@@ -1,0 +1,70 @@
+import type { Project, User } from '../types'
+
+export const users: User[] = [
+  {
+    id: 'u_alice',
+    name: 'Alice Moreau',
+    handle: 'alice',
+    email: 'alice@team.dev',
+    role: 'Owner',
+    color: '#8b5cf6',
+    online: true,
+    title: 'Infrastructure Lead',
+  },
+  {
+    id: 'u_bob',
+    name: 'Bob Tanaka',
+    handle: 'bob',
+    email: 'bob@team.dev',
+    role: 'Admin',
+    color: '#0ea5e9',
+    online: true,
+    title: 'Backend Engineer',
+  },
+  {
+    id: 'u_carol',
+    name: 'Carol Nkemelu',
+    handle: 'carol',
+    email: 'carol@team.dev',
+    role: 'Member',
+    color: '#f59e0b',
+    online: false,
+    title: 'Frontend Engineer',
+  },
+  {
+    id: 'u_dan',
+    name: 'Dan Kovács',
+    handle: 'dan',
+    email: 'dan@team.dev',
+    role: 'Member',
+    color: '#10b981',
+    online: true,
+    title: 'DevOps',
+  },
+  {
+    id: 'u_eve',
+    name: 'Eve Lindqvist',
+    handle: 'eve',
+    email: 'eve@team.dev',
+    role: 'Member',
+    color: '#ec4899',
+    online: false,
+    title: 'Designer',
+  },
+  {
+    id: 'u_frank',
+    name: 'Frank Osei',
+    handle: 'frank',
+    email: 'frank@team.dev',
+    role: 'Visitor',
+    color: '#64748b',
+    online: false,
+    title: 'Advisor',
+  },
+]
+
+export const projects: Project[] = [
+  { id: 'p_infra', name: 'Infrastructure', key: 'INF', color: '#8b5cf6' },
+  { id: 'p_web', name: 'Website', key: 'WEB', color: '#0ea5e9' },
+  { id: 'p_internal', name: 'Internal Tools', key: 'INT', color: '#10b981' },
+]
