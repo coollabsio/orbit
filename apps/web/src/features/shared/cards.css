@@ -1,0 +1,39 @@
+/* Layer card — Coolify signature card pattern shared by Home & Settings. */
+
+.layer-card {
+  background: var(--elevated);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--hairline);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.layer-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 8px 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.layer-card-body {
+  background: var(--base);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--fill);
+  padding: 16px;
+  margin: 0 1px 1px;
+  min-width: 0;
+}
+
+.layer-card-body.flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.layer-card-body.flush .list-row:last-child {
+  border-bottom: none;
+}

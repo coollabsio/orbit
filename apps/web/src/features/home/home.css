@@ -1,0 +1,74 @@
+.home-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.home-body {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.home-greeting h1 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 0 0 6px;
+}
+
+.home-summary {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.home-summary a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.home-summary a:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .home-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.home-card-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.home-icon-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  background: var(--recessed);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* the mobile top bar already shows the page title */
+@media (max-width: 899px) {
+  .home-header {
+    display: none;
+  }
+}
