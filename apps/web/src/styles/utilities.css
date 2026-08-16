@@ -413,6 +413,14 @@ textarea.input {
 }
 
 /* ---------- panes / layout ---------- */
+.page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
 .pane {
   display: flex;
   flex-direction: column;
