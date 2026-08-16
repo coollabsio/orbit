@@ -1,0 +1,55 @@
+import { Paperclip, Star } from 'reicon-react'
+import { Avatar } from '../../../components/ui/Avatar'
+import { relativeTime } from '../../../lib/format'
+import { toggleThreadStar } from '../../../mock/actions'
+import type { MailThread } from '../../../mock/types'
+import { threadSender } from '../mailLib'
+
+interface ThreadRowProps {
+  thread: MailThread
+  active: boolean
+  onOpen: (threadId: string) => void
+}
+
+export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
+  const sender = threadSender(thread)
+  return (
+    <div
+      className="list-row mail-row"
+      data-active={active ? 'true' : undefined}
+      data-unread={thread.unread ? 'true' : undefined}
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(thread.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(thread.id)
+      }}
+    >
+      <span className="mail-row-dot">{thread.unread ? <span className="unread-dot" /> : null}</span>
+      <Avatar user={null} name={sender.name} size={32} />
+      <div className="mail-row-main">
+        <div className="mail-row-line1">
+          <span className="mail-row-sender truncate">{sender.name}</span>
+          <span className="spacer" />
+          <span className="mail-row-time">{relativeTime(thread.updatedAt)}</span>
+        </div>
+        <div className="mail-row-subject truncate">{thread.subject}</div>
+        <div className="mail-row-snippet truncate">{thread.snippet}</div>
+      </div>
+      <div className="mail-row-trailing" onClick={(e) => e.stopPropagation()}>
+        <button
+          className="icon-button mail-star"
+          aria-label={thread.starred ? 'Unstar' : 'Star'}
+          onClick={() => toggleThreadStar(thread.id)}
+        >
+          <Star
+            size={16}
+            weight={thread.starred ? 'Filled' : 'Outline'}
+            color={thread.starred ? 'var(--warning-dot)' : undefined}
+          />
+        </button>
+        {thread.hasAttachment ? <Paperclip size={14} /> : null}
+      </div>
+    </div>
+  )
+}

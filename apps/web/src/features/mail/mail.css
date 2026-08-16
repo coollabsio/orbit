@@ -1,0 +1,273 @@
+/* Mail feature — three-pane layout */
+
+.mail-rail {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.mail-list {
+  width: 360px;
+  flex-shrink: 0;
+}
+
+.mail-view {
+  flex: 1;
+}
+
+.mail-page .mail-mobile {
+  display: none;
+}
+
+/* ---------- folder rail ---------- */
+.mail-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+
+/* ---------- thread rows ---------- */
+.mail-row {
+  align-items: flex-start;
+  gap: 8px;
+  padding-block: 10px;
+  min-height: 64px;
+}
+
+.mail-row-dot {
+  display: flex;
+  align-items: center;
+  width: 8px;
+  flex-shrink: 0;
+  align-self: stretch;
+  max-height: 32px;
+}
+
+.mail-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mail-row-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mail-row-sender {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+
+.mail-row[data-unread='true'] .mail-row-sender {
+  font-weight: 600;
+}
+
+.mail-row-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.mail-row-subject {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.mail-row[data-unread='true'] .mail-row-subject {
+  font-weight: 600;
+}
+
+.mail-row-snippet {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.mail-row-trailing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.mail-star {
+  width: 24px;
+  height: 24px;
+}
+
+/* ---------- reading pane ---------- */
+.mail-view-title {
+  flex-shrink: 1;
+}
+
+.mail-thread {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 20px 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+.mail-thread-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+}
+
+.mail-thread-subject {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.mail-message {
+  padding: 16px 0;
+}
+
+.mail-message + .mail-message {
+  border-top: 1px solid var(--hairline);
+}
+
+.mail-message-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.mail-message-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mail-message-sender {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.mail-message-date {
+  flex-shrink: 0;
+}
+
+.mail-message-body {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+}
+
+.mail-message-preview {
+  margin-top: 6px;
+  padding-left: 42px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ---------- reply composer ---------- */
+.mail-reply {
+  margin-top: 16px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+}
+
+.mail-reply-label {
+  padding: 10px 12px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.mail-reply-textarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.mail-reply-textarea::placeholder {
+  color: var(--control-placeholder);
+}
+
+.mail-reply-textarea:focus {
+  outline: none;
+}
+
+.mail-reply-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ---------- compose modal ---------- */
+.mail-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mail-compose-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 1199px) {
+  .mail-list {
+    width: 300px;
+  }
+}
+
+@media (max-width: 899px) {
+  .mail-page .mail-mobile {
+    display: flex;
+  }
+
+  .mail-page .mail-desktop {
+    display: none;
+  }
+
+  .mail-rail {
+    display: none;
+  }
+
+  .mail-list {
+    width: auto;
+    flex: 1;
+  }
+
+  .mail-page[data-view='thread'] .mail-list {
+    display: none;
+  }
+
+  .mail-page[data-view='list'] .mail-view {
+    display: none;
+  }
+
+  .mail-page .pane + .pane {
+    border-left: none;
+  }
+}
