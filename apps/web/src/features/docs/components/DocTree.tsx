@@ -48,8 +48,8 @@ export function DocTree({ docs, activeId }: DocTreeProps) {
 
   return (
     <section className="pane docs-tree-pane">
-      <div className="pane-header">
-        <span className="pane-title">Docs</span>
+      <div className="docs-tree-label">
+        <span className="nav-section">Documents</span>
         <span className="spacer" />
         <button
           type="button"

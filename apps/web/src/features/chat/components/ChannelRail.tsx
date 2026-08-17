@@ -15,9 +15,6 @@ export function ChannelRail({ state, activeChannelId }: ChannelRailProps) {
 
   return (
     <div className="pane chat-rail">
-      <div className="pane-header">
-        <span className="pane-title">Chat</span>
-      </div>
       <div className="pane-body chat-rail-body">
         <div className="nav-section">Channels</div>
         {state.channels.map((channel) => (

@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { Hashtag } from 'reicon-react'
 import { useAppState } from '../../mock/store'
-import { fullDate, relativeTime } from '../../lib/format'
+import { relativeTime } from '../../lib/format'
 import { cx } from '../../lib/cx'
 import { TaskStatusIcon } from '../../components/workspace/TaskStatusIcon'
 import { PriorityIcon } from '../../components/workspace/PriorityIcon'
@@ -75,13 +75,6 @@ export function HomePage() {
   return (
     <div className="page home-page">
       <div className="pane" style={{ flex: 1 }}>
-        <div className="pane-header home-header">
-          <span className="pane-title">Home</span>
-          <span className="spacer" />
-          <span className="text-faint" style={{ fontSize: 13 }}>
-            {fullDate(new Date().toISOString())}
-          </span>
-        </div>
         <div className="home-scroll">
           <div className="home-body">
             <div className="home-greeting">

@@ -19,10 +19,23 @@ export function TasksPage() {
   const [tab, setTab] = useState<'my' | 'all'>('my')
   const [statusFilter, setStatusFilter] = useState<TaskStatus | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
-  const [showNewTask, setShowNewTask] = useState(false)
+  const [newTaskClicked, setNewTaskClicked] = useState(false)
+
+  // the topbar "New → Task" entry deep-links here with ?new=1
+  const showNewTask = newTaskClicked || searchParams.get('new') === '1'
+  const setShowNewTask = (open: boolean) => {
+    setNewTaskClicked(open)
+    if (!open && searchParams.get('new')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('new')
+      setSearchParams(next, { replace: true })
+    }
+  }
 
   const projectFilter = searchParams.get('project')
-  const search = searchParams.toString()
+  const persisted = new URLSearchParams(searchParams)
+  persisted.delete('new')
+  const search = persisted.toString()
   const searchSuffix = search ? `?${search}` : ''
 
   const setProjectFilter = (projectId: string | null) => {
@@ -49,7 +62,6 @@ export function TasksPage() {
     <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
       <section className="pane tasks-list-pane">
         <div className="pane-header">
-          <span className="pane-title">Tasks</span>
           <button className="app-tab" data-active={tab === 'my' || undefined} onClick={() => setTab('my')}>
             My tasks
           </button>

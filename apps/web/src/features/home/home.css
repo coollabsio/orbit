@@ -65,10 +65,3 @@
   color: var(--text-muted);
   flex-shrink: 0;
 }
-
-/* the mobile top bar already shows the page title */
-@media (max-width: 899px) {
-  .home-header {
-    display: none;
-  }
-}

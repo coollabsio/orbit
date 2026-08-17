@@ -319,3 +319,11 @@ button.doc-tree-chevron:hover {
     padding: 24px 16px 64px;
   }
 }
+
+/* borderless rail label row (Coolify second-nav style) */
+.docs-tree-label {
+  display: flex;
+  align-items: center;
+  padding: 8px 8px 0 4px;
+  flex-shrink: 0;
+}

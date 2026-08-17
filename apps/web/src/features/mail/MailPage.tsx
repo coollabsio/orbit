@@ -12,9 +12,20 @@ import './mail.css'
 
 export function MailPage() {
   const { threadId } = useParams()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const state = useAppState()
-  const [composeOpen, setComposeOpen] = useState(false)
+  const [composeClicked, setComposeClicked] = useState(false)
+
+  // the topbar "New → Email" entry deep-links here with ?compose=1
+  const composeOpen = composeClicked || searchParams.get('compose') === '1'
+  const setComposeOpen = (open: boolean) => {
+    setComposeClicked(open)
+    if (!open && searchParams.get('compose')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('compose')
+      setSearchParams(next, { replace: true })
+    }
+  }
 
   const folderId = searchParams.get('folder') ?? DEFAULT_FOLDER_ID
   const folder =
@@ -31,7 +42,6 @@ export function MailPage() {
         folders={state.mailFolders}
         threads={state.mailThreads}
         activeFolderId={folder.id}
-        onCompose={() => setComposeOpen(true)}
       />
       <ThreadList
         folders={state.mailFolders}
