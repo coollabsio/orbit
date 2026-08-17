@@ -1,43 +1,42 @@
-/* Design tokens — Coolify visual language.
-   Accent is theme-dependent: purple in light mode, yellow in dark mode. */
+/* Design tokens — Coolify v4 visual language.
+   Purple accent in both themes; neutral gray fills for selection. */
 
 :root {
   /* brand */
   --brand-purple: #6b16ed;
   --brand-purple-bright: #7317ff;
   --brand-purple-deep: #5a12c7;
-  --brand-yellow: #fcd452;
 
   /* surface ladder — light */
-  --canvas: #f9fafb;
+  --canvas: #fafafa;
   --panel: #ffffff;
-  --elevated: #fafafa;
+  --elevated: #ffffff;
   --base: #ffffff;
-  --recessed: #f4f4f4;
-  --fill: #e5e5e5;
-  --line: rgba(10, 10, 10, 0.1);
-  --hairline: #ebebeb;
+  --recessed: #f4f4f5;
+  --fill: #e4e4e7;
+  --line: #e4e4e7;
+  --hairline: #ececee;
 
   /* text */
-  --text-heading: #000000;
-  --text-primary: #171717;
-  --text-secondary: #525252;
-  --text-muted: #737373;
-  --text-faint: #a1a1a1;
+  --text-heading: #09090b;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #71717a;
+  --text-faint: #a1a1aa;
 
   /* nav */
-  --nav-text: #525252;
-  --nav-muted: #666666;
-  --nav-active: #171717;
-  --nav-hover-bg: #f5f5f5;
-  --nav-active-bg: rgba(0, 0, 0, 0.05);
+  --nav-text: #52525b;
+  --nav-muted: #8e8e96;
+  --nav-active: #09090b;
+  --nav-hover-bg: #f0f0f1;
+  --nav-active-bg: #e9e9eb;
 
-  /* accent (light = purple) */
+  /* accent */
   --accent: var(--brand-purple);
   --accent-contrast: #ffffff;
   --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-  --accent-soft-hover: color-mix(in srgb, var(--accent) 15%, transparent);
-  --accent-ring: color-mix(in srgb, var(--accent) 25%, transparent);
+  --accent-soft-hover: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 30%, transparent);
 
   /* semantic */
   --success: #047857;
@@ -45,94 +44,95 @@
   --success-dot: #10b981;
   --warning: #b45309;
   --warning-bg: rgba(245, 158, 11, 0.16);
-  --warning-dot: #fcd452;
+  --warning-dot: #f59e0b;
   --danger: #dc2626;
   --danger-bg: rgba(248, 113, 113, 0.14);
   --danger-dot: #ef4444;
   --info: #1d4ed8;
   --info-bg: rgba(59, 130, 246, 0.14);
   --info-dot: #3b82f6;
-  --neutral-dot: #a1a1a1;
+  --neutral-dot: #a1a1aa;
 
   /* controls */
   --control-bg: #ffffff;
-  --control-border: #e5e5e5;
-  --control-hover-bg: #f5f5f5;
-  --control-placeholder: #a8a8a8;
+  --control-border: #e4e4e7;
+  --control-hover-bg: #f4f4f5;
+  --control-placeholder: #a1a1aa;
 
   /* chrome geometry */
-  --sidebar-width: 224px;
-  --topbar-height: 48px;
+  --sidebar-width: 240px;
+  --topbar-height: 56px;
   --dock-height: 56px;
   --detail-width: 440px;
 
   /* radius */
   --radius-sm: 6px;
   --radius-md: 8px;
-  --radius-lg: 10px;
+  --radius-lg: 12px;
 
   /* shadows */
   --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.25), 0 4px 16px rgba(0, 0, 0, 0.18);
-  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.18);
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.16);
 
   /* misc */
-  --hover-wash: rgba(0, 0, 0, 0.02);
-  --tooltip-bg: #171717;
+  --hover-wash: rgba(0, 0, 0, 0.025);
+  --tooltip-bg: #18181b;
   --tooltip-text: #ffffff;
-  --tooltip-border: #404040;
+  --tooltip-border: #3f3f46;
 }
 
 .dark {
   /* surface ladder — dark ("graphite") */
-  --canvas: #0c0c0d;
-  --panel: #030303;
-  --elevated: #0b0b0b;
+  --canvas: #0a0a0a;
+  --panel: #141414;
+  --elevated: #191919;
   --base: #101010;
-  --recessed: #161616;
-  --fill: #262626;
-  --line: #333333;
-  --hairline: #262626;
+  --recessed: #0d0d0d;
+  --fill: #27272a;
+  --line: #262626;
+  --hairline: #1f1f1f;
 
   /* text */
-  --text-heading: #ffffff;
-  --text-primary: #f2f2f2;
-  --text-secondary: #b4b4b8;
-  --text-muted: #b4b4b8;
-  --text-faint: #6e6e74;
+  --text-heading: #fafafa;
+  --text-primary: #ededed;
+  --text-secondary: #a7a7ad;
+  --text-muted: #8f8f96;
+  --text-faint: #63636a;
 
   /* nav */
-  --nav-text: #a8a8b0;
-  --nav-muted: #7a7a84;
-  --nav-active: #f2f2f2;
-  --nav-hover-bg: rgba(255, 255, 255, 0.05);
-  --nav-active-bg: rgba(255, 255, 255, 0.06);
+  --nav-text: #a1a1a8;
+  --nav-muted: #6e6e75;
+  --nav-active: #fafafa;
+  --nav-hover-bg: #161616;
+  --nav-active-bg: #1f1f1f;
 
-  /* accent (dark = yellow) */
-  --accent: var(--brand-yellow);
-  --accent-contrast: #000000;
-  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
-  --accent-soft-hover: color-mix(in srgb, var(--accent) 20%, transparent);
-  --accent-ring: color-mix(in srgb, var(--accent) 25%, transparent);
+  /* accent — lighter violet for legibility on dark */
+  --accent: #a78bfa;
+  --accent-contrast: #ffffff;
+  --accent-soft: color-mix(in srgb, #8b5cf6 16%, transparent);
+  --accent-soft-hover: color-mix(in srgb, #8b5cf6 24%, transparent);
+  --accent-ring: color-mix(in srgb, #8b5cf6 35%, transparent);
 
   /* semantic */
   --success: #34d399;
   --success-bg: rgba(16, 185, 129, 0.16);
   --warning: #fbbf24;
   --warning-bg: rgba(245, 158, 11, 0.14);
+  --warning-dot: #fbbf24;
   --danger: #f87171;
   --danger-bg: rgba(248, 113, 113, 0.14);
   --info: #60a5fa;
   --info-bg: rgba(59, 130, 246, 0.16);
-  --neutral-dot: #737373;
+  --neutral-dot: #52525b;
 
   /* controls */
-  --control-bg: rgba(255, 255, 255, 0.06);
-  --control-border: rgba(255, 255, 255, 0.08);
-  --control-hover-bg: rgba(255, 255, 255, 0.1);
+  --control-bg: #161616;
+  --control-border: #2a2a2a;
+  --control-hover-bg: #1f1f1f;
   --control-placeholder: #55555c;
 
   --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55), 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.5);
 
   --hover-wash: rgba(255, 255, 255, 0.03);
   --tooltip-bg: #1c1c1e;

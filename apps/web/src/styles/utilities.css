@@ -205,14 +205,13 @@ textarea.input {
   text-overflow: ellipsis;
 }
 
+/* Coolify-style group label: small, muted, sentence case */
 .nav-section {
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 500;
+  padding: 12px 10px 4px;
+  font-size: 12px;
+  font-weight: 400;
   color: var(--nav-muted);
   user-select: none;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
 }
 
 /* ---------- tabs ---------- */
@@ -419,19 +418,28 @@ textarea.input {
   min-height: 0;
   display: flex;
   overflow: hidden;
+  background: var(--canvas);
 }
 
+/* flat pane on the canvas — columns separated by borders, Coolify-style */
 .pane {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   height: 100%;
-  background: var(--panel);
+  background: var(--canvas);
 }
 
 .pane + .pane {
-  border-left: 1px solid var(--hairline);
+  border-left: 1px solid var(--line);
+}
+
+/* content card — ONLY for form sections and tiles, never whole panes */
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
 }
 
 .pane-header {

@@ -11,7 +11,7 @@ import {
 } from 'reicon-react'
 import { useAppState } from '../../mock/store'
 
-const MAIN_LINKS = [
+const WORKSPACE_LINKS = [
   { to: '/', label: 'Home', icon: Home2, end: true },
   { to: '/tasks', label: 'Tasks', icon: TaskSquare },
   { to: '/docs', label: 'Docs', icon: Note2 },
@@ -19,7 +19,7 @@ const MAIN_LINKS = [
   { to: '/chat', label: 'Chat', icon: Message },
 ]
 
-/** Sidebar navigation links — shared by the desktop sidebar and the mobile drawer. */
+/** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const state = useAppState()
   const navigate = useNavigate()
@@ -34,8 +34,20 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      <nav className="app-sidebar-nav">
-        {MAIN_LINKS.map((link) => (
+      <button
+        className="sidebar-search"
+        onClick={() => {
+          onNavigate?.()
+          window.dispatchEvent(new CustomEvent('open-command-palette'))
+        }}
+      >
+        <SearchNormal size={15} />
+        Search
+        <span className="kbd">⌘K</span>
+      </button>
+      <div className="app-sidebar-scroll">
+        <div className="nav-section">Workspace</div>
+        {WORKSPACE_LINKS.map((link) => (
           <NavLink
             key={link.to}
             to={link.to}
@@ -48,20 +60,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             {counts[link.to] ? <span className="count-badge">{counts[link.to]}</span> : null}
           </NavLink>
         ))}
-      </nav>
-      <div className="app-sidebar-separator" />
-      <nav className="app-sidebar-nav">
-        <button
-          className="menu-item"
-          onClick={() => {
-            onNavigate?.()
-            window.dispatchEvent(new CustomEvent('open-command-palette'))
-          }}
-        >
-          <SearchNormal size={18} />
-          <span className="menu-item-label">Search</span>
-          <span className="kbd">⌘K</span>
-        </button>
+        <div className="nav-section">Personal</div>
         <NavLink
           to="/inbox"
           className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
@@ -71,8 +70,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           <span className="menu-item-label">Inbox</span>
           {unreadNotifications ? <span className="count-badge">{unreadNotifications}</span> : null}
         </NavLink>
-      </nav>
-      <div className="app-sidebar-scroll">
         <div className="nav-section">Projects</div>
         {state.projects.map((project) => (
           <button
@@ -96,20 +93,16 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             <span className="menu-item-label">{project.name}</span>
           </button>
         ))}
+        <div className="nav-section">Manage</div>
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          onClick={onNavigate}
+        >
+          <Setting2 size={18} />
+          <span className="menu-item-label">Settings</span>
+        </NavLink>
       </div>
     </>
-  )
-}
-
-export function SidebarSettingsLink({ onNavigate }: { onNavigate?: () => void }) {
-  return (
-    <NavLink
-      to="/settings"
-      className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
-      onClick={onNavigate}
-    >
-      <Setting2 size={18} />
-      <span className="menu-item-label">Settings</span>
-    </NavLink>
   )
 }
