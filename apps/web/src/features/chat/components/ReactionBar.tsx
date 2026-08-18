@@ -1,12 +1,7 @@
 import { toggleReaction } from '../../../mock/actions'
 import type { ChatMessage } from '../../../mock/types'
 
-interface ReactionBarProps {
-  message: ChatMessage
-  currentUserId: string
-}
-
-export function ReactionBar({ message, currentUserId }: ReactionBarProps) {
+export function ReactionBar({ message, currentUserId }: { message: ChatMessage; currentUserId: string }) {
   if (message.reactions.length === 0) return null
   return (
     <div className="chat-reactions">
@@ -14,12 +9,11 @@ export function ReactionBar({ message, currentUserId }: ReactionBarProps) {
         <button
           key={reaction.emoji}
           type="button"
-          className="chat-reaction"
+          className="chat-reaction-pill"
           data-mine={reaction.userIds.includes(currentUserId) ? 'true' : undefined}
           onClick={() => toggleReaction(message.id, reaction.emoji)}
         >
-          <span>{reaction.emoji}</span>
-          <span>{reaction.userIds.length}</span>
+          {reaction.emoji} {reaction.userIds.length}
         </button>
       ))}
     </div>

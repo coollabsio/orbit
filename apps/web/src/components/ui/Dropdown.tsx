@@ -7,11 +7,13 @@ interface DropdownProps {
   /** Render the menu content. Call `close` after an option is picked. */
   children: (close: () => void) => React.ReactNode
   align?: 'left' | 'right'
+  /** Open below (default) or above the trigger. */
+  direction?: 'down' | 'up'
   className?: string
 }
 
-/** Simple popover dropdown: opens below the trigger, closes on outside click / Escape. */
-export function Dropdown({ trigger, children, align = 'left', className }: DropdownProps) {
+/** Simple popover dropdown: opens next to the trigger, closes on outside click / Escape. */
+export function Dropdown({ trigger, children, align = 'left', direction = 'down', className }: DropdownProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -40,7 +42,7 @@ export function Dropdown({ trigger, children, align = 'left', className }: Dropd
         <div
           className={cx('popover')}
           style={{
-            top: 'calc(100% + 4px)',
+            [direction === 'down' ? 'top' : 'bottom']: 'calc(100% + 4px)',
             [align === 'left' ? 'left' : 'right']: 0,
           }}
         >

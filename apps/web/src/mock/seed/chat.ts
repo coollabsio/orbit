@@ -54,7 +54,7 @@ export const chatMessages: ChatMessage[] = [
     ago(3, 'h'),
     { authorType: 'github', externalAuthor: { name: 'GitHub', source: 'team/workspace' } },
   ),
-  msg('c_engineering', 'u_carol', 'The proxy appears to drop websocket upgrades when the config reloads — anyone else seeing this?', ago(2, 'h')),
+  msg('c_engineering', 'u_carol', 'The proxy appears to drop websocket upgrades when the config reloads — @alice anyone else seeing this?', ago(2, 'h')),
   msg('c_engineering', 'u_alice', 'Yes, that matches INF-101. My patch re-attaches listeners after reload.', ago(1, 'h')),
 
   // infra
