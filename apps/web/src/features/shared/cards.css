@@ -1,12 +1,14 @@
-/* Layer card — Coolify signature card pattern shared by Home & Settings. */
+/* Layer card — Coolify content card: one flat surface with a border.
+   Used for form sections and summary tiles (Home, Settings) only. */
 
 .layer-card {
-  background: var(--elevated);
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--hairline);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
 }
 
 .layer-card-header {
@@ -18,20 +20,18 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .layer-card-body {
-  background: var(--base);
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--fill);
-  padding: 16px;
-  margin: 0 1px 1px;
+  padding: 4px 16px 16px;
   min-width: 0;
 }
 
 .layer-card-body.flush {
   padding: 0;
   overflow: hidden;
+  border-top: 1px solid var(--hairline);
 }
 
 .layer-card-body.flush .list-row:last-child {
