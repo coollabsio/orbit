@@ -96,10 +96,16 @@ export interface MailThread {
   updatedAt: string
 }
 
+export interface ChatCategory {
+  id: string
+  name: string
+}
+
 export interface Channel {
   id: string
   name: string
   description: string
+  categoryId: string
   unreadCount: number
 }
 
@@ -113,6 +119,8 @@ export interface ChatMessage {
   content: string
   reactions: Array<{ emoji: string; userIds: string[] }>
   createdAt: string
+  editedAt: string | null
+  pinned: boolean
 }
 
 export interface Notification {
@@ -135,7 +143,11 @@ export interface AppState {
   docs: Doc[]
   mailFolders: MailFolder[]
   mailThreads: MailThread[]
+  chatCategories: ChatCategory[]
   channels: Channel[]
   chatMessages: ChatMessage[]
+  /** channelId → users currently typing (mock realtime; expires = epoch ms) */
+  typingUsers: Record<string, Array<{ userId: string; expires: number }>>
+
   notifications: Notification[]
 }

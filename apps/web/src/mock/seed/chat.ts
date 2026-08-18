@@ -1,12 +1,18 @@
 import { ago } from '../../lib/format'
-import type { Channel, ChatMessage } from '../types'
+import type { Channel, ChatCategory, ChatMessage } from '../types'
+
+export const chatCategories: ChatCategory[] = [
+  { id: 'cc_general', name: 'General' },
+  { id: 'cc_engineering', name: 'Engineering' },
+  { id: 'cc_support', name: 'Support' },
+]
 
 export const channels: Channel[] = [
-  { id: 'c_general', name: 'general', description: 'Team-wide announcements and chatter', unreadCount: 0 },
-  { id: 'c_engineering', name: 'engineering', description: 'Backend, frontend, and everything between', unreadCount: 3 },
-  { id: 'c_infra', name: 'infra', description: 'Servers, deploys, and incidents', unreadCount: 1 },
-  { id: 'c_design', name: 'design', description: 'UI, UX, and visual direction', unreadCount: 0 },
-  { id: 'c_support', name: 'support', description: 'Forwarded customer conversations', unreadCount: 2 },
+  { id: 'c_general', name: 'general', description: 'Team-wide announcements and chatter', categoryId: 'cc_general', unreadCount: 0 },
+  { id: 'c_design', name: 'design', description: 'UI, UX, and visual direction', categoryId: 'cc_general', unreadCount: 0 },
+  { id: 'c_engineering', name: 'engineering', description: 'Backend, frontend, and everything between', categoryId: 'cc_engineering', unreadCount: 3 },
+  { id: 'c_infra', name: 'infra', description: 'Servers, deploys, and incidents', categoryId: 'cc_engineering', unreadCount: 1 },
+  { id: 'c_support', name: 'support', description: 'Forwarded customer conversations', categoryId: 'cc_support', unreadCount: 2 },
 ]
 
 let m = 0
@@ -28,6 +34,8 @@ function msg(
     content,
     reactions: [],
     createdAt,
+    editedAt: null,
+    pinned: false,
     ...extra,
   }
 }
@@ -62,6 +70,7 @@ export const chatMessages: ChatMessage[] = [
   msg('c_infra', 'u_alice', 'Proxy patch is on staging now. Watching error rates for an hour before promoting.', ago(3, 'h')),
   msg('c_infra', 'u_dan', '502 rate on staging dropped to zero since the patch 📉', ago(30, 'm'), {
     reactions: [{ emoji: '🚀', userIds: ['u_alice', 'u_bob', 'u_carol'] }],
+    pinned: true,
   }),
 
   // design

@@ -1,15 +1,26 @@
+// Helpers copied from the chat reference (frontend/src/components/chat/MessageItem.tsx
+// and frontend/src/lib/time.ts), adapted from JSON content to plain text.
 import type { AppState, ChatMessage, User } from '../../mock/types'
 
-/** The chat reference-style 12h time: "3:42 PM". */
-export function chatTime(iso: string): string {
+/* ---------- time (the chat reference lib/time.ts) ---------- */
+
+export function formatShortTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
-export function authorKey(message: ChatMessage): string {
-  return message.authorType === 'user'
-    ? `user:${message.authorId}`
-    : `${message.authorType}:${message.externalAuthor?.name ?? message.authorId}`
+export function formatMessageDate(iso: string): string {
+  return new Date(iso).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' })
 }
+
+export function isSameDay(left: string, right: string): boolean {
+  const l = new Date(left)
+  const r = new Date(right)
+  return (
+    l.getFullYear() === r.getFullYear() && l.getMonth() === r.getMonth() && l.getDate() === r.getDate()
+  )
+}
+
+/* ---------- authors ---------- */
 
 export function displayName(state: AppState, message: ChatMessage): string {
   if (message.authorType === 'user') {
@@ -18,44 +29,58 @@ export function displayName(state: AppState, message: ChatMessage): string {
   return message.externalAuthor?.name ?? message.authorType
 }
 
-/** True when the message mentions the given user (@handle or @everyone/@here). */
-export function mentionsUser(message: ChatMessage, user: User | undefined): boolean {
-  if (!user) return false
+export function authorUser(state: AppState, message: ChatMessage): User | undefined {
+  return message.authorType === 'user'
+    ? state.users.find((u) => u.id === message.authorId)
+    : undefined
+}
+
+/* ---------- mentions ---------- */
+
+export type MentionToken = { label: string; color: string; kind: 'user' | 'global' }
+
+export function buildMentionTokens(users: User[]): MentionToken[] {
+  return [
+    { label: 'everyone', color: '#dee0fc', kind: 'global' },
+    { label: 'here', color: '#dee0fc', kind: 'global' },
+    ...users.flatMap((user): MentionToken[] => [
+      { label: user.name, color: '#dee0fc', kind: 'user' },
+      { label: user.handle, color: '#dee0fc', kind: 'user' },
+    ]),
+  ]
+}
+
+export function messageMentionsCurrentUser(message: ChatMessage, me: User | undefined): boolean {
+  if (!me) return false
   const content = message.content.toLowerCase()
+  if (content.includes('@everyone') || content.includes('@here')) return true
   return (
-    content.includes(`@${user.handle.toLowerCase()}`) ||
-    content.includes('@everyone') ||
-    content.includes('@here')
+    mentionsToken(content, me.handle.toLowerCase()) || mentionsToken(content, me.name.toLowerCase())
   )
 }
 
-/** Split content into plain text and @mention tokens for inline highlighting. */
-export function splitMentions(content: string, users: User[]): Array<{ text: string; mention: boolean }> {
-  const handles = users.map((u) => u.handle.toLowerCase())
-  const parts: Array<{ text: string; mention: boolean }> = []
-  const regex = /@[a-z0-9_]+/gi
-  let last = 0
-  for (const match of content.matchAll(regex)) {
-    const token = match[0]
-    const isKnown =
-      handles.includes(token.slice(1).toLowerCase()) || token === '@everyone' || token === '@here'
-    if (!isKnown) continue
-    if (match.index > last) parts.push({ text: content.slice(last, match.index), mention: false })
-    parts.push({ text: token, mention: true })
-    last = match.index + token.length
+function mentionsToken(content: string, label: string): boolean {
+  const needle = `@${label}`
+  let index = content.indexOf(needle)
+  while (index !== -1) {
+    if (isMentionBoundary(content[index + needle.length])) return true
+    index = content.indexOf(needle, index + 1)
   }
-  if (last < content.length) parts.push({ text: content.slice(last), mention: false })
-  return parts.length > 0 ? parts : [{ text: content, mention: false }]
+  return false
 }
 
-/** Scroll a message into view and flash it, The chat reference's reply-jump behavior. */
+export function isMentionBoundary(char: string | undefined): boolean {
+  return !char || /\s|[.,!?;:()[\]{}"'`]/.test(char)
+}
+
+/* ---------- reply jump (the chat reference ReplyReference.scrollToReply) ---------- */
+
 export function jumpToMessage(messageId: string): void {
-  const el = document.getElementById(`message-${messageId}`)
-  if (!el) return
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  el.classList.remove('chat-jump-highlight')
-  // restart the animation on repeat jumps
-  void el.offsetWidth
-  el.classList.add('chat-jump-highlight')
-  window.setTimeout(() => el.classList.remove('chat-jump-highlight'), 1900)
+  const target = document.getElementById(`message-${messageId}`)
+  if (!target) return
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  target.classList.remove('reply-jump-highlight')
+  void target.getBoundingClientRect()
+  target.classList.add('reply-jump-highlight')
+  window.setTimeout(() => target.classList.remove('reply-jump-highlight'), 1800)
 }

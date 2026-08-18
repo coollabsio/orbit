@@ -238,8 +238,101 @@ export function sendChatMessage(channelId: string, content: string, replyToId: s
       content,
       reactions: [],
       createdAt: now(),
+      editedAt: null,
+      pinned: false,
     }
     return { ...s, chatMessages: [...s.chatMessages, message] }
+  })
+  simulateTypingReply(channelId)
+}
+
+/** Mock realtime: after the current user sends a message, another member "types" for 3s. */
+function simulateTypingReply(channelId: string) {
+  const s = getState()
+  const others = s.users.filter((u) => u.id !== s.currentUserId && u.online)
+  const member = others[(channelId.length + s.chatMessages.length) % Math.max(others.length, 1)]
+  if (!member) return
+  const expires = Date.now() + 3000
+  updateState((prev) => ({
+    ...prev,
+    typingUsers: { ...prev.typingUsers, [channelId]: [{ userId: member.id, expires }] },
+  }))
+  window.setTimeout(() => {
+    updateState((prev) => ({
+      ...prev,
+      typingUsers: {
+        ...prev.typingUsers,
+        [channelId]: (prev.typingUsers[channelId] ?? []).filter((t) => t.expires > Date.now()),
+      },
+    }))
+  }, 3200)
+}
+
+export function editChatMessage(messageId: string, content: string) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages.map((m) =>
+      m.id === messageId ? { ...m, content, editedAt: now() } : m,
+    ),
+  }))
+}
+
+export function deleteChatMessage(messageId: string) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages
+      .filter((m) => m.id !== messageId)
+      .map((m) => (m.replyToId === messageId ? { ...m, replyToId: null } : m)),
+  }))
+}
+
+export function togglePinMessage(messageId: string) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages.map((m) => (m.id === messageId ? { ...m, pinned: !m.pinned } : m)),
+  }))
+}
+
+export function createChannel(categoryId: string, name: string, description = '') {
+  const id = nextId('c')
+  updateState((s) => ({
+    ...s,
+    channels: [...s.channels, { id, name, description, categoryId, unreadCount: 0 }],
+  }))
+  return id
+}
+
+export function updateChannel(channelId: string, patch: { name?: string; description?: string }) {
+  updateState((s) => ({
+    ...s,
+    channels: s.channels.map((c) => (c.id === channelId ? { ...c, ...patch } : c)),
+  }))
+}
+
+export function deleteChannel(channelId: string) {
+  updateState((s) => ({
+    ...s,
+    channels: s.channels.filter((c) => c.id !== channelId),
+    chatMessages: s.chatMessages.filter((m) => m.channelId !== channelId),
+  }))
+}
+
+export function createChatCategory(name: string) {
+  updateState((s) => ({
+    ...s,
+    chatCategories: [...s.chatCategories, { id: nextId('cc'), name }],
+  }))
+}
+
+export function deleteChatCategory(categoryId: string) {
+  updateState((s) => {
+    const channelIds = s.channels.filter((c) => c.categoryId === categoryId).map((c) => c.id)
+    return {
+      ...s,
+      chatCategories: s.chatCategories.filter((c) => c.id !== categoryId),
+      channels: s.channels.filter((c) => c.categoryId !== categoryId),
+      chatMessages: s.chatMessages.filter((m) => !channelIds.includes(m.channelId)),
+    }
   })
 }
 

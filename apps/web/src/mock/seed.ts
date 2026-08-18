@@ -3,7 +3,7 @@ import { projects, users } from './seed/users'
 import { tasks } from './seed/tasks'
 import { docs } from './seed/docs'
 import { mailFolders, mailThreads } from './seed/mail'
-import { channels, chatMessages } from './seed/chat'
+import { channels, chatCategories, chatMessages } from './seed/chat'
 import { notifications } from './seed/notifications'
 
 export function seedState(): AppState {
@@ -15,8 +15,10 @@ export function seedState(): AppState {
     docs,
     mailFolders,
     mailThreads,
+    chatCategories,
     channels,
     chatMessages,
+    typingUsers: {},
     notifications,
   }
 }
