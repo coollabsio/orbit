@@ -285,8 +285,10 @@ button.doc-tree-chevron:hover {
   line-height: inherit;
 }
 
-.doc-block-textarea:focus {
+.doc-block-textarea:focus,
+.doc-block-textarea:focus-visible {
   outline: none;
+  box-shadow: none;
 }
 
 .doc-block-editing.doc-block-h1 .doc-block-textarea,
