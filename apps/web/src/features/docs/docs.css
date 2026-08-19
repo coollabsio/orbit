@@ -254,7 +254,20 @@ button.doc-tree-chevron:hover {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  background: var(--hover-wash);
+  background: transparent;
+}
+
+.doc-block-editing:hover,
+.doc-block-editing:focus-within {
+  background: transparent;
+}
+
+.doc-block-editing input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  margin-top: 5px;
+  accent-color: var(--accent);
 }
 
 .doc-block-textarea {
@@ -282,14 +295,11 @@ button.doc-tree-chevron:hover {
   color: var(--text-heading);
 }
 
-.doc-block-type-button {
-  margin-top: 2px;
-}
-
-.doc-add-block {
-  justify-content: flex-start;
-  margin-top: 8px;
-  color: var(--text-faint);
+.doc-editor-tail {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  cursor: text;
 }
 
 /* ---------- slash command menu ---------- */

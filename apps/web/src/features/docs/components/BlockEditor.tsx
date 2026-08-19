@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Category } from 'reicon-react'
-import { Dropdown } from '../../../components/ui/Dropdown'
 import { cx } from '../../../lib/cx'
 import type { DocBlock } from '../../../mock/types'
-import { BLOCK_TYPES } from '../lib'
 import { SLASH_ITEMS, filterSuggestionItems, getSlashState, type SlashItem } from '../slashItems'
 import { SlashMenu } from './SlashMenu'
 
@@ -13,26 +10,41 @@ interface BlockEditorProps {
   onCommit: (text: string, action: 'close' | 'insert') => void
   onDelete: () => void
   onChangeType: (type: DocBlock['type'], text: string) => void
+  onToggleTodo: () => void
+  marker?: string
+  autoFocus?: boolean
   /** The docs reference slash actions: create a sub-page / open the link-a-page dialog. */
   onSubpage: (textWithoutSlash: string) => void
   onLinkPage: (textWithoutSlash: string) => void
 }
 
-export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage, onLinkPage }: BlockEditorProps) {
+export function BlockEditor({
+  block,
+  onCommit,
+  onDelete,
+  onChangeType,
+  onToggleTodo,
+  marker,
+  autoFocus,
+  onSubpage,
+  onLinkPage,
+}: BlockEditorProps) {
   const [text, setText] = useState(block.text)
   const [slash, setSlash] = useState<{ start: number; query: string } | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
-  const doneRef = useRef(false)
+  const suppressBlurRef = useRef(false)
 
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
+    if (autoFocus) {
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
-  }, [])
+  }, [autoFocus])
 
   const grow = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto'
@@ -40,8 +52,8 @@ export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage
   }
 
   const finish = (action: 'close' | 'insert') => {
-    if (doneRef.current) return
-    doneRef.current = true
+    if (suppressBlurRef.current) return
+    if (action === 'insert') suppressBlurRef.current = true
     onCommit(text, action)
   }
 
@@ -68,7 +80,7 @@ export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage
       case 'turn-into': {
         if (item.action.type === 'divider') {
           // a divider has no text: turn into divider and continue in a fresh paragraph
-          doneRef.current = true
+          suppressBlurRef.current = true
           onChangeType('divider', '')
           onCommit('', 'insert')
           return
@@ -85,11 +97,11 @@ export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage
         return
       }
       case 'subpage':
-        doneRef.current = true
+        suppressBlurRef.current = true
         onSubpage(stripped)
         return
       case 'link-page':
-        doneRef.current = true
+        suppressBlurRef.current = true
         onLinkPage(stripped)
         return
     }
@@ -126,7 +138,7 @@ export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage
       finish('close')
     } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault()
-      doneRef.current = true
+      suppressBlurRef.current = true
       onDelete()
     }
   }
@@ -143,39 +155,16 @@ export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage
       )}
       style={{ position: 'relative' }}
     >
-      <span onMouseDown={(e) => e.preventDefault()}>
-        <Dropdown
-          trigger={() => (
-            <button
-              type="button"
-              className="icon-button doc-block-type-button"
-              aria-label="Change block type"
-            >
-              <Category size={14} />
-            </button>
-          )}
-        >
-          {(close) => (
-            <>
-              <div className="popover-heading">Turn into</div>
-              {BLOCK_TYPES.map((entry) => (
-                <button
-                  key={entry.type}
-                  type="button"
-                  className="popover-option"
-                  data-selected={entry.type === block.type}
-                  onClick={() => {
-                    close()
-                    onChangeType(entry.type, text)
-                  }}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </>
-          )}
-        </Dropdown>
-      </span>
+      {block.type === 'todo' ? (
+        <input
+          type="checkbox"
+          checked={block.checked === true}
+          aria-label="Toggle to-do"
+          onChange={onToggleTodo}
+        />
+      ) : marker ? (
+        <span className="doc-block-marker">{marker}</span>
+      ) : null}
       <textarea
         ref={ref}
         className="doc-block-textarea"
@@ -183,6 +172,7 @@ export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage
         value={text}
         placeholder={block.type === 'divider' ? 'Divider' : "Type '/' for commands…"}
         onChange={(e) => {
+          suppressBlurRef.current = false
           setText(e.target.value)
           updateSlash(e.target.value, e.target.selectionStart)
           grow(e.target)
@@ -190,6 +180,9 @@ export function BlockEditor({ block, onCommit, onDelete, onChangeType, onSubpage
         onClick={(e) => updateSlash(text, e.currentTarget.selectionStart)}
         onSelect={(e) => updateSlash(text, e.currentTarget.selectionStart)}
         onKeyDown={onKeyDown}
+        onFocus={() => {
+          suppressBlurRef.current = false
+        }}
         onBlur={() => finish('close')}
       />
       {menuOpen ? (

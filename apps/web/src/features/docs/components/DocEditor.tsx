@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Add, ArrowLeft, MoreH, Trash } from 'reicon-react'
+import { ArrowLeft, MoreH, Trash } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { relativeTime } from '../../../lib/format'
 import { createDoc, updateDocContent, updateDocTitle } from '../../../mock/actions'
 import { nextId } from '../../../mock/store'
 import type { Doc, DocBlock, User } from '../../../mock/types'
-import { ancestorsOf } from '../lib'
+import { ancestorsOf, numberedIndex } from '../lib'
 import { BlockEditor } from './BlockEditor'
 import { BlockView } from './BlockView'
 import { PageBlock } from './PageBlock'
@@ -51,6 +51,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   }
 
   const removeBlock = (id: string) => {
+    if (doc.content.length === 1) return
     setEditingId(null)
     setBlocks(doc.content.filter((b) => b.id !== id))
   }
@@ -68,6 +69,11 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   }
 
   const addBlock = () => {
+    const last = doc.content.at(-1)
+    if (last?.type === 'p' && last.text === '') {
+      setEditingId(last.id)
+      return
+    }
     const fresh: DocBlock = { id: nextId('db'), type: 'p', text: '' }
     setBlocks([...doc.content, fresh])
     setEditingId(fresh.id)
@@ -165,7 +171,17 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
             onChange={(e) => setTitle(e.target.value)}
             onBlur={commitTitle}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                const firstWritable = doc.content.find(
+                  (block, index) =>
+                    !(index === 0 && block.type === 'h1' && block.text === doc.title) &&
+                    block.type !== 'page' &&
+                    block.type !== 'divider',
+                )
+                setEditingId(firstWritable?.id ?? null)
+                e.currentTarget.blur()
+              }
             }}
           />
           <div className="doc-blocks">
@@ -178,32 +194,38 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   onOpen={(id) => navigate(`/docs/${id}`)}
                   onRemove={() => removeBlock(block.id)}
                 />
-              ) : block.id === editingId ? (
-                <BlockEditor
-                  key={block.id}
-                  block={block}
-                  onCommit={(text, action) => commitBlock(block.id, text, action)}
-                  onDelete={() => removeBlock(block.id)}
-                  onChangeType={(type, text) => changeType(block.id, type, text)}
-                  onSubpage={() => insertSubpage(block.id)}
-                  onLinkPage={() => openLinkDialog(block.id)}
-                />
-              ) : (
+              ) : block.type === 'divider' ? (
                 <BlockView
                   key={block.id}
                   block={block}
                   blocks={doc.content}
                   index={index}
-                  onEdit={() => setEditingId(block.id)}
+                  onEdit={() => undefined}
+                  onToggleTodo={() => undefined}
+                />
+              ) : (
+                <BlockEditor
+                  key={block.id}
+                  block={block}
+                  autoFocus={block.id === editingId}
+                  onCommit={(text, action) => commitBlock(block.id, text, action)}
+                  onDelete={() => removeBlock(block.id)}
+                  onChangeType={(type, text) => changeType(block.id, type, text)}
                   onToggleTodo={() => toggleTodo(block.id)}
+                  marker={
+                    block.type === 'bullet'
+                      ? '•'
+                      : block.type === 'numbered'
+                        ? `${numberedIndex(doc.content, index)}.`
+                        : undefined
+                  }
+                  onSubpage={() => insertSubpage(block.id)}
+                  onLinkPage={() => openLinkDialog(block.id)}
                 />
               ),
             )}
           </div>
-          <button type="button" className="button button-ghost doc-add-block" onClick={addBlock}>
-            <Add size={14} />
-            Add block
-          </button>
+          <button type="button" className="doc-editor-tail" aria-label="Continue writing" onClick={addBlock} />
         </div>
       </div>
       {linkTarget ? (
