@@ -56,6 +56,19 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
     setBlocks(doc.content.filter((b) => b.id !== id))
   }
 
+  const removeEmptyBlock = (id: string) => {
+    const index = doc.content.findIndex((block) => block.id === id)
+    const previous = doc.content
+      .slice(0, index)
+      .reverse()
+      .find((block) => block.type !== 'page' && block.type !== 'divider')
+
+    if (!previous) return
+
+    setBlocks(doc.content.filter((block) => block.id !== id))
+    setEditingId(previous.id)
+  }
+
   const changeType = (id: string, type: DocBlock['type'], text: string) => {
     setBlocks(
       doc.content.map((b) =>
@@ -209,7 +222,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   block={block}
                   autoFocus={block.id === editingId}
                   onCommit={(text, action) => commitBlock(block.id, text, action)}
-                  onDelete={() => removeBlock(block.id)}
+                  onDelete={() => removeEmptyBlock(block.id)}
                   onChangeType={(type, text) => changeType(block.id, type, text)}
                   onToggleTodo={() => toggleTodo(block.id)}
                   marker={
