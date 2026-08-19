@@ -65,9 +65,11 @@ export interface Doc {
 
 export interface DocBlock {
   id: string
-  type: 'h1' | 'h2' | 'h3' | 'p' | 'bullet' | 'numbered' | 'quote' | 'code' | 'divider' | 'todo'
+  type: 'h1' | 'h2' | 'h3' | 'p' | 'bullet' | 'numbered' | 'quote' | 'code' | 'divider' | 'todo' | 'page'
   text: string
   checked?: boolean
+  /** For 'page' blocks: the linked document id (reference-style page block). */
+  refId?: string
 }
 
 export interface MailFolder {

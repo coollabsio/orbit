@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router'
 import { Add, ArrowLeft, MoreH, Trash } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { relativeTime } from '../../../lib/format'
-import { updateDocContent, updateDocTitle } from '../../../mock/actions'
+import { createDoc, updateDocContent, updateDocTitle } from '../../../mock/actions'
 import { nextId } from '../../../mock/store'
 import type { Doc, DocBlock, User } from '../../../mock/types'
 import { ancestorsOf } from '../lib'
 import { BlockEditor } from './BlockEditor'
 import { BlockView } from './BlockView'
+import { PageBlock } from './PageBlock'
+import { PageLinkDialog } from './PageLinkDialog'
 
 interface DocEditorProps {
   doc: Doc
@@ -21,6 +23,8 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   const navigate = useNavigate()
   const [title, setTitle] = useState(doc.title)
   const [editingId, setEditingId] = useState<string | null>(null)
+  // "Link a page" dialog opened from the slash menu; holds the block to replace.
+  const [linkTarget, setLinkTarget] = useState<string | null>(null)
 
   const ancestors = ancestorsOf(docs, doc.id)
   const updatedBy = users.find((u) => u.id === doc.updatedBy)
@@ -67,6 +71,35 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
     const fresh: DocBlock = { id: nextId('db'), type: 'p', text: '' }
     setBlocks([...doc.content, fresh])
     setEditingId(fresh.id)
+  }
+
+  /** The docs reference insertSubpage: new child page, current block becomes a page block, then open it. */
+  const insertSubpage = (blockId: string) => {
+    const child = createDoc(doc.id)
+    setEditingId(null)
+    setBlocks(
+      doc.content.map((b) =>
+        b.id === blockId ? { id: b.id, type: 'page' as const, text: 'New page', refId: child.id } : b,
+      ),
+    )
+    navigate(`/docs/${child.id}`)
+  }
+
+  /** The docs reference "Link a page": remember the "/" block and open the picker. */
+  const openLinkDialog = (blockId: string) => {
+    setEditingId(null)
+    setLinkTarget(blockId)
+  }
+
+  const pickLinkedPage = (picked: Doc) => {
+    if (linkTarget) {
+      setBlocks(
+        doc.content.map((b) =>
+          b.id === linkTarget ? { id: b.id, type: 'page' as const, text: picked.title, refId: picked.id } : b,
+        ),
+      )
+    }
+    setLinkTarget(null)
   }
 
   return (
@@ -137,13 +170,23 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
           />
           <div className="doc-blocks">
             {doc.content.map((block, index) =>
-              index === 0 && block.type === 'h1' && block.text === doc.title ? null : block.id === editingId ? (
+              index === 0 && block.type === 'h1' && block.text === doc.title ? null : block.type === 'page' ? (
+                <PageBlock
+                  key={block.id}
+                  block={block}
+                  docs={docs}
+                  onOpen={(id) => navigate(`/docs/${id}`)}
+                  onRemove={() => removeBlock(block.id)}
+                />
+              ) : block.id === editingId ? (
                 <BlockEditor
                   key={block.id}
                   block={block}
                   onCommit={(text, action) => commitBlock(block.id, text, action)}
                   onDelete={() => removeBlock(block.id)}
                   onChangeType={(type, text) => changeType(block.id, type, text)}
+                  onSubpage={() => insertSubpage(block.id)}
+                  onLinkPage={() => openLinkDialog(block.id)}
                 />
               ) : (
                 <BlockView
@@ -163,6 +206,14 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
           </button>
         </div>
       </div>
+      {linkTarget ? (
+        <PageLinkDialog
+          docs={docs}
+          excludeId={doc.id}
+          onPick={pickLinkedPage}
+          onClose={() => setLinkTarget(null)}
+        />
+      ) : null}
     </section>
   )
 }
