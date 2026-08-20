@@ -1,4 +1,4 @@
-/* Layer card — Coolify content card: one flat surface with a border.
+/* Layer card — Coolify content card: panel shell with a recessed content layer.
    Used for form sections and summary tiles (Home, Settings) only. */
 
 .layer-card {
@@ -26,6 +26,7 @@
 .layer-card-body {
   padding: 4px 16px 16px;
   min-width: 0;
+  background: var(--base);
 }
 
 .layer-card-body.flush {
