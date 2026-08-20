@@ -9,6 +9,128 @@
   flex-shrink: 0;
 }
 
+.tasks-layout-toggle {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--recessed);
+}
+
+.tasks-layout-toggle button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+.tasks-layout-toggle button[data-active='true'] {
+  color: var(--text-primary);
+  background: var(--fill);
+}
+
+/* kanban */
+.tasks-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 12px;
+  min-width: 940px;
+  min-height: 100%;
+  padding: 12px;
+}
+
+.tasks-board-column {
+  min-width: 0;
+  border-radius: var(--radius-md);
+  background: var(--recessed);
+}
+
+.tasks-board-column-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tasks-board-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.tasks-board-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 120px;
+  padding: 0 7px 7px;
+}
+
+.tasks-board-card {
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.tasks-board-card:hover {
+  border-color: var(--line);
+  background: var(--elevated);
+}
+
+.tasks-board-card[data-active='true'] {
+  border-color: var(--accent-ring);
+}
+
+.tasks-board-card:focus-visible {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.tasks-board-card-topline,
+.tasks-board-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.tasks-board-card h3 {
+  margin: 5px 0 9px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.tasks-board-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 9px;
+}
+
+.tasks-board-comment-count {
+  min-height: 16px;
+}
+
+.tasks-board-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 /* filter triggers */
 .tasks-filter[data-active='true'] {
   background: var(--accent-soft);
@@ -170,6 +292,11 @@
 
   .tasks-close {
     display: none;
+  }
+
+  .tasks-board {
+    grid-template-columns: repeat(4, 270px);
+    min-width: max-content;
   }
 }
 

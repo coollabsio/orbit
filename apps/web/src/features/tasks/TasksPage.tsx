@@ -4,6 +4,7 @@ import { Add } from 'reicon-react'
 import { useAppState } from '../../mock/store'
 import type { TaskStatus } from '../../mock/types'
 import { NewTaskModal } from './components/NewTaskModal'
+import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
 import { TaskList } from './components/TaskList'
@@ -17,6 +18,7 @@ export function TasksPage() {
   const state = useAppState()
 
   const [tab, setTab] = useState<'my' | 'all'>('my')
+  const [layout, setLayout] = useState<'list' | 'board'>('list')
   const [statusFilter, setStatusFilter] = useState<TaskStatus | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const [newTaskClicked, setNewTaskClicked] = useState(false)
@@ -69,6 +71,14 @@ export function TasksPage() {
             All
           </button>
           <div className="spacer" />
+          <div className="tasks-layout-toggle" aria-label="Task layout">
+            <button type="button" data-active={layout === 'list' || undefined} onClick={() => setLayout('list')}>
+              List
+            </button>
+            <button type="button" data-active={layout === 'board' || undefined} onClick={() => setLayout('board')}>
+              Board
+            </button>
+          </div>
           <button className="button button-primary" onClick={() => setShowNewTask(true)}>
             <Add size={16} />
             New task
@@ -85,12 +95,21 @@ export function TasksPage() {
           onAssigneeChange={setAssigneeFilter}
         />
         <div className="pane-body">
-          <TaskList
-            tasks={visibleTasks}
-            users={state.users}
-            activeTaskId={taskId ?? null}
-            onOpen={openTask}
-          />
+          {layout === 'board' ? (
+            <TaskBoard
+              tasks={visibleTasks}
+              users={state.users}
+              activeTaskId={taskId ?? null}
+              onOpen={openTask}
+            />
+          ) : (
+            <TaskList
+              tasks={visibleTasks}
+              users={state.users}
+              activeTaskId={taskId ?? null}
+              onOpen={openTask}
+            />
+          )}
         </div>
       </section>
 
