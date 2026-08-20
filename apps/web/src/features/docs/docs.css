@@ -127,8 +127,10 @@ button.doc-tree-chevron:hover {
   margin-bottom: 20px;
 }
 
-.doc-title-input:focus {
+.doc-title-input:focus,
+.doc-title-input:focus-visible {
   outline: none;
+  box-shadow: none;
 }
 
 .doc-title-input::placeholder {
