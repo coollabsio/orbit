@@ -26,7 +26,7 @@
 .layer-card-body {
   padding: 4px 16px 16px;
   min-width: 0;
-  background: var(--base);
+  background: var(--recessed);
 }
 
 .layer-card-body.flush {
