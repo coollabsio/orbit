@@ -291,6 +291,14 @@ button.doc-tree-chevron:hover {
   box-shadow: none;
 }
 
+.doc-block-textarea::placeholder {
+  color: transparent;
+}
+
+.doc-block-textarea:focus::placeholder {
+  color: var(--text-faint);
+}
+
 .doc-block-editing.doc-block-h1 .doc-block-textarea,
 .doc-block-editing.doc-block-h2 .doc-block-textarea,
 .doc-block-editing.doc-block-h3 .doc-block-textarea {
