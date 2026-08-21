@@ -114,7 +114,7 @@
 
 /* ---------- top bar ---------- */
 .topbar {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 8px;
   height: var(--topbar-height);
@@ -302,6 +302,7 @@ a.topbar-crumb:hover {
   }
 
   .topbar {
+    display: flex;
     height: 48px;
     padding: 0 8px;
   }
