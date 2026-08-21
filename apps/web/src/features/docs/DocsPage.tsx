@@ -10,7 +10,7 @@ import './docs.css'
 export function DocsPage() {
   const { docId } = useParams()
   const navigate = useNavigate()
-  const { docs, users } = useAppState()
+  const { docs } = useAppState()
 
   const doc = docId ? docs.find((d) => d.id === docId) : undefined
 
@@ -22,7 +22,6 @@ export function DocsPage() {
           key={doc.id}
           doc={doc}
           docs={docs}
-          users={users}
           onDelete={() => {
             deleteDoc(doc.id)
             navigate('/docs')

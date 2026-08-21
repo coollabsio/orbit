@@ -80,6 +80,7 @@ button.doc-tree-chevron:hover {
 
 /* ---------- editor pane ---------- */
 .docs-page .docs-editor-pane {
+  position: relative;
   flex: 1;
   border-left: none; /* tree pane already draws the divider */
 }
@@ -88,22 +89,14 @@ button.doc-tree-chevron:hover {
   display: none;
 }
 
-.docs-breadcrumbs {
+.docs-editor-actions {
+  position: absolute;
+  z-index: 10;
+  top: 12px;
+  right: 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text-faint);
-}
-
-.docs-breadcrumbs .docs-crumb-current {
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-.docs-crumb-sep {
-  flex-shrink: 0;
+  gap: 4px;
 }
 
 .docs-editor-scroll {
@@ -503,10 +496,6 @@ button.doc-tree-chevron:hover {
 
   .docs-back {
     display: inline-flex;
-  }
-
-  .docs-updated-meta {
-    display: none;
   }
 
   .docs-editor-scroll {
