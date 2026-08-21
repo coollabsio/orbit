@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ArrowLeft, MoreH, Trash } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
+import { relativeTime } from '../../../lib/format'
 import { createDoc, updateDocContent, updateDocTitle } from '../../../mock/actions'
 import { nextId } from '../../../mock/store'
-import type { Doc, DocBlock } from '../../../mock/types'
-import { numberedIndex } from '../lib'
+import type { Doc, DocBlock, User } from '../../../mock/types'
+import { ancestorsOf, numberedIndex } from '../lib'
 import { BlockEditor } from './BlockEditor'
 import { BlockView } from './BlockView'
 import { PageBlock } from './PageBlock'
@@ -14,15 +15,19 @@ import { PageLinkDialog } from './PageLinkDialog'
 interface DocEditorProps {
   doc: Doc
   docs: Doc[]
+  users: User[]
   onDelete: () => void
 }
 
-export function DocEditor({ doc, docs, onDelete }: DocEditorProps) {
+export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   const navigate = useNavigate()
   const [title, setTitle] = useState(doc.title)
   const [editingId, setEditingId] = useState<string | null>(null)
   // "Link a page" dialog opened from the slash menu; holds the block to replace.
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
+
+  const ancestors = ancestorsOf(docs, doc.id)
+  const updatedBy = users.find((u) => u.id === doc.updatedBy)
 
   const commitTitle = () => {
     const next = title.trim() || 'Untitled'
@@ -118,7 +123,7 @@ export function DocEditor({ doc, docs, onDelete }: DocEditorProps) {
 
   return (
     <section className="pane docs-editor-pane">
-      <div className="docs-editor-actions">
+      <div className="pane-header">
         <button
           type="button"
           className="icon-button docs-back"
@@ -127,6 +132,25 @@ export function DocEditor({ doc, docs, onDelete }: DocEditorProps) {
         >
           <ArrowLeft size={16} />
         </button>
+        <nav className="docs-breadcrumbs truncate" aria-label="Breadcrumb">
+          {ancestors.map((a) => (
+            <span key={a.id} style={{ display: 'contents' }}>
+              <button
+                type="button"
+                className="truncate text-faint"
+                onClick={() => navigate(`/docs/${a.id}`)}
+              >
+                {a.title || 'Untitled'}
+              </button>
+              <span className="docs-crumb-sep">/</span>
+            </span>
+          ))}
+          <span className="docs-crumb-current truncate">{doc.title || 'Untitled'}</span>
+        </nav>
+        <span className="spacer" />
+        <span className="docs-updated-meta text-faint text-xs" style={{ whiteSpace: 'nowrap' }}>
+          Updated {relativeTime(doc.updatedAt)} by {updatedBy?.name ?? 'Unknown'}
+        </span>
         <Dropdown
           align="right"
           trigger={() => (
