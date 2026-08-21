@@ -1,6 +1,7 @@
 // The chat reference-style modals: CreateChannel / CreateCategory / EditChannel / ConfirmDelete
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import { Modal } from '../../../components/ui/Modal'
 import {
   createChannel,
   createChatCategory,
@@ -25,15 +26,6 @@ interface ChannelModalsProps {
 }
 
 export function ChannelModals({ modal, onClose, activeChannelId }: ChannelModalsProps) {
-  useEffect(() => {
-    if (!modal) return
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [modal, onClose])
-
   if (!modal) return null
   switch (modal.kind) {
     case 'create-channel':
@@ -73,16 +65,21 @@ export function ChannelModals({ modal, onClose, activeChannelId }: ChannelModals
   }
 }
 
-function ModalShell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function ModalShell({
+  title,
+  description,
+  children,
+  onClose,
+}: {
+  title: string
+  description?: string
+  children: React.ReactNode
+  onClose: () => void
+}) {
   return (
-    <div
-      className="fc-modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div className="fc-modal">{children}</div>
-    </div>
+    <Modal title={title} description={description} onClose={onClose} maxWidth={480}>
+      <div className="fc-modal-form">{children}</div>
+    </Modal>
   )
 }
 
@@ -99,9 +96,7 @@ function CreateChannelModal({ categoryId, categoryName, onClose }: { categoryId:
   }
 
   return (
-    <ModalShell onClose={onClose}>
-      <h2>Create channel</h2>
-      <p>In {categoryName}</p>
+    <ModalShell title="Create channel" description={`Add a channel to ${categoryName}.`} onClose={onClose}>
       <label className="fc-modal-label">Channel name</label>
       <input
         className="fc-modal-input"
@@ -135,8 +130,7 @@ function CreateCategoryModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <ModalShell onClose={onClose}>
-      <h2>Create category</h2>
+    <ModalShell title="Create category" description="Organize related channels into a new category." onClose={onClose}>
       <label className="fc-modal-label">Category name</label>
       <input
         className="fc-modal-input"
@@ -172,8 +166,7 @@ function EditChannelModal({ channel, onClose }: { channel: Channel; onClose: () 
   }
 
   return (
-    <ModalShell onClose={onClose}>
-      <h2>Edit channel</h2>
+    <ModalShell title="Edit channel" description={`Update #${channel.name}.`} onClose={onClose}>
       <label className="fc-modal-label">Channel name</label>
       <input
         className="fc-modal-input"
@@ -223,9 +216,7 @@ export function ConfirmDeleteModal({
 }) {
   const navigate = useNavigate()
   return (
-    <ModalShell onClose={onClose}>
-      <h2>{title}</h2>
-      <p>{description}</p>
+    <ModalShell title={title} description={description} onClose={onClose}>
       <div className="fc-modal-footer">
         <button className="fc-modal-button" data-variant="secondary" onClick={onClose}>
           Cancel

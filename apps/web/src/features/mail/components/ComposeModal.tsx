@@ -35,6 +35,7 @@ export function ComposeModal({ onClose }: ComposeModalProps) {
             placeholder="name@example.com"
             value={to}
             onChange={(e) => setTo(e.target.value)}
+            autoFocus
           />
         </div>
         <div>
@@ -62,8 +63,7 @@ export function ComposeModal({ onClose }: ComposeModalProps) {
             onChange={(e) => setBody(e.target.value)}
           />
         </div>
-        <div className="mail-compose-footer">
-          <span className="spacer" />
+        <div className="modal-footer">
           <button className="button button-ghost" onClick={onClose}>
             Discard
           </button>

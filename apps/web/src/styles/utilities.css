@@ -571,25 +571,95 @@ textarea.input {
   position: fixed;
   inset: 0;
   z-index: 90;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.56);
   backdrop-filter: blur(2px);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   padding: 16px;
+  animation: modal-backdrop-in 0.1s ease-out;
 }
 
 .modal {
-  margin-top: 10vh;
   width: 100%;
-  max-width: 480px;
   max-height: calc(100dvh - 2rem);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: var(--elevated);
-  box-shadow: 0 0 0 1px var(--hairline), var(--shadow-modal);
+  background: var(--panel);
+  box-shadow: var(--shadow-modal);
+  animation: modal-in 0.1s ease-out;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-height: 56px;
+  padding: 14px 14px 14px 18px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.modal-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.modal-title {
+  color: var(--text-heading);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.modal-description {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.modal-body {
+  min-height: 0;
+  padding: 18px;
+  overflow-y: auto;
+  background: var(--base);
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 18px -18px -18px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--hairline);
+  background: var(--panel);
+}
+
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+
+@media (max-width: 599px) {
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 8px;
+  }
+
+  .modal {
+    max-height: calc(100dvh - 16px);
+  }
 }
 
 /* ---------- misc ---------- */

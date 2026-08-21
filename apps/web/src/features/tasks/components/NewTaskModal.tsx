@@ -79,7 +79,7 @@ export function NewTaskModal({ projects, defaultProjectId, onClose, onCreated }:
             ))}
           </select>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+        <div className="modal-footer">
           <button type="button" className="button button-ghost" onClick={onClose}>
             Cancel
           </button>
