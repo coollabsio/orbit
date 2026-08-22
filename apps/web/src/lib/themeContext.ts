@@ -2,8 +2,13 @@ import { createContext, useContext } from 'react'
 
 export type Theme = 'dark' | 'light'
 
-export const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({
+export const ThemeContext = createContext<{
+  theme: Theme
+  setTheme: (theme: Theme) => void
+  toggleTheme: () => void
+}>({
   theme: 'dark',
+  setTheme: () => {},
   toggleTheme: () => {},
 })
 

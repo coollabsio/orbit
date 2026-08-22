@@ -18,5 +18,5 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
   }, [])
 
-  return <ThemeContext value={{ theme, toggleTheme }}>{children}</ThemeContext>
+  return <ThemeContext value={{ theme, setTheme, toggleTheme }}>{children}</ThemeContext>
 }
