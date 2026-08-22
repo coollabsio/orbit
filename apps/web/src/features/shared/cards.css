@@ -1,38 +1,77 @@
-/* Layer card — Coolify content card: panel shell with a recessed content layer.
-   Used for form sections and summary tiles (Home, Settings) only. */
+/* Layer card — 1:1 port of Coolify `.application-settings-section`:
+   elevated shell with a hairline ring, compact header strip, and a nested
+   body panel on the base surface with a fill ring. Used for form sections
+   and summary tiles (Home, Settings) only — never for whole panes. */
 
 .layer-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  margin: 0;
   display: flex;
-  flex-direction: column;
+  width: 100%;
   min-width: 0;
-  overflow: hidden;
+  flex-direction: column;
+  border-radius: 8px;
+  border: none;
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--hairline);
 }
 
 .layer-card-header {
   display: flex;
+  min-height: 48px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border-radius: 8px 8px 0 0;
+  background: var(--elevated);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--text-muted);
+}
+
+.layer-card-heading {
+  min-width: 0;
+  padding-block: 2px;
+}
+
+.layer-card-heading h3 {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0;
+  color: inherit;
+}
+
+.layer-card-heading p {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+.layer-card-actions {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  min-height: 44px;
-  padding: 8px 8px 8px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  flex-shrink: 0;
 }
 
 .layer-card-body {
-  padding: 4px 16px 16px;
+  position: relative;
   min-width: 0;
-  background: var(--recessed);
+  border-radius: 8px;
+  background: var(--base);
+  box-shadow: 0 0 0 1px var(--fill);
+  padding: 16px;
 }
 
 .layer-card-body.flush {
   padding: 0;
   overflow: hidden;
-  border-top: 1px solid var(--hairline);
 }
 
 .layer-card-body.flush .list-row:last-child {
