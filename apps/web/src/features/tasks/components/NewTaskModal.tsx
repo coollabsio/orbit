@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Listbox } from '../../../components/ui/Listbox'
 import { Modal } from '../../../components/ui/Modal'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '../../../components/workspace/taskMeta'
 import { createTask } from '../../../mock/actions'
@@ -49,35 +50,23 @@ export function NewTaskModal({ projects, defaultProjectId, onClose, onCreated }:
           <label className="field-label" htmlFor="new-task-project">
             Project
           </label>
-          <select
+          <Listbox
             id="new-task-project"
-            className="input"
             value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            options={projects.map((p) => ({ value: p.id, label: p.name }))}
+            onChange={setProjectId}
+          />
         </div>
         <div>
           <label className="field-label" htmlFor="new-task-priority">
             Priority
           </label>
-          <select
+          <Listbox<TaskPriority>
             id="new-task-priority"
-            className="input"
             value={priority}
-            onChange={(e) => setPriority(e.target.value as TaskPriority)}
-          >
-            {PRIORITY_ORDER.map((p) => (
-              <option key={p} value={p}>
-                {PRIORITY_LABEL[p]}
-              </option>
-            ))}
-          </select>
+            options={PRIORITY_ORDER.map((p) => ({ value: p, label: PRIORITY_LABEL[p] }))}
+            onChange={setPriority}
+          />
         </div>
         <div className="modal-footer">
           <button type="button" className="button button-ghost" onClick={onClose}>
