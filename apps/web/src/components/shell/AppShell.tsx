@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router'
-import { ArrowDown2, Home2, Message, Note2, Sms, TaskSquare } from 'reicon-react'
+import { NavLink, Outlet } from 'react-router'
+import { Home2, Message, Note2, Sms, TaskSquare } from 'reicon-react'
 import { useAppState } from '../../mock/store'
-import { Avatar } from '../ui/Avatar'
 import { CommandPalette } from './CommandPalette'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
+import { UserMenu } from './UserMenu'
 import './shell.css'
 
 const DOCK_LINKS = [
@@ -18,11 +18,9 @@ const DOCK_LINKS = [
 
 export function AppShell() {
   const state = useAppState()
-  const navigate = useNavigate()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
-  const me = state.users.find((u) => u.id === state.currentUserId)
   const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
   const unreadChat = state.channels.reduce((sum, c) => sum + c.unreadCount, 0)
   const dockCounts: Record<string, number> = { '/mail': unreadMail, '/chat': unreadChat }
@@ -52,11 +50,7 @@ export function AppShell() {
         </div>
         <SidebarNav />
         <div className="app-sidebar-footer">
-          <button className="sidebar-user" onClick={() => navigate('/settings')}>
-            <Avatar user={me} size={22} showOnline />
-            <span className="sidebar-user-name">{me?.name}</span>
-            <ArrowDown2 size={14} color="var(--text-faint)" />
-          </button>
+          <UserMenu />
         </div>
       </aside>
 
