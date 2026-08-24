@@ -7,6 +7,7 @@ import type {
   Task,
   TaskPriority,
   TaskStatus,
+  User,
 } from './types'
 
 const now = () => new Date().toISOString()
@@ -227,6 +228,9 @@ export function composeMail(input: { to: string; subject: string; body: string }
 
 /* ---------- chat ---------- */
 
+
+/** Mock realtime: after the current user sends a message, another member "types" for 3s. */
+
 export function sendChatMessage(channelId: string, content: string, replyToId: string | null = null) {
   updateState((s) => {
     const message: ChatMessage = {
@@ -246,7 +250,6 @@ export function sendChatMessage(channelId: string, content: string, replyToId: s
   simulateTypingReply(channelId)
 }
 
-/** Mock realtime: after the current user sends a message, another member "types" for 3s. */
 function simulateTypingReply(channelId: string) {
   const s = getState()
   const others = s.users.filter((u) => u.id !== s.currentUserId && u.online)
@@ -285,6 +288,8 @@ export function deleteChatMessage(messageId: string) {
       .map((m) => (m.replyToId === messageId ? { ...m, replyToId: null } : m)),
   }))
 }
+
+
 
 export function togglePinMessage(messageId: string) {
   updateState((s) => ({
@@ -384,3 +389,27 @@ export function markAllNotificationsRead() {
     notifications: s.notifications.map((n) => ({ ...n, readAt: n.readAt ?? now() })),
   }))
 }
+
+/* ---------- team members ---------- */
+
+export function setUserRole(userId: string, role: User['role']) {
+  updateState((s) => ({
+    ...s,
+    users: s.users.map((u) => (u.id === userId ? { ...u, role } : u)),
+  }))
+}
+
+export function removeUser(userId: string) {
+  updateState((s) => {
+    if (userId === s.currentUserId) return s
+    return { ...s, users: s.users.filter((u) => u.id !== userId) }
+  })
+}
+
+export function updateUserProfile(userId: string, patch: Partial<Pick<User, 'name' | 'email' | 'title'>>) {
+  updateState((s) => ({
+    ...s,
+    users: s.users.map((u) => (u.id === userId ? { ...u, ...patch } : u)),
+  }))
+}
+
