@@ -62,8 +62,14 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
     }
     case 'inbox':
       return { crumbs: [{ label: 'Inbox' }] }
-    case 'settings':
-      return { crumbs: [{ label: 'Settings' }] }
+    case 'profile':
+      return { crumbs: [{ label: 'Profile' }] }
+    case 'settings': {
+      const crumbs: Crumb[] = [{ label: 'Settings', to: '/settings' }]
+      if (id === 'members') crumbs.push({ label: 'Members' })
+      else if (id === 'webhooks') crumbs.push({ label: 'Webhooks' })
+      return { crumbs }
+    }
     default:
       return { crumbs: [{ label: 'Home' }] }
   }

@@ -7,7 +7,11 @@ import { DocsPage } from './features/docs/DocsPage'
 import { MailPage } from './features/mail/MailPage'
 import { ChatPage } from './features/chat/ChatPage'
 import { InboxPage } from './features/inbox/InboxPage'
-import { SettingsPage } from './features/settings/SettingsPage'
+import { SettingsLayout } from './features/settings/SettingsLayout'
+import { GeneralPage } from './features/settings/GeneralPage'
+import { MembersPage } from './features/settings/MembersPage'
+import { ProfilePage } from './features/profile/ProfilePage'
+import { WebhooksPage } from './features/settings/WebhooksPage'
 
 export default function App() {
   return (
@@ -25,7 +29,12 @@ export default function App() {
             <Route path="chat" element={<ChatPage />} />
             <Route path="chat/:channelId" element={<ChatPage />} />
             <Route path="inbox" element={<InboxPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="profile" element={<ProfilePage />} />
+            <Route path="settings" element={<SettingsLayout />}>
+              <Route index element={<GeneralPage />} />
+              <Route path="members" element={<MembersPage />} />
+              <Route path="webhooks" element={<WebhooksPage />} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

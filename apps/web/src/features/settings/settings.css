@@ -1,121 +1,281 @@
+/* Settings — 1:1 port of Coolify `x-settings.layout` / `.application-settings-workspace`.
+   Main: px-10 pt-7 pb-10 · grid xl:[210px_minmax(0,1fr)] gap-8 · cards gap-6. */
+
 .settings-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
 
-.settings-body {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 24px;
+.settings-workspace {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 32px;
+  width: 100%;
+  min-width: 0;
+  padding: 28px 40px 40px;
+}
+
+/* aside.application-settings-navigation (sticky at xl) */
+.settings-nav {
+  position: sticky;
+  top: 28px;
+  align-self: start;
+  min-width: 0;
+  max-height: calc(100dvh - 5.5rem);
+  padding-right: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-nav nav {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.settings-nav .nav-section {
+  grid-column: 1 / -1;
+}
+
+/* later sections: mt-5 border-t pt-4 */
+.settings-nav .nav-section + .menu-item ~ .nav-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* form column: flex flex-col gap-6 */
+.settings-content {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  min-width: 0;
 }
 
-.settings-profile {
+/* grid gap-4 lg:grid-cols-2 */
+.settings-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-grid .col-span-2 {
+  grid-column: span 2;
+}
+
+.settings-field {
+  width: 100%;
+  min-width: 0;
+}
+
+/* flex items-end gap-2 (input + trailing button) */
+.settings-field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.settings-field-row .settings-field {
+  flex: 1;
+}
+
+/* ---------- Members toolbar (Coolify team/member/index) ---------- */
+.members-toolbar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
 }
 
-.settings-profile-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-heading);
+.members-search {
+  position: relative;
+  width: 100%;
+  max-width: 24rem;
 }
 
-.settings-meta-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--hairline);
+.members-search > svg {
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: var(--text-faint);
 }
 
-.settings-meta-row {
+.members-search .input {
+  height: 32px;
+  padding: 0 32px;
+  font-size: 12px;
+  border-radius: 8px;
+  border-color: var(--line);
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.dark .members-search .input {
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+.members-search .input:focus {
+  box-shadow: none;
+  border-color: var(--accent);
+}
+
+.members-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 13px;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-faint);
+  transition: background-color 0.15s, color 0.15s;
 }
 
-.settings-meta-row dt {
-  width: 96px;
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-
-.settings-meta-row dd {
-  margin: 0;
+.members-search-clear:hover {
+  background: var(--nav-hover-bg);
   color: var(--text-primary);
+}
+
+.members-filters {
+  display: flex;
+  gap: 8px;
+}
+
+.members-filter-role {
+  width: 144px;
+}
+
+.members-filter-sort {
+  width: 160px;
+}
+
+/* .team-members-table-grid */
+.members-table-grid {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.55fr) 7rem minmax(10rem, 0.9fr);
+}
+
+.members-name {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.settings-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.settings-row-label {
+.members-name-text {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
 
-.settings-row-description {
-  font-size: 12px;
-  color: var(--text-faint);
-  margin-top: 2px;
+.members-manage {
+  height: 28px;
+  min-height: 28px;
+  padding-inline: 10px;
+  font-size: 11px;
 }
 
-.settings-segmented {
-  display: inline-flex;
-  gap: 4px;
-  flex-shrink: 0;
+.members-empty {
+  padding: 16px;
 }
 
-.badge-outline {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--control-border);
-  color: var(--text-muted);
+.members-empty .empty-state-wrap {
+  padding: 0;
 }
 
-.settings-feature-rows {
+/* invite result */
+.invite-link-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ---------- Features (checkbox list) ---------- */
+.features-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
 }
 
-.settings-switch {
-  display: inline-flex;
-  align-items: center;
-  width: 30px;
-  height: 18px;
-  border-radius: 9999px;
-  background: var(--fill);
-  padding: 2px;
-  flex-shrink: 0;
-  transition: background-color 0.15s;
+.features-note {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--text-secondary);
 }
 
-.settings-switch[data-on='true'] {
-  background: var(--accent);
-  justify-content: flex-end;
+/* ---------- responsive (Coolify: nav collapses to a horizontal grid below xl) ---------- */
+@media (max-width: 1279px) {
+  .settings-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 24px 32px 40px;
+  }
+
+  .settings-nav {
+    position: static;
+    max-height: none;
+    padding-right: 0;
+    overflow: visible;
+  }
+
+  .settings-nav nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .settings-nav .nav-section {
+    display: none;
+  }
 }
 
-.settings-switch-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 9999px;
-  background: var(--base);
-}
+@media (max-width: 899px) {
+  .settings-workspace {
+    padding: 20px 20px 32px;
+  }
 
-.settings-switch[data-on='true'] .settings-switch-thumb {
-  background: var(--accent-contrast);
+  .settings-nav nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-grid .col-span-2 {
+    grid-column: auto;
+  }
+
+  .members-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .members-search {
+    max-width: none;
+  }
+
+  .members-filter-role,
+  .members-filter-sort {
+    width: 100%;
+  }
+
+  .members-table-grid {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .members-table-grid > :nth-child(2) {
+    display: none;
+  }
 }
