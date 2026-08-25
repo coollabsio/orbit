@@ -1,5 +1,5 @@
 import type { IconComponent } from 'reicon-react'
-import { Archive, DirectInbox, Note2, Send2, Star, Trash } from 'reicon-react'
+import { Archive, DirectInbox, Folder, Note2, Send2, Star, Trash } from 'reicon-react'
 import type { MailFolder, MailThread } from '../../mock/types'
 
 export const DEFAULT_FOLDER_ID = 'f_inbox'
@@ -12,6 +12,7 @@ export const FOLDER_ICONS: Record<MailFolder['icon'], IconComponent> = {
   trash: Trash,
   archive: Archive,
   star: Star,
+  folder: Folder,
 }
 
 /** Threads belonging to a folder, newest first. "Starred" is virtual. */

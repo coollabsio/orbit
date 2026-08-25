@@ -75,7 +75,9 @@ export interface DocBlock {
 export interface MailFolder {
   id: string
   name: string
-  icon: 'inbox' | 'send' | 'note' | 'trash' | 'archive' | 'star'
+  icon: 'inbox' | 'send' | 'note' | 'trash' | 'archive' | 'star' | 'folder'
+  /** user-created folder (listed under "Custom folders") */
+  custom?: boolean
 }
 
 export interface MailMessage {

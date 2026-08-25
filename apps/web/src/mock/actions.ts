@@ -7,6 +7,7 @@ import type {
   Task,
   TaskPriority,
   TaskStatus,
+  MailFolder,
   User,
 } from './types'
 
@@ -291,6 +292,7 @@ export function deleteChatMessage(messageId: string) {
 
 
 
+
 export function togglePinMessage(messageId: string) {
   updateState((s) => ({
     ...s,
@@ -413,3 +415,10 @@ export function updateUserProfile(userId: string, patch: Partial<Pick<User, 'nam
   }))
 }
 
+/* ---------- mail folders ---------- */
+
+export function createMailFolder(name: string): MailFolder {
+  const folder: MailFolder = { id: nextId('f'), name: name.trim(), icon: 'folder', custom: true }
+  updateState((s) => ({ ...s, mailFolders: [...s.mailFolders, folder] }))
+  return folder
+}

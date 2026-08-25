@@ -8,6 +8,9 @@ export const mailFolders: MailFolder[] = [
   { id: 'f_drafts', name: 'Drafts', icon: 'note' },
   { id: 'f_archive', name: 'Archive', icon: 'archive' },
   { id: 'f_trash', name: 'Trash', icon: 'trash' },
+  { id: 'f_customers', name: 'Customers', icon: 'folder', custom: true },
+  { id: 'f_invoices', name: 'Invoices', icon: 'folder', custom: true },
+  { id: 'f_hiring', name: 'Hiring', icon: 'folder', custom: true },
 ]
 
 export const mailThreads: MailThread[] = [

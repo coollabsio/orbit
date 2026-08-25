@@ -26,6 +26,19 @@
   padding: 8px;
 }
 
+.mail-rail-section {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+  padding-right: 2px;
+}
+
+.mail-rail-new {
+  height: 28px;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
 /* ---------- thread rows ---------- */
 .mail-row {
   align-items: flex-start;
