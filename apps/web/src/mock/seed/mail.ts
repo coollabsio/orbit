@@ -30,15 +30,15 @@ export const mailThreads: MailThread[] = [
       },
       {
         id: 'mm_2',
-        from: { name: 'Alice Moreau', email: 'alice@team.dev' },
+        from: { name: 'ShadowArcanist', email: 'shadowarcanist@coolify.io' },
         to: ['jordan@customer.io'],
-        body: 'Hi Jordan,\n\nThanks for the report — we tracked this to a proxy network detection issue after daemon restarts (we have it as INF-101 internally). A fix is rolling out to staging today.\n\nI\'ll follow up as soon as it\'s deployed.\n\nAlice',
+        body: 'Hi Jordan,\n\nThanks for the report — we tracked this to a proxy network detection issue after daemon restarts (we have it as INF-101 internally). A fix is rolling out to staging today.\n\nI\'ll follow up as soon as it\'s deployed.\n\nShadowArcanist',
         createdAt: ago(3, 'h'),
       },
       {
         id: 'mm_3',
         from: { name: 'Jordan Reyes', email: 'jordan@customer.io' },
-        to: ['alice@team.dev'],
+        to: ['shadowarcanist@coolify.io'],
         body: 'We are still seeing 502 errors after the restart. Can someone take another look?\n\nJordan',
         createdAt: ago(1, 'h'),
       },
@@ -105,7 +105,7 @@ export const mailThreads: MailThread[] = [
     id: 'm_5',
     folderId: 'f_inbox',
     subject: 'Re: Candidate intro — senior Rust engineer',
-    snippet: 'Thanks Alice! Attaching the CV. They are available for interviews from next week.',
+    snippet: 'Thanks ShadowArcanist! Attaching the CV. They are available for interviews from next week.',
     unread: false,
     starred: true,
     hasAttachment: true,
@@ -114,8 +114,8 @@ export const mailThreads: MailThread[] = [
       {
         id: 'mm_7',
         from: { name: 'Recruiter Anna', email: 'anna@talentbridge.eu' },
-        to: ['alice@team.dev'],
-        body: 'Thanks Alice! Attaching the CV. They are available for interviews from next week.\n\nAnna',
+        to: ['shadowarcanist@coolify.io'],
+        body: 'Thanks ShadowArcanist! Attaching the CV. They are available for interviews from next week.\n\nAnna',
         createdAt: ago(3, 'd'),
       },
     ],
@@ -132,9 +132,9 @@ export const mailThreads: MailThread[] = [
     messages: [
       {
         id: 'mm_8',
-        from: { name: 'Alice Moreau', email: 'alice@team.dev' },
+        from: { name: 'ShadowArcanist', email: 'shadowarcanist@coolify.io' },
         to: ['customers@team.dev'],
-        body: 'Hi everyone,\n\nWe will be performing scheduled maintenance this Saturday between 02:00 and 04:00 UTC. Expect brief interruptions to deployments during that window.\n\nAlice',
+        body: 'Hi everyone,\n\nWe will be performing scheduled maintenance this Saturday between 02:00 and 04:00 UTC. Expect brief interruptions to deployments during that window.\n\nShadowArcanist',
         createdAt: ago(2, 'd'),
       },
     ],
@@ -151,7 +151,7 @@ export const mailThreads: MailThread[] = [
     messages: [
       {
         id: 'mm_9',
-        from: { name: 'Dan Kovács', email: 'dan@team.dev' },
+        from: { name: 'Cinzya', email: 'cinzya@coolify.io' },
         to: ['billing@hetzner.com'],
         body: 'Hi,\n\nConfirming payment went out this morning. Reference: TX-88412.\n\nDan',
         createdAt: ago(6, 'd'),
@@ -170,7 +170,7 @@ export const mailThreads: MailThread[] = [
     messages: [
       {
         id: 'mm_10',
-        from: { name: 'Alice Moreau', email: 'alice@team.dev' },
+        from: { name: 'ShadowArcanist', email: 'shadowarcanist@coolify.io' },
         to: [],
         body: 'Here is where we landed for Q3: proxy stability, mail sync rewrite, and the docs revamp. Still need numbers from…',
         createdAt: ago(1, 'd'),

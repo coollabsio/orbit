@@ -42,18 +42,18 @@ function msg(
 
 export const chatMessages: ChatMessage[] = [
   // general
-  msg('c_general', 'u_alice', 'Morning everyone! Reminder: weekly sync moved to 14:00 today.', ago(26, 'h')),
-  msg('c_general', 'u_carol', 'Works for me 👍', ago(25, 'h')),
-  msg('c_general', 'u_eve', 'I will share the new empty-state illustrations right after.', ago(25, 'h'), {
-    reactions: [{ emoji: '🎉', userIds: ['u_alice', 'u_carol'] }],
+  msg('c_general', 'u_shadow', 'Morning everyone! Reminder: weekly sync moved to 14:00 today.', ago(26, 'h')),
+  msg('c_general', 'u_adiology', 'Works for me 👍', ago(25, 'h')),
+  msg('c_general', 'u_peak', 'I will share the new empty-state illustrations right after.', ago(25, 'h'), {
+    reactions: [{ emoji: '🎉', userIds: ['u_shadow', 'u_adiology'] }],
   }),
-  msg('c_general', 'u_dan', 'Heads up: rotating TLS certs Thursday evening, expect a brief blip on internal tools.', ago(4, 'h')),
+  msg('c_general', 'u_cinzya', 'Heads up: rotating TLS certs Thursday evening, expect a brief blip on internal tools.', ago(4, 'h')),
 
   // engineering
-  msg('c_engineering', 'u_bob', 'Found the GitHub duplicate-task bug — webhook retries were not idempotent.', ago(7, 'h')),
-  msg('c_engineering', 'u_bob', 'Fix is to dedupe on the issue node id before insert.', ago(7, 'h')),
-  msg('c_engineering', 'u_alice', 'Nice. Can you add an activity entry when a duplicate is skipped?', ago(6, 'h'), {
-    reactions: [{ emoji: '👍', userIds: ['u_bob'] }],
+  msg('c_engineering', 'u_andras', 'Found the GitHub duplicate-task bug — webhook retries were not idempotent.', ago(7, 'h')),
+  msg('c_engineering', 'u_andras', 'Fix is to dedupe on the issue node id before insert.', ago(7, 'h')),
+  msg('c_engineering', 'u_shadow', 'Nice. Can you add an activity entry when a duplicate is skipped?', ago(6, 'h'), {
+    reactions: [{ emoji: '👍', userIds: ['u_andras'] }],
   }),
   msg(
     'c_engineering',
@@ -62,21 +62,21 @@ export const chatMessages: ChatMessage[] = [
     ago(3, 'h'),
     { authorType: 'github', externalAuthor: { name: 'GitHub', source: 'team/workspace' } },
   ),
-  msg('c_engineering', 'u_carol', 'The proxy appears to drop websocket upgrades when the config reloads — @alice anyone else seeing this?', ago(2, 'h')),
-  msg('c_engineering', 'u_alice', 'Yes, that matches INF-101. My patch re-attaches listeners after reload.', ago(1, 'h')),
+  msg('c_engineering', 'u_adiology', 'The proxy appears to drop websocket upgrades when the config reloads — @shadowarcanist anyone else seeing this?', ago(2, 'h')),
+  msg('c_engineering', 'u_shadow', 'Yes, that matches INF-101. My patch re-attaches listeners after reload.', ago(1, 'h')),
 
   // infra
-  msg('c_infra', 'u_dan', 'Staging deploy at 11:40 went clean. Smoke checks green.', ago(8, 'h')),
-  msg('c_infra', 'u_alice', 'Proxy patch is on staging now. Watching error rates for an hour before promoting.', ago(3, 'h')),
-  msg('c_infra', 'u_dan', '502 rate on staging dropped to zero since the patch 📉', ago(30, 'm'), {
-    reactions: [{ emoji: '🚀', userIds: ['u_alice', 'u_bob', 'u_carol'] }],
+  msg('c_infra', 'u_cinzya', 'Staging deploy at 11:40 went clean. Smoke checks green.', ago(8, 'h')),
+  msg('c_infra', 'u_shadow', 'Proxy patch is on staging now. Watching error rates for an hour before promoting.', ago(3, 'h')),
+  msg('c_infra', 'u_cinzya', '502 rate on staging dropped to zero since the patch 📉', ago(30, 'm'), {
+    reactions: [{ emoji: '🚀', userIds: ['u_shadow', 'u_andras', 'u_adiology'] }],
     pinned: true,
   }),
 
   // design
-  msg('c_design', 'u_eve', 'Uploaded the dark-theme token pass — accent switches to yellow like Coolify does.', ago(2, 'd')),
-  msg('c_design', 'u_carol', 'Looks great in the sidebar. The purple gradient stays for primary buttons, right?', ago(2, 'd')),
-  msg('c_design', 'u_eve', 'Exactly — gradient primary in both themes, accent only for selection and focus.', ago(2, 'd')),
+  msg('c_design', 'u_peak', 'Uploaded the dark-theme token pass — accent switches to yellow like Coolify does.', ago(2, 'd')),
+  msg('c_design', 'u_adiology', 'Looks great in the sidebar. The purple gradient stays for primary buttons, right?', ago(2, 'd')),
+  msg('c_design', 'u_peak', 'Exactly — gradient primary in both themes, accent only for selection and focus.', ago(2, 'd')),
 
   // support (with Discord-forwarded messages)
   msg(
@@ -86,7 +86,7 @@ export const chatMessages: ChatMessage[] = [
     ago(5, 'h'),
     { authorType: 'discord', externalAuthor: { name: 'JordanR', source: '#support' } },
   ),
-  msg('c_support', 'u_alice', 'That is the proxy issue — replied on the mail thread and posted a status update.', ago(4, 'h')),
+  msg('c_support', 'u_shadow', 'That is the proxy issue — replied on the mail thread and posted a status update.', ago(4, 'h')),
   msg(
     'c_support',
     'dc',
