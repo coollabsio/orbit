@@ -4,6 +4,7 @@ import { Add } from 'reicon-react'
 import { useAppState } from '../../mock/store'
 import type { TaskStatus } from '../../mock/types'
 import { NewTaskModal } from './components/NewTaskModal'
+import { ProjectRail } from './components/ProjectRail'
 import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
@@ -62,6 +63,7 @@ export function TasksPage() {
 
   return (
     <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
+      <ProjectRail projects={state.projects} tasks={state.tasks} projectId={projectFilter} onSelect={setProjectFilter} />
       <section className="pane tasks-list-pane">
         <div className="pane-header">
           <button className="app-tab" data-active={tab === 'my' || undefined} onClick={() => setTab('my')}>
@@ -85,12 +87,9 @@ export function TasksPage() {
           </button>
         </div>
         <TaskFilters
-          projects={state.projects}
           users={state.users}
-          projectId={projectFilter}
           status={statusFilter}
           assigneeId={assigneeFilter}
-          onProjectChange={setProjectFilter}
           onStatusChange={setStatusFilter}
           onAssigneeChange={setAssigneeFilter}
         />

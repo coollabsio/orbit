@@ -1,5 +1,37 @@
 /* Tasks feature */
 
+.tasks-rail-pane {
+  width: 240px;
+  flex-shrink: 0;
+}
+
+.tasks-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+
+.tasks-rail-dot {
+  margin-inline: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.tasks-rail-key {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.tasks-rail-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
 .tasks-list-pane {
   flex: 1;
 }
@@ -278,6 +310,10 @@
 
 /* responsive: one pane on mobile */
 @media (max-width: 899px) {
+  .tasks-rail-pane {
+    display: none;
+  }
+
   .tasks-page[data-view='detail'] .tasks-list-pane {
     display: none;
   }
