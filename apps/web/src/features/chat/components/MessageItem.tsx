@@ -1,6 +1,7 @@
 // Port of the chat reference MessageItem (the chat reference frontend/src/components/chat/MessageItem.tsx)
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Copy, Edit, Pin, Reply, Trash } from 'reicon-react'
+import { createPortal } from 'react-dom'
+import { Copy, Edit, Messages, Pin, Reply, Trash } from 'reicon-react'
 import {
   deleteChatMessage,
   editChatMessage,
@@ -12,10 +13,13 @@ import {
   type MentionToken,
   authorUser,
   displayName,
+  extractPreview,
   formatShortTime,
   jumpToMessage,
+  threadTitleOf,
 } from '../chatLib'
 import { MessageContent } from './MessageContent'
+import { relativeTime } from '../../../lib/format'
 import { ConfirmDeleteModal } from './ChannelModals'
 
 const TOOLBAR_EMOJIS = ['👍', '👀', '😂']
@@ -27,9 +31,22 @@ interface MessageItemProps {
   mentionedCurrentUser: boolean
   mentionTokens: MentionToken[]
   onReply: (message: ChatMessage) => void
+  /** Open (or create) the thread rooted at this message. Absent inside the thread panel. */
+  onOpenThread?: (message: ChatMessage) => void
+  /** the chat reference hideThreadPreview: the thread panel renders the root without its preview card. */
+  hideThreadPreview?: boolean
 }
 
-export function MessageItem({ state, message, compact, mentionedCurrentUser, mentionTokens, onReply }: MessageItemProps) {
+export function MessageItem({
+  state,
+  message,
+  compact,
+  mentionedCurrentUser,
+  mentionTokens,
+  onReply,
+  onOpenThread,
+  hideThreadPreview,
+}: MessageItemProps) {
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
@@ -72,6 +89,15 @@ export function MessageItem({ state, message, compact, mentionedCurrentUser, men
   const replyTarget = message.replyToId
     ? state.chatMessages.find((m) => m.id === message.replyToId)
     : null
+  const threadReplies = state.chatMessages.filter((m) => m.threadRootId === message.id)
+  const lastReply = threadReplies.length > 0 ? threadReplies[threadReplies.length - 1] : null
+  const hasThread = threadReplies.length > 0 || message.startsThread
+  const isThreadStarter = message.startsThread && !message.threadRootId
+  const showThreadPreview = !hideThreadPreview && !!onOpenThread && threadReplies.length > 0
+  const openThread = () => {
+    onOpenThread?.(message)
+    setContextMenu(null)
+  }
 
   const body = (
     <div className="fc-msg-body">
@@ -115,8 +141,51 @@ export function MessageItem({ state, message, compact, mentionedCurrentUser, men
         </>
       )}
       <Reactions message={message} currentUserId={state.currentUserId} />
+      {showThreadPreview ? (
+        <ThreadPreview
+          state={state}
+          message={message}
+          lastReply={lastReply}
+          compact={compact}
+          replyCount={threadReplies.length}
+          onOpen={openThread}
+        />
+      ) : null}
     </div>
   )
+
+  if (isThreadStarter && onOpenThread) {
+    return (
+      <div id={`message-${message.id}`} className="fc-msg fc-thread-starter" data-full="true">
+        <div className="fc-msg-row">
+          <div className="fc-msg-gutter">
+            <span className="fc-thread-starter-icon">
+              <Messages size={20} />
+            </span>
+            <span className="fc-thread-starter-elbow" />
+          </div>
+          <div className="fc-msg-body">
+            <div className="fc-thread-starter-text">
+              <span className="fc-msg-author" style={author ? { color: author.color } : undefined}>
+                {name}
+              </span>{' '}
+              started a thread: <strong>{threadTitleOf(message)}</strong>.{' '}
+              <span className="fc-msg-time">{timeStr}</span>
+            </div>
+            <ThreadPreview
+              state={state}
+              message={message}
+              lastReply={lastReply}
+              compact
+              starterCard
+              replyCount={threadReplies.length}
+              onOpen={openThread}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <>
@@ -145,8 +214,8 @@ export function MessageItem({ state, message, compact, mentionedCurrentUser, men
           ) : (
             <div className="fc-msg-gutter">
               <div className="fc-avatar" style={author ? { background: `color-mix(in srgb, ${author.color} 22%, transparent)`, color: author.color } : undefined}>
-                {name.charAt(0).toUpperCase()}
-              </div>
+                  {name.charAt(0).toUpperCase()}
+                </div>
             </div>
           )}
           {body}
@@ -176,6 +245,11 @@ export function MessageItem({ state, message, compact, mentionedCurrentUser, men
             <button title="Reply" onClick={handleReply}>
               <Reply />
             </button>
+            {onOpenThread ? (
+              <button title={hasThread ? 'Open Thread' : 'Create Thread'} onClick={openThread}>
+                <Messages />
+              </button>
+            ) : null}
             <div className="fc-toolbar-sep" />
             <button title={message.pinned ? 'Unpin message' : 'Pin message'} onClick={() => togglePinMessage(message.id)}>
               <Pin />
@@ -205,6 +279,8 @@ export function MessageItem({ state, message, compact, mentionedCurrentUser, men
           onCopyText={handleCopyText}
           onEdit={startEditing}
           onReply={handleReply}
+          onThread={onOpenThread ? openThread : undefined}
+          threadLabel={hasThread ? 'Open Thread' : 'Create Thread'}
           onPin={() => {
             togglePinMessage(message.id)
             setContextMenu(null)
@@ -225,6 +301,62 @@ export function MessageItem({ state, message, compact, mentionedCurrentUser, men
         />
       ) : null}
     </>
+  )
+}
+
+/** the chat reference ThreadPreview: reply-count card under the parent message. */
+function ThreadPreview({
+  state,
+  message,
+  lastReply,
+  compact,
+  starterCard,
+  replyCount,
+  onOpen,
+}: {
+  state: AppState
+  message: ChatMessage
+  lastReply: ChatMessage | null
+  compact: boolean
+  starterCard?: boolean
+  replyCount: number
+  onOpen: () => void
+}) {
+  const title = threadTitleOf(message)
+  const previewMessage = lastReply ?? message
+  const previewAuthor = authorUser(state, previewMessage)
+  const previewText = extractPreview(previewMessage.content)
+  const totalMessages = replyCount + 1
+  return (
+    <div className="fc-thread-preview-wrap" data-starter={starterCard || undefined}>
+      {!compact && !starterCard ? <span className="fc-thread-preview-elbow" /> : null}
+      <button type="button" className="fc-thread-preview" onClick={onOpen}>
+        {!starterCard ? (
+          <span className="fc-thread-preview-icon">
+            <Messages size={14} />
+          </span>
+        ) : null}
+        <span className="fc-thread-preview-body">
+          <span className="fc-thread-preview-head">
+            <span className="fc-thread-preview-title">{title}</span>
+            <span className="fc-thread-preview-count">
+              {starterCard ? 'See Thread ›' : `${totalMessages} ${totalMessages === 1 ? 'Message' : 'Messages'} ›`}
+            </span>
+          </span>
+          {starterCard && !lastReply ? (
+            <span className="fc-thread-preview-line">There are no recent messages in this thread.</span>
+          ) : (
+            <span className="fc-thread-preview-line">
+              <span className="fc-thread-preview-author" style={previewAuthor ? { color: previewAuthor.color } : undefined}>
+                {displayName(state, previewMessage)}
+              </span>
+              {previewText ? <span className="fc-thread-preview-text">{previewText}</span> : null}
+              <span className="fc-thread-preview-time">{relativeTime(previewMessage.createdAt)}</span>
+            </span>
+          )}
+        </span>
+      </button>
+    </div>
   )
 }
 
@@ -317,6 +449,8 @@ function MessageContextMenu({
   onCopyText,
   onEdit,
   onReply,
+  onThread,
+  threadLabel,
   onPin,
   onDelete,
 }: {
@@ -328,6 +462,8 @@ function MessageContextMenu({
   onCopyText: () => void
   onEdit: () => void
   onReply: () => void
+  onThread?: () => void
+  threadLabel: string
   onPin: () => void
   onDelete: () => void
 }) {
@@ -359,7 +495,9 @@ function MessageContextMenu({
     }
   }, [onClose])
 
-  return (
+  // portal: message rows keep a transform from their enter animation, which would make
+  // position:fixed resolve against the row instead of the viewport
+  return createPortal(
     <div ref={menuRef} className="fc-menu fc-context-menu" style={{ left: adjusted.x, top: adjusted.y }}>
       <div style={{ display: 'flex', gap: 2, padding: '2px 4px 6px' }}>
         {TOOLBAR_EMOJIS.map((emoji) => (
@@ -377,6 +515,12 @@ function MessageContextMenu({
         <Reply size={16} />
         Reply
       </button>
+      {onThread ? (
+        <button className="fc-menu-item" onClick={onThread}>
+          <Messages size={16} />
+          {threadLabel}
+        </button>
+      ) : null}
       <button className="fc-menu-item" onClick={onCopyText}>
         <Copy size={16} />
         Copy Text
@@ -400,6 +544,7 @@ function MessageContextMenu({
           </button>
         </>
       ) : null}
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -1,24 +1,13 @@
 // Port of the chat reference MessageInput: autosize textarea, @mention autocomplete with keyboard
 // navigation, grouped emoji picker with search, + actions menu, reply bar.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { Add, EmojiHappy, Magnifier, Paperclip2, Reply, User, Xmark } from 'reicon-react'
+import { Add, EmojiHappy, Magnifier, Messages, Paperclip2, Reply, Xmark } from 'reicon-react'
 import { sendChatMessage } from '../../../mock/actions'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
 import type { EmojiEntry } from '../emojis'
 import { displayName } from '../chatLib'
-
-interface MentionState {
-  start: number
-  end: number
-  query: string
-}
-
-interface MentionSuggestion {
-  id: string
-  label: string
-  username: string
-  color: string
-}
+import { useMentionAutocomplete } from '../useMentionAutocomplete'
+import { MentionPopover } from './MentionPopover'
 
 const EMOJI_CATEGORY_ORDER = ['Smileys', 'Gestures', 'Symbols', 'Objects', 'Other']
 
@@ -58,36 +47,48 @@ function emojiCategory({ name, keywords }: EmojiEntry): string {
 export function MessageInput({
   state,
   channel,
-  replyTarget,
+  replyTarget = null,
   onCancelReply,
+  threadRootId = null,
+  placeholder,
+  onSend,
+  onCreateThread,
+  autoFocus,
 }: {
   state: AppState
   channel: Channel
-  replyTarget: ChatMessage | null
-  onCancelReply: () => void
+  replyTarget?: ChatMessage | null
+  onCancelReply?: () => void
+  /** the chat reference ThreadPanel: send replies into this thread instead of the channel timeline. */
+  threadRootId?: string | null
+  placeholder?: string
+  /** Override sending (the chat reference NewThreadPanel). Return false to keep the draft. */
+  onSend?: (content: string) => boolean | void
+  /** Shows "Create Thread" in the + menu (the chat reference composer action). */
+  onCreateThread?: () => void
+  autoFocus?: boolean
 }) {
   const [text, setText] = useState('')
   const [actionsOpen, setActionsOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [emojiQuery, setEmojiQuery] = useState('')
   const [emojis, setEmojis] = useState<EmojiEntry[]>([])
-  const [mentionState, setMentionState] = useState<MentionState | null>(null)
-  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
-  const suppressMentionRef = useRef(false)
+  const mention = useMentionAutocomplete(state.users, text, setText, inputRef, resizeTextarea)
+  const closeMention = mention.close
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (composerRef.current && !composerRef.current.contains(e.target as Node)) {
         setActionsOpen(false)
         setEmojiOpen(false)
-        setMentionState(null)
+        closeMention()
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  }, [closeMention])
 
   useEffect(() => {
     if (!emojiOpen || emojis.length > 0) return
@@ -101,9 +102,9 @@ export function MessageInput({
   }, [emojiOpen, emojis.length])
 
   useEffect(() => {
-    if (!replyTarget) return
+    if (!replyTarget && !autoFocus) return
     requestAnimationFrame(() => inputRef.current?.focus())
-  }, [replyTarget])
+  }, [replyTarget, autoFocus])
 
   function resizeTextarea() {
     const el = inputRef.current
@@ -112,67 +113,10 @@ export function MessageInput({
     el.style.height = `${Math.min(el.scrollHeight, 320)}px`
   }
 
-  const mentionSuggestions: MentionSuggestion[] = state.users.map((user) => ({
-    id: user.id,
-    label: user.name,
-    username: user.handle,
-    color: user.color,
-  }))
-  const normalizedMentionQuery = mentionState?.query.trim().toLowerCase() ?? ''
-  const filteredMentionSuggestions = (
-    normalizedMentionQuery
-      ? mentionSuggestions.filter(
-          (s) =>
-            s.label.toLowerCase().includes(normalizedMentionQuery) ||
-            s.username.toLowerCase().includes(normalizedMentionQuery),
-        )
-      : mentionSuggestions
-  ).slice(0, 10)
-
-  function updateMentionState(value: string, cursor: number) {
-    if (suppressMentionRef.current) {
-      suppressMentionRef.current = false
-      setMentionState(null)
-      return
-    }
-    const beforeCursor = value.slice(0, cursor)
-    const atIndex = beforeCursor.lastIndexOf('@')
-    if (atIndex === -1) {
-      setMentionState(null)
-      return
-    }
-    const query = beforeCursor.slice(atIndex + 1)
-    const charBeforeAt = atIndex > 0 ? beforeCursor[atIndex - 1] : ''
-    if ((charBeforeAt && !/\s/.test(charBeforeAt)) || query.includes('\n') || query.length > 48) {
-      setMentionState(null)
-      return
-    }
-    setMentionState({ start: atIndex, end: cursor, query })
-    setActiveMentionIndex(0)
-  }
-
   function handleChange(value: string, cursor: number) {
     setText(value)
-    updateMentionState(value, cursor)
+    mention.update(value, cursor)
     requestAnimationFrame(resizeTextarea)
-  }
-
-  function insertMention(suggestion: MentionSuggestion) {
-    if (!mentionState) return
-    const el = inputRef.current
-    const insertion = `@${suggestion.username} `
-    const next = `${text.slice(0, mentionState.start)}${insertion}${text.slice(mentionState.end)}`
-    const cursor = mentionState.start + insertion.length
-    suppressMentionRef.current = true
-    setText(next)
-    setMentionState(null)
-    requestAnimationFrame(() => {
-      if (!el) return
-      el.focus()
-      el.selectionStart = cursor
-      el.selectionEnd = cursor
-      resizeTextarea()
-    })
   }
 
   function insertEmoji(emoji: string) {
@@ -195,10 +139,14 @@ export function MessageInput({
   function handleSend() {
     const trimmed = text.trim()
     if (!trimmed) return
-    sendChatMessage(channel.id, trimmed, replyTarget?.id ?? null)
+    if (onSend) {
+      if (onSend(trimmed) === false) return
+    } else {
+      sendChatMessage(channel.id, trimmed, replyTarget?.id ?? null, { threadRootId })
+    }
     setText('')
-    onCancelReply()
-    setMentionState(null)
+    onCancelReply?.()
+    mention.close()
     setTimeout(() => {
       if (inputRef.current) inputRef.current.style.height = '24px'
       inputRef.current?.focus()
@@ -206,30 +154,7 @@ export function MessageInput({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (mentionState && filteredMentionSuggestions.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setActiveMentionIndex((index) => (index + 1) % filteredMentionSuggestions.length)
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setActiveMentionIndex(
-          (index) => (index - 1 + filteredMentionSuggestions.length) % filteredMentionSuggestions.length,
-        )
-        return
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault()
-        insertMention(filteredMentionSuggestions[activeMentionIndex])
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setMentionState(null)
-        return
-      }
-    }
+    if (mention.handleKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -285,6 +210,18 @@ export function MessageInput({
                 <Paperclip2 size={16} />
                 Upload Files
               </button>
+              {onCreateThread ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionsOpen(false)
+                    onCreateThread()
+                  }}
+                >
+                  <Messages size={16} />
+                  Create Thread
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -295,45 +232,21 @@ export function MessageInput({
           value={text}
           rows={1}
           style={{ height: 24 }}
-          placeholder={`Message #${channel.name}`}
+          placeholder={placeholder ?? `Message #${channel.name}`}
           onChange={(e) => handleChange(e.target.value, e.target.selectionStart)}
-          onClick={(e) => updateMentionState(text, e.currentTarget.selectionStart)}
-          onSelect={(e) => updateMentionState(text, e.currentTarget.selectionStart)}
+          onClick={(e) => mention.update(text, e.currentTarget.selectionStart)}
+          onSelect={(e) => mention.update(text, e.currentTarget.selectionStart)}
           onKeyDown={handleKeyDown}
           onInput={resizeTextarea}
         />
 
-        {mentionState && filteredMentionSuggestions.length > 0 ? (
-          <div className="fc-mention-popover">
-            <div className="fc-popover-label">Mentions</div>
-            {filteredMentionSuggestions.map((suggestion, index) => (
-              <button
-                key={suggestion.id}
-                type="button"
-                className="fc-mention-option"
-                data-active={index === activeMentionIndex ? 'true' : undefined}
-                onMouseDown={(event) => {
-                  event.preventDefault()
-                  insertMention(suggestion)
-                }}
-                onMouseEnter={() => setActiveMentionIndex(index)}
-              >
-                <span
-                  className="fc-mention-avatar"
-                  style={{ background: `color-mix(in srgb, ${suggestion.color} 22%, transparent)`, color: suggestion.color }}
-                >
-                  {suggestion.label.charAt(0).toUpperCase()}
-                </span>
-                <span className="fc-mention-label" style={{ color: suggestion.color }}>
-                  @{suggestion.label}
-                </span>
-                <span className="fc-mention-username">
-                  <User size={12} />
-                  {suggestion.username}
-                </span>
-              </button>
-            ))}
-          </div>
+        {mention.open ? (
+          <MentionPopover
+            suggestions={mention.suggestions}
+            activeIndex={mention.activeIndex}
+            onSelect={mention.insert}
+            onHover={mention.setActiveIndex}
+          />
         ) : null}
 
         {/* right emoji menu */}

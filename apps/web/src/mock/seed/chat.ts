@@ -36,6 +36,9 @@ function msg(
     createdAt,
     editedAt: null,
     pinned: false,
+    threadRootId: null,
+    startsThread: false,
+    threadTitle: null,
     ...extra,
   }
 }
@@ -95,3 +98,39 @@ export const chatMessages: ChatMessage[] = [
     { authorType: 'discord', externalAuthor: { name: 'JordanR', source: '#support' } },
   ),
 ]
+
+// the chat reference demo content: markdown + code block, and a thread with replies
+chatMessages.push(
+  msg(
+    'c_engineering',
+    'u_andras',
+    [
+      '## Webhook dedupe',
+      'Proposed fix for the duplicate-task bug — dedupe on the **issue node id** before insert:',
+      '```rust',
+      'fn dedupe(existing: &HashSet<String>, node_id: &str) -> bool {',
+      '    // skip when the id was already seen',
+      '    !existing.contains(node_id)',
+      '}',
+      '```',
+      '> Retries are idempotent after this change.',
+      '- add an activity entry when a duplicate is skipped',
+      '- backfill the `node_id` column for old rows',
+      'Docs: [GitHub webhooks](https://docs.github.com/webhooks)',
+    ].join('\n'),
+    ago(90, 'm'),
+  ),
+  msg('c_engineering', 'u_shadow', 'Should we also retry on 5xx from the GitHub API? Opening a thread for this.', ago(80, 'm')),
+)
+const threadRoot = chatMessages[chatMessages.length - 1]
+chatMessages.push(
+  msg('c_engineering', 'u_andras', 'Yes — exponential backoff, max 5 attempts.', ago(70, 'm'), {
+    threadRootId: threadRoot.id,
+  }),
+  msg('c_engineering', 'u_cinzya', 'Please cap the total wait at 2 minutes so deploys do not hang.', ago(60, 'm'), {
+    threadRootId: threadRoot.id,
+  }),
+  msg('c_engineering', 'u_shadow', 'Agreed. Andras, can you add it to the fix PR?', ago(40, 'm'), {
+    threadRootId: threadRoot.id,
+  }),
+)

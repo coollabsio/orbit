@@ -16,10 +16,12 @@ export function MessageList({
   state,
   channel,
   onReply,
+  onOpenThread,
 }: {
   state: AppState
   channel: Channel
   onReply: (message: ChatMessage) => void
+  onOpenThread: (message: ChatMessage) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -31,7 +33,7 @@ export function MessageList({
   const messages = useMemo(
     () =>
       state.chatMessages
-        .filter((m) => m.channelId === channel.id)
+        .filter((m) => m.channelId === channel.id && !m.threadRootId)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     [state.chatMessages, channel.id],
   )
@@ -97,7 +99,9 @@ export function MessageList({
               prevMsg.authorId === msg.authorId &&
               (prevMsg.externalAuthor?.name ?? '') === (msg.externalAuthor?.name ?? '') &&
               new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() < GROUP_WINDOW_MS &&
-              !msg.replyToId
+              !msg.replyToId &&
+              !msg.startsThread &&
+              !prevMsg.startsThread
 
             return (
               <div
@@ -115,6 +119,7 @@ export function MessageList({
                   mentionedCurrentUser={messageMentionsCurrentUser(msg, me)}
                   mentionTokens={mentionTokens}
                   onReply={onReply}
+                  onOpenThread={onOpenThread}
                 />
               </div>
             )
@@ -143,3 +148,4 @@ function DateSeparator({ iso }: { iso: string }) {
     </div>
   )
 }
+

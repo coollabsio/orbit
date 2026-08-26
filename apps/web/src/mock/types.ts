@@ -129,6 +129,10 @@ export interface ChatMessage {
   createdAt: string
   editedAt: string | null
   pinned: boolean
+  /** the chat reference threads: a thread is a message; replies point at the root via threadRootId. */
+  threadRootId: string | null
+  startsThread: boolean
+  threadTitle: string | null
 }
 
 export interface Notification {

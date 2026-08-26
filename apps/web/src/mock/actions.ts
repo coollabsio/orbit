@@ -233,11 +233,22 @@ export function composeMail(input: { to: string; subject: string; body: string }
 
 
 /** Mock realtime: after the current user sends a message, another member "types" for 3s. */
+export interface SendChatMessageOptions {
+  threadRootId?: string | null
+  startsThread?: boolean
+  threadTitle?: string | null
+}
 
-export function sendChatMessage(channelId: string, content: string, replyToId: string | null = null) {
+export function sendChatMessage(
+  channelId: string,
+  content: string,
+  replyToId: string | null = null,
+  options: SendChatMessageOptions = {},
+): string {
+  const id = nextId('cm')
   updateState((s) => {
     const message: ChatMessage = {
-      id: nextId('cm'),
+      id,
       channelId,
       authorId: s.currentUserId,
       authorType: 'user',
@@ -247,10 +258,28 @@ export function sendChatMessage(channelId: string, content: string, replyToId: s
       createdAt: now(),
       editedAt: null,
       pinned: false,
+      threadRootId: options.threadRootId ?? null,
+      startsThread: options.startsThread ?? false,
+      threadTitle: options.threadTitle ?? null,
     }
     return { ...s, chatMessages: [...s.chatMessages, message] }
   })
   simulateTypingReply(channelId)
+  return id
+}
+
+/** the chat reference NewThreadPanel: a thread-starter root (title as content) plus the first reply. */
+export function createThread(channelId: string, title: string, firstMessage: string): string {
+  const rootId = sendChatMessage(channelId, title.trim(), null, { startsThread: true, threadTitle: title.trim() })
+  sendChatMessage(channelId, firstMessage, null, { threadRootId: rootId })
+  return rootId
+}
+
+export function renameThread(rootId: string, title: string) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages.map((m) => (m.id === rootId ? { ...m, threadTitle: title.trim() || null } : m)),
+  }))
 }
 
 function simulateTypingReply(channelId: string) {
@@ -287,7 +316,7 @@ export function deleteChatMessage(messageId: string) {
   updateState((s) => ({
     ...s,
     chatMessages: s.chatMessages
-      .filter((m) => m.id !== messageId)
+      .filter((m) => m.id !== messageId && m.threadRootId !== messageId)
       .map((m) => (m.replyToId === messageId ? { ...m, replyToId: null } : m)),
   }))
 }
