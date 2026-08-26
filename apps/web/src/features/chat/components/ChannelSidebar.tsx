@@ -1,9 +1,11 @@
-// Port of the chat reference ChannelSidebar (the chat reference frontend/src/components/layout/ChannelSidebar.tsx)
-import { useEffect, useRef, useState } from 'react'
+// Port of the chat reference ChannelSidebar: resizable width, collapsible categories, context menus,
+// and hand-rolled mouse drag-and-drop reorder for categories and channels (no DnD library).
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router'
-import { Add, ArrowSwapHorizontal, ChevronDown, Edit, FolderAdd, Hashtag, Setting2, Trash } from 'reicon-react'
-import { markChannelRead } from '../../../mock/actions'
-import type { AppState, Channel } from '../../../mock/types'
+import { Add, ChevronDown, Edit, FolderAdd, Hashtag, Setting2, Trash } from 'reicon-react'
+import { markChannelRead, reorderChannels, reorderChatCategories } from '../../../mock/actions'
+import type { AppState, Channel, ChatCategory } from '../../../mock/types'
 import { ChannelModals, type ChannelModalState } from './ChannelModals'
 
 const WIDTH_KEY = 'orbit:channel_sidebar_width'
@@ -33,7 +35,51 @@ function storedCollapsed(): Set<string> {
 interface ContextMenuState {
   x: number
   y: number
-  target: { kind: 'channel'; channel: Channel } | { kind: 'category'; id: string; name: string }
+  target: { kind: 'channel'; channel: Channel } | { kind: 'category'; category: ChatCategory }
+}
+
+/* ---------- the chat reference drag helpers ---------- */
+
+type DropPosition = 'before' | 'after'
+type ChannelDropIndicator = { channelId: string; categoryId: string; position: DropPosition }
+type ChannelDragState = { channelId: string; categoryId: string }
+type CategoryDropIndicator = { categoryId: string; position: DropPosition }
+
+function getDropPosition(element: HTMLElement, clientY: number): DropPosition {
+  const rect = element.getBoundingClientRect()
+  return clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+}
+
+function getChannelDropTarget(clientX: number, clientY: number): ChannelDropIndicator | null {
+  const element = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-channel-drop-id]')
+  const channelId = element?.getAttribute('data-channel-drop-id')
+  const categoryId = element?.getAttribute('data-channel-category-id')
+  if (!element || !channelId || !categoryId) return null
+  return { channelId, categoryId, position: getDropPosition(element, clientY) }
+}
+
+function getCategoryDropTarget(clientX: number, clientY: number): CategoryDropIndicator | null {
+  const element = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-category-drop-id]')
+  const categoryId = element?.getAttribute('data-category-drop-id')
+  if (!element || !categoryId) return null
+  return { categoryId, position: getDropPosition(element, clientY) }
+}
+
+function moveItem<T extends { id: string }>(items: T[], draggedId: string, targetId: string, position: DropPosition): T[] {
+  const next = [...items]
+  const fromIndex = next.findIndex((item) => item.id === draggedId)
+  const targetIndex = next.findIndex((item) => item.id === targetId)
+  if (fromIndex === -1 || targetIndex === -1) return next
+  const [dragged] = next.splice(fromIndex, 1)
+  const adjustedTargetIndex = next.findIndex((item) => item.id === targetId)
+  if (adjustedTargetIndex === -1) return items
+  next.splice(position === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex, 0, dragged)
+  return next
+}
+
+function DropLine({ position }: { position: DropPosition | null }) {
+  if (!position) return null
+  return <span aria-hidden="true" className="fc-drop-line" data-position={position} />
 }
 
 export function ChannelSidebar({ state, activeChannelId }: { state: AppState; activeChannelId: string | null }) {
@@ -45,6 +91,11 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
   const [modal, setModal] = useState<ChannelModalState>(null)
   const serverMenuRef = useRef<HTMLDivElement>(null)
   const contextRef = useRef<HTMLDivElement>(null)
+
+  const [dragChannel, setDragChannel] = useState<ChannelDragState | null>(null)
+  const [dropIndicator, setDropIndicator] = useState<ChannelDropIndicator | null>(null)
+  const [dragCategoryId, setDragCategoryId] = useState<string | null>(null)
+  const [categoryDropIndicator, setCategoryDropIndicator] = useState<CategoryDropIndicator | null>(null)
 
   useEffect(() => {
     window.localStorage.setItem(WIDTH_KEY, String(width))
@@ -107,6 +158,81 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
     navigate(`/chat/${channelId}`)
   }
 
+  /* ---- channel drag (the chat reference: channels cannot move between categories) ---- */
+
+  function startChannelDrag(channelId: string, categoryId: string) {
+    setDragChannel({ channelId, categoryId })
+    setDropIndicator(null)
+    setDragCategoryId(null)
+    setCategoryDropIndicator(null)
+    setContextMenu(null)
+
+    function handleMouseUp(event: MouseEvent) {
+      const target = getChannelDropTarget(event.clientX, event.clientY)
+      if (target && target.channelId !== channelId && target.categoryId === categoryId) {
+        const inCategory = state.channels.filter((c) => c.categoryId === categoryId)
+        const next = moveItem(inCategory, channelId, target.channelId, target.position)
+        reorderChannels(categoryId, next.map((c) => c.id))
+      }
+      setDragChannel(null)
+      setDropIndicator(null)
+    }
+
+    document.addEventListener('mouseup', handleMouseUp, { once: true })
+  }
+
+  function handleChannelDragOver(channelId: string, categoryId: string, element: HTMLElement, clientY: number) {
+    if (!dragChannel || dragChannel.channelId === channelId || dragChannel.categoryId !== categoryId) {
+      setDropIndicator(null)
+      return
+    }
+    const position = getDropPosition(element, clientY)
+    setDropIndicator((current) =>
+      current?.channelId === channelId && current.position === position ? current : { channelId, categoryId, position },
+    )
+  }
+
+  function handleChannelDragLeave(channelId: string) {
+    setDropIndicator((current) => (current?.channelId === channelId ? null : current))
+  }
+
+  /* ---- category drag ---- */
+
+  function startCategoryDrag(categoryId: string) {
+    setDragCategoryId(categoryId)
+    setCategoryDropIndicator(null)
+    setDragChannel(null)
+    setDropIndicator(null)
+    setContextMenu(null)
+
+    function handleMouseUp(event: MouseEvent) {
+      const target = getCategoryDropTarget(event.clientX, event.clientY)
+      if (target && target.categoryId !== categoryId) {
+        const next = moveItem(state.chatCategories, categoryId, target.categoryId, target.position)
+        reorderChatCategories(next.map((c) => c.id))
+      }
+      setDragCategoryId(null)
+      setCategoryDropIndicator(null)
+    }
+
+    document.addEventListener('mouseup', handleMouseUp, { once: true })
+  }
+
+  function handleCategoryDragOver(categoryId: string, element: HTMLElement, clientY: number) {
+    if (!dragCategoryId || dragCategoryId === categoryId) {
+      setCategoryDropIndicator(null)
+      return
+    }
+    const position = getDropPosition(element, clientY)
+    setCategoryDropIndicator((current) =>
+      current?.categoryId === categoryId && current.position === position ? current : { categoryId, position },
+    )
+  }
+
+  function handleCategoryDragLeave(categoryId: string) {
+    setCategoryDropIndicator((current) => (current?.categoryId === categoryId ? null : current))
+  }
+
   return (
     <div className="fc-sidebar" style={{ width }}>
       <div className="fc-sidebar-resize" onPointerDown={handleResizeStart} title="Resize channel sidebar" />
@@ -114,11 +240,8 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
       {/* server header + dropdown */}
       <div style={{ position: 'relative' }} ref={serverMenuRef}>
         <button className="fc-server-header" onClick={() => setServerMenuOpen((prev) => !prev)}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <span className="fc-server-icon">O</span>
-            <span className="fc-server-name">Orbit Chat</span>
-          </span>
-          <ArrowSwapHorizontal size={16} style={{ transform: 'rotate(90deg)', flexShrink: 0 }} color="var(--text-muted)" />
+          <span className="fc-server-name">Chat</span>
+          <ChevronDown size={14} style={{ flexShrink: 0 }} color="var(--text-muted)" />
         </button>
         {serverMenuOpen ? (
           <div className="fc-menu fc-server-menu">
@@ -170,16 +293,32 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
                   className="fc-category-row"
                   onContextMenu={(e) => {
                     e.preventDefault()
-                    setContextMenu({ x: e.clientX, y: e.clientY, target: { kind: 'category', id: cat.id, name: cat.name } })
+                    setContextMenu({ x: e.clientX, y: e.clientY, target: { kind: 'category', category: cat } })
                   }}
                 >
                   <button
                     type="button"
                     className="fc-category-toggle"
+                    data-category-drop-id={cat.id}
                     data-collapsed={isCollapsed ? 'true' : undefined}
+                    data-dragging={dragCategoryId === cat.id ? 'true' : undefined}
                     onClick={() => toggleCategory(cat.id)}
+                    onMouseMove={(event: ReactMouseEvent<HTMLButtonElement>) =>
+                      handleCategoryDragOver(cat.id, event.currentTarget, event.clientY)
+                    }
+                    onMouseLeave={() => handleCategoryDragLeave(cat.id)}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return
+                      startCategoryDrag(cat.id)
+                    }}
                   >
-                    <span className="truncate">{cat.name}</span>
+                    <DropLine
+                      position={categoryDropIndicator?.categoryId === cat.id ? categoryDropIndicator.position : null}
+                    />
+                    <span className="fc-category-label">
+                      {cat.emoji ? <span className="fc-emoji-icon" data-size="sm">{cat.emoji}</span> : null}
+                      <span className="truncate">{cat.name}</span>
+                    </span>
                     <ChevronDown className="fc-chevron" />
                   </button>
                   <button
@@ -200,15 +339,27 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
                           key={ch.id}
                           type="button"
                           className="fc-channel-row"
+                          data-channel-drop-id={ch.id}
+                          data-channel-category-id={cat.id}
                           data-active={isActive ? 'true' : undefined}
                           data-unread={ch.unreadCount > 0 ? 'true' : undefined}
+                          data-dragging={dragChannel?.channelId === ch.id ? 'true' : undefined}
                           onClick={() => selectChannel(ch.id)}
+                          onMouseMove={(event: ReactMouseEvent<HTMLButtonElement>) =>
+                            handleChannelDragOver(ch.id, cat.id, event.currentTarget, event.clientY)
+                          }
+                          onMouseLeave={() => handleChannelDragLeave(ch.id)}
+                          onMouseDown={(event) => {
+                            if (event.button !== 0) return
+                            startChannelDrag(ch.id, cat.id)
+                          }}
                           onContextMenu={(e) => {
                             e.preventDefault()
                             setContextMenu({ x: e.clientX, y: e.clientY, target: { kind: 'channel', channel: ch } })
                           }}
                         >
-                          <Hashtag size={16} />
+                          <DropLine position={dropIndicator?.channelId === ch.id ? dropIndicator.position : null} />
+                          {ch.emoji ? <span className="fc-emoji-icon">{ch.emoji}</span> : <Hashtag size={16} />}
                           <span className="fc-channel-row-name">{ch.name}</span>
                           {ch.unreadCount > 0 && !isActive ? (
                             <span className="fc-unread-badge">{ch.unreadCount}</span>
@@ -225,7 +376,8 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
       </div>
 
       {/* context menus */}
-      {contextMenu ? (
+      {contextMenu
+        ? createPortal(
         <div ref={contextRef} className="fc-menu fc-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           {contextMenu.target.kind === 'channel' ? (
             <>
@@ -258,9 +410,20 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
               <button
                 className="fc-menu-item"
                 onClick={() => {
-                  const target = contextMenu.target as { kind: 'category'; id: string; name: string }
+                  const category = (contextMenu.target as { kind: 'category'; category: ChatCategory }).category
                   setContextMenu(null)
-                  setModal({ kind: 'create-channel', categoryId: target.id, categoryName: target.name })
+                  setModal({ kind: 'edit-category', category })
+                }}
+              >
+                <Edit size={16} />
+                Edit Category
+              </button>
+              <button
+                className="fc-menu-item"
+                onClick={() => {
+                  const category = (contextMenu.target as { kind: 'category'; category: ChatCategory }).category
+                  setContextMenu(null)
+                  setModal({ kind: 'create-channel', categoryId: category.id, categoryName: category.name })
                 }}
               >
                 <Add size={16} />
@@ -270,9 +433,9 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
                 className="fc-menu-item"
                 data-danger="true"
                 onClick={() => {
-                  const target = contextMenu.target as { kind: 'category'; id: string; name: string }
+                  const category = (contextMenu.target as { kind: 'category'; category: ChatCategory }).category
                   setContextMenu(null)
-                  setModal({ kind: 'delete-category', id: target.id, name: target.name })
+                  setModal({ kind: 'delete-category', id: category.id, name: category.name })
                 }}
               >
                 <Trash size={16} />
@@ -280,8 +443,10 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
               </button>
             </>
           )}
-        </div>
-      ) : null}
+        </div>,
+            document.body,
+          )
+        : null}
 
       <ChannelModals modal={modal} onClose={() => setModal(null)} activeChannelId={activeChannelId} />
     </div>

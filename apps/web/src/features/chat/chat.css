@@ -1858,3 +1858,91 @@
   background: var(--danger-bg);
   color: var(--danger);
 }
+
+/* ===== the chat reference: sidebar drag & drop ===== */
+.fc-category-toggle,
+.fc-channel-row {
+  cursor: grab;
+}
+
+.fc-category-toggle:active,
+.fc-channel-row:active {
+  cursor: grabbing;
+}
+
+.fc-category-toggle[data-dragging='true'],
+.fc-channel-row[data-dragging='true'] {
+  opacity: 0.5;
+}
+
+.fc-category-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+/* h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)] */
+.fc-drop-line {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  height: 2px;
+  border-radius: 9999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.fc-drop-line[data-position='before'] {
+  top: 0;
+}
+
+.fc-drop-line[data-position='after'] {
+  bottom: 0;
+}
+
+.fc-emoji-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.fc-emoji-icon[data-size='sm'] {
+  width: 14px;
+  height: 14px;
+  font-size: 10.5px;
+}
+
+.fc-emoji-icon[data-size='lg'] {
+  width: 20px;
+  height: 20px;
+  font-size: 16px;
+}
+
+/* modal helpers (the chat reference EmojiSelect + ConfirmDelete copy) */
+.fc-emoji-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fc-emoji-select-input {
+  width: 48px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  text-align: center;
+  font-size: 18px;
+}
+
+.fc-confirm-text {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}

@@ -1,5 +1,7 @@
 import { getState, nextId, updateState } from './store'
 import type {
+  Channel,
+  ChatCategory,
   ChatMessage,
   Doc,
   DocBlock,
@@ -336,6 +338,35 @@ export function updateChatCategory(categoryId: string, patch: { name?: string; e
     ...s,
     chatCategories: s.chatCategories.map((c) => (c.id === categoryId ? { ...c, ...patch } : c)),
   }))
+}
+
+/** the chat reference reorder contract: the full ordered id list replaces the current order. */
+export function reorderChatCategories(orderedIds: string[]) {
+  updateState((s) => {
+    const byId = new Map(s.chatCategories.map((c) => [c.id, c]))
+    const ordered = orderedIds.map((id) => byId.get(id)).filter((c): c is ChatCategory => !!c)
+    const rest = s.chatCategories.filter((c) => !orderedIds.includes(c.id))
+    return { ...s, chatCategories: [...ordered, ...rest] }
+  })
+}
+
+/** Reorder channels inside one category; channels of other categories keep their order. */
+export function reorderChannels(categoryId: string, orderedIds: string[]) {
+  updateState((s) => {
+    const byId = new Map(s.channels.map((c) => [c.id, c]))
+    const ordered = orderedIds.map((id) => byId.get(id)).filter((c): c is Channel => !!c && c.categoryId === categoryId)
+    const next: Channel[] = []
+    let inserted = false
+    for (const channel of s.channels) {
+      if (channel.categoryId !== categoryId) {
+        next.push(channel)
+      } else if (!inserted) {
+        next.push(...ordered)
+        inserted = true
+      }
+    }
+    return { ...s, channels: next }
+  })
 }
 
 export function deleteChatCategory(categoryId: string) {
