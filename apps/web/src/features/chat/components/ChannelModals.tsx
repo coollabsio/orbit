@@ -1,5 +1,6 @@
-// The chat reference-style modals: CreateChannel / CreateCategory / EditChannel / ConfirmDelete
-import { useState } from 'react'
+// the chat reference modals (Create/Edit Channel, Create/Edit Category, ConfirmDelete) rendered
+// with the Coolify modal shell and form controls.
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Modal } from '../../../components/ui/Modal'
 import {
@@ -8,13 +9,15 @@ import {
   deleteChannel,
   deleteChatCategory,
   updateChannel,
+  updateChatCategory,
 } from '../../../mock/actions'
-import type { Channel } from '../../../mock/types'
+import type { Channel, ChatCategory } from '../../../mock/types'
 
 export type ChannelModalState =
   | { kind: 'create-channel'; categoryId: string; categoryName: string }
   | { kind: 'create-category' }
   | { kind: 'edit-channel'; channel: Channel }
+  | { kind: 'edit-category'; category: ChatCategory }
   | { kind: 'delete-channel'; channel: Channel }
   | { kind: 'delete-category'; id: string; name: string }
   | null
@@ -34,6 +37,8 @@ export function ChannelModals({ modal, onClose, activeChannelId }: ChannelModals
       return <CreateCategoryModal onClose={onClose} />
     case 'edit-channel':
       return <EditChannelModal channel={modal.channel} onClose={onClose} />
+    case 'edit-category':
+      return <EditCategoryModal category={modal.category} onClose={onClose} />
     case 'delete-channel':
       return (
         <ConfirmDeleteModal
@@ -65,137 +70,251 @@ export function ChannelModals({ modal, onClose, activeChannelId }: ChannelModals
   }
 }
 
-function ModalShell({
-  title,
-  description,
-  children,
-  onClose,
-}: {
-  title: string
-  description?: string
-  children: React.ReactNode
-  onClose: () => void
-}) {
+function slugChannelName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, '-')
+}
+
+function emojiPickerHint() {
+  const platform = navigator.platform.toLowerCase()
+  if (platform.includes('mac')) return 'Press ⌃⌘Space'
+  if (platform.includes('win')) return 'Press Win + .'
+  return 'Use your OS emoji shortcut'
+}
+
+/** the chat reference EmojiSelect: small emoji input + "Focus input" + Clear, with an OS picker hint. */
+function EmojiSelect({ value, onChange, label = 'Emoji' }: { value: string; onChange: (v: string) => void; label?: string }) {
+  const inputRef = useRef<HTMLInputElement>(null)
   return (
-    <Modal title={title} description={description} onClose={onClose} maxWidth={480}>
-      <div className="fc-modal-form">{children}</div>
-    </Modal>
+    <div className="settings-field">
+      <label className="field-label" htmlFor="emoji-select">
+        {label} <span className="text-muted">(optional)</span>
+      </label>
+      <div className="fc-emoji-select">
+        <input
+          ref={inputRef}
+          id="emoji-select"
+          className="input fc-emoji-select-input"
+          value={value}
+          maxLength={16}
+          aria-label={`${label} unicode emoji`}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            inputRef.current?.focus()
+            inputRef.current?.select()
+          }}
+        >
+          Focus input
+        </button>
+        {value.trim() ? (
+          <button type="button" className="button button-ghost" onClick={() => onChange('')}>
+            Clear
+          </button>
+        ) : null}
+      </div>
+      <p className="field-help">{emojiPickerHint()}; picked emoji will insert into the focused field.</p>
+    </div>
   )
+}
+
+function FormFields({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>{children}</div>
 }
 
 function CreateChannelModal({ categoryId, categoryName, onClose }: { categoryId: string; categoryName: string; onClose: () => void }) {
   const [name, setName] = useState('')
+  const [emoji, setEmoji] = useState('')
   const navigate = useNavigate()
 
-  function commit() {
-    const trimmed = name.trim().toLowerCase().replace(/\s+/g, '-')
-    if (!trimmed) return
-    const id = createChannel(categoryId, trimmed)
+  function commit(e: React.FormEvent) {
+    e.preventDefault()
+    const slug = slugChannelName(name)
+    if (!slug) return
+    const id = createChannel(categoryId, slug)
+    if (emoji.trim()) updateChannel(id, { emoji: emoji.trim() })
     onClose()
     navigate(`/chat/${id}`)
   }
 
   return (
-    <ModalShell title="Create channel" description={`Add a channel to ${categoryName}.`} onClose={onClose}>
-      <label className="fc-modal-label">Channel name</label>
-      <input
-        className="fc-modal-input"
-        value={name}
-        placeholder="new-channel"
-        autoFocus
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit()
-        }}
-      />
-      <div className="fc-modal-footer">
-        <button className="fc-modal-button" data-variant="secondary" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="fc-modal-button" data-variant="primary" disabled={!name.trim()} onClick={commit}>
-          Create Channel
-        </button>
-      </div>
-    </ModalShell>
+    <Modal title="Create Channel" description={`in ${categoryName}`} onClose={onClose} maxWidth={448}>
+      <form onSubmit={commit}>
+        <FormFields>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="channel-name">
+              Channel Name <span className="field-required">*</span>
+            </label>
+            <input
+              id="channel-name"
+              className="input"
+              value={name}
+              placeholder="general"
+              autoFocus
+              required
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <EmojiSelect value={emoji} onChange={setEmoji} label="Channel emoji" />
+        </FormFields>
+        <div className="modal-footer">
+          <button type="button" className="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="button button-primary" disabled={!name.trim()}>
+            Create Channel
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
 function CreateCategoryModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('')
+  const [emoji, setEmoji] = useState('')
 
-  function commit() {
+  function commit(e: React.FormEvent) {
+    e.preventDefault()
     if (!name.trim()) return
-    createChatCategory(name.trim())
+    createChatCategory(name.trim(), emoji.trim())
     onClose()
   }
 
   return (
-    <ModalShell title="Create category" description="Organize related channels into a new category." onClose={onClose}>
-      <label className="fc-modal-label">Category name</label>
-      <input
-        className="fc-modal-input"
-        value={name}
-        placeholder="New Category"
-        autoFocus
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit()
-        }}
-      />
-      <div className="fc-modal-footer">
-        <button className="fc-modal-button" data-variant="secondary" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="fc-modal-button" data-variant="primary" disabled={!name.trim()} onClick={commit}>
-          Create Category
-        </button>
-      </div>
-    </ModalShell>
+    <Modal title="Create Category" description="Organize your channels into groups" onClose={onClose} maxWidth={448}>
+      <form onSubmit={commit}>
+        <FormFields>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="category-name">
+              Category Name <span className="field-required">*</span>
+            </label>
+            <input
+              id="category-name"
+              className="input"
+              value={name}
+              placeholder="New Category"
+              autoFocus
+              required
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <EmojiSelect value={emoji} onChange={setEmoji} label="Category emoji" />
+        </FormFields>
+        <div className="modal-footer">
+          <button type="button" className="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="button button-primary" disabled={!name.trim()}>
+            Create Category
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
 function EditChannelModal({ channel, onClose }: { channel: Channel; onClose: () => void }) {
   const [name, setName] = useState(channel.name)
   const [topic, setTopic] = useState(channel.description)
+  const [emoji, setEmoji] = useState(channel.emoji ?? '')
 
-  function commit() {
-    const trimmed = name.trim().toLowerCase().replace(/\s+/g, '-')
-    if (!trimmed) return
-    updateChannel(channel.id, { name: trimmed, description: topic.trim() })
+  function commit(e: React.FormEvent) {
+    e.preventDefault()
+    const slug = slugChannelName(name)
+    if (!slug) return
+    updateChannel(channel.id, { name: slug, description: topic.trim(), emoji: emoji.trim() })
     onClose()
   }
 
   return (
-    <ModalShell title="Edit channel" description={`Update #${channel.name}.`} onClose={onClose}>
-      <label className="fc-modal-label">Channel name</label>
-      <input
-        className="fc-modal-input"
-        value={name}
-        autoFocus
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit()
-        }}
-      />
-      <label className="fc-modal-label">Topic</label>
-      <input
-        className="fc-modal-input"
-        value={topic}
-        placeholder="What is this channel about?"
-        onChange={(e) => setTopic(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit()
-        }}
-      />
-      <div className="fc-modal-footer">
-        <button className="fc-modal-button" data-variant="secondary" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="fc-modal-button" data-variant="primary" disabled={!name.trim()} onClick={commit}>
-          Save
-        </button>
-      </div>
-    </ModalShell>
+    <Modal title="Edit Channel" onClose={onClose} maxWidth={448}>
+      <form onSubmit={commit}>
+        <FormFields>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="edit-channel-name">
+              Channel Name <span className="field-required">*</span>
+            </label>
+            <input
+              id="edit-channel-name"
+              className="input"
+              value={name}
+              placeholder="general"
+              autoFocus
+              required
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="edit-channel-topic">
+              Topic <span className="text-muted">(optional)</span>
+            </label>
+            <input
+              id="edit-channel-topic"
+              className="input"
+              value={topic}
+              placeholder="What's this channel about?"
+              onChange={(e) => setTopic(e.target.value)}
+            />
+          </div>
+          <EmojiSelect value={emoji} onChange={setEmoji} label="Channel emoji" />
+        </FormFields>
+        <div className="modal-footer">
+          <button type="button" className="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="button button-primary" disabled={!name.trim()}>
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function EditCategoryModal({ category, onClose }: { category: ChatCategory; onClose: () => void }) {
+  const [name, setName] = useState(category.name)
+  const [emoji, setEmoji] = useState(category.emoji ?? '')
+
+  function commit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) return
+    updateChatCategory(category.id, { name: name.trim(), emoji: emoji.trim() })
+    onClose()
+  }
+
+  return (
+    <Modal title="Edit Category" onClose={onClose} maxWidth={448}>
+      <form onSubmit={commit}>
+        <FormFields>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="edit-category-name">
+              Category Name <span className="field-required">*</span>
+            </label>
+            <input
+              id="edit-category-name"
+              className="input"
+              value={name}
+              placeholder="New Category"
+              autoFocus
+              required
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <EmojiSelect value={emoji} onChange={setEmoji} label="Category emoji" />
+        </FormFields>
+        <div className="modal-footer">
+          <button type="button" className="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="button button-primary" disabled={!name.trim()}>
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -216,14 +335,15 @@ export function ConfirmDeleteModal({
 }) {
   const navigate = useNavigate()
   return (
-    <ModalShell title={title} description={description} onClose={onClose}>
-      <div className="fc-modal-footer">
-        <button className="fc-modal-button" data-variant="secondary" onClick={onClose}>
+    <Modal title={title} onClose={onClose} maxWidth={384}>
+      <p className="fc-confirm-text">{description}</p>
+      <div className="modal-footer">
+        <button type="button" className="button" onClick={onClose}>
           Cancel
         </button>
         <button
-          className="fc-modal-button"
-          data-variant="danger"
+          type="button"
+          className="button button-danger"
           onClick={() => {
             onConfirm()
             if (navigateAwayFrom && navigateAwayFrom === activeChannelId) navigate('/chat')
@@ -232,6 +352,6 @@ export function ConfirmDeleteModal({
           Delete
         </button>
       </div>
-    </ModalShell>
+    </Modal>
   )
 }

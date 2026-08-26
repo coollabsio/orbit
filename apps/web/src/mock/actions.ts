@@ -309,7 +309,7 @@ export function createChannel(categoryId: string, name: string, description = ''
   return id
 }
 
-export function updateChannel(channelId: string, patch: { name?: string; description?: string }) {
+export function updateChannel(channelId: string, patch: { name?: string; description?: string; emoji?: string }) {
   updateState((s) => ({
     ...s,
     channels: s.channels.map((c) => (c.id === channelId ? { ...c, ...patch } : c)),
@@ -324,10 +324,17 @@ export function deleteChannel(channelId: string) {
   }))
 }
 
-export function createChatCategory(name: string) {
+export function createChatCategory(name: string, emoji = '') {
   updateState((s) => ({
     ...s,
-    chatCategories: [...s.chatCategories, { id: nextId('cc'), name }],
+    chatCategories: [...s.chatCategories, { id: nextId('cc'), name, emoji }],
+  }))
+}
+
+export function updateChatCategory(categoryId: string, patch: { name?: string; emoji?: string }) {
+  updateState((s) => ({
+    ...s,
+    chatCategories: s.chatCategories.map((c) => (c.id === categoryId ? { ...c, ...patch } : c)),
   }))
 }
 

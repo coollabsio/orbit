@@ -103,12 +103,16 @@ export interface MailThread {
 export interface ChatCategory {
   id: string
   name: string
+  /** Optional leading emoji (the chat reference: categories.emoji). Order = array order. */
+  emoji?: string
 }
 
 export interface Channel {
   id: string
   name: string
   description: string
+  /** Optional emoji shown instead of "#" (the chat reference: channels.emoji). Order = array order. */
+  emoji?: string
   categoryId: string
   unreadCount: number
 }
