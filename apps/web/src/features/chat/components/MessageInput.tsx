@@ -1,9 +1,10 @@
 // Port of the chat reference MessageInput: autosize textarea, @mention autocomplete with keyboard
 // navigation, grouped emoji picker with search, + actions menu, reply bar.
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from 'react'
 import { Add, EmojiHappy, Magnifier, Messages, Paperclip2, Reply, Xmark } from 'reicon-react'
 import { sendChatMessage } from '../../../mock/actions'
-import type { AppState, Channel, ChatMessage } from '../../../mock/types'
+import { nextId } from '../../../mock/store'
+import type { AppState, Attachment, Channel, ChatMessage } from '../../../mock/types'
 import type { EmojiEntry } from '../emojis'
 import { displayName } from '../chatLib'
 import { useMentionAutocomplete } from '../useMentionAutocomplete'
@@ -44,7 +45,13 @@ function emojiCategory({ name, keywords }: EmojiEntry): string {
   return 'Other'
 }
 
+export interface MessageInputHandle {
+  addFiles: (files: FileList | File[]) => void
+  focus: () => void
+}
+
 export function MessageInput({
+  ref,
   state,
   channel,
   replyTarget = null,
@@ -55,6 +62,8 @@ export function MessageInput({
   onCreateThread,
   autoFocus,
 }: {
+  /** the chat reference: ChatArea drops files into the composer through this handle. */
+  ref?: Ref<MessageInputHandle>
   state: AppState
   channel: Channel
   replyTarget?: ChatMessage | null
@@ -73,6 +82,8 @@ export function MessageInput({
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [emojiQuery, setEmojiQuery] = useState('')
   const [emojis, setEmojis] = useState<EmojiEntry[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
   const mention = useMentionAutocomplete(state.users, text, setText, inputRef, resizeTextarea)
@@ -106,6 +117,55 @@ export function MessageInput({
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [replyTarget, autoFocus])
 
+  /** Mock upload: files become attachments immediately (object URLs stand in for uploaded files). */
+  function addFiles(files: FileList | File[] | null) {
+    if (!files || files.length === 0) return
+    const next = Array.from(files).map(
+      (file): Attachment => ({
+        id: nextId('att'),
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        url: URL.createObjectURL(file),
+      }),
+    )
+    setAttachments((prev) => [...prev, ...next])
+    setActionsOpen(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    inputRef.current?.focus()
+  }
+
+  useImperativeHandle(ref, () => ({ addFiles, focus: () => inputRef.current?.focus() }))
+
+  function removeAttachment(id: string) {
+    setAttachments((prev) => {
+      const attachment = prev.find((a) => a.id === id)
+      if (attachment?.url.startsWith('blob:')) URL.revokeObjectURL(attachment.url)
+      return prev.filter((a) => a.id !== id)
+    })
+  }
+
+  /** the chat reference handlePaste: pasted images become attachments. */
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = [
+      ...Array.from(event.clipboardData.files),
+      ...Array.from(event.clipboardData.items)
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file)),
+    ].filter((file) => file.type.startsWith('image/'))
+    const seen = new Set<string>()
+    const files = pasted.filter((file) => {
+      const key = `${file.type}:${file.size}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    if (files.length === 0) return
+    event.preventDefault()
+    addFiles(files)
+  }
+
   function resizeTextarea() {
     const el = inputRef.current
     if (!el) return
@@ -138,13 +198,14 @@ export function MessageInput({
 
   function handleSend() {
     const trimmed = text.trim()
-    if (!trimmed) return
+    if (!trimmed && attachments.length === 0) return
     if (onSend) {
       if (onSend(trimmed) === false) return
     } else {
-      sendChatMessage(channel.id, trimmed, replyTarget?.id ?? null, { threadRootId })
+      sendChatMessage(channel.id, trimmed, replyTarget?.id ?? null, { threadRootId, attachments })
     }
     setText('')
+    setAttachments([])
     onCancelReply?.()
     mention.close()
     setTimeout(() => {
@@ -174,6 +235,21 @@ export function MessageInput({
 
   return (
     <div ref={composerRef} className="fc-composer">
+      {attachments.length > 0 ? (
+        <div className="fc-composer-attachments">
+          <div className="fc-composer-attachments-grid">
+            {attachments.map((a) => (
+              <div key={a.id} className="fc-pending-attachment">
+                {a.mimeType.startsWith('image/') ? <img src={a.url} alt="" /> : <Paperclip2 size={32} />}
+                <span className="fc-pending-attachment-name">{a.fileName}</span>
+                <button type="button" className="fc-pending-attachment-remove" title="Remove" onClick={() => removeAttachment(a.id)}>
+                  <Xmark size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {replyTarget ? (
         <div className="fc-composer-reply">
           <div className="fc-composer-reply-row">
@@ -189,7 +265,8 @@ export function MessageInput({
         </div>
       ) : null}
 
-      <div className="fc-input-row" data-attached={replyTarget ? 'true' : undefined}>
+      <div className="fc-input-row" data-attached={replyTarget || attachments.length > 0 ? 'true' : undefined}>
+        <input ref={fileInputRef} type="file" multiple hidden aria-label="File upload" onChange={(e) => addFiles(e.target.files)} />
         {/* left plus menu */}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <button
@@ -206,7 +283,7 @@ export function MessageInput({
           </button>
           {actionsOpen ? (
             <div className="fc-composer-popover fc-actions-popover">
-              <button type="button" disabled title="File uploads arrive with the backend">
+              <button type="button" onClick={() => fileInputRef.current?.click()}>
                 <Paperclip2 size={16} />
                 Upload Files
               </button>
@@ -237,6 +314,7 @@ export function MessageInput({
           onClick={(e) => mention.update(text, e.currentTarget.selectionStart)}
           onSelect={(e) => mention.update(text, e.currentTarget.selectionStart)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onInput={resizeTextarea}
         />
 

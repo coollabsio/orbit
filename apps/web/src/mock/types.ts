@@ -138,6 +138,15 @@ export interface Embed {
   fields?: EmbedField[]
 }
 
+/* the chat reference AttachmentInfo */
+export interface Attachment {
+  id: string
+  fileName: string
+  mimeType: string
+  fileSize: number
+  url: string
+}
+
 export interface Webhook {
   id: string
   name: string
@@ -157,6 +166,7 @@ export interface ChatMessage {
   webhookName?: string
   webhookIconUrl?: string | null
   embeds?: Embed[]
+  attachments?: Attachment[]
   replyToId: string | null
   content: string
   reactions: Array<{ emoji: string; userIds: string[] }>

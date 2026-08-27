@@ -1,5 +1,5 @@
 import { ago } from '../../lib/format'
-import type { Channel, ChatCategory, ChatMessage } from '../types'
+import type { Attachment, Channel, ChatCategory, ChatMessage } from '../types'
 
 export const chatCategories: ChatCategory[] = [
   { id: 'cc_general', name: 'General' },
@@ -16,6 +16,16 @@ export const channels: Channel[] = [
 ]
 
 let m = 0
+
+/** Offline-safe placeholder image (SVG data URL) for mock attachments. */
+function svgImage(width: number, height: number, from: string, to: string, label: string): string {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${width}' height='${height}' viewBox='0 0 ${width} ${height}'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${from}'/><stop offset='1' stop-color='${to}'/></linearGradient></defs><rect width='${width}' height='${height}' rx='24' fill='url(#g)'/><text x='50%' y='52%' text-anchor='middle' font-family='Inter,sans-serif' font-size='${Math.round(width / 14)}' font-weight='600' fill='rgba(255,255,255,0.9)'>${label}</text></svg>`
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`
+}
+
+function image(id: string, fileName: string, from: string, to: string, label: string, fileSize: number): Attachment {
+  return { id, fileName, mimeType: 'image/svg+xml', fileSize, url: svgImage(960, 600, from, to, label) }
+}
 
 function msg(
   channelId: string,
@@ -49,6 +59,10 @@ export const chatMessages: ChatMessage[] = [
   msg('c_general', 'u_adiology', 'Works for me 👍', ago(25, 'h')),
   msg('c_general', 'u_peak', 'I will share the new empty-state illustrations right after.', ago(25, 'h'), {
     reactions: [{ emoji: '🎉', userIds: ['u_shadow', 'u_adiology'] }],
+    attachments: [
+      image('att_1', 'empty-state-mail.svg', '#6b16ed', '#0ea5e9', 'Mail — empty state', 48_213),
+      image('att_2', 'empty-state-docs.svg', '#7317ff', '#ec4899', 'Docs — empty state', 51_902),
+    ],
   }),
   msg('c_general', 'u_cinzya', 'Heads up: rotating TLS certs Thursday evening, expect a brief blip on internal tools.', ago(4, 'h')),
 
@@ -154,6 +168,15 @@ chatMessages.push(
         footer: { text: 'Coolify · v4.3.12' },
         timestamp: ago(35, 'm'),
       },
+    ],
+  }),
+)
+
+// the chat reference attachments: a document file card
+chatMessages.push(
+  msg('c_engineering', 'u_andras', 'Runbook for the retry change — please review before Thursday.', ago(30, 'm'), {
+    attachments: [
+      { id: 'att_3', fileName: 'retry-runbook.pdf', mimeType: 'application/pdf', fileSize: 254_812, url: '#' },
     ],
   }),
 )

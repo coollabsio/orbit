@@ -2654,3 +2654,348 @@
   margin-bottom: 0;
   border-radius: 10px;
 }
+
+/* ===== the chat reference: attachments ===== */
+.fc-attachments {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fc-attachments[data-no-text='true'] {
+  margin-top: 4px;
+}
+
+/* grid max-w-lg gap-1; 2 cols (3 cols for exactly three) */
+.fc-attachment-grid {
+  display: grid;
+  max-width: 512px;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fc-attachment-grid[data-count='3'] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fc-attachment-image {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  aspect-ratio: 1 / 1;
+  transition: opacity 0.15s;
+}
+
+.fc-attachment-image:hover {
+  opacity: 0.9;
+}
+
+.fc-attachment-image[data-hero='true'] {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+
+.fc-attachment-image[data-single] {
+  grid-column: span 2;
+  width: fit-content;
+  aspect-ratio: auto;
+}
+
+.fc-attachment-image button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.fc-attachment-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fc-attachment-image[data-single] img {
+  width: auto;
+  height: auto;
+  max-height: 300px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.fc-attachment-more {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.fc-file-cards {
+  display: flex;
+  max-width: 448px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* file card: rounded-lg border bg-bg p-3 shadow-sm hover:bg-muted */
+.fc-file-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--canvas);
+  padding: 12px;
+  color: var(--text-muted);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: background-color 0.15s;
+}
+
+.fc-file-card:hover {
+  background: var(--fill);
+}
+
+.fc-file-card-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.fc-file-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.fc-file-card-size {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.fc-file-card-download {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.fc-file-card:hover .fc-file-card-download {
+  opacity: 1;
+}
+
+/* ===== the chat reference: image viewer ===== */
+.fc-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  backdrop-filter: blur(4px);
+}
+
+.fc-viewer-bar {
+  display: flex;
+  height: 56px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0 16px;
+}
+
+.fc-viewer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fc-viewer-zoom {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.fc-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fc-viewer-button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  transition: background-color 0.15s;
+}
+
+.fc-viewer-button-text {
+  width: auto;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.fc-viewer-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.fc-viewer-stage {
+  min-height: 0;
+  flex: 1;
+  cursor: zoom-out;
+  overflow: auto;
+  padding: 24px;
+}
+
+.fc-viewer-center {
+  display: flex;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.fc-viewer-center img {
+  max-height: calc(100vh - 7rem);
+  max-width: calc(100vw - 3rem);
+  user-select: none;
+  border-radius: 6px;
+  object-fit: contain;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  transition: transform 0.1s;
+}
+
+/* ===== the chat reference: drop zone overlay ===== */
+.fc-drop-zone {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.fc-drop-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 12px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--canvas) 80%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.fc-drop-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--elevated);
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+}
+
+.fc-drop-overlay-card svg {
+  color: var(--accent);
+}
+
+/* ===== the chat reference: composer attachment strip ===== */
+.fc-composer-attachments {
+  border-radius: 8px 8px 0 0;
+  border: 1px solid var(--hairline);
+  border-bottom: none;
+  background: color-mix(in srgb, var(--fill) 25%, transparent);
+  padding: 8px;
+}
+
+.fc-composer-attachments-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+@media (min-width: 900px) {
+  .fc-composer-attachments-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.fc-pending-attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: var(--canvas);
+  padding: 8px;
+  transition: background-color 0.15s;
+}
+
+.fc-pending-attachment:hover {
+  background: var(--fill);
+}
+
+.fc-pending-attachment img {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  object-fit: cover;
+}
+
+.fc-pending-attachment > svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.fc-pending-attachment-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.fc-pending-attachment-remove {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--text-muted);
+  transition: background-color 0.15s;
+}
+
+.fc-pending-attachment-remove:hover {
+  background: var(--fill);
+}

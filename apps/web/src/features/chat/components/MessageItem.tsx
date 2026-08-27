@@ -20,6 +20,7 @@ import {
 } from '../chatLib'
 import { MessageContent } from './MessageContent'
 import { EmbedCards } from './Embeds'
+import { Attachments } from './Attachments'
 import { WebhookIcon } from '../../../components/ui/WebhookIcon'
 import { relativeTime } from '../../../lib/format'
 import { ConfirmDeleteModal } from './ChannelModals'
@@ -150,6 +151,9 @@ export function MessageItem({
           {compact && message.editedAt ? <span className="fc-msg-edited">(edited)</span> : null}
         </>
       )}
+      {message.attachments && message.attachments.length > 0 ? (
+        <Attachments attachments={message.attachments} hasTextContent={!!message.content.trim()} />
+      ) : null}
       {message.embeds && message.embeds.length > 0 ? (
         <EmbedCards embeds={message.embeds} hasTextContent={!!message.content.trim()} mentionTokens={mentionTokens} />
       ) : null}

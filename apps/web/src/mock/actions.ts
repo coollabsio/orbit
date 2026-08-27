@@ -1,5 +1,6 @@
 import { getState, nextId, updateState } from './store'
 import type {
+  Attachment,
   Channel,
   ChatCategory,
   ChatMessage,
@@ -238,6 +239,7 @@ export interface SendChatMessageOptions {
   threadRootId?: string | null
   startsThread?: boolean
   threadTitle?: string | null
+  attachments?: Attachment[]
 }
 
 export function sendChatMessage(
@@ -262,6 +264,7 @@ export function sendChatMessage(
       threadRootId: options.threadRootId ?? null,
       startsThread: options.startsThread ?? false,
       threadTitle: options.threadTitle ?? null,
+      attachments: options.attachments?.length ? options.attachments : undefined,
     }
     return { ...s, chatMessages: [...s.chatMessages, message] }
   })
@@ -324,6 +327,16 @@ export function deleteChatMessage(messageId: string) {
 
 
 
+
+/** the chat reference api.attachments.delete */
+export function deleteAttachment(messageId: string, attachmentId: string) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages.map((m) =>
+      m.id === messageId ? { ...m, attachments: (m.attachments ?? []).filter((a) => a.id !== attachmentId) } : m,
+    ),
+  }))
+}
 
 export function togglePinMessage(messageId: string) {
   updateState((s) => ({
