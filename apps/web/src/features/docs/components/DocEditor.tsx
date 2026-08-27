@@ -9,6 +9,7 @@ import type { Doc, DocBlock, User } from '../../../mock/types'
 import { ancestorsOf, numberedIndex } from '../lib'
 import { BlockEditor } from './BlockEditor'
 import { BlockView } from './BlockView'
+import { buildMentionTokens } from '../../chat/chatLib'
 import { PageBlock } from './PageBlock'
 import { PageLinkDialog } from './PageLinkDialog'
 
@@ -28,6 +29,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
 
   const ancestors = ancestorsOf(docs, doc.id)
   const updatedBy = users.find((u) => u.id === doc.updatedBy)
+  const mentionTokens = buildMentionTokens(users)
 
   const commitTitle = () => {
     const next = title.trim() || 'Untitled'
@@ -208,7 +210,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   onRemove={() => removeBlock(block.id)}
                 />
               ) : block.type === 'divider' ? (
-                <BlockView
+                <BlockView mentionTokens={mentionTokens}
                   key={block.id}
                   block={block}
                   blocks={doc.content}
@@ -217,7 +219,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   onToggleTodo={() => undefined}
                 />
               ) : (
-                <BlockEditor
+                <BlockEditor users={users}
                   key={block.id}
                   block={block}
                   autoFocus={block.id === editingId}

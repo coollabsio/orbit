@@ -1,18 +1,21 @@
 import { cx } from '../../../lib/cx'
 import type { DocBlock } from '../../../mock/types'
 import { numberedIndex } from '../lib'
+import type { MentionToken } from '../../chat/chatLib'
+import { mentionifyText } from '../../chat/markdown'
 
 interface BlockViewProps {
   block: DocBlock
   blocks: DocBlock[]
   index: number
+  mentionTokens: MentionToken[]
   onEdit: () => void
   onToggleTodo: () => void
 }
 
-export function BlockView({ block, blocks, index, onEdit, onToggleTodo }: BlockViewProps) {
+export function BlockView({ block, blocks, index, mentionTokens, onEdit, onToggleTodo }: BlockViewProps) {
   const empty = block.text.trim() === ''
-  const text = empty ? 'Empty block' : block.text
+  const text = empty ? 'Empty block' : mentionifyText(block.text, `block-${block.id}`, mentionTokens)
 
   const inner = () => {
     switch (block.type) {

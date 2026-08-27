@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { cx } from '../../../lib/cx'
-import type { DocBlock } from '../../../mock/types'
+import type { DocBlock, User } from '../../../mock/types'
+import { MentionPopover } from '../../chat/components/MentionPopover'
+import { useMentionAutocomplete } from '../../chat/useMentionAutocomplete'
 import { SLASH_ITEMS, filterSuggestionItems, getSlashState, type SlashItem } from '../slashItems'
 import { SlashMenu } from './SlashMenu'
 
 interface BlockEditorProps {
   block: DocBlock
+  /** Workspace members for @mention autocomplete (same popup as chat). */
+  users: User[]
   /** Commit the text; 'insert' also creates a paragraph after this block. */
   onCommit: (text: string, action: 'close' | 'insert') => void
   onDelete: () => void
@@ -20,6 +24,7 @@ interface BlockEditorProps {
 
 export function BlockEditor({
   block,
+  users,
   onCommit,
   onDelete,
   onChangeType,
@@ -35,6 +40,15 @@ export function BlockEditor({
   const ref = useRef<HTMLTextAreaElement>(null)
   const suppressBlurRef = useRef(false)
 
+  const grow = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
+
+  const mention = useMentionAutocomplete(users, text, setText, ref, () => {
+    if (ref.current) grow(ref.current)
+  })
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -45,11 +59,6 @@ export function BlockEditor({
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }, [autoFocus])
-
-  const grow = (el: HTMLTextAreaElement) => {
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }
 
   const finish = (action: 'close' | 'insert') => {
     if (suppressBlurRef.current) return
@@ -108,6 +117,7 @@ export function BlockEditor({
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!menuOpen && mention.handleKeyDown(e)) return
     if (menuOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -175,16 +185,32 @@ export function BlockEditor({
           suppressBlurRef.current = false
           setText(e.target.value)
           updateSlash(e.target.value, e.target.selectionStart)
+          mention.update(e.target.value, e.target.selectionStart)
           grow(e.target)
         }}
-        onClick={(e) => updateSlash(text, e.currentTarget.selectionStart)}
-        onSelect={(e) => updateSlash(text, e.currentTarget.selectionStart)}
+        onClick={(e) => {
+          updateSlash(text, e.currentTarget.selectionStart)
+          mention.update(text, e.currentTarget.selectionStart)
+        }}
+        onSelect={(e) => {
+          updateSlash(text, e.currentTarget.selectionStart)
+          mention.update(text, e.currentTarget.selectionStart)
+        }}
         onKeyDown={onKeyDown}
         onFocus={() => {
           suppressBlurRef.current = false
         }}
         onBlur={() => finish('close')}
       />
+      {!menuOpen && mention.open ? (
+        <MentionPopover
+          placement="below"
+          suggestions={mention.suggestions}
+          activeIndex={mention.activeIndex}
+          onSelect={mention.insert}
+          onHover={mention.setActiveIndex}
+        />
+      ) : null}
       {menuOpen ? (
         <SlashMenu
           items={slashResults}
