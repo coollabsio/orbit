@@ -19,6 +19,8 @@ import {
   threadTitleOf,
 } from '../chatLib'
 import { MessageContent } from './MessageContent'
+import { EmbedCards } from './Embeds'
+import { WebhookIcon } from '../../../components/ui/WebhookIcon'
 import { relativeTime } from '../../../lib/format'
 import { ConfirmDeleteModal } from './ChannelModals'
 
@@ -55,7 +57,10 @@ export function MessageItem({
 
   const author = authorUser(state, message)
   const isExternal = message.authorType === 'discord' || message.authorType === 'github'
+  const isWebhook = message.authorType === 'webhook'
   const isAuthor = message.authorType === 'user' && message.authorId === state.currentUserId
+  // the chat reference: canDelete = isAuthor || Boolean(message.webhook_name)
+  const canDelete = isAuthor || isWebhook
   const name = displayName(state, message)
   const timeStr = formatShortTime(message.createdAt)
 
@@ -111,6 +116,11 @@ export function MessageItem({
               {message.authorType === 'discord' ? 'DISCORD' : 'GITHUB'}
             </span>
           ) : null}
+          {isWebhook ? (
+            <span className="fc-source-badge" data-source="webhook">
+              Webhook
+            </span>
+          ) : null}
           <span className="fc-msg-time">
             {timeStr}
             {message.editedAt ? ' (edited)' : ''}
@@ -140,6 +150,9 @@ export function MessageItem({
           {compact && message.editedAt ? <span className="fc-msg-edited">(edited)</span> : null}
         </>
       )}
+      {message.embeds && message.embeds.length > 0 ? (
+        <EmbedCards embeds={message.embeds} hasTextContent={!!message.content.trim()} mentionTokens={mentionTokens} />
+      ) : null}
       <Reactions message={message} currentUserId={state.currentUserId} />
       {showThreadPreview ? (
         <ThreadPreview
@@ -213,9 +226,15 @@ export function MessageItem({
             <div className="fc-msg-hover-time">{timeStr}</div>
           ) : (
             <div className="fc-msg-gutter">
-              <div className="fc-avatar" style={author ? { background: `color-mix(in srgb, ${author.color} 22%, transparent)`, color: author.color } : undefined}>
+              {isWebhook ? (
+                <div className="fc-avatar" data-webhook="true">
+                  {message.webhookIconUrl ? <img src={message.webhookIconUrl} alt="" /> : <WebhookIcon size={20} />}
+                </div>
+              ) : (
+                <div className="fc-avatar" style={author ? { background: `color-mix(in srgb, ${author.color} 22%, transparent)`, color: author.color } : undefined}>
                   {name.charAt(0).toUpperCase()}
                 </div>
+              )}
             </div>
           )}
           {body}
@@ -254,7 +273,7 @@ export function MessageItem({
             <button title={message.pinned ? 'Unpin message' : 'Pin message'} onClick={() => togglePinMessage(message.id)}>
               <Pin />
             </button>
-            {isAuthor ? (
+            {canDelete ? (
               <>
                 <div className="fc-toolbar-sep" />
                 <button data-danger="true" title="Delete message" onClick={requestDelete}>
@@ -271,6 +290,7 @@ export function MessageItem({
           position={contextMenu}
           message={message}
           isAuthor={isAuthor}
+          canDelete={canDelete}
           onClose={() => setContextMenu(null)}
           onReaction={(emoji) => {
             toggleReaction(message.id, emoji)
@@ -444,6 +464,7 @@ function MessageContextMenu({
   position,
   message,
   isAuthor,
+  canDelete,
   onClose,
   onReaction,
   onCopyText,
@@ -457,6 +478,7 @@ function MessageContextMenu({
   position: { x: number; y: number }
   message: ChatMessage
   isAuthor: boolean
+  canDelete: boolean
   onClose: () => void
   onReaction: (emoji: string) => void
   onCopyText: () => void
@@ -535,7 +557,7 @@ function MessageContextMenu({
         <Pin size={16} />
         {message.pinned ? 'Unpin Message' : 'Pin Message'}
       </button>
-      {isAuthor ? (
+      {canDelete ? (
         <>
           <div className="fc-menu-separator" />
           <button className="fc-menu-item" data-danger="true" onClick={onDelete}>

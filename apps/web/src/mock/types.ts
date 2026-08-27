@@ -117,12 +117,46 @@ export interface Channel {
   unreadCount: number
 }
 
+/* the chat reference webhooks: webhook-compatible embeds posted by webhooks */
+export interface EmbedField {
+  name: string
+  value: string
+  inline?: boolean
+}
+
+export interface Embed {
+  title?: string
+  description?: string
+  url?: string
+  /** 0xRRGGBB integer. */
+  color?: number
+  timestamp?: string
+  footer?: { text: string; iconUrl?: string }
+  image?: { url: string }
+  thumbnail?: { url: string }
+  author?: { name: string; url?: string; iconUrl?: string }
+  fields?: EmbedField[]
+}
+
+export interface Webhook {
+  id: string
+  name: string
+  channelId: string
+  token: string
+  createdAt: string
+  iconUrl: string | null
+}
+
 export interface ChatMessage {
   id: string
   channelId: string
   authorId: string
-  authorType: 'user' | 'discord' | 'github' | 'system'
+  authorType: 'user' | 'discord' | 'github' | 'system' | 'webhook'
   externalAuthor?: { name: string; source: string }
+  /** authorType 'webhook': display name override + icon, plus optional embeds. */
+  webhookName?: string
+  webhookIconUrl?: string | null
+  embeds?: Embed[]
   replyToId: string | null
   content: string
   reactions: Array<{ emoji: string; userIds: string[] }>
@@ -158,6 +192,7 @@ export interface AppState {
   chatCategories: ChatCategory[]
   channels: Channel[]
   chatMessages: ChatMessage[]
+  webhooks: Webhook[]
   /** channelId → users currently typing (mock realtime; expires = epoch ms) */
   typingUsers: Record<string, Array<{ userId: string; expires: number }>>
 

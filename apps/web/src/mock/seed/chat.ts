@@ -134,3 +134,26 @@ chatMessages.push(
     threadRootId: threadRoot.id,
   }),
 )
+
+// the chat reference webhook message with a webhook-compatible embed
+chatMessages.push(
+  msg('c_infra', 'wh_deploy', '', ago(35, 'm'), {
+    authorType: 'webhook',
+    webhookName: 'Deploy Bot',
+    webhookIconUrl: null,
+    embeds: [
+      {
+        title: ':white_check_mark: Deploy succeeded — website',
+        description: 'Build **#412** finished and the new release is live.',
+        color: 0x1f8b4c,
+        fields: [
+          { name: 'Environment', value: 'Production', inline: true },
+          { name: 'Duration', value: '42s', inline: true },
+          { name: 'Commit', value: '`3f9c2a1`', inline: true },
+        ],
+        footer: { text: 'Coolify · v4.3.12' },
+        timestamp: ago(35, 'm'),
+      },
+    ],
+  }),
+)
