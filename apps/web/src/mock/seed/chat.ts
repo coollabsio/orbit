@@ -64,7 +64,11 @@ export const chatMessages: ChatMessage[] = [
       image('att_2', 'empty-state-docs.svg', '#7317ff', '#ec4899', 'Docs — empty state', 51_902),
     ],
   }),
-  msg('c_general', 'u_cinzya', 'Heads up: rotating TLS certs Thursday evening, expect a brief blip on internal tools.', ago(4, 'h')),
+  msg('c_general', 'u_cinzya', 'Heads up: rotating TLS certs Thursday evening, expect a brief blip on internal tools.', ago(4, 'h'), {
+    pinned: true,
+    pinnedAt: ago(3, 'h'),
+    pinnedBy: 'u_shadow',
+  }),
 
   // engineering
   msg('c_engineering', 'u_andras', 'Found the GitHub duplicate-task bug — webhook retries were not idempotent.', ago(7, 'h')),

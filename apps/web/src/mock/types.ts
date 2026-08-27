@@ -167,6 +167,10 @@ export interface ChatMessage {
   webhookIconUrl?: string | null
   embeds?: Embed[]
   attachments?: Attachment[]
+  /** the chat reference pins: who/when pinned; the timeline shows a "pinned a message" notice until hidden */
+  pinnedAt?: string | null
+  pinnedBy?: string | null
+  pinNoticeHidden?: boolean
   replyToId: string | null
   content: string
   reactions: Array<{ emoji: string; userIds: string[] }>

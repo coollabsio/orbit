@@ -327,6 +327,26 @@ export function deleteChatMessage(messageId: string) {
 
 
 
+export function togglePinMessage(messageId: string) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages.map((m) =>
+      m.id === messageId
+        ? m.pinned
+          ? { ...m, pinned: false, pinnedAt: null, pinnedBy: null, pinNoticeHidden: false }
+          : { ...m, pinned: true, pinnedAt: now(), pinnedBy: s.currentUserId, pinNoticeHidden: false }
+        : m,
+    ),
+  }))
+}
+
+/** the chat reference hide_pin_notice: remove the "pinned a message" timeline row, keep the pin. */
+export function hidePinNotice(messageId: string) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages.map((m) => (m.id === messageId ? { ...m, pinNoticeHidden: true } : m)),
+  }))
+}
 
 /** the chat reference api.attachments.delete */
 export function deleteAttachment(messageId: string, attachmentId: string) {
@@ -335,13 +355,6 @@ export function deleteAttachment(messageId: string, attachmentId: string) {
     chatMessages: s.chatMessages.map((m) =>
       m.id === messageId ? { ...m, attachments: (m.attachments ?? []).filter((a) => a.id !== attachmentId) } : m,
     ),
-  }))
-}
-
-export function togglePinMessage(messageId: string) {
-  updateState((s) => ({
-    ...s,
-    chatMessages: s.chatMessages.map((m) => (m.id === messageId ? { ...m, pinned: !m.pinned } : m)),
   }))
 }
 

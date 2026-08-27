@@ -1,6 +1,9 @@
 // Port of the chat reference MessageList (grouping, date separators, jump-to-present, enter animation)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Messages } from 'reicon-react'
+import { createPortal } from 'react-dom'
+import { Messages, Pin, Trash } from 'reicon-react'
+import { hidePinNotice } from '../../../mock/actions'
+import { ConfirmDeleteModal } from './ChannelModals'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
 import {
   buildMentionTokens,
@@ -37,6 +40,16 @@ export function MessageList({
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     [state.chatMessages, channel.id],
   )
+  // the chat reference buildTimeline: a "pinned a message" notice follows the pinned message in time order
+  const notices = useMemo(
+    () => messages.filter((m) => m.pinned && m.pinnedAt && !m.pinNoticeHidden).map((m) => ({ message: m, at: m.pinnedAt! })),
+    [messages],
+  )
+  const noticesBefore = (index: number) => {
+    const current = messages[index]
+    const next = messages[index + 1]
+    return notices.filter((n) => n.at > current.createdAt && (!next || n.at <= next.createdAt))
+  }
 
   // ChatArea remounts this component per channel (key={channel.id}), so this
   // only needs to pin the initial scroll to the bottom.
@@ -121,6 +134,9 @@ export function MessageList({
                   onReply={onReply}
                   onOpenThread={onOpenThread}
                 />
+                {noticesBefore(i).map((notice) => (
+                  <PinnedNotice key={`${notice.message.id}-pin`} state={state} message={notice.message} />
+                ))}
               </div>
             )
           })
@@ -149,3 +165,69 @@ function DateSeparator({ iso }: { iso: string }) {
   )
 }
 
+/** the chat reference PinnedNotice: "X pinned a message to this channel." with a right-click "Delete pin notice". */
+function PinnedNotice({ state, message }: { state: AppState; message: ChatMessage }) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const actor = state.users.find((u) => u.id === message.pinnedBy)
+  const actorName = actor?.name ?? 'Someone'
+
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [menu])
+
+  return (
+    <>
+      <div
+        className="fc-pin-notice"
+        onContextMenu={(e) => {
+          e.preventDefault()
+          setMenu({ x: e.clientX, y: e.clientY })
+        }}
+      >
+        <div className="fc-pin-notice-icon">
+          <Pin size={20} />
+        </div>
+        <div className="fc-pin-notice-text">
+          <strong style={actor ? { color: actor.color } : undefined}>{actorName}</strong> pinned <strong>a message</strong> to this channel.
+        </div>
+      </div>
+      {menu
+        ? createPortal(
+            <div className="fc-menu fc-context-menu" style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
+              <button
+                className="fc-menu-item"
+                data-danger="true"
+                onClick={() => {
+                  setMenu(null)
+                  setConfirmOpen(true)
+                }}
+              >
+                <Trash size={16} />
+                Delete pin notice
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+      {confirmOpen ? (
+        <ConfirmDeleteModal
+          title="Delete pin notice?"
+          description="This removes the notice from the channel. The message stays pinned."
+          onClose={() => setConfirmOpen(false)}
+          onConfirm={() => {
+            hidePinNotice(message.id)
+            setConfirmOpen(false)
+          }}
+        />
+      ) : null}
+    </>
+  )
+}
