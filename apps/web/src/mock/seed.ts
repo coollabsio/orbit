@@ -5,10 +5,11 @@ import { docs } from './seed/docs'
 import { mailFolders, mailThreads } from './seed/mail'
 import { channels, chatCategories, chatMessages } from './seed/chat'
 import { notifications } from './seed/notifications'
+import { webhooks } from './seed/webhooks'
 
 export function seedState(): AppState {
   return {
-    currentUserId: 'u_alice',
+    currentUserId: 'u_shadow',
     users,
     projects,
     tasks,
@@ -18,6 +19,7 @@ export function seedState(): AppState {
     chatCategories,
     channels,
     chatMessages,
+    webhooks,
     typingUsers: {},
     notifications,
   }

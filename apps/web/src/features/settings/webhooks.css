@@ -1,0 +1,192 @@
+/* ===== Webhooks settings (the chat reference WebhooksTab) ===== */
+.wh-error {
+  margin-bottom: 16px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--danger);
+}
+
+.wh-empty {
+  padding: 32px 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.wh-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* overflow-hidden rounded-lg border bg-sidebar */
+.wh-row {
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--canvas);
+}
+
+/* flex w-full items-center gap-3.5 px-4 py-3.5 hover:bg-sidebar-accent/50 */
+.wh-row-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.wh-row-header:hover {
+  background: var(--hover-wash);
+}
+
+/* size-10 rounded-full bg-amber-500/15 text-amber-400 */
+.wh-avatar {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.wh-avatar img,
+.wh-icon-upload img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wh-row-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.wh-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wh-row-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.wh-chevron {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  transition: transform 0.15s;
+}
+
+.wh-chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+.wh-divider {
+  margin: 0 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* grid gap-5 px-4 py-4 sm:grid-cols-[6.5rem_1fr] */
+.wh-body {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 20px;
+  padding: 16px;
+}
+
+.wh-label {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* size-16 rounded-full bg-amber-500/15 text-amber-400 hover:opacity-85 */
+.wh-icon-upload {
+  position: relative;
+  display: flex;
+  width: 64px;
+  height: 64px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  transition: opacity 0.15s;
+}
+
+.wh-icon-upload:hover {
+  opacity: 0.85;
+}
+
+.wh-icon-upload input {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.wh-icon-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--canvas) 55%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wh-icon-hint {
+  margin-top: 8px;
+  width: 64px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+.wh-icon-hint span {
+  display: block;
+}
+
+.wh-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.wh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+@media (max-width: 599px) {
+  .wh-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

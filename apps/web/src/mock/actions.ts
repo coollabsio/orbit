@@ -10,6 +10,7 @@ import type {
   TaskPriority,
   TaskStatus,
   MailFolder,
+  Webhook,
   User,
 } from './types'
 
@@ -480,6 +481,36 @@ export function updateUserProfile(userId: string, patch: Partial<Pick<User, 'nam
     ...s,
     users: s.users.map((u) => (u.id === userId ? { ...u, ...patch } : u)),
   }))
+}
+
+/* ---------- webhooks (the chat reference api.webhooks) ---------- */
+
+function randomToken() {
+  return Array.from({ length: 20 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+}
+
+export function createWebhook(channelId: string): Webhook {
+  const webhook: Webhook = {
+    id: nextId('wh'),
+    name: 'New Webhook',
+    channelId,
+    token: randomToken(),
+    createdAt: now(),
+    iconUrl: null,
+  }
+  updateState((s) => ({ ...s, webhooks: [webhook, ...s.webhooks] }))
+  return webhook
+}
+
+export function updateWebhook(id: string, patch: { name?: string; channelId?: string; iconUrl?: string | null }) {
+  updateState((s) => ({
+    ...s,
+    webhooks: s.webhooks.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+  }))
+}
+
+export function deleteWebhook(id: string) {
+  updateState((s) => ({ ...s, webhooks: s.webhooks.filter((w) => w.id !== id) }))
 }
 
 /* ---------- mail folders ---------- */
