@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Hashtag } from 'reicon-react'
-import { useParams, useSearchParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useAppState } from '../../mock/store'
 import type { ChatMessage } from '../../mock/types'
@@ -24,12 +24,15 @@ export function ChatPage() {
   const state = useAppState()
   const [membersOpen, setMembersOpen] = useState(true)
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false)
-  const channel = state.channels.find((c) => c.id === channelId) ?? null
   // the chat reference deep link: /chat/:channelId?thread=<rootId> opens the thread pane
   const [threadView, setThreadView] = useState<ThreadView | null>(() => {
     const rootId = searchParams.get('thread')
     return channelId && rootId ? { channelId, kind: 'thread', rootId } : null
   })
+  const navigate = useNavigate()
+  const firstChannel = state.channels[0] ?? null
+  // no channel in the URL: show the first channel right away (the chat reference picks the first channel)
+  const channel = channelId ? (state.channels.find((c) => c.id === channelId) ?? null) : firstChannel
 
   const toggleMembers = () => {
     if (isMobileViewport()) setMobileMembersOpen((o) => !o)
@@ -54,6 +57,10 @@ export function ChatPage() {
         <ThreadPanel state={state} channel={channel} root={threadRoot} onClose={() => setThreadView(null)} isMobile={mobile} />
       ) : null
     ) : null
+
+  useEffect(() => {
+    if (!channelId && firstChannel) navigate(`/chat/${firstChannel.id}`, { replace: true })
+  }, [channelId, firstChannel, navigate])
 
   return (
     <div className="page chat-page" data-view={channel ? 'conversation' : 'list'}>
