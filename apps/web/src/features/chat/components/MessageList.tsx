@@ -1,6 +1,7 @@
 // Port of the chat reference MessageList (grouping, date separators, jump-to-present, enter animation)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useSearchParams } from 'react-router'
 import { Messages, Pin, Trash } from 'reicon-react'
 import { hidePinNotice } from '../../../mock/actions'
 import { ConfirmDeleteModal } from './ChannelModals'
@@ -9,6 +10,7 @@ import {
   buildMentionTokens,
   formatMessageDate,
   isSameDay,
+  jumpToMessage,
   messageMentionsCurrentUser,
 } from '../chatLib'
 import { MessageItem } from './MessageItem'
@@ -26,6 +28,8 @@ export function MessageList({
   onReply: (message: ChatMessage) => void
   onOpenThread: (message: ChatMessage) => void
 }) {
+  const [searchParams] = useSearchParams()
+  const jumpTargetId = searchParams.get('message_id')
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -56,6 +60,9 @@ export function MessageList({
   useEffect(() => {
     const el = containerRef.current
     if (el) el.scrollTop = el.scrollHeight
+    // the chat reference: ?message_id= (search result / pin jump) scrolls to and flashes the message
+    if (jumpTargetId) requestAnimationFrame(() => jumpToMessage(jumpTargetId))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

@@ -75,6 +75,7 @@ export function ChatPage() {
             onToggleMembers={toggleMembers}
             onOpenThread={(root) => setThreadView({ channelId: channel.id, kind: 'thread', rootId: root.id })}
             onNewThread={() => setThreadView({ channelId: channel.id, kind: 'new' })}
+            rightPanel={membersOpen && !threadPane && !mobile ? <MemberList state={state} /> : undefined}
           />
           {threadPane ? (
             mobile ? (
@@ -86,7 +87,6 @@ export function ChatPage() {
               threadPane
             )
           ) : null}
-          {membersOpen ? <MemberList state={state} /> : null}
           {mobileMembersOpen ? (
             <MemberList state={state} isMobile onClose={() => setMobileMembersOpen(false)} />
           ) : null}
