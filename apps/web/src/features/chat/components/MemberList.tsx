@@ -135,7 +135,7 @@ function MemberItem({ member, online }: { member: User; online: boolean }) {
         </div>
         {online ? <span className="fc-presence" /> : null}
       </div>
-      <span className="fc-member-name" style={{ color: member.color, opacity: online ? 1 : 0.65 }}>
+      <span className="fc-member-name" data-online={online ? 'true' : 'false'}>
         {member.name}
       </span>
     </div>
