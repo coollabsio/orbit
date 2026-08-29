@@ -1289,6 +1289,37 @@ textarea.input {
   border: 0;
 }
 
+/* ---------- avatar stack ---------- */
+.avatar-stack {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.avatar-stack .avatar {
+  box-shadow: 0 0 0 2px var(--base);
+}
+
+.avatar-stack .avatar + .avatar {
+  margin-left: -5px;
+}
+
+.avatar-stack-more {
+  background: var(--fill);
+  color: var(--text-secondary);
+}
+
+/* remove mark at the end of an active multi-select option */
+.popover-option-remove {
+  margin-left: auto;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.popover-option:hover .popover-option-remove {
+  color: var(--text-primary);
+}
+
 /* ---------- date picker (calendar + time) ---------- */
 .datepicker {
   display: flex;

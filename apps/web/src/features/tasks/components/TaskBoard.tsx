@@ -1,4 +1,4 @@
-import { Avatar } from '../../../components/ui/Avatar'
+import { AvatarStack } from '../../../components/ui/Avatar'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { STATUS_LABEL, STATUS_ORDER } from '../../../components/workspace/taskMeta'
@@ -41,7 +41,7 @@ export function TaskBoard({
             </header>
             <div className="tasks-board-cards">
               {columnTasks.map((task) => {
-                const assignee = users.find((user) => user.id === task.assigneeId)
+                const assignees = users.filter((user) => task.assigneeIds.includes(user.id))
                 return (
                   <article
                     key={task.id}
@@ -74,7 +74,7 @@ export function TaskBoard({
                       <span className="tasks-board-comment-count">
                         {task.comments.length > 0 ? `${task.comments.length} comment${task.comments.length === 1 ? '' : 's'}` : ''}
                       </span>
-                      <Avatar user={assignee} size={20} name="—" />
+                      <AvatarStack users={assignees} size={20} />
                     </div>
                   </article>
                 )

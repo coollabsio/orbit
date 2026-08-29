@@ -454,8 +454,16 @@
 
 .tasks-comment-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 4px;
   padding: 0 8px 8px;
+}
+
+/* the due-date popover holds a calendar: no height cap, nested time list may overflow */
+.tasks-date-dropdown .popover {
+  max-height: none;
+  overflow: visible;
 }
 
 /* responsive: one pane on mobile */

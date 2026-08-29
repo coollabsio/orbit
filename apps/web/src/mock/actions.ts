@@ -56,9 +56,23 @@ export function setTaskPriority(taskId: string, priority: TaskPriority) {
   touchTask(taskId, { priority }, `set priority to ${priority}`)
 }
 
-export function setTaskAssignee(taskId: string, assigneeId: string | null) {
-  const name = assigneeId ? getState().users.find((u) => u.id === assigneeId)?.name : null
-  touchTask(taskId, { assigneeId }, name ? `assigned ${name}` : 'removed the assignee')
+/** Adds or removes one assignee (tasks can have several). */
+export function toggleTaskAssignee(taskId: string, userId: string) {
+  const s = getState()
+  const task = s.tasks.find((t) => t.id === taskId)
+  if (!task) return
+  const name = s.users.find((u) => u.id === userId)?.name ?? 'someone'
+  const assigned = task.assigneeIds.includes(userId)
+  touchTask(
+    taskId,
+    { assigneeIds: assigned ? task.assigneeIds.filter((id) => id !== userId) : [...task.assigneeIds, userId] },
+    assigned ? `unassigned ${name}` : `assigned ${name}`,
+  )
+}
+
+export function setTaskDueAt(taskId: string, dueAt: string | null) {
+  const label = dueAt ? new Date(dueAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null
+  touchTask(taskId, { dueAt }, label ? `set the due date to ${label}` : 'removed the due date')
 }
 
 export function setTaskTitle(taskId: string, title: string) {
@@ -92,7 +106,7 @@ export function createTask(input: {
   projectId: string
   status?: TaskStatus
   priority?: TaskPriority
-  assigneeId?: string | null
+  assigneeIds?: string[]
 }): Task {
   const s = getState()
   const project = s.projects.find((p) => p.id === input.projectId) ?? s.projects[0]
@@ -104,7 +118,7 @@ export function createTask(input: {
     description: '',
     status: input.status ?? 'todo',
     priority: input.priority ?? 'none',
-    assigneeId: input.assigneeId ?? null,
+    assigneeIds: input.assigneeIds ?? [],
     creatorId: s.currentUserId,
     projectId: project.id,
     labels: [],

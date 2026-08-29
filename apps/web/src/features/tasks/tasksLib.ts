@@ -11,10 +11,10 @@ export interface TaskFilterState {
 
 export function filterTasks(tasks: Task[], f: TaskFilterState): Task[] {
   return tasks.filter((t) => {
-    if (f.tab === 'my' && t.assigneeId !== f.currentUserId) return false
+    if (f.tab === 'my' && !t.assigneeIds.includes(f.currentUserId)) return false
     if (f.projectId && t.projectId !== f.projectId) return false
     if (f.status && t.status !== f.status) return false
-    if (f.assigneeId && t.assigneeId !== f.assigneeId) return false
+    if (f.assigneeId && !t.assigneeIds.includes(f.assigneeId)) return false
     return true
   })
 }

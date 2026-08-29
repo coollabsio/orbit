@@ -54,7 +54,7 @@ export interface Task {
   description: string
   status: TaskStatus
   priority: TaskPriority
-  assigneeId: string | null
+  assigneeIds: string[]
   creatorId: string
   projectId: string
   labels: string[]

@@ -46,7 +46,7 @@ export function HomePage() {
   const myOpenTasks = state.tasks
     .filter(
       (t) =>
-        t.assigneeId === state.currentUserId &&
+        t.assigneeIds.includes(state.currentUserId) &&
         (t.status === 'todo' || t.status === 'in_progress'),
     )
     .sort((a, b) => {

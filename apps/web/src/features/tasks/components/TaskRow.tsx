@@ -1,4 +1,4 @@
-import { Avatar } from '../../../components/ui/Avatar'
+import { AvatarStack } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
@@ -9,7 +9,7 @@ import type { Task, User } from '../../../mock/types'
 
 interface TaskRowProps {
   task: Task
-  assignee: User | undefined
+  assignees: User[]
   selected: boolean
   dragging: boolean
   onOpen: (taskId: string) => void
@@ -19,7 +19,7 @@ interface TaskRowProps {
 }
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
-export function TaskRow({ task, assignee, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+export function TaskRow({ task, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
   return (
     <div
       className="list-row tasks-row"
@@ -86,7 +86,7 @@ export function TaskRow({ task, assignee, selected, dragging, onOpen, onToggleSe
           ))}
         </span>
       ) : null}
-      <Avatar user={assignee} size={18} name="—" />
+      <AvatarStack users={assignees} size={18} />
       <span className="tasks-row-date">{shortDate(task.createdAt)}</span>
     </div>
   )

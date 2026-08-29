@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { ArrowLeft, TaskSquare, Xmark } from 'reicon-react'
-import { Avatar } from '../../../components/ui/Avatar'
+import { ArrowLeft, Calendar, TaskSquare, Xmark } from 'reicon-react'
+import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
+import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
@@ -11,14 +12,15 @@ import {
   STATUS_LABEL,
   STATUS_ORDER,
 } from '../../../components/workspace/taskMeta'
-import { fullDate } from '../../../lib/format'
+import { fullDate, timeOfDay } from '../../../lib/format'
 import {
   addTaskComment,
-  setTaskAssignee,
   setTaskDescription,
+  setTaskDueAt,
   setTaskPriority,
   setTaskStatus,
   setTaskTitle,
+  toggleTaskAssignee,
 } from '../../../mock/actions'
 import type { Project, Task, User } from '../../../mock/types'
 import { ActivityFeed } from './ActivityFeed'
@@ -33,7 +35,7 @@ interface TaskDetailProps {
 /** Full-page task view: main column (title, description, activity, comment box) + properties column. */
 export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
   const [comment, setComment] = useState('')
-  const assignee = users.find((u) => u.id === task?.assigneeId)
+  const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
 
   const submitComment = () => {
     const body = comment.trim()
@@ -169,13 +171,14 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
                   </>
                 )}
               </Dropdown>
+              {/* multi-assignee: options toggle and stay open; active ones show an × at the end */}
               <Dropdown
                 trigger={() => (
                   <button className="button button-ghost tasks-side-prop">
-                    {assignee ? (
+                    {assignees.length > 0 ? (
                       <>
-                        <Avatar user={assignee} size={16} />
-                        {assignee.name}
+                        <AvatarStack users={assignees} size={16} />
+                        <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
                       </>
                     ) : (
                       <>
@@ -186,32 +189,25 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
                   </button>
                 )}
               >
-                {(close) => (
+                {() => (
                   <>
-                    <button
-                      className="popover-option"
-                      data-selected={!task.assigneeId || undefined}
-                      onClick={() => {
-                        setTaskAssignee(task.id, null)
-                        close()
-                      }}
-                    >
-                      Unassigned
-                    </button>
-                    {users.map((u) => (
-                      <button
-                        key={u.id}
-                        className="popover-option"
-                        data-selected={u.id === task.assigneeId || undefined}
-                        onClick={() => {
-                          setTaskAssignee(task.id, u.id)
-                          close()
-                        }}
-                      >
-                        <Avatar user={u} size={16} />
-                        {u.name}
-                      </button>
-                    ))}
+                    <div className="popover-heading">Assignees</div>
+                    {users.map((u) => {
+                      const active = task.assigneeIds.includes(u.id)
+                      return (
+                        <button
+                          key={u.id}
+                          className="popover-option"
+                          data-selected={active || undefined}
+                          aria-pressed={active}
+                          onClick={() => toggleTaskAssignee(task.id, u.id)}
+                        >
+                          <Avatar user={u} size={16} />
+                          {u.name}
+                          {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
+                        </button>
+                      )
+                    })}
                   </>
                 )}
               </Dropdown>
@@ -246,9 +242,27 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Due date</h4>
-              <span className={task.dueAt ? 'tasks-side-text' : 'text-faint text-xs'}>
-                {task.dueAt ? fullDate(task.dueAt) : 'No due date'}
-              </span>
+              <Dropdown
+                className="tasks-date-dropdown"
+                trigger={() => (
+                  <button className="button button-ghost tasks-side-prop">
+                    <Calendar size={15} />
+                    {task.dueAt ? `${fullDate(task.dueAt)} · ${timeOfDay(task.dueAt)}` : 'Set due date'}
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <DatePicker
+                    value={task.dueAt}
+                    onChange={(iso) => setTaskDueAt(task.id, iso)}
+                    onClear={() => {
+                      setTaskDueAt(task.id, null)
+                      close()
+                    }}
+                    onDone={close}
+                  />
+                )}
+              </Dropdown>
             </div>
           </aside>
         </div>
