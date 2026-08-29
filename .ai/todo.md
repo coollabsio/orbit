@@ -62,6 +62,12 @@ Goal: complete the full frontend with mock data, reference-style shell/layout, C
 - [x] chat header spans the full width; member list renders as ChatArea `rightPanel` under it (the chat reference structure)
 - [x] the chat reference polish pass: filled header icons (reicon `weight="Filled"`), 32px buttons at 8px gaps, soft borderless search field with 16px gutter, neutral member names
 
+## Chat + settings additions (2026-08-29)
+- [x] composer thread mode: + menu "Create Thread" enters thread mode when no panel handler is given (pill, "Start a thread #channel" placeholder, sends a thread-starter root)
+- [x] message context menu: "Add Reaction" toggles the quick-emoji row; item order Add Reaction / Reply / Thread / Edit / Pin / Copy Text / Delete
+- [x] thread follow/unfollow (panel toggle + sidebar menu), auto-follow on start/reply, followed-thread rows nested under channels with L connector, rename modal, delete thread
+- [x] settings: Server settings section — General (icon + name), Roles (list, search, create, drag reorder, edit rail, Display/Manage Members), Webhooks, Danger Zone (purge + delete); Members under Team
+
 ## Review notes
 - Browser-default `text-align: center` on `<button>` leaked into row labels — fixed in base.css reset.
 - Headless Firefox `--screenshot` can paint stale CSS variable values (tabs looked purple in dark mode); live computed styles confirmed correct yellow accent. Do not chase that artifact again.
