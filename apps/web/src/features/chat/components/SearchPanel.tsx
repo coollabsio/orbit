@@ -2,7 +2,8 @@
 // workspace-wide message matches grouped by channel / thread; a card click jumps to the message.
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Hashtag, Magnifier, Messages } from 'reicon-react'
+import { Hashtag, Magnifier } from 'reicon-react'
+import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import type { AppState, ChatMessage } from '../../../mock/types'
 import { authorUser, displayName, jumpToMessage, threadTitleOf } from '../chatLib'
 
@@ -164,7 +165,7 @@ export function SearchPanel({ state, query, onClose }: { state: AppState; query:
         {groups.map((group) => (
           <section key={group.key} className="fc-search-group">
             <div className="fc-search-group-title">
-              {group.kind === 'thread' ? <Messages size={16} /> : <Hashtag size={16} />}
+              {group.kind === 'thread' ? <ThreadIcon size={16} /> : <Hashtag size={16} />}
               <span className="truncate">{group.label}</span>
             </div>
             <div className="fc-search-cards">

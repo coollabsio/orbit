@@ -1,7 +1,8 @@
 // Port of the chat reference MessageItem (the chat reference frontend/src/components/chat/MessageItem.tsx)
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Edit, Messages, Pin, Reply, Trash } from 'reicon-react'
+import { Copy, Edit, EmojiHappy, Pin, Reply, Trash } from 'reicon-react'
+import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import {
   deleteChatMessage,
   editChatMessage,
@@ -177,7 +178,7 @@ export function MessageItem({
         <div className="fc-msg-row">
           <div className="fc-msg-gutter">
             <span className="fc-thread-starter-icon">
-              <Messages size={20} />
+              <ThreadIcon size={20} />
             </span>
             <span className="fc-thread-starter-elbow" />
           </div>
@@ -270,7 +271,7 @@ export function MessageItem({
             </button>
             {onOpenThread ? (
               <button title={hasThread ? 'Open Thread' : 'Create Thread'} onClick={openThread}>
-                <Messages />
+                <ThreadIcon size={16} />
               </button>
             ) : null}
             <div className="fc-toolbar-sep" />
@@ -357,7 +358,7 @@ function ThreadPreview({
       <button type="button" className="fc-thread-preview" onClick={onOpen}>
         {!starterCard ? (
           <span className="fc-thread-preview-icon">
-            <Messages size={14} />
+            <ThreadIcon size={14} />
           </span>
         ) : null}
         <span className="fc-thread-preview-body">
@@ -521,55 +522,75 @@ function MessageContextMenu({
     }
   }, [onClose])
 
+  const [showEmojis, setShowEmojis] = useState(false)
+
   // portal: message rows keep a transform from their enter animation, which would make
   // position:fixed resolve against the row instead of the viewport
   return createPortal(
-    <div ref={menuRef} className="fc-menu fc-context-menu" style={{ left: adjusted.x, top: adjusted.y }}>
-      <div style={{ display: 'flex', gap: 2, padding: '2px 4px 6px' }}>
-        {TOOLBAR_EMOJIS.map((emoji) => (
-          <button
-            key={emoji}
-            style={{ borderRadius: 6, padding: 6, fontSize: 18, lineHeight: '20px' }}
-            onClick={() => onReaction(emoji)}
-          >
-            {emoji}
+    <div ref={menuRef} className="fc-ctx" style={{ left: adjusted.x, top: adjusted.y }}>
+      {showEmojis ? (
+        <div className="fc-ctx-emojis">
+          {TOOLBAR_EMOJIS.map((emoji) => (
+            <button key={emoji} type="button" onClick={() => onReaction(emoji)}>
+              {emoji}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="fc-ctx-items">
+        <button type="button" className="fc-ctx-item" onClick={() => setShowEmojis((prev) => !prev)}>
+          <span className="fc-ctx-icon">
+            <EmojiHappy size={16} />
+          </span>
+          <span>Add Reaction</span>
+        </button>
+        <button type="button" className="fc-ctx-item" onClick={onReply}>
+          <span className="fc-ctx-icon">
+            <Reply size={16} />
+          </span>
+          <span>Reply</span>
+        </button>
+        {onThread ? (
+          <button type="button" className="fc-ctx-item" onClick={onThread}>
+            <span className="fc-ctx-icon">
+              <ThreadIcon size={16} />
+            </span>
+            <span>{threadLabel}</span>
           </button>
-        ))}
+        ) : null}
+        <div className="fc-ctx-separator" />
+        {isAuthor ? (
+          <button type="button" className="fc-ctx-item" onClick={onEdit}>
+            <span className="fc-ctx-icon">
+              <Edit size={16} />
+            </span>
+            <span>Edit Message</span>
+          </button>
+        ) : null}
+        <button type="button" className="fc-ctx-item" onClick={onPin}>
+          <span className="fc-ctx-icon">
+            <Pin size={16} />
+          </span>
+          <span>{message.pinned ? 'Unpin Message' : 'Pin Message'}</span>
+        </button>
+        <button type="button" className="fc-ctx-item" onClick={onCopyText}>
+          <span className="fc-ctx-icon">
+            <Copy size={16} />
+          </span>
+          <span>Copy Text</span>
+        </button>
+        {canDelete ? (
+          <>
+            <div className="fc-ctx-separator" />
+            <button type="button" className="fc-ctx-item" data-danger="true" onClick={onDelete}>
+              <span className="fc-ctx-icon">
+                <Trash size={16} />
+              </span>
+              <span>Delete Message</span>
+            </button>
+          </>
+        ) : null}
       </div>
-      <div className="fc-menu-separator" />
-      <button className="fc-menu-item" onClick={onReply}>
-        <Reply size={16} />
-        Reply
-      </button>
-      {onThread ? (
-        <button className="fc-menu-item" onClick={onThread}>
-          <Messages size={16} />
-          {threadLabel}
-        </button>
-      ) : null}
-      <button className="fc-menu-item" onClick={onCopyText}>
-        <Copy size={16} />
-        Copy Text
-      </button>
-      {isAuthor ? (
-        <button className="fc-menu-item" onClick={onEdit}>
-          <Edit size={16} />
-          Edit Message
-        </button>
-      ) : null}
-      <button className="fc-menu-item" onClick={onPin}>
-        <Pin size={16} />
-        {message.pinned ? 'Unpin Message' : 'Pin Message'}
-      </button>
-      {canDelete ? (
-        <>
-          <div className="fc-menu-separator" />
-          <button className="fc-menu-item" data-danger="true" onClick={onDelete}>
-            <Trash size={16} />
-            Delete Message
-          </button>
-        </>
-      ) : null}
     </div>,
     document.body,
   )

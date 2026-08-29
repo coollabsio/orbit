@@ -3789,3 +3789,104 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ===== message context menu: fixed z-50 min-w-48 rounded-xl border bg-overlay shadow-xl ===== */
+.fc-ctx {
+  position: fixed;
+  z-index: 100;
+  min-width: 192px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--elevated);
+  color: var(--text-primary);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  animation: ctx-fade-in 100ms ease-out;
+}
+
+@keyframes ctx-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* mx-2 mt-2 mb-1 flex gap-1 rounded-lg bg-secondary p-2 */
+.fc-ctx-emojis {
+  margin: 8px 8px 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  background: var(--fill);
+  padding: 8px;
+}
+
+.fc-ctx-emojis button {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 18px;
+  transition: background-color 0.15s;
+}
+
+.fc-ctx-emojis button:hover {
+  background: var(--canvas);
+}
+
+.fc-ctx-items {
+  padding: 6px 4px;
+}
+
+/* gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium */
+.fc-ctx-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: background-color 0.15s;
+}
+
+.fc-ctx-item:hover {
+  background: var(--fill);
+}
+
+.fc-ctx-item[data-danger='true'] {
+  color: var(--danger);
+}
+
+.fc-ctx-item[data-danger='true']:hover {
+  background: var(--danger-bg);
+}
+
+.fc-ctx-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.fc-ctx-item[data-danger='true'] .fc-ctx-icon {
+  color: inherit;
+}
+
+/* mx-2 my-1.5 h-px bg-border */
+.fc-ctx-separator {
+  margin: 6px 8px;
+  height: 1px;
+  background: var(--line);
+}

@@ -1,7 +1,8 @@
 // Port of the chat reference ThreadsPopover: header dropdown listing the channel's threads,
 // grouped into Active (activity within 24h) and Inactive, with search and Create.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Magnifier, Messages } from 'reicon-react'
+import { Magnifier } from 'reicon-react'
+import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { relativeTime } from '../../../lib/format'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
 import { authorUser, displayName, extractPreview, threadTitleOf } from '../chatLib'
@@ -107,7 +108,7 @@ export function ThreadsPopover({
       <div className="fc-threads-list">
         {filtered.length === 0 ? (
           <div className="fc-threads-empty">
-            <Messages size={28} />
+            <ThreadIcon size={28} />
             <h3>No threads</h3>
             <p>Threads with replies in this channel will appear here.</p>
           </div>
