@@ -1,9 +1,11 @@
 // Port of the chat reference ThreadPanel: resizable side pane (468px default, 320-720) with an
 // inline-renamable title, the root message, a separator, grouped replies, and a composer.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Edit, Messages, Xmark } from 'reicon-react'
+import { Edit, Xmark } from 'reicon-react'
+import { PlugConnectIcon } from '../../../components/ui/icons/PlugConnectIcon'
+import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { useSearchParams } from 'react-router'
-import { renameThread } from '../../../mock/actions'
+import { followThread, renameThread } from '../../../mock/actions'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
 import { buildMentionTokens, jumpToMessage, messageMentionsCurrentUser, threadTitleOf } from '../chatLib'
 import { MessageInput } from './MessageInput'
@@ -91,7 +93,7 @@ export function ThreadPanel({
       {!isMobile ? <div className="fc-thread-resize" onPointerDown={handleResizeStart} title="Resize thread panel" /> : null}
       <div className="fc-thread-header">
         <div className="fc-thread-header-title">
-          <Messages size={16} />
+          <ThreadIcon size={16} />
           {editingTitle ? (
             <input
               autoFocus
@@ -115,6 +117,16 @@ export function ThreadPanel({
           )}
         </div>
         <div className="fc-thread-header-actions">
+          <button
+            type="button"
+            className="fc-thread-icon-button"
+            data-active={root.threadFollowed ? 'true' : undefined}
+            title={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
+            aria-label={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
+            onClick={() => followThread(root.id, !root.threadFollowed)}
+          >
+            <PlugConnectIcon size={14} />
+          </button>
           <button type="button" className="fc-thread-icon-button" title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
             <Edit size={16} />
           </button>
@@ -160,7 +172,7 @@ export function ThreadPanel({
         <div ref={bottomRef} />
       </div>
 
-      <MessageInput state={state} channel={channel} threadRootId={root.id} placeholder="Send a message" autoFocus />
+      <MessageInput state={state} channel={channel} threadRootId={root.id} placeholder="Send a message" showThreadAction={false} autoFocus />
     </div>
   )
 }

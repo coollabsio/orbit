@@ -138,7 +138,9 @@ chatMessages.push(
     ].join('\n'),
     ago(90, 'm'),
   ),
-  msg('c_engineering', 'u_shadow', 'Should we also retry on 5xx from the GitHub API? Opening a thread for this.', ago(80, 'm')),
+  msg('c_engineering', 'u_shadow', 'Should we also retry on 5xx from the GitHub API? Opening a thread for this.', ago(80, 'm'), {
+    threadFollowed: true,
+  }),
 )
 const threadRoot = chatMessages[chatMessages.length - 1]
 chatMessages.push(

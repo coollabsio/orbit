@@ -4,9 +4,11 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router'
 import { Add, ChevronDown, Edit, FolderAdd, Hashtag, Setting2, Trash } from 'reicon-react'
-import { markChannelRead, reorderChannels, reorderChatCategories } from '../../../mock/actions'
-import type { AppState, Channel, ChatCategory } from '../../../mock/types'
-import { ChannelModals, type ChannelModalState } from './ChannelModals'
+import { deleteChatMessage, followThread, markChannelRead, renameThread, reorderChannels, reorderChatCategories } from '../../../mock/actions'
+import { PlugConnectIcon } from '../../../components/ui/icons/PlugConnectIcon'
+import { threadTitleOf } from '../chatLib'
+import type { AppState, Channel, ChatCategory, ChatMessage } from '../../../mock/types'
+import { ChannelModals, ConfirmDeleteModal, type ChannelModalState } from './ChannelModals'
 
 const WIDTH_KEY = 'orbit:channel_sidebar_width'
 const COLLAPSE_KEY = 'orbit:category_collapsed'
@@ -35,7 +37,10 @@ function storedCollapsed(): Set<string> {
 interface ContextMenuState {
   x: number
   y: number
-  target: { kind: 'channel'; channel: Channel } | { kind: 'category'; category: ChatCategory }
+  target:
+    | { kind: 'channel'; channel: Channel }
+    | { kind: 'category'; category: ChatCategory }
+    | { kind: 'thread'; thread: ChatMessage }
 }
 
 /* ---------- the chat reference drag helpers ---------- */
@@ -82,13 +87,27 @@ function DropLine({ position }: { position: DropPosition | null }) {
   return <span aria-hidden="true" className="fc-drop-line" data-position={position} />
 }
 
-export function ChannelSidebar({ state, activeChannelId }: { state: AppState; activeChannelId: string | null }) {
+export function ChannelSidebar({
+  state,
+  activeChannelId,
+  activeThreadId = null,
+  onOpenThread,
+}: {
+  state: AppState
+  activeChannelId: string | null
+  /** Open thread root id: the thread row is active and the channel row is not. */
+  activeThreadId?: string | null
+  onOpenThread?: (channelId: string, rootId: string) => void
+}) {
   const navigate = useNavigate()
   const [width, setWidth] = useState(storedWidth)
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed)
   const [serverMenuOpen, setServerMenuOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [modal, setModal] = useState<ChannelModalState>(null)
+  const [deleteThread, setDeleteThread] = useState<ChatMessage | null>(null)
+  const [renamingThread, setRenamingThread] = useState<ChatMessage | null>(null)
+  const [threadNameDraft, setThreadNameDraft] = useState('')
   const serverMenuRef = useRef<HTMLDivElement>(null)
   const contextRef = useRef<HTMLDivElement>(null)
 
@@ -156,6 +175,28 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
   function selectChannel(channelId: string) {
     markChannelRead(channelId)
     navigate(`/chat/${channelId}`)
+  }
+
+  /** Followed threads only: non-reply roots with replies or a thread start, oldest first. */
+  function threadsForChannel(channelId: string): ChatMessage[] {
+    return state.chatMessages
+      .filter(
+        (m) =>
+          m.channelId === channelId &&
+          !m.threadRootId &&
+          m.threadFollowed &&
+          (m.startsThread || state.chatMessages.some((r) => r.threadRootId === m.id)),
+      )
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }
+
+  function commitThreadRename() {
+    if (!renamingThread) return
+    const name = threadNameDraft.trim()
+    if (!name) return
+    renameThread(renamingThread.id, name)
+    setRenamingThread(null)
+    setThreadNameDraft('')
   }
 
   /* ---- channel drag (the chat reference: channels cannot move between categories) ---- */
@@ -333,10 +374,11 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
                 {!isCollapsed ? (
                   <div className="fc-category-channels">
                     {channels.map((ch) => {
-                      const isActive = ch.id === activeChannelId
+                      const isActive = ch.id === activeChannelId && !activeThreadId
+                      const threads = threadsForChannel(ch.id)
                       return (
+                        <div key={ch.id} style={{ minWidth: 0 }}>
                         <button
-                          key={ch.id}
                           type="button"
                           className="fc-channel-row"
                           data-channel-drop-id={ch.id}
@@ -365,6 +407,31 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
                             <span className="fc-unread-badge">{ch.unreadCount}</span>
                           ) : null}
                         </button>
+                        {threads.length > 0 ? (
+                          <div className="fc-thread-rows">
+                            {threads.map((thread, index) => {
+                              const isThreadActive = activeChannelId === ch.id && activeThreadId === thread.id
+                              return (
+                                <button
+                                  key={thread.id}
+                                  type="button"
+                                  className="fc-thread-row"
+                                  data-active={isThreadActive ? 'true' : undefined}
+                                  onClick={() => onOpenThread?.(ch.id, thread.id)}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault()
+                                    setContextMenu({ x: e.clientX, y: e.clientY, target: { kind: 'thread', thread } })
+                                  }}
+                                >
+                                  <span aria-hidden className="fc-thread-row-connector" data-last={index === threads.length - 1 ? 'true' : undefined} />
+                                  <span aria-hidden className="fc-thread-row-bg" />
+                                  <span className="fc-thread-row-label">{threadTitleOf(thread)}</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                        </div>
                       )
                     })}
                   </div>
@@ -379,7 +446,44 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
       {contextMenu
         ? createPortal(
         <div ref={contextRef} className="fc-menu fc-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          {contextMenu.target.kind === 'channel' ? (
+          {contextMenu.target.kind === 'thread' ? (
+            <>
+              <button
+                className="fc-menu-item"
+                onClick={() => {
+                  const thread = (contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread
+                  followThread(thread.id, !thread.threadFollowed)
+                  setContextMenu(null)
+                }}
+              >
+                <PlugConnectIcon size={16} />
+                {(contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread.threadFollowed ? 'Unfollow Thread' : 'Follow Thread'}
+              </button>
+              <button
+                className="fc-menu-item"
+                onClick={() => {
+                  const thread = (contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread
+                  setRenamingThread(thread)
+                  setThreadNameDraft(threadTitleOf(thread))
+                  setContextMenu(null)
+                }}
+              >
+                <Edit size={16} />
+                Rename Thread
+              </button>
+              <button
+                className="fc-menu-item"
+                data-danger="true"
+                onClick={() => {
+                  setDeleteThread((contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread)
+                  setContextMenu(null)
+                }}
+              >
+                <Trash size={16} />
+                Delete Thread
+              </button>
+            </>
+          ) : contextMenu.target.kind === 'channel' ? (
             <>
               <button
                 className="fc-menu-item"
@@ -449,6 +553,45 @@ export function ChannelSidebar({ state, activeChannelId }: { state: AppState; ac
         : null}
 
       <ChannelModals modal={modal} onClose={() => setModal(null)} activeChannelId={activeChannelId} />
+      {deleteThread ? (
+        <ConfirmDeleteModal
+          title="Delete thread?"
+          description={`This will permanently delete the thread "${threadTitleOf(deleteThread)}".`}
+          onClose={() => setDeleteThread(null)}
+          onConfirm={() => {
+            deleteChatMessage(deleteThread.id)
+            setDeleteThread(null)
+          }}
+        />
+      ) : null}
+      {renamingThread ? (
+        <div className="fc-rename-overlay">
+          <div className="fc-rename-card">
+            <h2>Rename thread</h2>
+            <label className="fc-rename-label">
+              <span>Thread name</span>
+              <input
+                className="fc-rename-input"
+                value={threadNameDraft}
+                autoFocus
+                onChange={(e) => setThreadNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitThreadRename()
+                  if (e.key === 'Escape') setRenamingThread(null)
+                }}
+              />
+            </label>
+            <div className="fc-rename-actions">
+              <button type="button" className="button" onClick={() => setRenamingThread(null)}>
+                Cancel
+              </button>
+              <button type="button" className="button button-primary" disabled={!threadNameDraft.trim()} onClick={commitThreadRename}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

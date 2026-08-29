@@ -64,7 +64,15 @@ export function ChatPage() {
 
   return (
     <div className="page chat-page" data-view={channel ? 'conversation' : 'list'}>
-      <ChannelSidebar state={state} activeChannelId={channel?.id ?? null} />
+      <ChannelSidebar
+        state={state}
+        activeChannelId={channel?.id ?? null}
+        activeThreadId={activeThread?.kind === 'thread' ? activeThread.rootId : null}
+        onOpenThread={(channelId, rootId) => {
+          setThreadView({ channelId, kind: 'thread', rootId })
+          if (channelId !== channel?.id) navigate(`/chat/${channelId}`)
+        }}
+      />
       {channel ? (
         <>
           <ChatArea

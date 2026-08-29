@@ -181,6 +181,8 @@ export interface ChatMessage {
   threadRootId: string | null
   startsThread: boolean
   threadTitle: string | null
+  /** The current user follows this thread (root messages only). */
+  threadFollowed?: boolean
 }
 
 export interface Notification {

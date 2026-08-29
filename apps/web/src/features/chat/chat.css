@@ -3638,3 +3638,154 @@
 .fc-thread-pill:hover {
   background: var(--accent-soft-hover);
 }
+
+/* ===== thread follow toggle (active: bg-primary-subtle text-primary-subtle-fg) ===== */
+.fc-thread-icon-button[data-active='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.fc-thread-icon-button[data-active='true']:hover {
+  background: var(--accent-soft-hover);
+}
+
+/* ===== followed thread rows under a channel: ml-3.5 py-0.5 ===== */
+.fc-thread-rows {
+  margin-left: 14px;
+  padding: 2px 0;
+}
+
+/* py-1 pl-6 pr-2 text-xs/5 font-semibold */
+.fc-thread-row {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  border-radius: 6px;
+  padding: 4px 8px 4px 24px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: color 0.15s;
+}
+
+.fc-thread-row:hover,
+.fc-thread-row[data-active='true'] {
+  color: var(--text-primary);
+}
+
+/* L connector: w-2.5 rounded-bl-md border-b-2 border-l-2 */
+.fc-thread-row-connector {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 10;
+  width: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-bottom-left-radius: 6px;
+}
+
+.fc-thread-row-connector[data-last='true'] {
+  bottom: auto;
+  height: 12px;
+}
+
+/* hover / active layer: absolute bottom-0 left-3.5 right-0 top-0 rounded-md */
+.fc-thread-row-bg {
+  pointer-events: none;
+  position: absolute;
+  inset: 0 0 0 14px;
+  border-radius: 6px;
+  transition: background-color 0.15s;
+}
+
+.fc-thread-row:hover .fc-thread-row-bg {
+  background: color-mix(in srgb, var(--nav-active-bg) 45%, transparent);
+}
+
+.fc-thread-row[data-active='true'] .fc-thread-row-bg {
+  background: var(--nav-active-bg);
+}
+
+.fc-thread-row-label {
+  position: relative;
+  z-index: 10;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== rename thread modal ===== */
+.fc-rename-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 16px;
+}
+
+/* w-full max-w-sm rounded-xl border bg-overlay p-5 shadow-2xl */
+.fc-rename-card {
+  width: 100%;
+  max-width: 384px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--elevated);
+  padding: 20px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+.fc-rename-card h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fc-rename-label {
+  margin-top: 16px;
+  display: block;
+}
+
+.fc-rename-label span {
+  margin-bottom: 6px;
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.fc-rename-input {
+  height: 40px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--recessed);
+  padding: 0 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.fc-rename-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+.fc-rename-actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

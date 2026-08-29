@@ -265,11 +265,23 @@ export function sendChatMessage(
       startsThread: options.startsThread ?? false,
       threadTitle: options.threadTitle ?? null,
       attachments: options.attachments?.length ? options.attachments : undefined,
+      threadFollowed: options.startsThread ? true : undefined,
     }
-    return { ...s, chatMessages: [...s.chatMessages, message] }
+    // auto-follow: replying into a thread follows its root
+    const chatMessages = options.threadRootId
+      ? s.chatMessages.map((m) => (m.id === options.threadRootId ? { ...m, threadFollowed: true } : m))
+      : s.chatMessages
+    return { ...s, chatMessages: [...chatMessages, message] }
   })
   simulateTypingReply(channelId)
   return id
+}
+
+export function followThread(rootId: string, follow: boolean) {
+  updateState((s) => ({
+    ...s,
+    chatMessages: s.chatMessages.map((m) => (m.id === rootId ? { ...m, threadFollowed: follow } : m)),
+  }))
 }
 
 /** the chat reference NewThreadPanel: a thread-starter root (title as content) plus the first reply. */
