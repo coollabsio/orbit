@@ -3617,3 +3617,24 @@
     border-left: none;
   }
 }
+
+/* ===== composer thread mode pill: h-6 rounded-md bg-primary-subtle px-2 text-xs font-semibold ===== */
+.fc-thread-pill {
+  margin-top: 4px;
+  display: inline-flex;
+  height: 24px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  transition: background-color 0.15s;
+}
+
+.fc-thread-pill:hover {
+  background: var(--accent-soft-hover);
+}

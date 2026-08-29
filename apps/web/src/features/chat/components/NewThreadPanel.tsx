@@ -1,7 +1,8 @@
 // Port of the chat reference NewThreadPanel: title input above a composer; sending creates the
 // thread-starter root plus the first reply, then opens the thread.
 import { useRef, useState } from 'react'
-import { Messages, Xmark } from 'reicon-react'
+import { Xmark } from 'reicon-react'
+import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { createThread } from '../../../mock/actions'
 import type { AppState, Channel } from '../../../mock/types'
 import { MessageInput } from './MessageInput'
@@ -34,7 +35,7 @@ export function NewThreadPanel({
     <div className="fc-thread-panel fc-new-thread">
       <div className="fc-thread-header">
         <div className="fc-thread-header-title">
-          <Messages size={20} />
+          <ThreadIcon size={20} />
           <h2>New Thread</h2>
         </div>
         <button type="button" className="fc-thread-icon-button" title="Close new thread" aria-label="Close new thread" onClick={onClose}>
@@ -44,7 +45,7 @@ export function NewThreadPanel({
       <div className="spacer" />
       <div className="fc-new-thread-form">
         <div className="fc-new-thread-icon">
-          <Messages size={28} />
+          <ThreadIcon size={28} />
         </div>
         <label className="fc-new-thread-label">
           <span>Thread Name</span>
@@ -62,6 +63,7 @@ export function NewThreadPanel({
         state={state}
         channel={channel}
         placeholder="Enter a message to start the conversation!"
+        showThreadAction={false}
         onSend={handleSend}
       />
     </div>

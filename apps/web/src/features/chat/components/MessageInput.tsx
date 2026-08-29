@@ -1,7 +1,8 @@
 // Port of the chat reference MessageInput: autosize textarea, @mention autocomplete with keyboard
 // navigation, grouped emoji picker with search, + actions menu, reply bar.
 import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from 'react'
-import { Add, EmojiHappy, Magnifier, Messages, Paperclip2, Reply, Xmark } from 'reicon-react'
+import { Add, EmojiHappy, Magnifier, Paperclip2, Reply, Xmark } from 'reicon-react'
+import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { sendChatMessage } from '../../../mock/actions'
 import { nextId } from '../../../mock/store'
 import type { AppState, Attachment, Channel, ChatMessage } from '../../../mock/types'
@@ -59,6 +60,8 @@ export function MessageInput({
   threadRootId = null,
   placeholder,
   onSend,
+  showThreadAction = true,
+  threadActionLabel = 'Create Thread',
   onCreateThread,
   autoFocus,
 }: {
@@ -73,7 +76,10 @@ export function MessageInput({
   placeholder?: string
   /** Override sending (the chat reference NewThreadPanel). Return false to keep the draft. */
   onSend?: (content: string) => boolean | void
-  /** Shows "Create Thread" in the + menu (the chat reference composer action). */
+  /** Show the thread action in the + menu (off inside thread panels). */
+  showThreadAction?: boolean
+  threadActionLabel?: string
+  /** When given, the + menu action opens the new-thread panel; otherwise it enters thread mode (pill). */
   onCreateThread?: () => void
   autoFocus?: boolean
 }) {
@@ -83,6 +89,8 @@ export function MessageInput({
   const [emojiQuery, setEmojiQuery] = useState('')
   const [emojis, setEmojis] = useState<EmojiEntry[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [threadMode, setThreadMode] = useState(false)
+  const threadModeRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
@@ -116,6 +124,12 @@ export function MessageInput({
     if (!replyTarget && !autoFocus) return
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [replyTarget, autoFocus])
+
+  function setThreadModeImmediate(enabled: boolean) {
+    threadModeRef.current = enabled
+    setThreadMode(enabled)
+    if (enabled) requestAnimationFrame(() => inputRef.current?.focus())
+  }
 
   /** Mock upload: files become attachments immediately (object URLs stand in for uploaded files). */
   function addFiles(files: FileList | File[] | null) {
@@ -199,13 +213,19 @@ export function MessageInput({
   function handleSend() {
     const trimmed = text.trim()
     if (!trimmed && attachments.length === 0) return
+    const startsThread = threadModeRef.current
     if (onSend) {
       if (onSend(trimmed) === false) return
     } else {
-      sendChatMessage(channel.id, trimmed, replyTarget?.id ?? null, { threadRootId, attachments })
+      sendChatMessage(channel.id, trimmed, startsThread ? null : (replyTarget?.id ?? null), {
+        threadRootId,
+        attachments,
+        startsThread,
+      })
     }
     setText('')
     setAttachments([])
+    setThreadModeImmediate(false)
     onCancelReply?.()
     mention.close()
     setTimeout(() => {
@@ -287,21 +307,30 @@ export function MessageInput({
                 <Paperclip2 size={16} />
                 Upload Files
               </button>
-              {onCreateThread ? (
+              {showThreadAction ? (
                 <button
                   type="button"
                   onClick={() => {
+                    if (onCreateThread) onCreateThread()
+                    else setThreadModeImmediate(true)
                     setActionsOpen(false)
-                    onCreateThread()
+                    inputRef.current?.focus()
                   }}
                 >
-                  <Messages size={16} />
-                  Create Thread
+                  <ThreadIcon size={16} />
+                  {threadActionLabel}
                 </button>
               ) : null}
             </div>
           ) : null}
         </div>
+
+        {threadMode ? (
+          <button type="button" className="fc-thread-pill" title="Cancel thread mode" onClick={() => setThreadModeImmediate(false)}>
+            <ThreadIcon size={12} />
+            Thread
+          </button>
+        ) : null}
 
         <textarea
           ref={inputRef}
@@ -309,7 +338,7 @@ export function MessageInput({
           value={text}
           rows={1}
           style={{ height: 24 }}
-          placeholder={placeholder ?? `Message #${channel.name}`}
+          placeholder={placeholder ?? `${threadMode ? 'Start a thread' : 'Message'} #${channel.name}`}
           onChange={(e) => handleChange(e.target.value, e.target.selectionStart)}
           onClick={(e) => mention.update(text, e.currentTarget.selectionStart)}
           onSelect={(e) => mention.update(text, e.currentTarget.selectionStart)}
