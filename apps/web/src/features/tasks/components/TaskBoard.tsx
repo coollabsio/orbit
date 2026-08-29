@@ -50,7 +50,7 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
   }
 
   return (
-    <div className="tasks-board" style={{ gridTemplateColumns: `repeat(${groups.length}, 250px)` }}>
+    <div className="tasks-board" style={{ gridTemplateColumns: `repeat(${groups.length}, 320px)` }}>
       {groups.map((group) => {
         const columnTasks = sortTasks(
           tasks.filter((task) => group.statusIds.includes(task.statusId)),
