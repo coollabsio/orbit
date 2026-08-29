@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, CloseCircle, TaskSquare } from 'reicon-react'
+import { ArrowLeft, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
@@ -30,6 +30,7 @@ interface TaskDetailProps {
   onBack: () => void
 }
 
+/** Full-page task view: main column (title, description, activity, comment box) + properties column. */
 export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
   const [comment, setComment] = useState('')
   const assignee = users.find((u) => u.id === task?.assigneeId)
@@ -44,13 +45,13 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
   return (
     <section className="pane tasks-detail-pane">
       <div className="pane-header">
-        <button className="icon-button tasks-back" onClick={onBack} aria-label="Back to tasks">
+        <button className="icon-button" onClick={onBack} aria-label="Back to tasks">
           <ArrowLeft size={16} />
         </button>
         <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
         <div className="spacer" />
-        <button className="icon-button tasks-close" onClick={onBack} aria-label="Close detail">
-          <CloseCircle size={16} />
+        <button className="icon-button" onClick={onBack} aria-label="Close task">
+          <Xmark size={16} />
         </button>
       </div>
       {!task ? (
@@ -62,8 +63,8 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
           />
         </div>
       ) : (
-        <>
-          <div className="pane-body" style={{ padding: '16px 16px 8px' }}>
+        <div className="pane-body tasks-detail-body">
+          <div className="tasks-detail-main">
             <input
               key={task.id}
               className="tasks-detail-title"
@@ -79,154 +80,11 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
               }}
             />
 
-            <div className="tasks-props">
-              <span className="tasks-prop-label">Status</span>
-              <div className="tasks-prop-value">
-                <Dropdown
-                  trigger={() => (
-                    <button className="button button-ghost">
-                      <TaskStatusIcon status={task.status} />
-                      {STATUS_LABEL[task.status]}
-                    </button>
-                  )}
-                >
-                  {(close) => (
-                    <>
-                      {STATUS_ORDER.map((status) => (
-                        <button
-                          key={status}
-                          className="popover-option"
-                          data-selected={status === task.status || undefined}
-                          onClick={() => {
-                            setTaskStatus(task.id, status)
-                            close()
-                          }}
-                        >
-                          <TaskStatusIcon status={status} />
-                          {STATUS_LABEL[status]}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </Dropdown>
-              </div>
-
-              <span className="tasks-prop-label">Priority</span>
-              <div className="tasks-prop-value">
-                <Dropdown
-                  trigger={() => (
-                    <button className="button button-ghost">
-                      <PriorityIcon priority={task.priority} />
-                      {PRIORITY_LABEL[task.priority]}
-                    </button>
-                  )}
-                >
-                  {(close) => (
-                    <>
-                      {PRIORITY_ORDER.map((priority) => (
-                        <button
-                          key={priority}
-                          className="popover-option"
-                          data-selected={priority === task.priority || undefined}
-                          onClick={() => {
-                            setTaskPriority(task.id, priority)
-                            close()
-                          }}
-                        >
-                          <PriorityIcon priority={priority} />
-                          {PRIORITY_LABEL[priority]}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </Dropdown>
-              </div>
-
-              <span className="tasks-prop-label">Assignee</span>
-              <div className="tasks-prop-value">
-                <Dropdown
-                  trigger={() => (
-                    <button className="button button-ghost">
-                      {assignee ? (
-                        <>
-                          <Avatar user={assignee} size={16} />
-                          {assignee.name}
-                        </>
-                      ) : (
-                        'Unassigned'
-                      )}
-                    </button>
-                  )}
-                >
-                  {(close) => (
-                    <>
-                      <button
-                        className="popover-option"
-                        data-selected={!task.assigneeId || undefined}
-                        onClick={() => {
-                          setTaskAssignee(task.id, null)
-                          close()
-                        }}
-                      >
-                        Unassigned
-                      </button>
-                      {users.map((u) => (
-                        <button
-                          key={u.id}
-                          className="popover-option"
-                          data-selected={u.id === task.assigneeId || undefined}
-                          onClick={() => {
-                            setTaskAssignee(task.id, u.id)
-                            close()
-                          }}
-                        >
-                          <Avatar user={u} size={16} />
-                          {u.name}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </Dropdown>
-              </div>
-
-              <span className="tasks-prop-label">Project</span>
-              <div className="tasks-prop-value">
-                {project ? (
-                  <span className="pill">
-                    <span className="pill-dot" style={{ background: project.color }} />
-                    {project.name}
-                  </span>
-                ) : (
-                  <span className="text-faint">—</span>
-                )}
-              </div>
-
-              <span className="tasks-prop-label">Due date</span>
-              <div className="tasks-prop-value">
-                <span className={task.dueAt ? undefined : 'text-faint'} style={{ fontSize: 13 }}>
-                  {task.dueAt ? fullDate(task.dueAt) : '—'}
-                </span>
-              </div>
-
-              <span className="tasks-prop-label">Labels</span>
-              <div className="tasks-prop-value">
-                {task.labels.length > 0 ? (
-                  task.labels.map((label) => (
-                    <span key={label} className="pill">
-                      {label}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-faint">—</span>
-                )}
-              </div>
-            </div>
-
             <textarea
               key={`desc-${task.id}`}
               className="tasks-desc"
               defaultValue={task.description}
-              placeholder="Add a description…"
+              placeholder="Add description…"
               aria-label="Description"
               onBlur={(e) => {
                 if (e.target.value !== task.description) setTaskDescription(task.id, e.target.value)
@@ -234,23 +92,166 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
             />
 
             <ActivityFeed task={task} users={users} />
+
+            <div className="tasks-comment-box">
+              <textarea
+                className="tasks-comment-input"
+                placeholder="Leave a comment…"
+                aria-label="Comment"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitComment()
+                }}
+              />
+              <div className="tasks-comment-actions">
+                <button className="button button-primary" onClick={submitComment} disabled={!comment.trim()}>
+                  Comment
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="tasks-composer">
-            <input
-              className="input"
-              placeholder="Leave a comment…"
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitComment()
-              }}
-            />
-            <button className="button" onClick={submitComment} disabled={!comment.trim()}>
-              Comment
-            </button>
-          </div>
-        </>
+          <aside className="tasks-detail-side">
+            <div className="tasks-side-group">
+              <h4 className="tasks-side-heading">Properties</h4>
+              <Dropdown
+                trigger={() => (
+                  <button className="button button-ghost tasks-side-prop">
+                    <TaskStatusIcon status={task.status} />
+                    {STATUS_LABEL[task.status]}
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    {STATUS_ORDER.map((status) => (
+                      <button
+                        key={status}
+                        className="popover-option"
+                        data-selected={status === task.status || undefined}
+                        onClick={() => {
+                          setTaskStatus(task.id, status)
+                          close()
+                        }}
+                      >
+                        <TaskStatusIcon status={status} />
+                        {STATUS_LABEL[status]}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Dropdown>
+              <Dropdown
+                trigger={() => (
+                  <button className="button button-ghost tasks-side-prop">
+                    <PriorityIcon priority={task.priority} />
+                    {task.priority === 'none' ? 'Set priority' : PRIORITY_LABEL[task.priority]}
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    {PRIORITY_ORDER.map((priority) => (
+                      <button
+                        key={priority}
+                        className="popover-option"
+                        data-selected={priority === task.priority || undefined}
+                        onClick={() => {
+                          setTaskPriority(task.id, priority)
+                          close()
+                        }}
+                      >
+                        <PriorityIcon priority={priority} />
+                        {PRIORITY_LABEL[priority]}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Dropdown>
+              <Dropdown
+                trigger={() => (
+                  <button className="button button-ghost tasks-side-prop">
+                    {assignee ? (
+                      <>
+                        <Avatar user={assignee} size={16} />
+                        {assignee.name}
+                      </>
+                    ) : (
+                      <>
+                        <Avatar user={undefined} size={16} name="—" />
+                        Assign
+                      </>
+                    )}
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <button
+                      className="popover-option"
+                      data-selected={!task.assigneeId || undefined}
+                      onClick={() => {
+                        setTaskAssignee(task.id, null)
+                        close()
+                      }}
+                    >
+                      Unassigned
+                    </button>
+                    {users.map((u) => (
+                      <button
+                        key={u.id}
+                        className="popover-option"
+                        data-selected={u.id === task.assigneeId || undefined}
+                        onClick={() => {
+                          setTaskAssignee(task.id, u.id)
+                          close()
+                        }}
+                      >
+                        <Avatar user={u} size={16} />
+                        {u.name}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Dropdown>
+            </div>
+
+            <div className="tasks-side-group">
+              <h4 className="tasks-side-heading">Labels</h4>
+              <div className="tasks-side-pills">
+                {task.labels.length > 0 ? (
+                  task.labels.map((label) => (
+                    <span key={label} className="pill">
+                      {label}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-faint text-xs">No labels</span>
+                )}
+              </div>
+            </div>
+
+            <div className="tasks-side-group">
+              <h4 className="tasks-side-heading">Project</h4>
+              {project ? (
+                <span className="pill">
+                  <span className="pill-dot" style={{ background: project.color }} />
+                  {project.name}
+                </span>
+              ) : (
+                <span className="text-faint text-xs">—</span>
+              )}
+            </div>
+
+            <div className="tasks-side-group">
+              <h4 className="tasks-side-heading">Due date</h4>
+              <span className={task.dueAt ? 'tasks-side-text' : 'text-faint text-xs'}>
+                {task.dueAt ? fullDate(task.dueAt) : 'No due date'}
+              </span>
+            </div>
+          </aside>
+        </div>
       )}
     </section>
   )
