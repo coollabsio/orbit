@@ -316,7 +316,7 @@ export function ChannelSidebar({
               }}
             >
               <Setting2 size={16} />
-              Server Settings
+              Chat Settings
             </button>
           </div>
         ) : null}

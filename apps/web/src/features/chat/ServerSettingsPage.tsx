@@ -1,39 +1,37 @@
-// Server settings: a settings sidebar replaces the channel sidebar (same width), with
-// General / Roles / Webhooks / Danger Zone tabs; the content column fills the rest.
+// Chat settings: a settings sidebar replaces the channel sidebar (same width), with
+// Roles / Webhooks / Danger Zone tabs; the content column fills the rest.
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { People, Setting2, Trash } from 'reicon-react'
+import { People, Trash } from 'reicon-react'
 import { WebhookIcon } from '../../components/ui/WebhookIcon'
 import { useAppState } from '../../mock/store'
 import { DangerTab } from './settings/DangerTab'
-import { GeneralTab } from './settings/GeneralTab'
 import { RolesTab } from './settings/RolesTab'
 import { WebhooksTab } from './settings/WebhooksTab'
 import './chat.css'
 import './settings/server.css'
 
-type Tab = 'general' | 'roles' | 'webhooks' | 'danger'
+type Tab = 'roles' | 'webhooks' | 'danger'
 
 const navItems: { key: Tab; label: string; icon: React.ComponentType<{ size?: number }>; danger?: boolean }[] = [
-  { key: 'general', label: 'General', icon: Setting2 },
   { key: 'roles', label: 'Roles', icon: People },
   { key: 'webhooks', label: 'Webhooks', icon: WebhookIcon },
   { key: 'danger', label: 'Danger Zone', icon: Trash, danger: true },
 ]
 
 function isTab(value: string | null): value is Tab {
-  return value === 'general' || value === 'roles' || value === 'webhooks' || value === 'danger'
+  return value === 'roles' || value === 'webhooks' || value === 'danger'
 }
 
 export function ServerSettingsPage() {
   const state = useAppState()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [activeTab, setActiveTab] = useState<Tab>(() => (isTab(searchParams.get('tab')) ? (searchParams.get('tab') as Tab) : 'general'))
+  const [activeTab, setActiveTab] = useState<Tab>(() => (isTab(searchParams.get('tab')) ? (searchParams.get('tab') as Tab) : 'roles'))
 
   function selectTab(tab: Tab) {
     setActiveTab(tab)
     const next = new URLSearchParams(searchParams)
-    if (tab === 'general') next.delete('tab')
+    if (tab === 'roles') next.delete('tab')
     else next.set('tab', tab)
     setSearchParams(next, { replace: true })
   }
@@ -50,7 +48,7 @@ export function ServerSettingsPage() {
         </div>
         <div className="ss-nav-scroll">
           <div className="ss-nav">
-            <div className="ss-nav-label">SERVER SETTINGS</div>
+            <div className="ss-nav-label">CHAT SETTINGS</div>
             <div className="ss-nav-items">
               {navItems.map(({ key, label, icon: Icon, danger }) => (
                 <button
@@ -73,7 +71,6 @@ export function ServerSettingsPage() {
       {/* content area — fills the rest */}
       <div className="ss-content">
         <div className="ss-inner" data-wide={activeTab === 'roles' ? 'true' : undefined}>
-          {activeTab === 'general' ? <GeneralTab /> : null}
           {activeTab === 'roles' ? <RolesTab /> : null}
           {activeTab === 'webhooks' ? <WebhooksTab /> : null}
           {activeTab === 'danger' ? <DangerTab /> : null}

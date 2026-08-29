@@ -57,7 +57,7 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
     case 'chat': {
       const crumbs: Crumb[] = [{ label: 'Chat', to: '/chat' }]
       const channel = id ? state.channels.find((c) => c.id === id) : null
-      if (id === 'settings') crumbs.push({ label: 'Server Settings' })
+      if (id === 'settings') crumbs.push({ label: 'Chat Settings' })
       else if (channel) crumbs.push({ label: `#${channel.name}` })
       return { crumbs }
     }
