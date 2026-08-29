@@ -7,6 +7,20 @@ export interface User {
   color: string
   online: boolean
   title: string
+  /** Custom role ids (server roles); order follows the roles list. */
+  roleIds: string[]
+}
+
+export interface Role {
+  id: string
+  name: string
+  color: string
+  position: number
+}
+
+export interface Workspace {
+  name: string
+  iconUrl: string | null
 }
 
 export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'cancelled'
@@ -199,7 +213,9 @@ export interface Notification {
 
 export interface AppState {
   currentUserId: string
+  workspace: Workspace
   users: User[]
+  roles: Role[]
   projects: Project[]
   tasks: Task[]
   docs: Doc[]

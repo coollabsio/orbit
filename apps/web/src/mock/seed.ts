@@ -1,5 +1,5 @@
 import type { AppState } from './types'
-import { projects, users } from './seed/users'
+import { projects, roles, users } from './seed/users'
 import { tasks } from './seed/tasks'
 import { docs } from './seed/docs'
 import { mailFolders, mailThreads } from './seed/mail'
@@ -10,7 +10,9 @@ import { webhooks } from './seed/webhooks'
 export function seedState(): AppState {
   return {
     currentUserId: 'u_shadow',
+    workspace: { name: 'Orbit', iconUrl: null },
     users,
+    roles,
     projects,
     tasks,
     docs,

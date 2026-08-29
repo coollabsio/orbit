@@ -11,6 +11,7 @@ import type {
   TaskPriority,
   TaskStatus,
   MailFolder,
+  Role,
   Webhook,
   User,
 } from './types'
@@ -557,4 +558,51 @@ export function createMailFolder(name: string): MailFolder {
   const folder: MailFolder = { id: nextId('f'), name: name.trim(), icon: 'folder', custom: true }
   updateState((s) => ({ ...s, mailFolders: [...s.mailFolders, folder] }))
   return folder
+}
+
+/* ---------- roles ---------- */
+
+export function createRole(name: string, color: string): Role {
+  const role: Role = { id: nextId('r'), name, color, position: getState().roles.length }
+  updateState((s) => ({ ...s, roles: [...s.roles, role] }))
+  return role
+}
+
+export function updateRole(roleId: string, patch: { name?: string; color?: string }) {
+  updateState((s) => ({ ...s, roles: s.roles.map((r) => (r.id === roleId ? { ...r, ...patch } : r)) }))
+}
+
+export function deleteRole(roleId: string) {
+  updateState((s) => ({
+    ...s,
+    roles: s.roles.filter((r) => r.id !== roleId).map((r, position) => ({ ...r, position })),
+    users: s.users.map((u) => ({ ...u, roleIds: u.roleIds.filter((id) => id !== roleId) })),
+  }))
+}
+
+export function reorderRoles(orderedIds: string[]) {
+  updateState((s) => {
+    const byId = new Map(s.roles.map((r) => [r.id, r]))
+    const ordered = orderedIds.map((id) => byId.get(id)).filter((r): r is Role => !!r)
+    return { ...s, roles: ordered.map((r, position) => ({ ...r, position })) }
+  })
+}
+
+export function assignMemberRoles(userId: string, roleIds: string[]) {
+  updateState((s) => ({ ...s, users: s.users.map((u) => (u.id === userId ? { ...u, roleIds } : u)) }))
+}
+
+/* ---------- workspace ---------- */
+
+export function updateWorkspace(patch: { name?: string; iconUrl?: string | null }) {
+  updateState((s) => ({ ...s, workspace: { ...s.workspace, ...patch } }))
+}
+
+/** Mock of "purge deleted messages": the mock store hard-deletes, so there is nothing to purge. */
+export function purgeDeletedMessages(): number {
+  return 0
+}
+
+export function deleteWorkspaceContent() {
+  updateState((s) => ({ ...s, chatCategories: [], channels: [], chatMessages: [], webhooks: [], roles: [] }))
 }
