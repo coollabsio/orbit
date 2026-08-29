@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Add, ArrowLeft, Calendar, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { DatePicker } from '../../../components/ui/DatePicker'
@@ -36,7 +36,6 @@ interface TaskDetailProps {
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
 export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
-  const [newLabel, setNewLabel] = useState('')
   const users = state.users
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
   // every label used in the workspace, so a task can pick from the existing ones
@@ -44,13 +43,6 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
     () => Array.from(new Set(state.tasks.flatMap((t) => t.labels))).sort((a, b) => a.localeCompare(b)),
     [state.tasks],
   )
-
-  const submitNewLabel = () => {
-    const label = newLabel.trim().toLowerCase()
-    if (!label || !task) return
-    if (!task.labels.includes(label)) toggleTaskLabel(task.id, label)
-    setNewLabel('')
-  }
 
   return (
     <section className="pane tasks-detail-pane">
@@ -232,7 +224,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                     </button>
                   </span>
                 ))}
-                {/* add / remove labels: existing labels toggle (× on active), or type a new one */}
+                {/* add / remove labels: existing labels toggle (× on active) */}
                 <Dropdown
                   trigger={() => (
                     <button className="pill tasks-label-add" aria-label="Add label">
@@ -259,25 +251,6 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                           </button>
                         )
                       })}
-                      <div className="popover-separator" />
-                      <form
-                        className="tasks-label-new"
-                        onSubmit={(e) => {
-                          e.preventDefault()
-                          submitNewLabel()
-                        }}
-                      >
-                        <input
-                          className="input"
-                          placeholder="New label…"
-                          aria-label="New label"
-                          value={newLabel}
-                          onChange={(e) => setNewLabel(e.target.value)}
-                        />
-                        <button type="submit" className="button" disabled={!newLabel.trim()}>
-                          Add
-                        </button>
-                      </form>
                     </>
                   )}
                 </Dropdown>

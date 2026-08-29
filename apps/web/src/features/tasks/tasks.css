@@ -469,10 +469,30 @@
   background: var(--elevated);
 }
 
-/* comments reuse the chat message layout inside the card */
+/* comments reuse the chat message layout inside the card, at the task page's text scale */
 .tasks-thread .tasks-comment {
-  padding-top: 10px;
-  padding-bottom: 10px;
+  padding: 10px 12px;
+}
+
+.tasks-comment .fc-msg-gutter {
+  width: 28px;
+  margin-right: 4px;
+}
+
+.tasks-comment .fc-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.tasks-comment .fc-msg-author {
+  font-size: 13px;
+}
+
+.tasks-comment .fc-msg-text {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 19px;
 }
 
 .tasks-thread .tasks-comment + .tasks-comment {
@@ -538,17 +558,6 @@
   color: var(--text-primary);
 }
 
-.tasks-label-new {
-  display: flex;
-  gap: 6px;
-  padding: 4px;
-}
-
-.tasks-label-new .input {
-  min-width: 0;
-  flex: 1;
-  height: 30px;
-}
 
 /* the due-date popover holds a calendar: no height cap, nested time list may overflow */
 .tasks-date-dropdown .popover {
