@@ -1,4 +1,4 @@
-import type { Channel, Webhook } from '../../mock/types'
+import type { Channel, Webhook } from '../../../mock/types'
 
 /** Public URL a sender would POST to (the chat reference: /api/webhooks/:id/:token). */
 export function webhookUrl(webhook: Webhook): string {

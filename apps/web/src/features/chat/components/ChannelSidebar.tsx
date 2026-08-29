@@ -312,11 +312,11 @@ export function ChannelSidebar({
               className="fc-menu-item"
               onClick={() => {
                 setServerMenuOpen(false)
-                navigate('/settings')
+                navigate('/chat/settings')
               }}
             >
               <Setting2 size={16} />
-              Workspace Settings
+              Server Settings
             </button>
           </div>
         ) : null}

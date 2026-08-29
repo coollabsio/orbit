@@ -1,27 +1,19 @@
 import { NavLink, Outlet } from 'react-router'
-import { People, Setting2, Trash } from 'reicon-react'
-import { WebhookIcon } from '../../components/ui/WebhookIcon'
+import { People, Setting2 } from 'reicon-react'
 import '../shared/cards.css'
 import './settings.css'
-import './server.css'
 
 interface NavItem {
   to: string
   label: string
   icon: React.ComponentType<{ size?: number }>
   end?: boolean
-  danger?: boolean
 }
 
 const SECTIONS: { label: string; items: NavItem[] }[] = [
   {
-    label: 'Server settings',
-    items: [
-      { to: '/settings', label: 'General', icon: Setting2, end: true },
-      { to: '/settings/roles', label: 'Roles', icon: People },
-      { to: '/settings/webhooks', label: 'Webhooks', icon: WebhookIcon },
-      { to: '/settings/danger', label: 'Danger Zone', icon: Trash, danger: true },
-    ],
+    label: 'Configuration',
+    items: [{ to: '/settings', label: 'General', icon: Setting2, end: true }],
   },
   {
     label: 'Team',
@@ -50,7 +42,6 @@ export function SettingsLayout() {
                         to={item.to}
                         end={item.end}
                         className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
-                        data-danger={item.danger ? 'true' : undefined}
                       >
                         <item.icon size={18} />
                         <span className="menu-item-label">{item.label}</span>

@@ -2,11 +2,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Danger } from 'reicon-react'
-import { deleteWorkspaceContent, purgeDeletedMessages } from '../../mock/actions'
-import { ConfirmDeleteModal } from '../chat/components/ChannelModals'
+import { deleteWorkspaceContent, purgeDeletedMessages } from '../../../mock/actions'
+import { ConfirmDeleteModal } from '../components/ChannelModals'
 import './server.css'
 
-export function DangerPage() {
+export function DangerTab() {
   const navigate = useNavigate()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmPurge, setConfirmPurge] = useState(false)

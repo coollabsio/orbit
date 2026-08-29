@@ -3,10 +3,10 @@
 import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { Add, ArrowLeft2, Edit, Magnifier, People, TickCircle, Trash, Xmark } from 'reicon-react'
-import { assignMemberRoles, createRole, deleteRole, reorderRoles, updateRole } from '../../mock/actions'
-import { useAppState } from '../../mock/store'
-import type { Role, User } from '../../mock/types'
-import { ConfirmDeleteModal } from '../chat/components/ChannelModals'
+import { assignMemberRoles, createRole, deleteRole, reorderRoles, updateRole } from '../../../mock/actions'
+import { useAppState } from '../../../mock/store'
+import type { Role, User } from '../../../mock/types'
+import { ConfirmDeleteModal } from '../components/ChannelModals'
 import './server.css'
 
 const ROLE_COLORS = [
@@ -59,7 +59,7 @@ function RoleDropLine({ position }: { position: DropPosition | null }) {
   return <span aria-hidden="true" className="fs-drop-line" data-position={position} />
 }
 
-export function RolesPage() {
+export function RolesTab() {
   const state = useAppState()
   const roles = [...state.roles].sort((a, b) => a.position - b.position)
   const members = state.users

@@ -11,9 +11,7 @@ import { SettingsLayout } from './features/settings/SettingsLayout'
 import { GeneralPage } from './features/settings/GeneralPage'
 import { MembersPage } from './features/settings/MembersPage'
 import { ProfilePage } from './features/profile/ProfilePage'
-import { WebhooksPage } from './features/settings/WebhooksPage'
-import { RolesPage } from './features/settings/RolesPage'
-import { DangerPage } from './features/settings/DangerPage'
+import { ServerSettingsPage } from './features/chat/ServerSettingsPage'
 
 export default function App() {
   return (
@@ -29,15 +27,13 @@ export default function App() {
             <Route path="mail" element={<MailPage />} />
             <Route path="mail/:threadId" element={<MailPage />} />
             <Route path="chat" element={<ChatPage />} />
+            <Route path="chat/settings" element={<ServerSettingsPage />} />
             <Route path="chat/:channelId" element={<ChatPage />} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings" element={<SettingsLayout />}>
               <Route index element={<GeneralPage />} />
               <Route path="members" element={<MembersPage />} />
-              <Route path="webhooks" element={<WebhooksPage />} />
-              <Route path="roles" element={<RolesPage />} />
-              <Route path="danger" element={<DangerPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

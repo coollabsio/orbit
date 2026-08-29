@@ -190,3 +190,42 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ===== server settings shell additions ===== */
+/* space-y-4 border-b pb-7 */
+.fs-webhooks-head {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 28px;
+}
+
+.wh-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wh-field {
+  display: block;
+  min-width: 0;
+}
+
+/* Delete Webhook: border-danger/20 bg-danger/10 text-danger hover:bg-danger/15 */
+.wh-delete {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--danger);
+}
+
+.wh-delete:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.15);
+}
+
+@media (max-width: 599px) {
+  .wh-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

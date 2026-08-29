@@ -1,93 +1,58 @@
-// Server settings › General: icon upload + server name.
-import { useState, type FormEvent } from 'react'
-import { updateWorkspace } from '../../mock/actions'
-import { useAppState } from '../../mock/store'
-import './server.css'
+import { Listbox } from '../../components/ui/Listbox'
+import { useTheme, type Theme } from '../../lib/themeContext'
+import { SettingsCard } from './SettingsCard'
 
 export function GeneralPage() {
-  const state = useAppState()
-  const [name, setName] = useState(state.workspace.name)
-  const [saving, setSaving] = useState(false)
-  const [uploadingIcon, setUploadingIcon] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState('')
-
-  function flashSaved() {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  function handleIconUpload(file?: File) {
-    if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setError('Failed to upload server icon')
-      return
-    }
-    setUploadingIcon(true)
-    setError('')
-    setSaved(false)
-    updateWorkspace({ iconUrl: URL.createObjectURL(file) })
-    setUploadingIcon(false)
-    flashSaved()
-  }
-
-  function handleSave(e: FormEvent) {
-    e.preventDefault()
-    if (!name.trim()) return
-    setSaving(true)
-    setError('')
-    setSaved(false)
-    updateWorkspace({ name: name.trim() })
-    setSaving(false)
-    flashSaved()
-  }
+  const { theme, setTheme } = useTheme()
 
   return (
-    <div className="fs-page">
-      <div>
-        <h2 className="fs-title">General</h2>
-        <p className="fs-subtitle">Manage your server settings</p>
-      </div>
-
-      <div>
-        <label className="fs-label">Server Icon</label>
-        <div className="fs-row">
-          <label className="fs-icon-upload">
-            <input
-              type="file"
-              accept="image/*"
-              disabled={uploadingIcon}
-              aria-label="Upload server icon"
-              onChange={(e) => {
-                handleIconUpload(e.target.files?.[0])
-                e.currentTarget.value = ''
-              }}
+    <>
+      <SettingsCard title="Appearance" description="Theme for this browser.">
+        <div className="settings-grid">
+          <div className="settings-field">
+            <label className="field-label" htmlFor="appearance-theme">
+              Theme
+            </label>
+            <Listbox<Theme>
+              id="appearance-theme"
+              value={theme}
+              options={[
+                { value: 'light', label: 'Light' },
+                { value: 'dark', label: 'Dark' },
+              ]}
+              onChange={setTheme}
             />
-            {state.workspace.iconUrl ? <img src={state.workspace.iconUrl} alt="" /> : state.workspace.name.charAt(0).toUpperCase()}
-            {uploadingIcon ? <span className="fs-icon-upload-busy">Saving</span> : null}
-          </label>
-          <div className="fs-icon-hint">
-            <p>Upload Icon</p>
-            <p>256x256</p>
           </div>
         </div>
-      </div>
+      </SettingsCard>
 
-      <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <label className="fs-label" htmlFor="server-name">
-            Server Name
-          </label>
-          <input id="server-name" type="text" className="fs-input" value={name} placeholder="Server name" required onChange={(e) => setName(e.target.value)} />
+      <SettingsCard title="About" description="Version and backend status of this Orbit instance.">
+        <div className="settings-grid">
+          <div className="settings-field">
+            <label className="field-label" htmlFor="about-version">
+              Version
+            </label>
+            <input id="about-version" className="input" value="0.1.0 (mock)" readOnly />
+          </div>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="about-backend">
+              Backend
+            </label>
+            <input
+              id="about-backend"
+              className="input"
+              value="Not connected — using mock data"
+              readOnly
+            />
+          </div>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="about-storage">
+              Storage
+            </label>
+            <input id="about-storage" className="input" value="Local browser session" readOnly />
+          </div>
         </div>
-        {error ? <p className="fs-error">{error}</p> : null}
-        <div className="fs-row" data-end>
-          <button type="submit" className="fs-btn" data-variant="primary" disabled={saving}>
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
-          {saved ? <span className="fs-success">Saved!</span> : null}
-        </div>
-      </form>
-    </div>
+      </SettingsCard>
+    </>
   )
 }
