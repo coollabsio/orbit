@@ -68,14 +68,15 @@ export function MessageInput({
   /** the chat reference: ChatArea drops files into the composer through this handle. */
   ref?: Ref<MessageInputHandle>
   state: AppState
-  channel: Channel
+  /** Channel to send into; omit when `onSend` handles the message (task comments). */
+  channel?: Channel
   replyTarget?: ChatMessage | null
   onCancelReply?: () => void
   /** the chat reference ThreadPanel: send replies into this thread instead of the channel timeline. */
   threadRootId?: string | null
   placeholder?: string
-  /** Override sending (the chat reference NewThreadPanel). Return false to keep the draft. */
-  onSend?: (content: string) => boolean | void
+  /** Override sending (the chat reference NewThreadPanel, task comments). Return false to keep the draft. */
+  onSend?: (content: string, attachments: Attachment[]) => boolean | void
   /** Show the thread action in the + menu (off inside thread panels). */
   showThreadAction?: boolean
   threadActionLabel?: string
@@ -215,8 +216,8 @@ export function MessageInput({
     if (!trimmed && attachments.length === 0) return
     const startsThread = threadModeRef.current
     if (onSend) {
-      if (onSend(trimmed) === false) return
-    } else {
+      if (onSend(trimmed, attachments) === false) return
+    } else if (channel) {
       sendChatMessage(channel.id, trimmed, startsThread ? null : (replyTarget?.id ?? null), {
         threadRootId,
         attachments,
@@ -338,7 +339,7 @@ export function MessageInput({
           value={text}
           rows={1}
           style={{ height: 24 }}
-          placeholder={placeholder ?? `${threadMode ? 'Start a thread' : 'Message'} #${channel.name}`}
+          placeholder={placeholder ?? (channel ? `${threadMode ? 'Start a thread' : 'Message'} #${channel.name}` : 'Message')}
           onChange={(e) => handleChange(e.target.value, e.target.selectionStart)}
           onClick={(e) => mention.update(text, e.currentTarget.selectionStart)}
           onSelect={(e) => mention.update(text, e.currentTarget.selectionStart)}
