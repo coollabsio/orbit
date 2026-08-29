@@ -467,7 +467,6 @@
   border: 1px solid var(--hairline);
   border-radius: 10px;
   background: var(--elevated);
-  overflow: hidden;
 }
 
 /* comments reuse the chat message layout inside the card */
