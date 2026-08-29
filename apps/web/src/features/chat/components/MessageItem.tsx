@@ -13,6 +13,7 @@ import type { AppState, ChatMessage } from '../../../mock/types'
 import {
   type MentionToken,
   authorUser,
+  authorColor,
   displayName,
   extractPreview,
   formatShortTime,
@@ -58,6 +59,7 @@ export function MessageItem({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const author = authorUser(state, message)
+  const nameColor = authorColor(state, message)
   const isExternal = message.authorType === 'discord' || message.authorType === 'github'
   const isWebhook = message.authorType === 'webhook'
   const isAuthor = message.authorType === 'user' && message.authorId === state.currentUserId
@@ -110,7 +112,7 @@ export function MessageItem({
     <div className="fc-msg-body">
       {!compact ? (
         <div className="fc-msg-header">
-          <span className="fc-msg-author" style={author ? { color: author.color } : undefined}>
+          <span className="fc-msg-author" style={nameColor ? { color: nameColor } : undefined}>
             {name}
           </span>
           {isExternal ? (
@@ -184,7 +186,7 @@ export function MessageItem({
           </div>
           <div className="fc-msg-body">
             <div className="fc-thread-starter-text">
-              <span className="fc-msg-author" style={author ? { color: author.color } : undefined}>
+              <span className="fc-msg-author" style={nameColor ? { color: nameColor } : undefined}>
                 {name}
               </span>{' '}
               started a thread: <strong>{threadTitleOf(message)}</strong>.{' '}
@@ -349,7 +351,7 @@ function ThreadPreview({
 }) {
   const title = threadTitleOf(message)
   const previewMessage = lastReply ?? message
-  const previewAuthor = authorUser(state, previewMessage)
+  const previewAuthorColor = authorColor(state, previewMessage)
   const previewText = extractPreview(previewMessage.content)
   const totalMessages = replyCount + 1
   return (
@@ -372,7 +374,7 @@ function ThreadPreview({
             <span className="fc-thread-preview-line">There are no recent messages in this thread.</span>
           ) : (
             <span className="fc-thread-preview-line">
-              <span className="fc-thread-preview-author" style={previewAuthor ? { color: previewAuthor.color } : undefined}>
+              <span className="fc-thread-preview-author" style={previewAuthorColor ? { color: previewAuthorColor } : undefined}>
                 {displayName(state, previewMessage)}
               </span>
               {previewText ? <span className="fc-thread-preview-text">{previewText}</span> : null}

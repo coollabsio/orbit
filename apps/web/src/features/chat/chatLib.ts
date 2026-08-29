@@ -1,6 +1,6 @@
 // Helpers copied from the chat reference (frontend/src/components/chat/MessageItem.tsx
 // and frontend/src/lib/time.ts), adapted from JSON content to plain text.
-import type { AppState, ChatMessage, User } from '../../mock/types'
+import type { AppState, ChatMessage, Role, User } from '../../mock/types'
 
 /* ---------- time (the chat reference lib/time.ts) ---------- */
 
@@ -34,6 +34,23 @@ export function authorUser(state: AppState, message: ChatMessage): User | undefi
   return message.authorType === 'user'
     ? state.users.find((u) => u.id === message.authorId)
     : undefined
+}
+
+/* ---------- roles: members use the color of the highest role they have ---------- */
+
+export function primaryRole(state: AppState, userId: string): Role | undefined {
+  const user = state.users.find((u) => u.id === userId)
+  if (!user || user.roleIds.length === 0) return undefined
+  return [...state.roles].sort((a, b) => a.position - b.position).find((role) => user.roleIds.includes(role.id))
+}
+
+export function roleColor(state: AppState, userId: string): string | undefined {
+  return primaryRole(state, userId)?.color
+}
+
+/** Name color for a message author: the highest role color, none for external senders. */
+export function authorColor(state: AppState, message: ChatMessage): string | undefined {
+  return message.authorType === 'user' ? roleColor(state, message.authorId) : undefined
 }
 
 /* ---------- mentions ---------- */

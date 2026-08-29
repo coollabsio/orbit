@@ -14,7 +14,7 @@ export interface MentionSuggestion {
   id: string
   label: string
   username: string
-  color: string
+  color?: string
 }
 
 export function useMentionAutocomplete(
@@ -23,6 +23,8 @@ export function useMentionAutocomplete(
   setText: (next: string) => void,
   inputRef: RefObject<HTMLTextAreaElement | null>,
   afterInsert?: () => void,
+  /** Label color per user (the highest role color); undefined keeps the default text color. */
+  colorOf?: (user: User) => string | undefined,
 ) {
   const [mentionState, setMentionState] = useState<MentionState | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -32,7 +34,7 @@ export function useMentionAutocomplete(
     id: user.id,
     label: user.name,
     username: user.handle,
-    color: user.color,
+    color: colorOf ? colorOf(user) : undefined,
   }))
   const query = mentionState?.query.trim().toLowerCase() ?? ''
   const suggestions = (

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Xmark } from 'reicon-react'
 import type { AppState, User } from '../../../mock/types'
+import { primaryRole } from '../chatLib'
 
 const WIDTH_KEY = 'orbit:member_list_width'
 const MIN_WIDTH = 220
@@ -16,9 +17,6 @@ function storedWidth(): number {
   const value = Number(window.localStorage.getItem(WIDTH_KEY))
   return Number.isFinite(value) && value > 0 ? clampWidth(value) : DEFAULT_WIDTH
 }
-
-/* Owners and Admins get their own online group, like the chat reference's role groups. */
-const GROUPED_ROLES: Array<User['role']> = ['Owner', 'Admin']
 
 export function MemberList({
   state,
@@ -53,13 +51,19 @@ export function MemberList({
     window.addEventListener('pointerup', onUp)
   }
 
-  const roleGroups = GROUPED_ROLES.map((role) => ({
-    role,
-    members: state.users.filter((u) => u.online && u.role === role),
-  })).filter((group) => group.members.length > 0)
-  const groupedIds = new Set(roleGroups.flatMap((g) => g.members.map((m) => m.id)))
-  const online = state.users.filter((u) => u.online && !groupedIds.has(u.id))
-  const offline = state.users.filter((u) => !u.online)
+  // online members with a primary role are grouped under that role; the rest go to Online / Offline
+  const roles = [...state.roles].sort((a, b) => a.position - b.position)
+  const buckets = new Map<string, User[]>()
+  const online: User[] = []
+  const offline: User[] = []
+  for (const member of state.users) {
+    const role = member.online ? primaryRole(state, member.id) : undefined
+    if (role) buckets.set(role.id, [...(buckets.get(role.id) ?? []), member])
+    else if (member.online) online.push(member)
+    else offline.push(member)
+  }
+  const roleGroups = roles.map((role) => ({ role, members: buckets.get(role.id) ?? [] })).filter((group) => group.members.length > 0)
+  const colorOf = (member: User) => primaryRole(state, member.id)?.color
 
   const content = (
     <div className="fc-members" style={isMobile ? { height: '100%', width: 240 } : { width }}>
@@ -76,14 +80,14 @@ export function MemberList({
       ) : null}
       <div className="fc-members-scroll">
         {roleGroups.map(({ role, members }) => (
-          <div key={role} className="fc-members-section">
+          <div key={role.id} className="fc-members-section">
             <div className="fc-members-heading">
               <span>
-                {role} — {members.length}
+                {role.name} — {members.length}
               </span>
             </div>
             {members.map((member) => (
-              <MemberItem key={member.id} member={member} online />
+              <MemberItem key={member.id} member={member} online nameColor={colorOf(member)} />
             ))}
           </div>
         ))}
@@ -93,7 +97,7 @@ export function MemberList({
               <span>Online — {online.length}</span>
             </div>
             {online.map((member) => (
-              <MemberItem key={member.id} member={member} online />
+              <MemberItem key={member.id} member={member} online nameColor={colorOf(member)} />
             ))}
           </div>
         ) : null}
@@ -103,7 +107,7 @@ export function MemberList({
               <span>Offline — {offline.length}</span>
             </div>
             {offline.map((member) => (
-              <MemberItem key={member.id} member={member} online={false} />
+              <MemberItem key={member.id} member={member} online={false} nameColor={colorOf(member)} />
             ))}
           </div>
         ) : null}
@@ -123,7 +127,7 @@ export function MemberList({
   return <div className="fc-members-desktop" style={{ display: 'flex' }}>{content}</div>
 }
 
-function MemberItem({ member, online }: { member: User; online: boolean }) {
+function MemberItem({ member, online, nameColor }: { member: User; online: boolean; nameColor?: string }) {
   return (
     <div className="fc-member-item">
       <div className="fc-member-avatar-wrap">
@@ -135,7 +139,11 @@ function MemberItem({ member, online }: { member: User; online: boolean }) {
         </div>
         {online ? <span className="fc-presence" /> : null}
       </div>
-      <span className="fc-member-name" data-online={online ? 'true' : 'false'}>
+      <span
+        className="fc-member-name"
+        data-online={online ? 'true' : 'false'}
+        style={nameColor ? { color: nameColor, opacity: online ? 1 : 0.65 } : undefined}
+      >
         {member.name}
       </span>
     </div>

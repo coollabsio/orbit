@@ -31,13 +31,10 @@ export function MentionPopover({
           }}
           onMouseEnter={() => onHover(index)}
         >
-          <span
-            className="fc-mention-avatar"
-            style={{ background: `color-mix(in srgb, ${suggestion.color} 22%, transparent)`, color: suggestion.color }}
-          >
+          <span className="fc-mention-avatar">
             {suggestion.label.charAt(0).toUpperCase()}
           </span>
-          <span className="fc-mention-label" style={{ color: suggestion.color }}>
+          <span className="fc-mention-label" style={suggestion.color ? { color: suggestion.color } : undefined}>
             @{suggestion.label}
           </span>
           <span className="fc-mention-username">

@@ -7,7 +7,7 @@ import { sendChatMessage } from '../../../mock/actions'
 import { nextId } from '../../../mock/store'
 import type { AppState, Attachment, Channel, ChatMessage } from '../../../mock/types'
 import type { EmojiEntry } from '../emojis'
-import { displayName } from '../chatLib'
+import { displayName, roleColor } from '../chatLib'
 import { useMentionAutocomplete } from '../useMentionAutocomplete'
 import { MentionPopover } from './MentionPopover'
 
@@ -94,7 +94,7 @@ export function MessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
-  const mention = useMentionAutocomplete(state.users, text, setText, inputRef, resizeTextarea)
+  const mention = useMentionAutocomplete(state.users, text, setText, inputRef, resizeTextarea, (user) => roleColor(state, user.id))
   const closeMention = mention.close
 
   useEffect(() => {
