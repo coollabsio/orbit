@@ -1288,3 +1288,85 @@ textarea.input {
   white-space: nowrap;
   border: 0;
 }
+
+/* ---------- date picker (calendar + time) ---------- */
+.datepicker {
+  display: flex;
+  width: 264px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px;
+}
+
+.datepicker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.datepicker-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.datepicker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.datepicker-weekday {
+  padding-bottom: 4px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.datepicker-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.datepicker-day:hover {
+  background: var(--fill);
+}
+
+.datepicker-day[data-muted='true'] {
+  color: var(--text-faint);
+}
+
+.datepicker-day[data-today='true'] {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.datepicker-day[data-selected='true'] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.datepicker-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.datepicker-time-list {
+  flex: 1;
+}
+
+.datepicker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
