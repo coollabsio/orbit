@@ -87,7 +87,13 @@ export function addTaskComment(taskId: string, body: string) {
   }))
 }
 
-export function createTask(input: { title: string; projectId: string; priority?: TaskPriority; assigneeId?: string | null }): Task {
+export function createTask(input: {
+  title: string
+  projectId: string
+  status?: TaskStatus
+  priority?: TaskPriority
+  assigneeId?: string | null
+}): Task {
   const s = getState()
   const project = s.projects.find((p) => p.id === input.projectId) ?? s.projects[0]
   const count = s.tasks.filter((t) => t.projectId === project.id).length
@@ -96,7 +102,7 @@ export function createTask(input: { title: string; projectId: string; priority?:
     identifier: `${project.key}-${100 + count + 1}`,
     title: input.title,
     description: '',
-    status: 'todo',
+    status: input.status ?? 'todo',
     priority: input.priority ?? 'none',
     assigneeId: input.assigneeId ?? null,
     creatorId: s.currentUserId,

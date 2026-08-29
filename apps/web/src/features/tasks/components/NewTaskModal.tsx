@@ -3,16 +3,18 @@ import { Listbox } from '../../../components/ui/Listbox'
 import { Modal } from '../../../components/ui/Modal'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '../../../components/workspace/taskMeta'
 import { createTask } from '../../../mock/actions'
-import type { Project, TaskPriority } from '../../../mock/types'
+import type { Project, TaskPriority, TaskStatus } from '../../../mock/types'
 
 interface NewTaskModalProps {
   projects: Project[]
   defaultProjectId: string | null
+  /** Status preset by the list group's "+" button (defaults to Todo). */
+  defaultStatus?: TaskStatus
   onClose: () => void
   onCreated: (taskId: string) => void
 }
 
-export function NewTaskModal({ projects, defaultProjectId, onClose, onCreated }: NewTaskModalProps) {
+export function NewTaskModal({ projects, defaultProjectId, defaultStatus = 'todo', onClose, onCreated }: NewTaskModalProps) {
   const [title, setTitle] = useState('')
   const [projectId, setProjectId] = useState(defaultProjectId ?? projects[0]?.id ?? '')
   const [priority, setPriority] = useState<TaskPriority>('none')
@@ -20,7 +22,7 @@ export function NewTaskModal({ projects, defaultProjectId, onClose, onCreated }:
   const submit = () => {
     const trimmed = title.trim()
     if (!trimmed || !projectId) return
-    const task = createTask({ title: trimmed, projectId, priority })
+    const task = createTask({ title: trimmed, projectId, priority, status: defaultStatus })
     onCreated(task.id)
   }
 
