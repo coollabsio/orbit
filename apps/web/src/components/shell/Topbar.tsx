@@ -19,6 +19,12 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
   switch (root) {
     case 'tasks': {
       const crumbs: Crumb[] = [{ label: 'Tasks', to: '/tasks' }]
+      if (id === 'projects' && subId === 'settings') {
+        const project = state.projects.find((p) => p.id === sub)
+        if (project) crumbs.push({ label: project.name, to: `/tasks?project=${project.id}` })
+        crumbs.push({ label: 'Settings' })
+        return { crumbs }
+      }
       const task = id ? state.tasks.find((t) => t.id === id) : null
       if (task) {
         const project = state.projects.find((p) => p.id === task.projectId)

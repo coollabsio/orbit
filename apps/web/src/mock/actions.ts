@@ -11,6 +11,7 @@ import type {
   TaskPriority,
   TaskStatus,
   MailFolder,
+  Project,
   Role,
   Webhook,
   User,
@@ -176,6 +177,21 @@ export function createTask(input: {
   }
   updateState((prev) => ({ ...prev, tasks: [task, ...prev.tasks] }))
   return task
+}
+
+/* ---------- projects ---------- */
+
+export function updateProject(projectId: string, patch: Partial<Pick<Project, 'name' | 'key' | 'color'>>) {
+  updateState((s) => ({ ...s, projects: s.projects.map((p) => (p.id === projectId ? { ...p, ...patch } : p)) }))
+}
+
+/** Removes the project and every task in it. */
+export function deleteProject(projectId: string) {
+  updateState((s) => ({
+    ...s,
+    projects: s.projects.filter((p) => p.id !== projectId),
+    tasks: s.tasks.filter((t) => t.projectId !== projectId),
+  }))
 }
 
 /* ---------- docs ---------- */

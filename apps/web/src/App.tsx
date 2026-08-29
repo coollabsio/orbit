@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { ThemeProvider } from './lib/theme'
 import { AppShell } from './components/shell/AppShell'
 import { HomePage } from './features/home/HomePage'
+import { ProjectSettingsPage } from './features/tasks/ProjectSettingsPage'
 import { TasksPage } from './features/tasks/TasksPage'
 import { DocsPage } from './features/docs/DocsPage'
 import { MailPage } from './features/mail/MailPage'
@@ -21,6 +22,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route index element={<HomePage />} />
             <Route path="tasks" element={<TasksPage />} />
+            <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
             <Route path="tasks/:taskId" element={<TasksPage />} />
             <Route path="docs" element={<DocsPage />} />
             <Route path="docs/:docId" element={<DocsPage />} />
