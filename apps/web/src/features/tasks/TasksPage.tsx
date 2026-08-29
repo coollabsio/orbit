@@ -33,7 +33,10 @@ export function TasksPage() {
     const next = new URLSearchParams(searchParams)
     if (projectId) next.set('project', projectId)
     else next.delete('project')
-    setSearchParams(next, { replace: true })
+    next.delete('new')
+    // picking a project in the rail also leaves an open task (back to the list)
+    if (taskId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
+    else setSearchParams(next, { replace: true })
   }
 
   const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)

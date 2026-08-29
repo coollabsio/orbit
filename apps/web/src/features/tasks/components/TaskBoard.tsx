@@ -50,7 +50,7 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
   }
 
   return (
-    <div className="tasks-board" style={{ gridTemplateColumns: `repeat(${groups.length}, minmax(220px, 1fr))` }}>
+    <div className="tasks-board" style={{ gridTemplateColumns: `repeat(${groups.length}, 250px)` }}>
       {groups.map((group) => {
         const columnTasks = sortTasks(
           tasks.filter((task) => group.statusIds.includes(task.statusId)),
@@ -111,7 +111,7 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
                       <div className="tasks-board-card-topline">
                         <span>{task.identifier}</span>
                         <span className="tasks-board-card-meta">
-                          <AvatarStack users={assignees} size={18} />
+                          {assignees.length > 0 ? <AvatarStack users={assignees} size={18} /> : null}
                           <PriorityPicker task={task} align="right" />
                         </span>
                       </div>
