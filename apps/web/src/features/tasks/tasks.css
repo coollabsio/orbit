@@ -369,6 +369,12 @@
   color: var(--control-placeholder);
 }
 
+/* plain text fields: no focus ring */
+.tasks-detail-title:focus-visible,
+.tasks-desc:focus-visible {
+  box-shadow: none;
+}
+
 .tasks-desc {
   width: 100%;
   border: none;
@@ -460,7 +466,7 @@
   margin-top: 12px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
-  background: var(--recessed);
+  background: var(--elevated);
 }
 
 .tasks-thread-comment {
@@ -546,7 +552,7 @@
   margin-top: 16px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
-  background: var(--recessed);
+  background: var(--elevated);
 }
 
 .tasks-comment-input {
