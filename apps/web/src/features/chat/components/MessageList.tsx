@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router'
-import { Messages, Pin, Trash } from 'reicon-react'
+import { Messages, Trash } from 'reicon-react'
+import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { hidePinNotice } from '../../../mock/actions'
 import { ConfirmDeleteModal } from './ChannelModals'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
@@ -200,7 +201,7 @@ function PinnedNotice({ state, message }: { state: AppState; message: ChatMessag
         }}
       >
         <div className="fc-pin-notice-icon">
-          <Pin size={20} />
+          <PinIcon size={20} />
         </div>
         <div className="fc-pin-notice-text">
           <strong style={actor ? { color: actor.color } : undefined}>{actorName}</strong> pinned <strong>a message</strong> to this channel.

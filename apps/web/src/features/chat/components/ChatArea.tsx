@@ -2,7 +2,8 @@
 // search box) over MessageList + TypingIndicator + MessageInput, with file drag & drop.
 import { useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
-import { ArrowLeft, Folder, Hashtag, Magnifier, Paperclip2, People, Pin, Xmark } from 'reicon-react'
+import { ArrowLeft, Folder, Hashtag, Magnifier, Paperclip2, People, Xmark } from 'reicon-react'
+import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
 import { FilesView } from './FilesView'
@@ -127,7 +128,7 @@ export function ChatArea({
               setThreadsOpen(false)
             }}
           >
-            <Pin size={20} weight="Filled" />
+            <PinIcon size={20} />
           </button>
           <button type="button" {...headerButton(membersOpen)} title="Toggle Member List" onClick={onToggleMembers}>
             <People size={20} weight="Filled" />

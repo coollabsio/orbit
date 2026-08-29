@@ -1,7 +1,8 @@
 // Port of the chat reference MessageItem (the chat reference frontend/src/components/chat/MessageItem.tsx)
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Edit, EmojiHappy, Pin, Reply, Trash } from 'reicon-react'
+import { Copy, Edit, EmojiHappy, Reply, Trash } from 'reicon-react'
+import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import {
   deleteChatMessage,
@@ -131,7 +132,7 @@ export function MessageItem({
           </span>
           {message.pinned ? (
             <span className="fc-pinned-tag" title="Pinned message">
-              <Pin size={12} />
+              <PinIcon size={12} />
               <span>Pinned</span>
             </span>
           ) : null}
@@ -278,7 +279,7 @@ export function MessageItem({
             ) : null}
             <div className="fc-toolbar-sep" />
             <button title={message.pinned ? 'Unpin message' : 'Pin message'} onClick={() => togglePinMessage(message.id)}>
-              <Pin />
+              <PinIcon />
             </button>
             {canDelete ? (
               <>
@@ -571,7 +572,7 @@ function MessageContextMenu({
         ) : null}
         <button type="button" className="fc-ctx-item" onClick={onPin}>
           <span className="fc-ctx-icon">
-            <Pin size={16} />
+            <PinIcon size={16} />
           </span>
           <span>{message.pinned ? 'Unpin Message' : 'Pin Message'}</span>
         </button>

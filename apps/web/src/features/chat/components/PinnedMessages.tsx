@@ -1,6 +1,7 @@
 // Port of the chat reference PinnedMessages: header popover with search; each row jumps to the message.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Magnifier, Pin } from 'reicon-react'
+import { Magnifier } from 'reicon-react'
+import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import type { AppState, Channel } from '../../../mock/types'
 import { authorUser, displayName, extractPreview, jumpToMessage } from '../chatLib'
 
@@ -53,7 +54,7 @@ export function PinnedMessages({ state, channel, onClose }: { state: AppState; c
     <div ref={panelRef} className="fc-threads-popover">
       <div className="fc-threads-header">
         <div className="fc-pins-title">
-          <Pin size={16} />
+          <PinIcon size={16} />
           Pins
         </div>
         <div className="fc-threads-search">
@@ -64,7 +65,7 @@ export function PinnedMessages({ state, channel, onClose }: { state: AppState; c
       <div className="fc-threads-list" style={{ padding: 16 }}>
         {pins.length === 0 ? (
           <div className="fc-threads-empty">
-            <Pin size={40} style={{ opacity: 0.3 }} />
+            <PinIcon size={40} style={{ opacity: 0.3 }} />
             <h3>No pinned messages</h3>
             <p>Pinned messages in this channel will appear here.</p>
           </div>
