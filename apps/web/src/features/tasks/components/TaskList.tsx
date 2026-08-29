@@ -19,11 +19,14 @@ interface TaskListProps {
 export function TaskList({ tasks, users, onOpen, onAdd }: TaskListProps) {
   const groups = groupTasksByStatus(tasks)
   const [collapsed, setCollapsed] = useState<TaskStatus[]>([])
+  const [selected, setSelected] = useState<string[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null)
 
   const toggle = (status: TaskStatus) =>
     setCollapsed((prev) => (prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]))
+  const toggleSelect = (taskId: string) =>
+    setSelected((prev) => (prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]))
 
   const endDrag = () => {
     setDraggingId(null)
@@ -96,8 +99,10 @@ export function TaskList({ tasks, users, onOpen, onAdd }: TaskListProps) {
                     key={task.id}
                     task={task}
                     assignee={users.find((u) => u.id === task.assigneeId)}
+                    selected={selected.includes(task.id)}
                     dragging={task.id === draggingId}
                     onOpen={onOpen}
+                    onToggleSelect={toggleSelect}
                     onDragStart={setDraggingId}
                     onDragEnd={endDrag}
                   />

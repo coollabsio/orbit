@@ -236,12 +236,57 @@
   color: var(--text-primary);
 }
 
-/* list rows */
+/* list rows: [checkbox] priority · id · status · title … labels · assignee · created */
+.tasks-row {
+  gap: 8px;
+}
+
+.tasks-row-check {
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tasks-row:hover .tasks-row-check,
+.tasks-row[data-selected='true'] .tasks-row-check,
+.tasks-row-check:focus-within {
+  opacity: 1;
+}
+
+.tasks-row-check .checkbox-box-visual {
+  border-radius: 4px;
+}
+
+.tasks-row-check input:checked ~ .checkbox-box-tick {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.tasks-row[data-selected='true'] {
+  background: var(--accent-soft);
+}
+
 .tasks-row-id {
   width: 56px;
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-row-status {
+  width: 22px;
+  height: 22px;
+}
+
+.tasks-row-date {
+  flex-shrink: 0;
+  min-width: 44px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .tasks-row-title {
