@@ -22,13 +22,14 @@ export function TasksPage() {
   const [layout, setLayout] = useState<'list' | 'board'>('list')
   const [statusFilter, setStatusFilter] = useState<TaskStatus | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
-  const [newTaskClicked, setNewTaskClicked] = useState(false)
+  // "New task" from the header or from a status group's "+" (which presets the status)
+  const [newTask, setNewTask] = useState<{ status: TaskStatus } | null>(null)
 
   // the topbar "New → Task" entry deep-links here with ?new=1
-  const showNewTask = newTaskClicked || searchParams.get('new') === '1'
-  const setShowNewTask = (open: boolean) => {
-    setNewTaskClicked(open)
-    if (!open && searchParams.get('new')) {
+  const showNewTask = newTask !== null || searchParams.get('new') === '1'
+  const closeNewTask = () => {
+    setNewTask(null)
+    if (searchParams.get('new')) {
       const next = new URLSearchParams(searchParams)
       next.delete('new')
       setSearchParams(next, { replace: true })
@@ -64,55 +65,8 @@ export function TasksPage() {
   return (
     <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
       <ProjectRail projects={state.projects} tasks={state.tasks} projectId={projectFilter} onSelect={setProjectFilter} />
-      <section className="pane tasks-list-pane">
-        <div className="pane-header">
-          <button className="app-tab" data-active={tab === 'my' || undefined} onClick={() => setTab('my')}>
-            My tasks
-          </button>
-          <button className="app-tab" data-active={tab === 'all' || undefined} onClick={() => setTab('all')}>
-            All
-          </button>
-          <div className="spacer" />
-          <div className="tasks-layout-toggle" aria-label="Task layout">
-            <button type="button" data-active={layout === 'list' || undefined} onClick={() => setLayout('list')}>
-              List
-            </button>
-            <button type="button" data-active={layout === 'board' || undefined} onClick={() => setLayout('board')}>
-              Board
-            </button>
-          </div>
-          <button className="button button-primary" onClick={() => setShowNewTask(true)}>
-            <Add size={16} />
-            New task
-          </button>
-        </div>
-        <TaskFilters
-          users={state.users}
-          status={statusFilter}
-          assigneeId={assigneeFilter}
-          onStatusChange={setStatusFilter}
-          onAssigneeChange={setAssigneeFilter}
-        />
-        <div className="pane-body">
-          {layout === 'board' ? (
-            <TaskBoard
-              tasks={visibleTasks}
-              users={state.users}
-              activeTaskId={taskId ?? null}
-              onOpen={openTask}
-            />
-          ) : (
-            <TaskList
-              tasks={visibleTasks}
-              users={state.users}
-              activeTaskId={taskId ?? null}
-              onOpen={openTask}
-            />
-          )}
-        </div>
-      </section>
-
       {taskId ? (
+        // a task opens as a full page in place of the list (the rail stays)
         <TaskDetail
           key={taskId}
           task={activeTask}
@@ -120,15 +74,48 @@ export function TasksPage() {
           users={state.users}
           onBack={closeTask}
         />
-      ) : null}
+      ) : (
+        <section className="pane tasks-list-pane">
+          <div className="pane-header">
+            <button className="app-tab" data-active={tab === 'my' || undefined} onClick={() => setTab('my')}>
+              My tasks
+            </button>
+            <button className="app-tab" data-active={tab === 'all' || undefined} onClick={() => setTab('all')}>
+              All
+            </button>
+            <div className="spacer" />
+            <TaskFilters
+              users={state.users}
+              status={statusFilter}
+              assigneeId={assigneeFilter}
+              layout={layout}
+              onStatusChange={setStatusFilter}
+              onAssigneeChange={setAssigneeFilter}
+              onLayoutChange={setLayout}
+            />
+            <button className="button button-primary" onClick={() => setNewTask({ status: 'todo' })}>
+              <Add size={16} />
+              New task
+            </button>
+          </div>
+          <div className="pane-body">
+            {layout === 'board' ? (
+              <TaskBoard tasks={visibleTasks} users={state.users} activeTaskId={null} onOpen={openTask} />
+            ) : (
+              <TaskList tasks={visibleTasks} users={state.users} onOpen={openTask} onAdd={(status) => setNewTask({ status })} />
+            )}
+          </div>
+        </section>
+      )}
 
       {showNewTask ? (
         <NewTaskModal
           projects={state.projects}
           defaultProjectId={projectFilter}
-          onClose={() => setShowNewTask(false)}
+          defaultStatus={newTask?.status ?? 'todo'}
+          onClose={closeNewTask}
           onCreated={(id) => {
-            setShowNewTask(false)
+            closeNewTask()
             openTask(id)
           }}
         />

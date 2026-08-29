@@ -41,28 +41,6 @@
   min-width: 0;
 }
 
-.tasks-layout-toggle {
-  display: flex;
-  padding: 2px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-md);
-  background: var(--recessed);
-}
-
-.tasks-layout-toggle button {
-  min-height: 28px;
-  padding: 0 9px;
-  border-radius: var(--radius-sm);
-  color: var(--text-faint);
-  font-size: 12px;
-  text-align: center;
-}
-
-.tasks-layout-toggle button[data-active='true'] {
-  color: var(--text-primary);
-  background: var(--fill);
-}
-
 /* kanban */
 .tasks-board {
   display: grid;
@@ -170,7 +148,21 @@
   box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
-/* sticky status section headers */
+.tasks-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* status groups: sticky collapsible headers that accept dropped rows */
 .tasks-section-header {
   position: sticky;
   top: 0;
@@ -178,13 +170,70 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
-  padding: 0 12px;
+  height: 36px;
+  padding: 0 8px 0 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   background: var(--elevated);
   border-bottom: 1px solid var(--hairline);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.tasks-section-count {
+  font-weight: 400;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+}
+
+.tasks-section-toggle:hover {
+  background: var(--fill);
+  color: var(--text-primary);
+}
+
+.tasks-section-toggle svg {
+  transition: transform 0.15s;
+  transform: rotate(90deg);
+}
+
+.tasks-section-header[data-collapsed='true'] .tasks-section-toggle svg {
+  transform: rotate(0deg);
+}
+
+.tasks-section-add {
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+}
+
+.tasks-section-header:hover .tasks-section-add,
+.tasks-section-add:focus-visible {
+  opacity: 1;
+}
+
+.tasks-section[data-drop-over='true'] .tasks-section-header {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tasks-section[data-drop-over='true'] {
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+
+/* dragged row: normal cursor, only the color changes */
+.tasks-row[data-dragging='true'] {
+  background: var(--nav-active-bg);
+  color: var(--text-primary);
 }
 
 /* list rows */

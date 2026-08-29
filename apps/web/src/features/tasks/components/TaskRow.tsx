@@ -10,17 +10,26 @@ import type { Task, User } from '../../../mock/types'
 interface TaskRowProps {
   task: Task
   assignee: User | undefined
-  active: boolean
+  dragging: boolean
   onOpen: (taskId: string) => void
+  onDragStart: (taskId: string) => void
+  onDragEnd: () => void
 }
 
-export function TaskRow({ task, assignee, active, onOpen }: TaskRowProps) {
+export function TaskRow({ task, assignee, dragging, onOpen, onDragStart, onDragEnd }: TaskRowProps) {
   return (
     <div
-      className="list-row"
-      data-active={active ? 'true' : undefined}
+      className="list-row tasks-row"
+      data-dragging={dragging || undefined}
       role="button"
       tabIndex={0}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/task-id', task.id)
+        onDragStart(task.id)
+      }}
+      onDragEnd={onDragEnd}
       onClick={() => onOpen(task.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(task.id)

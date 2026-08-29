@@ -1,35 +1,41 @@
+import { Filter, Kanban, List, Setting4 } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { STATUS_LABEL, STATUS_ORDER } from '../../../components/workspace/taskMeta'
-import { cx } from '../../../lib/cx'
 import type { TaskStatus, User } from '../../../mock/types'
 
 interface TaskFiltersProps {
   users: User[]
   status: TaskStatus | null
   assigneeId: string | null
+  layout: 'list' | 'board'
   onStatusChange: (status: TaskStatus | null) => void
   onAssigneeChange: (assigneeId: string | null) => void
+  onLayoutChange: (layout: 'list' | 'board') => void
 }
 
-export function TaskFilters({ users, status, assigneeId, onStatusChange, onAssigneeChange }: TaskFiltersProps) {
-  const assignee = users.find((u) => u.id === assigneeId)
-  const anyActive = Boolean(status || assigneeId)
+/** Header dropdowns: one "Filter" menu (status + assignee) and one "Display" menu (layout). */
+export function TaskFilters({
+  users,
+  status,
+  assigneeId,
+  layout,
+  onStatusChange,
+  onAssigneeChange,
+  onLayoutChange,
+}: TaskFiltersProps) {
+  const activeCount = (status ? 1 : 0) + (assigneeId ? 1 : 0)
 
   return (
-    <div className="pane-toolbar">
+    <>
       <Dropdown
+        align="right"
         trigger={() => (
-          <button className={cx('button', 'button-ghost', 'tasks-filter')} data-active={Boolean(status) || undefined}>
-            {status ? (
-              <>
-                <TaskStatusIcon status={status} />
-                {STATUS_LABEL[status]}
-              </>
-            ) : (
-              'Status'
-            )}
+          <button className="button button-ghost tasks-filter" data-active={activeCount > 0 || undefined}>
+            <Filter size={15} />
+            Filter
+            {activeCount > 0 ? <span className="tasks-filter-count">{activeCount}</span> : null}
           </button>
         )}
       >
@@ -50,40 +56,7 @@ export function TaskFilters({ users, status, assigneeId, onStatusChange, onAssig
                 {STATUS_LABEL[s]}
               </button>
             ))}
-            {status ? (
-              <>
-                <div className="popover-separator" />
-                <button
-                  className="popover-option"
-                  onClick={() => {
-                    onStatusChange(null)
-                    close()
-                  }}
-                >
-                  Clear status
-                </button>
-              </>
-            ) : null}
-          </>
-        )}
-      </Dropdown>
-
-      <Dropdown
-        trigger={() => (
-          <button className={cx('button', 'button-ghost', 'tasks-filter')} data-active={Boolean(assignee) || undefined}>
-            {assignee ? (
-              <>
-                <Avatar user={assignee} size={16} />
-                {assignee.name}
-              </>
-            ) : (
-              'Assignee'
-            )}
-          </button>
-        )}
-      >
-        {(close) => (
-          <>
+            <div className="popover-separator" />
             <div className="popover-heading">Assignee</div>
             {users.map((u) => (
               <button
@@ -99,17 +72,18 @@ export function TaskFilters({ users, status, assigneeId, onStatusChange, onAssig
                 {u.name}
               </button>
             ))}
-            {assigneeId ? (
+            {activeCount > 0 ? (
               <>
                 <div className="popover-separator" />
                 <button
                   className="popover-option"
                   onClick={() => {
+                    onStatusChange(null)
                     onAssigneeChange(null)
                     close()
                   }}
                 >
-                  Clear assignee
+                  Clear filters
                 </button>
               </>
             ) : null}
@@ -117,20 +91,43 @@ export function TaskFilters({ users, status, assigneeId, onStatusChange, onAssig
         )}
       </Dropdown>
 
-      {anyActive ? (
-        <>
-          <div className="spacer" />
-          <button
-            className="button button-ghost"
-            onClick={() => {
-                            onStatusChange(null)
-              onAssigneeChange(null)
-            }}
-          >
-            Clear filters
+      <Dropdown
+        align="right"
+        trigger={() => (
+          <button className="button button-ghost tasks-filter">
+            <Setting4 size={15} />
+            Display
           </button>
-        </>
-      ) : null}
-    </div>
+        )}
+      >
+        {(close) => (
+          <>
+            <div className="popover-heading">Layout</div>
+            <button
+              className="popover-option"
+              data-selected={layout === 'list' || undefined}
+              onClick={() => {
+                onLayoutChange('list')
+                close()
+              }}
+            >
+              <List size={15} />
+              List
+            </button>
+            <button
+              className="popover-option"
+              data-selected={layout === 'board' || undefined}
+              onClick={() => {
+                onLayoutChange('board')
+                close()
+              }}
+            >
+              <Kanban size={15} />
+              Board
+            </button>
+          </>
+        )}
+      </Dropdown>
+    </>
   )
 }
