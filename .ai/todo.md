@@ -66,7 +66,8 @@ Goal: complete the full frontend with mock data, reference-style shell/layout, C
 - [x] composer thread mode: + menu "Create Thread" enters thread mode when no panel handler is given (pill, "Start a thread #channel" placeholder, sends a thread-starter root)
 - [x] message context menu: "Add Reaction" toggles the quick-emoji row; item order Add Reaction / Reply / Thread / Edit / Pin / Copy Text / Delete
 - [x] thread follow/unfollow (panel toggle + sidebar menu), auto-follow on start/reply, followed-thread rows nested under channels with L connector, rename modal, delete thread
-- [x] settings: Server settings section — General (icon + name), Roles (list, search, create, drag reorder, edit rail, Display/Manage Members), Webhooks, Danger Zone (purge + delete); Members under Team
+- [x] Server Settings is its own page (`/chat/settings`, from the server dropdown): settings sidebar replaces the channel sidebar; tabs General / Roles / Webhooks / Danger Zone; app Settings keeps General + Members
+- [x] member list groups online members by primary role, then Online / Offline; names (member list, message authors, thread previews, mention popup) use the highest role color
 
 ## Review notes
 - Browser-default `text-align: center` on `<button>` leaked into row labels — fixed in base.css reset.
