@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Edit, Xmark } from 'reicon-react'
 import { PlugConnectIcon } from '../../../components/ui/icons/PlugConnectIcon'
-import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { useSearchParams } from 'react-router'
 import { followThread, renameThread } from '../../../mock/actions'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
@@ -93,7 +92,6 @@ export function ThreadPanel({
       {!isMobile ? <div className="fc-thread-resize" onPointerDown={handleResizeStart} title="Resize thread panel" /> : null}
       <div className="fc-thread-header">
         <div className="fc-thread-header-title">
-          <ThreadIcon size={16} />
           {editingTitle ? (
             <input
               autoFocus
