@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { People, Trash } from 'reicon-react'
 import { WebhookIcon } from '../../components/ui/WebhookIcon'
-import { useAppState } from '../../mock/store'
 import { DangerTab } from './settings/DangerTab'
 import { RolesTab } from './settings/RolesTab'
 import { WebhooksTab } from './settings/WebhooksTab'
@@ -24,7 +23,6 @@ function isTab(value: string | null): value is Tab {
 }
 
 export function ServerSettingsPage() {
-  const state = useAppState()
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<Tab>(() => (isTab(searchParams.get('tab')) ? (searchParams.get('tab') as Tab) : 'roles'))
 
@@ -40,12 +38,6 @@ export function ServerSettingsPage() {
     <div className="page chat-page ss-page">
       {/* settings sidebar — replaces the channel sidebar, same width */}
       <div className="ss-sidebar">
-        <div className="ss-sidebar-header">
-          <span className="ss-server-icon">
-            {state.workspace.iconUrl ? <img src={state.workspace.iconUrl} alt="" /> : state.workspace.name.charAt(0).toUpperCase()}
-          </span>
-          <span className="ss-server-name">{state.workspace.name}</span>
-        </div>
         <div className="ss-nav-scroll">
           <div className="ss-nav">
             <div className="ss-nav-label">CHAT SETTINGS</div>

@@ -1860,19 +1860,11 @@
 }
 
 /* ===== the chat reference: sidebar drag & drop ===== */
-.fc-category-toggle,
-.fc-channel-row {
-  cursor: grab;
-}
-
-.fc-category-toggle:active,
-.fc-channel-row:active {
-  cursor: grabbing;
-}
-
+/* normal cursor; the dragged row only changes color */
 .fc-category-toggle[data-dragging='true'],
 .fc-channel-row[data-dragging='true'] {
-  opacity: 0.5;
+  background: var(--nav-active-bg);
+  color: var(--text-primary);
 }
 
 .fc-category-label {
