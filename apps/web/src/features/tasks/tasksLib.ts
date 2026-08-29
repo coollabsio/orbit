@@ -3,7 +3,6 @@ import { relativeTime } from '../../lib/format'
 import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from '../../components/workspace/taskMeta'
 
 export interface TaskFilterState {
-  tab: 'my' | 'all'
   currentUserId: string
   projectId: string | null
   /** Status group key (see `statusKeyOf`), so "Todo" matches across projects. */
@@ -15,7 +14,6 @@ export interface TaskFilterState {
 export function filterTasks(tasks: Task[], f: TaskFilterState): Task[] {
   const keyById = new Map(f.statuses.map((s) => [s.id, statusKeyOf(s)]))
   return tasks.filter((t) => {
-    if (f.tab === 'my' && !t.assigneeIds.includes(f.currentUserId)) return false
     if (f.projectId && t.projectId !== f.projectId) return false
     if (f.statusKey && keyById.get(t.statusId) !== f.statusKey) return false
     if (f.assigneeId && !t.assigneeIds.includes(f.assigneeId)) return false

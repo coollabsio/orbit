@@ -19,7 +19,6 @@ export function TasksPage() {
 
   // ?layout=board opens the kanban directly (deep link); the Display menu changes it afterwards
   const [layout, setLayout] = useState<'list' | 'board'>(() => (searchParams.get('layout') === 'board' ? 'board' : 'list'))
-  const [tab, setTab] = useState<'my' | 'all'>('my')
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
@@ -57,8 +56,8 @@ export function TasksPage() {
 
   // status columns/groups of the selected project (or of all projects, merged by name)
   const groups = statusGroups(state.statuses, projectFilter)
+  const activeProject = state.projects.find((p) => p.id === projectFilter)
   const visibleTasks = filterTasks(state.tasks, {
-    tab,
     currentUserId: state.currentUserId,
     projectId: projectFilter,
     statusKey: statusFilter,
@@ -83,12 +82,7 @@ export function TasksPage() {
       ) : (
         <section className="pane tasks-list-pane">
           <div className="pane-header">
-            <button className="app-tab" data-active={tab === 'my' || undefined} onClick={() => setTab('my')}>
-              My tasks
-            </button>
-            <button className="app-tab" data-active={tab === 'all' || undefined} onClick={() => setTab('all')}>
-              All
-            </button>
+            <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span>
             <div className="spacer" />
             <TaskFilters
               users={state.users}
