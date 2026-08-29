@@ -89,7 +89,7 @@ export function setTaskDescription(taskId: string, description: string) {
   touchTask(taskId, { description })
 }
 
-export function addTaskComment(taskId: string, body: string, parentId?: string) {
+export function addTaskComment(taskId: string, body: string, parentId?: string, attachments: Attachment[] = []) {
   updateState((s) => ({
     ...s,
     tasks: s.tasks.map((t) =>
@@ -99,10 +99,38 @@ export function addTaskComment(taskId: string, body: string, parentId?: string) 
             updatedAt: now(),
             comments: [
               ...t.comments,
-              { id: nextId('tc'), authorId: s.currentUserId, body, createdAt: now(), ...(parentId ? { parentId } : {}) },
+              {
+                id: nextId('tc'),
+                authorId: s.currentUserId,
+                body,
+                createdAt: now(),
+                ...(parentId ? { parentId } : {}),
+                ...(attachments.length > 0 ? { attachments } : {}),
+              },
             ],
           }
         : t,
+    ),
+  }))
+}
+
+export function editTaskComment(taskId: string, commentId: string, body: string) {
+  updateState((s) => ({
+    ...s,
+    tasks: s.tasks.map((t) =>
+      t.id === taskId
+        ? { ...t, comments: t.comments.map((c) => (c.id === commentId ? { ...c, body, editedAt: now() } : c)) }
+        : t,
+    ),
+  }))
+}
+
+/** Deletes a comment; deleting a top-level comment also removes its replies. */
+export function deleteTaskComment(taskId: string, commentId: string) {
+  updateState((s) => ({
+    ...s,
+    tasks: s.tasks.map((t) =>
+      t.id === taskId ? { ...t, comments: t.comments.filter((c) => c.id !== commentId && c.parentId !== commentId) } : t,
     ),
   }))
 }

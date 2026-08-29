@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { ArrowLeft, ArrowUp, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
+import { ArrowLeft, Calendar, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
@@ -22,28 +21,21 @@ import {
   setTaskTitle,
   toggleTaskAssignee,
 } from '../../../mock/actions'
-import type { Project, Task, User } from '../../../mock/types'
+import type { AppState, Project, Task } from '../../../mock/types'
+import { MessageInput } from '../../chat/components/MessageInput'
 import { ActivityFeed } from './ActivityFeed'
 
 interface TaskDetailProps {
   task: Task | undefined
   project: Project | undefined
-  users: User[]
-  currentUserId: string
+  state: AppState
   onBack: () => void
 }
 
-/** Full-page task view: main column (title, description, activity, comment box) + properties column. */
-export function TaskDetail({ task, project, users, currentUserId, onBack }: TaskDetailProps) {
-  const [comment, setComment] = useState('')
+/** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
+export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
+  const users = state.users
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
-
-  const submitComment = () => {
-    const body = comment.trim()
-    if (!body || !task) return
-    addTaskComment(task.id, body)
-    setComment('')
-  }
 
   return (
     <section className="pane tasks-detail-pane">
@@ -94,27 +86,18 @@ export function TaskDetail({ task, project, users, currentUserId, onBack }: Task
               }}
             />
 
-            <ActivityFeed task={task} users={users} currentUserId={currentUserId} />
+            <ActivityFeed task={task} state={state} />
 
-            <div className="tasks-comment-box">
-              <textarea
-                className="tasks-comment-input"
+            {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
+            <div className="tasks-comment-composer">
+              <MessageInput
+                state={state}
                 placeholder="Leave a comment…"
-                aria-label="Comment"
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitComment()
+                showThreadAction={false}
+                onSend={(content, attachments) => {
+                  addTaskComment(task.id, content, undefined, attachments)
                 }}
               />
-              <div className="tasks-comment-actions">
-                <button type="button" className="icon-button" aria-label="Attach file" title="Attach file">
-                  <Paperclip2 size={14} />
-                </button>
-                <button type="button" className="tasks-send" aria-label="Send comment" onClick={submitComment} disabled={!comment.trim()}>
-                  <ArrowUp size={14} />
-                </button>
-              </div>
             </div>
           </div>
 

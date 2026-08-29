@@ -1,93 +1,70 @@
-import { useState } from 'react'
-import { ArrowUp, Paperclip2 } from 'reicon-react'
+import { useMemo } from 'react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { addTaskComment } from '../../../mock/actions'
-import type { Task, TaskComment, User } from '../../../mock/types'
-import { agoLabel, commentThreads } from '../tasksLib'
+import type { AppState, Task, TaskActivity } from '../../../mock/types'
+import { buildMentionTokens } from '../../chat/chatLib'
+import { MessageInput } from '../../chat/components/MessageInput'
+import { agoLabel, buildFeed, type CommentThread } from '../tasksLib'
+import { CommentItem } from './CommentItem'
 
 interface ActivityFeedProps {
   task: Task
-  users: User[]
-  currentUserId: string
+  state: AppState
 }
 
-/** Activity timeline (icon + connector per event) followed by comment threads with a reply box each. */
-export function ActivityFeed({ task, users, currentUserId }: ActivityFeedProps) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const userById = (id: string) => users.find((u) => u.id === id)
-  const me = userById(currentUserId)
-  const activity = [...task.activity].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  const threads = commentThreads(task)
+/**
+ * Chronological feed: activity events (timeline rows) and comment threads (cards) interleaved by time,
+ * so a change made after a comment shows below that comment.
+ */
+export function ActivityFeed({ task, state }: ActivityFeedProps) {
+  const mentionTokens = useMemo(() => buildMentionTokens(state.users), [state.users])
+  const userById = (id: string) => state.users.find((u) => u.id === id)
+  const feed = buildFeed(task)
 
-  const sendReply = (rootId: string) => {
-    const body = (drafts[rootId] ?? '').trim()
-    if (!body) return
-    addTaskComment(task.id, body, rootId)
-    setDrafts((prev) => ({ ...prev, [rootId]: '' }))
-  }
+  const renderTimeline = (items: TaskActivity[], key: string) => (
+    <ol key={key} className="tasks-timeline">
+      {items.map((item) => {
+        const actor = userById(item.actorId)
+        return (
+          <li key={item.id} className="tasks-timeline-item">
+            <span className="tasks-timeline-icon">
+              {item.status ? <TaskStatusIcon status={item.status} size={14} /> : <Avatar user={actor} size={14} />}
+            </span>
+            <span className="tasks-timeline-text truncate">
+              <span className="tasks-timeline-actor">{actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}
+            </span>
+          </li>
+        )
+      })}
+    </ol>
+  )
 
-  const renderComment = (comment: TaskComment, reply: boolean) => {
-    const author = userById(comment.authorId)
-    return (
-      <div key={comment.id} className="tasks-thread-comment" data-reply={reply || undefined}>
-        <div className="tasks-comment-head">
-          <Avatar user={author} size={20} />
-          <span className="tasks-comment-author">{author?.name ?? 'Someone'}</span>
-          <span className="text-faint text-xs">{agoLabel(comment.createdAt)}</span>
-        </div>
-        <div className="tasks-comment-text">{comment.body}</div>
+  const renderThread = (thread: CommentThread) => (
+    <div key={thread.root.id} className="tasks-thread">
+      <CommentItem state={state} taskId={task.id} comment={thread.root} mentionTokens={mentionTokens} />
+      {thread.replies.map((reply) => (
+        <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
+      ))}
+      <div className="tasks-thread-composer">
+        <MessageInput
+          state={state}
+          placeholder="Leave a reply…"
+          showThreadAction={false}
+          onSend={(content, attachments) => {
+            addTaskComment(task.id, content, thread.root.id, attachments)
+          }}
+        />
       </div>
-    )
-  }
+    </div>
+  )
 
   return (
     <div className="tasks-activity">
       <h3 className="tasks-activity-heading">Activity</h3>
-      <ol className="tasks-timeline">
-        {activity.map((item) => {
-          const actor = userById(item.actorId)
-          return (
-            <li key={item.id} className="tasks-timeline-item">
-              <span className="tasks-timeline-icon">
-                {item.status ? <TaskStatusIcon status={item.status} size={14} /> : <Avatar user={actor} size={14} />}
-              </span>
-              <span className="tasks-timeline-text truncate">
-                <span className="tasks-timeline-actor">{actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}
-              </span>
-            </li>
-          )
-        })}
-      </ol>
-
-      {threads.map((thread) => (
-        <div key={thread.root.id} className="tasks-thread">
-          {renderComment(thread.root, false)}
-          {thread.replies.map((reply) => renderComment(reply, true))}
-          <form
-            className="tasks-reply"
-            onSubmit={(e) => {
-              e.preventDefault()
-              sendReply(thread.root.id)
-            }}
-          >
-            <Avatar user={me} size={18} />
-            <input
-              className="tasks-reply-input"
-              placeholder="Leave a reply…"
-              aria-label="Reply"
-              value={drafts[thread.root.id] ?? ''}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, [thread.root.id]: e.target.value }))}
-            />
-            <button type="button" className="icon-button" aria-label="Attach file" title="Attach file">
-              <Paperclip2 size={14} />
-            </button>
-            <button type="submit" className="tasks-send" aria-label="Send reply" disabled={!(drafts[thread.root.id] ?? '').trim()}>
-              <ArrowUp size={14} />
-            </button>
-          </form>
-        </div>
-      ))}
+      {feed.map((entry, index) =>
+        entry.kind === 'activity' ? renderTimeline(entry.items, `timeline-${index}`) : renderThread(entry.thread),
+      )}
     </div>
   )
 }

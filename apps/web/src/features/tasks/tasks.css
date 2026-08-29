@@ -467,120 +467,44 @@
   border: 1px solid var(--hairline);
   border-radius: 10px;
   background: var(--elevated);
+  overflow: hidden;
 }
 
-.tasks-thread-comment {
-  padding: 12px 14px;
+/* comments reuse the chat message layout inside the card */
+.tasks-thread .tasks-comment {
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
-.tasks-thread-comment + .tasks-thread-comment {
+.tasks-thread .tasks-comment + .tasks-comment {
   border-top: 1px solid var(--hairline);
 }
 
-.tasks-comment-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
+.tasks-thread .tasks-comment[data-reply='true'] {
+  padding-left: 24px;
 }
 
-.tasks-comment-author {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.tasks-comment-text {
-  margin-top: 6px;
-  font-size: 13px;
-  line-height: 19px;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-}
-
-.tasks-thread-comment[data-reply='true'] .tasks-comment-text {
-  padding-left: 28px;
-}
-
-.tasks-reply {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 8px 8px 14px;
+/* slim chat composer as the reply row of a thread card */
+.tasks-thread-composer {
   border-top: 1px solid var(--hairline);
 }
 
-.tasks-reply-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
+.tasks-thread-composer .fc-composer {
+  padding: 6px 8px;
+}
+
+.tasks-thread-composer .fc-input-row,
+.tasks-comment-composer .fc-input-row {
   background: transparent;
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-primary);
-  outline: none;
 }
 
-.tasks-reply-input::placeholder {
-  color: var(--control-placeholder);
-}
-
-.tasks-send {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: var(--fill);
-  color: var(--text-secondary);
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.tasks-send:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.tasks-send:not(:disabled):hover {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-
-/* comment box at the end of the activity */
-.tasks-comment-box {
+/* full chat composer at the end of the page */
+.tasks-comment-composer {
   margin-top: 16px;
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-  background: var(--elevated);
 }
 
-.tasks-comment-input {
-  display: block;
-  width: 100%;
-  min-height: 64px;
-  padding: 10px 12px;
-  border: none;
-  background: transparent;
-  font: inherit;
-  font-size: 13px;
-  line-height: 19px;
-  color: var(--text-primary);
-  resize: none;
-  outline: none;
-  field-sizing: content;
-}
-
-.tasks-comment-input::placeholder {
-  color: var(--control-placeholder);
-}
-
-.tasks-comment-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  padding: 0 8px 8px;
+.tasks-comment-composer .fc-composer {
+  padding: 0;
 }
 
 /* the due-date popover holds a calendar: no height cap, nested time list may overflow */

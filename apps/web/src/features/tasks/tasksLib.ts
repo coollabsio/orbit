@@ -1,4 +1,4 @@
-import type { Task, TaskComment, TaskStatus } from '../../mock/types'
+import type { Task, TaskActivity, TaskComment, TaskStatus } from '../../mock/types'
 import { relativeTime } from '../../lib/format'
 import { STATUS_ORDER } from '../../components/workspace/taskMeta'
 
@@ -53,4 +53,28 @@ export function agoLabel(iso: string): string {
   const label = relativeTime(iso)
   if (label === 'now') return 'just now'
   return /^\d+[mhd]$/.test(label) ? `${label} ago` : label
+}
+
+export type FeedEntry = { kind: 'activity'; at: string; items: TaskActivity[] } | { kind: 'thread'; at: string; thread: CommentThread }
+
+/** Activity events and comment threads in one chronological list; consecutive events share a timeline block. */
+export function buildFeed(task: Task): FeedEntry[] {
+  const events = [...task.activity].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const threads = commentThreads(task)
+  const mixed: Array<{ at: string; event?: TaskActivity; thread?: CommentThread }> = [
+    ...events.map((event) => ({ at: event.createdAt, event })),
+    ...threads.map((thread) => ({ at: thread.root.createdAt, thread })),
+  ].sort((a, b) => a.at.localeCompare(b.at))
+
+  const feed: FeedEntry[] = []
+  for (const item of mixed) {
+    if (item.thread) {
+      feed.push({ kind: 'thread', at: item.at, thread: item.thread })
+    } else if (item.event) {
+      const last = feed[feed.length - 1]
+      if (last && last.kind === 'activity') last.items.push(item.event)
+      else feed.push({ kind: 'activity', at: item.at, items: [item.event] })
+    }
+  }
+  return feed
 }

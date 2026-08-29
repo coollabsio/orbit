@@ -40,6 +40,8 @@ export interface TaskComment {
   createdAt: string
   /** Set on replies: the id of the top-level comment. */
   parentId?: string
+  attachments?: Attachment[]
+  editedAt?: string | null
 }
 
 export interface TaskActivity {
