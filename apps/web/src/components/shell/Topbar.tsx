@@ -68,6 +68,8 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       const crumbs: Crumb[] = [{ label: 'Settings', to: '/settings' }]
       if (id === 'members') crumbs.push({ label: 'Members' })
       else if (id === 'webhooks') crumbs.push({ label: 'Webhooks' })
+      else if (id === 'roles') crumbs.push({ label: 'Roles' })
+      else if (id === 'danger') crumbs.push({ label: 'Danger Zone' })
       return { crumbs }
     }
     default:
