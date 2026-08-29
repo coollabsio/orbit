@@ -6,12 +6,7 @@ import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import {
-  PRIORITY_LABEL,
-  PRIORITY_ORDER,
-  STATUS_LABEL,
-  STATUS_ORDER,
-} from '../../../components/workspace/taskMeta'
+import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../components/workspace/taskMeta'
 import { fullDate, timeOfDay } from '../../../lib/format'
 import {
   addTaskComment,
@@ -37,6 +32,8 @@ interface TaskDetailProps {
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
 export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   const users = state.users
+  const status = state.statuses.find((s) => s.id === task?.statusId)
+  const statusOptions = task ? projectStatuses(state.statuses, task.projectId) : []
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
   // every label used in the workspace, so a task can pick from the existing ones
   const allLabels = useMemo(
@@ -115,25 +112,25 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
               <Dropdown
                 trigger={() => (
                   <button className="button button-ghost tasks-side-prop">
-                    <TaskStatusIcon status={task.status} />
-                    {STATUS_LABEL[task.status]}
+                    <TaskStatusIcon status={status} />
+                    {status?.name ?? 'No status'}
                   </button>
                 )}
               >
                 {(close) => (
                   <>
-                    {STATUS_ORDER.map((status) => (
+                    {statusOptions.map((option) => (
                       <button
-                        key={status}
+                        key={option.id}
                         className="popover-option"
-                        data-selected={status === task.status || undefined}
+                        data-selected={option.id === task.statusId || undefined}
                         onClick={() => {
-                          setTaskStatus(task.id, status)
+                          setTaskStatus(task.id, option.id)
                           close()
                         }}
                       >
-                        <TaskStatusIcon status={status} />
-                        {STATUS_LABEL[status]}
+                        <TaskStatusIcon status={option} />
+                        {option.name}
                       </button>
                     ))}
                   </>

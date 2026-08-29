@@ -9,7 +9,8 @@ import type {
   MailThread,
   Task,
   TaskPriority,
-  TaskStatus,
+  StatusCategory,
+  TaskStatusDef,
   MailFolder,
   Project,
   Role,
@@ -17,11 +18,13 @@ import type {
   User,
 } from './types'
 
+import { defaultStatusOf, projectStatuses } from '../components/workspace/taskMeta'
+
 const now = () => new Date().toISOString()
 
 /* ---------- tasks ---------- */
 
-function touchTask(taskId: string, patch: Partial<Task>, activityText?: string, activityStatus?: TaskStatus) {
+function touchTask(taskId: string, patch: Partial<Task>, activityText?: string, activityStatusId?: string) {
   updateState((s) => ({
     ...s,
     tasks: s.tasks.map((t) =>
@@ -38,7 +41,7 @@ function touchTask(taskId: string, patch: Partial<Task>, activityText?: string, 
                     actorId: s.currentUserId,
                     text: activityText,
                     createdAt: now(),
-                    ...(activityStatus ? { status: activityStatus } : {}),
+                    ...(activityStatusId ? { statusId: activityStatusId } : {}),
                   },
                 ]
               : t.activity,
@@ -48,15 +51,9 @@ function touchTask(taskId: string, patch: Partial<Task>, activityText?: string, 
   }))
 }
 
-const statusLabel: Record<TaskStatus, string> = {
-  todo: 'Todo',
-  in_progress: 'In Progress',
-  done: 'Done',
-  cancelled: 'Cancelled',
-}
-
-export function setTaskStatus(taskId: string, status: TaskStatus) {
-  touchTask(taskId, { status }, `changed status to ${statusLabel[status]}`, status)
+export function setTaskStatus(taskId: string, statusId: string) {
+  const name = getState().statuses.find((s) => s.id === statusId)?.name ?? 'Unknown'
+  touchTask(taskId, { statusId }, `changed status to ${name}`, statusId)
 }
 
 export function setTaskPriority(taskId: string, priority: TaskPriority) {
@@ -151,7 +148,7 @@ export function toggleTaskLabel(taskId: string, label: string) {
 export function createTask(input: {
   title: string
   projectId: string
-  status?: TaskStatus
+  statusId?: string
   priority?: TaskPriority
   assigneeIds?: string[]
 }): Task {
@@ -163,7 +160,7 @@ export function createTask(input: {
     identifier: `${project.key}-${100 + count + 1}`,
     title: input.title,
     description: '',
-    status: input.status ?? 'todo',
+    statusId: input.statusId ?? defaultStatusOf(s.statuses, project.id)?.id ?? '',
     priority: input.priority ?? 'none',
     assigneeIds: input.assigneeIds ?? [],
     creatorId: s.currentUserId,
@@ -190,7 +187,67 @@ export function deleteProject(projectId: string) {
   updateState((s) => ({
     ...s,
     projects: s.projects.filter((p) => p.id !== projectId),
+    statuses: s.statuses.filter((st) => st.projectId !== projectId),
     tasks: s.tasks.filter((t) => t.projectId !== projectId),
+  }))
+}
+
+/* ---------- statuses ---------- */
+
+export function createStatus(
+  projectId: string,
+  input: { name: string; category: StatusCategory; color: string; description?: string },
+): TaskStatusDef {
+  const siblings = getState().statuses.filter((s) => s.projectId === projectId && s.category === input.category)
+  const status: TaskStatusDef = {
+    id: nextId('st'),
+    projectId,
+    name: input.name,
+    description: input.description ?? '',
+    color: input.color,
+    category: input.category,
+    position: siblings.length > 0 ? Math.max(...siblings.map((s) => s.position)) + 1 : 0,
+  }
+  updateState((s) => ({ ...s, statuses: [...s.statuses, status] }))
+  return status
+}
+
+export function updateStatus(statusId: string, patch: Partial<Pick<TaskStatusDef, 'name' | 'description' | 'color'>>) {
+  updateState((s) => ({ ...s, statuses: s.statuses.map((st) => (st.id === statusId ? { ...st, ...patch } : st)) }))
+}
+
+/** Removes a status; its tasks move to the next status of the same category, else the project default. */
+export function deleteStatus(statusId: string) {
+  const s = getState()
+  const status = s.statuses.find((st) => st.id === statusId)
+  if (!status) return
+  const remaining = s.statuses.filter((st) => st.id !== statusId)
+  const fallback =
+    projectStatuses(remaining, status.projectId).find((st) => st.category === status.category) ??
+    defaultStatusOf(remaining, status.projectId)
+  if (!fallback) return
+  updateState((prev) => ({
+    ...prev,
+    statuses: remaining,
+    tasks: prev.tasks.map((t) => (t.statusId === statusId ? { ...t, statusId: fallback.id, updatedAt: now() } : t)),
+  }))
+}
+
+/** Moves a status before/after another one of the same project and category. */
+export function reorderStatus(statusId: string, targetId: string, position: 'before' | 'after') {
+  const s = getState()
+  const moving = s.statuses.find((st) => st.id === statusId)
+  const target = s.statuses.find((st) => st.id === targetId)
+  if (!moving || !target || moving.id === target.id) return
+  if (moving.projectId !== target.projectId || moving.category !== target.category) return
+  const ordered = projectStatuses(s.statuses, moving.projectId)
+    .filter((st) => st.category === moving.category && st.id !== moving.id)
+  const index = ordered.findIndex((st) => st.id === target.id) + (position === 'after' ? 1 : 0)
+  ordered.splice(index, 0, moving)
+  const positions = new Map(ordered.map((st, i) => [st.id, i]))
+  updateState((prev) => ({
+    ...prev,
+    statuses: prev.statuses.map((st) => (positions.has(st.id) ? { ...st, position: positions.get(st.id)! } : st)),
   }))
 }
 

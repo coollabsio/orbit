@@ -23,7 +23,19 @@ export interface Workspace {
   iconUrl: string | null
 }
 
-export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'cancelled'
+export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled'
+
+/** A project's workflow status (Linear-style: category gives the glyph, color and order are editable). */
+export interface TaskStatusDef {
+  id: string
+  projectId: string
+  name: string
+  description: string
+  color: string
+  category: StatusCategory
+  /** Order inside the category. */
+  position: number
+}
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
 
 export interface Project {
@@ -50,7 +62,7 @@ export interface TaskActivity {
   text: string
   createdAt: string
   /** Status changes show the status glyph in the timeline. */
-  status?: TaskStatus
+  statusId?: string
 }
 
 export interface Task {
@@ -58,7 +70,7 @@ export interface Task {
   identifier: string
   title: string
   description: string
-  status: TaskStatus
+  statusId: string
   priority: TaskPriority
   assigneeIds: string[]
   creatorId: string
@@ -223,6 +235,7 @@ export interface AppState {
   users: User[]
   roles: Role[]
   projects: Project[]
+  statuses: TaskStatusDef[]
   tasks: Task[]
   docs: Doc[]
   mailFolders: MailFolder[]

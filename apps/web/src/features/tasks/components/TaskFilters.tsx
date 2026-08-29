@@ -2,15 +2,16 @@ import { Filter, Kanban, List, Setting4 } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { STATUS_LABEL, STATUS_ORDER } from '../../../components/workspace/taskMeta'
-import type { TaskStatus, User } from '../../../mock/types'
+import type { User } from '../../../mock/types'
+import type { StatusGroup } from '../tasksLib'
 
 interface TaskFiltersProps {
   users: User[]
-  status: TaskStatus | null
+  groups: StatusGroup[]
+  statusKey: string | null
   assigneeId: string | null
   layout: 'list' | 'board'
-  onStatusChange: (status: TaskStatus | null) => void
+  onStatusChange: (key: string | null) => void
   onAssigneeChange: (assigneeId: string | null) => void
   onLayoutChange: (layout: 'list' | 'board') => void
 }
@@ -18,14 +19,15 @@ interface TaskFiltersProps {
 /** Header dropdowns: one "Filter" menu (status + assignee) and one "Display" menu (layout). */
 export function TaskFilters({
   users,
-  status,
+  groups,
+  statusKey,
   assigneeId,
   layout,
   onStatusChange,
   onAssigneeChange,
   onLayoutChange,
 }: TaskFiltersProps) {
-  const activeCount = (status ? 1 : 0) + (assigneeId ? 1 : 0)
+  const activeCount = (statusKey ? 1 : 0) + (assigneeId ? 1 : 0)
 
   return (
     <>
@@ -42,18 +44,18 @@ export function TaskFilters({
         {(close) => (
           <>
             <div className="popover-heading">Status</div>
-            {STATUS_ORDER.map((s) => (
+            {groups.map((group) => (
               <button
-                key={s}
+                key={group.key}
                 className="popover-option"
-                data-selected={s === status || undefined}
+                data-selected={group.key === statusKey || undefined}
                 onClick={() => {
-                  onStatusChange(s === status ? null : s)
+                  onStatusChange(group.key === statusKey ? null : group.key)
                   close()
                 }}
               >
-                <TaskStatusIcon status={s} />
-                {STATUS_LABEL[s]}
+                <TaskStatusIcon status={group.status} />
+                {group.name}
               </button>
             ))}
             <div className="popover-separator" />

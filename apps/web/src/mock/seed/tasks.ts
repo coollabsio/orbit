@@ -1,11 +1,30 @@
 import { ago, inDays } from '../../lib/format'
-import type { Task } from '../types'
+import { DEFAULT_STATUS_TEMPLATES } from '../../components/workspace/taskMeta'
+import type { Task, TaskStatusDef } from '../types'
+import { projects } from './users'
 
 let n = 0
 
-function task(partial: Omit<Task, 'comments' | 'activity' | 'description' | 'labels' | 'dueAt'> & Partial<Task>): Task {
+/** Every project starts with the default workflow; ids are `${projectId}_${key}` so seeds can reference them. */
+export const statuses: TaskStatusDef[] = projects.flatMap((project) =>
+  DEFAULT_STATUS_TEMPLATES.map((template, index) => ({
+    id: `${project.id}_${template.key}`,
+    projectId: project.id,
+    name: template.name,
+    description: '',
+    color: template.color,
+    category: template.category,
+    position: index,
+  })),
+)
+
+type SeedTask = Omit<Task, 'comments' | 'activity' | 'description' | 'labels' | 'dueAt' | 'statusId'> &
+  Partial<Task> & { statusKey: 'todo' | 'in_progress' | 'done' | 'cancelled' }
+
+function task({ statusKey, ...partial }: SeedTask): Task {
   n += 1
   return {
+    statusId: `${partial.projectId}_${statusKey}`,
     description: '',
     labels: [],
     dueAt: null,
@@ -29,7 +48,7 @@ export const tasks: Task[] = [
     title: 'Fix proxy network detection on restart',
     description:
       'The reverse proxy loses track of container networks after a daemon restart. We need to re-scan attached networks on startup and reconcile the routing table.',
-    status: 'in_progress',
+    statusKey: 'in_progress',
     priority: 'urgent',
     assigneeIds: ['u_shadow', 'u_andras'],
     creatorId: 'u_cinzya',
@@ -61,7 +80,7 @@ export const tasks: Task[] = [
     ],
     activity: [
       { id: 'ta_t1_1', actorId: 'u_cinzya', text: 'created this task', createdAt: ago(3, 'd') },
-      { id: 'ta_t1_2', actorId: 'u_shadow', text: 'changed status to In Progress', status: 'in_progress', createdAt: ago(1, 'd') },
+      { id: 'ta_t1_2', actorId: 'u_shadow', text: 'changed status to In Progress', statusId: 'p_infra_in_progress', createdAt: ago(1, 'd') },
       { id: 'ta_t1_3', actorId: 'u_shadow', text: 'assigned Andras', createdAt: ago(5, 'h') },
     ],
   }),
@@ -69,7 +88,7 @@ export const tasks: Task[] = [
     id: 't_2',
     identifier: 'INF-102',
     title: 'Rotate TLS certificates for internal services',
-    status: 'todo',
+    statusKey: 'todo',
     priority: 'high',
     assigneeIds: ['u_cinzya'],
     creatorId: 'u_shadow',
@@ -83,7 +102,7 @@ export const tasks: Task[] = [
     id: 't_3',
     identifier: 'INF-103',
     title: 'Set up nightly SQLite backups with WAL checkpointing',
-    status: 'todo',
+    statusKey: 'todo',
     priority: 'medium',
     assigneeIds: ['u_cinzya'],
     creatorId: 'u_shadow',
@@ -96,7 +115,7 @@ export const tasks: Task[] = [
     id: 't_4',
     identifier: 'WEB-201',
     title: 'Improve error page for expired sessions',
-    status: 'in_progress',
+    statusKey: 'in_progress',
     priority: 'medium',
     assigneeIds: ['u_adiology'],
     creatorId: 'u_peak',
@@ -117,7 +136,7 @@ export const tasks: Task[] = [
     id: 't_5',
     identifier: 'WEB-202',
     title: 'Dark mode flashes light theme on first paint',
-    status: 'todo',
+    statusKey: 'todo',
     priority: 'low',
     assigneeIds: ['u_adiology'],
     creatorId: 'u_adiology',
@@ -130,7 +149,7 @@ export const tasks: Task[] = [
     id: 't_6',
     identifier: 'WEB-203',
     title: 'Migrate landing page to new design tokens',
-    status: 'done',
+    statusKey: 'done',
     priority: 'medium',
     assigneeIds: ['u_adiology'],
     creatorId: 'u_peak',
@@ -143,7 +162,7 @@ export const tasks: Task[] = [
     id: 't_7',
     identifier: 'INT-301',
     title: 'GitHub label sync creates duplicate tasks',
-    status: 'in_progress',
+    statusKey: 'in_progress',
     priority: 'high',
     assigneeIds: ['u_andras'],
     creatorId: 'u_andras',
@@ -165,7 +184,7 @@ export const tasks: Task[] = [
     id: 't_8',
     identifier: 'INT-302',
     title: 'Add Discord forwarding rules UI',
-    status: 'todo',
+    statusKey: 'todo',
     priority: 'medium',
     assigneeIds: ['u_peak'],
     creatorId: 'u_shadow',
@@ -178,7 +197,7 @@ export const tasks: Task[] = [
     id: 't_9',
     identifier: 'INT-303',
     title: 'Mail sync stalls on large attachments',
-    status: 'todo',
+    statusKey: 'todo',
     priority: 'high',
     assigneeIds: ['u_andras'],
     creatorId: 'u_cinzya',
@@ -191,7 +210,7 @@ export const tasks: Task[] = [
     id: 't_10',
     identifier: 'INT-304',
     title: 'Write onboarding doc for new teammates',
-    status: 'done',
+    statusKey: 'done',
     priority: 'low',
     assigneeIds: ['u_peak'],
     creatorId: 'u_shadow',
@@ -204,7 +223,7 @@ export const tasks: Task[] = [
     id: 't_11',
     identifier: 'INF-104',
     title: 'Investigate intermittent 502s behind the load balancer',
-    status: 'todo',
+    statusKey: 'todo',
     priority: 'urgent',
     assigneeIds: [],
     creatorId: 'u_cinzya',
@@ -217,7 +236,7 @@ export const tasks: Task[] = [
     id: 't_12',
     identifier: 'WEB-204',
     title: 'Add keyboard navigation to the pricing table',
-    status: 'cancelled',
+    statusKey: 'cancelled',
     priority: 'none',
     assigneeIds: [],
     creatorId: 'u_adiology',

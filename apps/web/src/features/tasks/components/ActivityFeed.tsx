@@ -26,10 +26,11 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
     <ol key={key} className="tasks-timeline">
       {items.map((item) => {
         const actor = userById(item.actorId)
+        const status = item.statusId ? state.statuses.find((s) => s.id === item.statusId) : undefined
         return (
           <li key={item.id} className="tasks-timeline-item">
             <span className="tasks-timeline-icon">
-              {item.status ? <TaskStatusIcon status={item.status} size={14} /> : <Avatar user={actor} size={14} />}
+              {status ? <TaskStatusIcon status={status} size={14} /> : <Avatar user={actor} size={14} />}
             </span>
             <span className="tasks-timeline-text truncate">
               <span className="tasks-timeline-actor">{actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}

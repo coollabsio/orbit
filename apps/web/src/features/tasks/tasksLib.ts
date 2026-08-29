@@ -1,37 +1,68 @@
-import type { Task, TaskActivity, TaskComment, TaskStatus } from '../../mock/types'
+import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from '../../mock/types'
 import { relativeTime } from '../../lib/format'
-import { STATUS_ORDER } from '../../components/workspace/taskMeta'
+import { defaultStatusOf, sortStatuses, statusKeyOf } from '../../components/workspace/taskMeta'
 
 export interface TaskFilterState {
   tab: 'my' | 'all'
   currentUserId: string
   projectId: string | null
-  status: TaskStatus | null
+  /** Status group key (see `statusKeyOf`), so "Todo" matches across projects. */
+  statusKey: string | null
   assigneeId: string | null
+  statuses: TaskStatusDef[]
 }
 
 export function filterTasks(tasks: Task[], f: TaskFilterState): Task[] {
+  const keyById = new Map(f.statuses.map((s) => [s.id, statusKeyOf(s)]))
   return tasks.filter((t) => {
     if (f.tab === 'my' && !t.assigneeIds.includes(f.currentUserId)) return false
     if (f.projectId && t.projectId !== f.projectId) return false
-    if (f.status && t.status !== f.status) return false
+    if (f.statusKey && keyById.get(t.statusId) !== f.statusKey) return false
     if (f.assigneeId && !t.assigneeIds.includes(f.assigneeId)) return false
     return true
   })
 }
 
+/** A status column/group: one status per project merged by key (same category + name). */
 export interface StatusGroup {
-  status: TaskStatus
+  key: string
+  name: string
+  category: StatusCategory
+  /** Representative definition (icon color). */
+  status: TaskStatusDef
+  statusIds: string[]
+}
+
+/** Groups for the given statuses (all projects or one), in workflow order, including empty ones. */
+export function statusGroups(statuses: TaskStatusDef[], projectId: string | null): StatusGroup[] {
+  const groups: StatusGroup[] = []
+  for (const status of sortStatuses(projectId ? statuses.filter((s) => s.projectId === projectId) : statuses)) {
+    const key = statusKeyOf(status)
+    const existing = groups.find((g) => g.key === key)
+    if (existing) existing.statusIds.push(status.id)
+    else groups.push({ key, name: status.name, category: status.category, status, statusIds: [status.id] })
+  }
+  return groups
+}
+
+export interface TaskGroup extends StatusGroup {
   tasks: Task[]
 }
 
-export function groupTasksByStatus(tasks: Task[]): StatusGroup[] {
-  return STATUS_ORDER.map((status) => ({
-    status,
-    tasks: tasks
-      .filter((t) => t.status === status)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-  })).filter((group) => group.tasks.length > 0)
+/** Tasks bucketed into status groups (empty groups dropped), newest first inside a group. */
+export function groupTasksByStatus(tasks: Task[], groups: StatusGroup[]): TaskGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      tasks: tasks.filter((t) => group.statusIds.includes(t.statusId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    }))
+    .filter((group) => group.tasks.length > 0)
+}
+
+/** The status of `projectId` that belongs to a group key; falls back to the project's default status. */
+export function resolveStatusId(statuses: TaskStatusDef[], projectId: string, key: string | null): string | undefined {
+  const match = key ? statuses.find((s) => s.projectId === projectId && statusKeyOf(s) === key) : undefined
+  return (match ?? defaultStatusOf(statuses, projectId))?.id
 }
 
 export interface CommentThread {

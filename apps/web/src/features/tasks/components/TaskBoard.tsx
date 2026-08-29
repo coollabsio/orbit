@@ -1,42 +1,48 @@
 import { AvatarStack } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { STATUS_LABEL, STATUS_ORDER } from '../../../components/workspace/taskMeta'
 import { setTaskStatus } from '../../../mock/actions'
-import type { Task, TaskStatus, User } from '../../../mock/types'
+import type { Task, TaskStatusDef, User } from '../../../mock/types'
+import { resolveStatusId, type StatusGroup } from '../tasksLib'
 import { PriorityPicker } from './PriorityPicker'
 
 export function TaskBoard({
   tasks,
   users,
+  statuses,
+  groups,
   activeTaskId,
   onOpen,
 }: {
   tasks: Task[]
   users: User[]
+  statuses: TaskStatusDef[]
+  groups: StatusGroup[]
   activeTaskId: string | null
   onOpen: (taskId: string) => void
 }) {
-  const moveTask = (event: React.DragEvent, status: TaskStatus) => {
+  const moveTask = (event: React.DragEvent, group: StatusGroup) => {
     event.preventDefault()
     const taskId = event.dataTransfer.getData('text/task-id')
     const task = tasks.find((item) => item.id === taskId)
-    if (task && task.status !== status) setTaskStatus(task.id, status)
+    if (!task) return
+    const statusId = resolveStatusId(statuses, task.projectId, group.key)
+    if (statusId && statusId !== task.statusId) setTaskStatus(task.id, statusId)
   }
 
   return (
-    <div className="tasks-board">
-      {STATUS_ORDER.map((status) => {
-        const columnTasks = tasks.filter((task) => task.status === status)
+    <div className="tasks-board" style={{ gridTemplateColumns: `repeat(${groups.length}, minmax(220px, 1fr))` }}>
+      {groups.map((group) => {
+        const columnTasks = tasks.filter((task) => group.statusIds.includes(task.statusId))
         return (
           <section
-            key={status}
+            key={group.key}
             className="tasks-board-column"
             onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => moveTask(event, status)}
+            onDrop={(event) => moveTask(event, group)}
           >
             <header className="tasks-board-column-header">
-              <TaskStatusIcon status={status} />
-              <span>{STATUS_LABEL[status]}</span>
+              <TaskStatusIcon status={group.status} />
+              <span>{group.name}</span>
               <span className="tasks-board-count">{columnTasks.length}</span>
             </header>
             <div className="tasks-board-cards">

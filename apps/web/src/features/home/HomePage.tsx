@@ -47,7 +47,7 @@ export function HomePage() {
     .filter(
       (t) =>
         t.assigneeIds.includes(state.currentUserId) &&
-        (t.status === 'todo' || t.status === 'in_progress'),
+        ['unstarted', 'started'].includes(state.statuses.find((s) => s.id === t.statusId)?.category ?? ''),
     )
     .sort((a, b) => {
       const p = PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority)
@@ -106,7 +106,7 @@ export function HomePage() {
                 ) : (
                   myOpenTasks.map((task) => (
                     <Link key={task.id} to={`/tasks/${task.id}`} className="list-row">
-                      <TaskStatusIcon status={task.status} />
+                      <TaskStatusIcon status={state.statuses.find((s) => s.id === task.statusId)} />
                       <span className="text-faint" style={{ fontSize: 12, flexShrink: 0 }}>
                         {task.identifier}
                       </span>

@@ -4,7 +4,6 @@ import { useTheme } from '../../lib/themeContext'
 import { useAppState } from '../../mock/store'
 import { createDoc } from '../../mock/actions'
 import { threadTitleOf } from '../../features/chat/chatLib'
-import { STATUS_LABEL } from '../workspace/taskMeta'
 import { TaskStatusIcon } from '../workspace/TaskStatusIcon'
 import { Dropdown } from '../ui/Dropdown'
 import type { AppState } from '../../mock/types'
@@ -27,6 +26,7 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       }
       const task = id ? state.tasks.find((t) => t.id === id) : null
       if (task) {
+        const status = state.statuses.find((s) => s.id === task.statusId)
         const project = state.projects.find((p) => p.id === task.projectId)
         if (project) crumbs.push({ label: project.name, to: `/tasks?project=${project.id}` })
         crumbs.push({ label: task.identifier })
@@ -34,8 +34,8 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
           crumbs,
           status: (
             <span className="topbar-status">
-              <TaskStatusIcon status={task.status} size={12} />
-              {STATUS_LABEL[task.status]}
+              <TaskStatusIcon status={status} size={12} />
+              {status?.name ?? 'No status'}
             </span>
           ),
         }

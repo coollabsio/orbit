@@ -1,14 +1,15 @@
 import { AvatarStack } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { STATUS_LABEL, STATUS_ORDER } from '../../../components/workspace/taskMeta'
+import { projectStatuses } from '../../../components/workspace/taskMeta'
 import { shortDate } from '../../../lib/format'
 import { setTaskStatus } from '../../../mock/actions'
-import type { Task, User } from '../../../mock/types'
+import type { Task, TaskStatusDef, User } from '../../../mock/types'
 import { PriorityPicker } from './PriorityPicker'
 
 interface TaskRowProps {
   task: Task
+  statuses: TaskStatusDef[]
   assignees: User[]
   selected: boolean
   dragging: boolean
@@ -19,7 +20,9 @@ interface TaskRowProps {
 }
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
-export function TaskRow({ task, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+export function TaskRow({ task, statuses, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+  const status = statuses.find((s) => s.id === task.statusId)
+  const options = projectStatuses(statuses, task.projectId)
   return (
     <div
       className="list-row tasks-row"
@@ -51,25 +54,25 @@ export function TaskRow({ task, assignees, selected, dragging, onOpen, onToggleS
       <div onClick={(e) => e.stopPropagation()}>
         <Dropdown
           trigger={() => (
-            <button className="icon-button tasks-row-status" aria-label={`Status: ${STATUS_LABEL[task.status]}`}>
-              <TaskStatusIcon status={task.status} />
+            <button className="icon-button tasks-row-status" aria-label={`Status: ${status?.name ?? 'None'}`}>
+              <TaskStatusIcon status={status} />
             </button>
           )}
         >
           {(close) => (
             <>
-              {STATUS_ORDER.map((status) => (
+              {options.map((option) => (
                 <button
-                  key={status}
+                  key={option.id}
                   className="popover-option"
-                  data-selected={status === task.status || undefined}
+                  data-selected={option.id === task.statusId || undefined}
                   onClick={() => {
-                    setTaskStatus(task.id, status)
+                    setTaskStatus(task.id, option.id)
                     close()
                   }}
                 >
-                  <TaskStatusIcon status={status} />
-                  {STATUS_LABEL[status]}
+                  <TaskStatusIcon status={option} />
+                  {option.name}
                 </button>
               ))}
             </>
