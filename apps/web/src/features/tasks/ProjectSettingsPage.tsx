@@ -3,11 +3,13 @@ import { useNavigate, useParams } from 'react-router'
 import { Add, ArrowLeft, Edit, More, TaskSquare, TickCircle, Trash } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
+import { InfoTip } from '../../components/ui/InfoTip'
+import { UnsavedBar } from '../../components/ui/UnsavedBar'
 import { TaskStatusIcon } from '../../components/workspace/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, STATUS_COLORS, defaultStatusOf, projectStatuses } from '../../components/workspace/taskMeta'
 import { createStatus, deleteProject, deleteStatus, reorderStatus, updateProject, updateStatus } from '../../mock/actions'
 import { useAppState } from '../../mock/store'
-import type { StatusCategory, TaskStatusDef } from '../../mock/types'
+import type { Project, StatusCategory, TaskStatusDef } from '../../mock/types'
 import { ConfirmDeleteModal } from '../chat/components/ChannelModals'
 import { SettingsCard } from '../settings/SettingsCard'
 import '../shared/cards.css'
@@ -45,7 +47,7 @@ export function ProjectSettingsPage() {
 
   return (
     <div className="page">
-      <section className="pane" style={{ flex: 1 }}>
+      <section className="pane project-settings-pane">
         <div className="pane-header">
           <button className="icon-button" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
             <ArrowLeft size={16} />
@@ -59,71 +61,7 @@ export function ProjectSettingsPage() {
         ) : (
           <div className="settings-scroll">
             <div className="settings-content project-settings">
-              <SettingsCard title="General" description="Name, tag and color of this project.">
-                <div className="settings-grid">
-                  <div className="settings-field">
-                    <label className="field-label" htmlFor="project-name">
-                      Name
-                    </label>
-                    <input
-                      id="project-name"
-                      key={`name-${project.id}`}
-                      className="input"
-                      defaultValue={project.name}
-                      onBlur={(e) => {
-                        const name = e.target.value.trim()
-                        if (name && name !== project.name) updateProject(project.id, { name })
-                      }}
-                    />
-                  </div>
-                  <div className="settings-field">
-                    <label className="field-label" htmlFor="project-key">
-                      Tag
-                    </label>
-                    <input
-                      id="project-key"
-                      key={`key-${project.id}`}
-                      className="input"
-                      defaultValue={project.key}
-                      maxLength={5}
-                      placeholder="INF"
-                      onBlur={(e) => {
-                        const key = e.target.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
-                        e.target.value = key
-                        if (key && key !== project.key) updateProject(project.id, { key })
-                      }}
-                    />
-                    <p className="settings-help">Short prefix used in task ids, for example {project.key}-101.</p>
-                  </div>
-                  <div className="settings-field col-span-2">
-                    <span className="field-label">Color</span>
-                    <div className="ps-swatches">
-                      {PROJECT_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          className="ps-swatch"
-                          style={{ backgroundColor: color }}
-                          title={color}
-                          aria-label={`Color ${color}`}
-                          aria-pressed={project.color.toLowerCase() === color}
-                          onClick={() => updateProject(project.id, { color })}
-                        >
-                          {project.color.toLowerCase() === color ? <TickCircle size={14} /> : null}
-                        </button>
-                      ))}
-                      <label className="ps-swatch ps-swatch-custom" style={{ backgroundColor: project.color }} title="Custom color">
-                        <input
-                          type="color"
-                          value={project.color}
-                          aria-label="Custom color"
-                          onChange={(e) => updateProject(project.id, { color: e.target.value })}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </SettingsCard>
+              <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} />
 
               <SettingsCard title="Statuses" description="The workflow a task goes through from start to completion." flush>
                 <div className="ps-status-list">
@@ -299,6 +237,75 @@ export function ProjectSettingsPage() {
         />
       ) : null}
     </div>
+  )
+}
+
+/**
+ * General card with a draft: edits stay local until "Save Changes" (Reset drops them). The parent
+ * keys this component by the saved values, so a fresh draft is created after each save.
+ */
+function ProjectGeneralCard({ project }: { project: Project }) {
+  const [draft, setDraft] = useState({ name: project.name, key: project.key, color: project.color })
+  const dirty = draft.name !== project.name || draft.key !== project.key || draft.color !== project.color
+  const canSave = draft.name.trim().length > 0 && draft.key.length > 0
+
+  return (
+    <>
+      <SettingsCard title="General" description="Name, tag and color of this project.">
+        <div className="settings-grid">
+          <div className="settings-field">
+            <label className="field-label" htmlFor="project-name">
+              Name
+            </label>
+            <input id="project-name" className="input" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+          </div>
+          <div className="settings-field">
+            <label className="field-label" htmlFor="project-key">
+              Tag
+              <InfoTip text={`Short prefix used in task ids, for example ${project.key}-101.`} />
+            </label>
+            <input
+              id="project-key"
+              className="input"
+              value={draft.key}
+              maxLength={5}
+              placeholder="INF"
+              onChange={(e) => setDraft((d) => ({ ...d, key: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
+            />
+          </div>
+          <div className="settings-field col-span-2">
+            <span className="field-label">Color</span>
+            <div className="ps-color-palette ps-color-palette-inline">
+              {PROJECT_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className="ps-color-dot"
+                  style={{ backgroundColor: color }}
+                  title={color}
+                  aria-label={`Color ${color}`}
+                  aria-pressed={draft.color.toLowerCase() === color}
+                  onClick={() => setDraft((d) => ({ ...d, color }))}
+                >
+                  {draft.color.toLowerCase() === color ? <TickCircle size={14} /> : null}
+                </button>
+              ))}
+              <span className="ps-color-sep" />
+              <label className="ps-color-dot ps-color-custom" title="Custom color">
+                <input type="color" value={draft.color} aria-label="Custom color" onChange={(e) => setDraft((d) => ({ ...d, color: e.target.value }))} />
+              </label>
+            </div>
+          </div>
+        </div>
+      </SettingsCard>
+      {dirty ? (
+        <UnsavedBar
+          onReset={() => setDraft({ name: project.name, key: project.key, color: project.color })}
+          onSave={() => canSave && updateProject(project.id, { name: draft.name.trim(), key: draft.key, color: draft.color })}
+          saving={!canSave}
+        />
+      ) : null}
+    </>
   )
 }
 

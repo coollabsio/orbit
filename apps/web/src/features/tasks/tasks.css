@@ -622,52 +622,22 @@
   padding: 28px 40px 48px;
 }
 
-.settings-help {
-  margin: 6px 0 0;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-.ps-swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.ps-swatch {
+/* the pane hosts the floating unsaved-changes bar */
+.project-settings-pane {
   position: relative;
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  color: #fff;
-  cursor: pointer;
+  flex: 1;
 }
 
-.ps-swatch[aria-pressed='true'] {
-  box-shadow: 0 0 0 2px var(--base), 0 0 0 4px var(--text-secondary);
-}
-
-.ps-swatch-custom {
-  width: 44px;
-  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.35), transparent);
-}
-
-.ps-swatch-custom input {
-  position: absolute;
-  inset: 0;
-  cursor: pointer;
-  opacity: 0;
+.ps-color-palette-inline {
+  flex-wrap: wrap;
+  padding: 6px 0 0;
 }
 
 /* statuses list (reference: group strip + status row with icon tile) */
 .ps-status-list {
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: 12px 12px 12px 18px;
 }
 
 .ps-status-group-header {
@@ -738,7 +708,7 @@
 
 .ps-status-grip {
   position: absolute;
-  left: -14px;
+  left: -13px;
   display: inline-flex;
   color: var(--text-faint);
   opacity: 0;
