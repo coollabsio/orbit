@@ -2,7 +2,7 @@
 // inline-renamable title, the root message, a separator, grouped replies, and a composer.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Edit, Xmark } from 'reicon-react'
-import { PlugConnectIcon } from '../../../components/ui/icons/PlugConnectIcon'
+import { FollowIcon } from '../../../components/ui/icons/FollowIcon'
 import { useSearchParams } from 'react-router'
 import { followThread, renameThread } from '../../../mock/actions'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
@@ -123,7 +123,7 @@ export function ThreadPanel({
             aria-label={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
             onClick={() => followThread(root.id, !root.threadFollowed)}
           >
-            <PlugConnectIcon size={14} />
+            <FollowIcon size={16} />
           </button>
           <button type="button" className="fc-thread-icon-button" title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
             <Edit size={16} />

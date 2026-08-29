@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router'
 import { Add, ChevronDown, Edit, FolderAdd, Hashtag, Setting2, Trash } from 'reicon-react'
 import { deleteChatMessage, followThread, markChannelRead, renameThread, reorderChannels, reorderChatCategories } from '../../../mock/actions'
-import { PlugConnectIcon } from '../../../components/ui/icons/PlugConnectIcon'
+import { FollowIcon } from '../../../components/ui/icons/FollowIcon'
 import { threadTitleOf } from '../chatLib'
 import type { AppState, Channel, ChatCategory, ChatMessage } from '../../../mock/types'
 import { ChannelModals, ConfirmDeleteModal, type ChannelModalState } from './ChannelModals'
@@ -456,7 +456,7 @@ export function ChannelSidebar({
                   setContextMenu(null)
                 }}
               >
-                <PlugConnectIcon size={16} />
+                <FollowIcon size={16} />
                 {(contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread.threadFollowed ? 'Unfollow Thread' : 'Follow Thread'}
               </button>
               <button
