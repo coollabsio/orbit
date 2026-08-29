@@ -73,6 +73,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
               defaultValue={task.title}
               placeholder="Task title"
               aria-label="Task title"
+              autoFocus={task.title === ''}
               onBlur={(e) => {
                 const value = e.target.value.trim()
                 if (value && value !== task.title) setTaskTitle(task.id, value)

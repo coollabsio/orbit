@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { Add } from 'reicon-react'
+import { createTask } from '../../mock/actions'
 import { useAppState } from '../../mock/store'
 import type { TaskStatus } from '../../mock/types'
-import { NewTaskModal } from './components/NewTaskModal'
 import { ProjectRail } from './components/ProjectRail'
 import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
@@ -22,20 +22,6 @@ export function TasksPage() {
   const [layout, setLayout] = useState<'list' | 'board'>('list')
   const [statusFilter, setStatusFilter] = useState<TaskStatus | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
-  // "New task" from the header or from a status group's "+" (which presets the status)
-  const [newTask, setNewTask] = useState<{ status: TaskStatus } | null>(null)
-
-  // the topbar "New → Task" entry deep-links here with ?new=1
-  const showNewTask = newTask !== null || searchParams.get('new') === '1'
-  const closeNewTask = () => {
-    setNewTask(null)
-    if (searchParams.get('new')) {
-      const next = new URLSearchParams(searchParams)
-      next.delete('new')
-      setSearchParams(next, { replace: true })
-    }
-  }
-
   const projectFilter = searchParams.get('project')
   const persisted = new URLSearchParams(searchParams)
   persisted.delete('new')
@@ -51,6 +37,21 @@ export function TasksPage() {
 
   const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)
   const closeTask = () => navigate(`/tasks${searchSuffix}`)
+
+  // "New task" (header, a group's "+", or the topbar's ?new=1) creates an empty task and opens it;
+  // the task view focuses the title field.
+  const startNewTask = (status: TaskStatus = 'todo', replace = false) => {
+    const projectId = projectFilter ?? state.projects[0]?.id
+    if (!projectId) return
+    const task = createTask({ title: '', projectId, status })
+    navigate(`/tasks/${task.id}${searchSuffix}`, { replace })
+  }
+
+  const wantsNew = searchParams.get('new') === '1'
+  useEffect(() => {
+    if (wantsNew) startNewTask('todo', true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsNew])
 
   const visibleTasks = filterTasks(state.tasks, {
     tab,
@@ -93,7 +94,7 @@ export function TasksPage() {
               onAssigneeChange={setAssigneeFilter}
               onLayoutChange={setLayout}
             />
-            <button className="button button-primary" onClick={() => setNewTask({ status: 'todo' })}>
+            <button className="button button-primary" onClick={() => startNewTask()}>
               <Add size={16} />
               New task
             </button>
@@ -102,24 +103,11 @@ export function TasksPage() {
             {layout === 'board' ? (
               <TaskBoard tasks={visibleTasks} users={state.users} activeTaskId={null} onOpen={openTask} />
             ) : (
-              <TaskList tasks={visibleTasks} users={state.users} onOpen={openTask} onAdd={(status) => setNewTask({ status })} />
+              <TaskList tasks={visibleTasks} users={state.users} onOpen={openTask} onAdd={(status) => startNewTask(status)} />
             )}
           </div>
         </section>
       )}
-
-      {showNewTask ? (
-        <NewTaskModal
-          projects={state.projects}
-          defaultProjectId={projectFilter}
-          defaultStatus={newTask?.status ?? 'todo'}
-          onClose={closeNewTask}
-          onCreated={(id) => {
-            closeNewTask()
-            openTask(id)
-          }}
-        />
-      ) : null}
     </div>
   )
 }
