@@ -38,6 +38,8 @@ export interface TaskComment {
   authorId: string
   body: string
   createdAt: string
+  /** Set on replies: the id of the top-level comment. */
+  parentId?: string
 }
 
 export interface TaskActivity {
@@ -45,6 +47,8 @@ export interface TaskActivity {
   actorId: string
   text: string
   createdAt: string
+  /** Status changes show the status glyph in the timeline. */
+  status?: TaskStatus
 }
 
 export interface Task {

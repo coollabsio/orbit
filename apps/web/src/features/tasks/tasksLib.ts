@@ -1,4 +1,5 @@
-import type { Task, TaskStatus } from '../../mock/types'
+import type { Task, TaskComment, TaskStatus } from '../../mock/types'
+import { relativeTime } from '../../lib/format'
 import { STATUS_ORDER } from '../../components/workspace/taskMeta'
 
 export interface TaskFilterState {
@@ -33,30 +34,23 @@ export function groupTasksByStatus(tasks: Task[]): StatusGroup[] {
   })).filter((group) => group.tasks.length > 0)
 }
 
-export interface FeedItem {
-  kind: 'activity' | 'comment'
-  id: string
-  authorId: string
-  text: string
-  createdAt: string
+export interface CommentThread {
+  root: TaskComment
+  replies: TaskComment[]
 }
 
-export function buildFeed(task: Task): FeedItem[] {
-  const items: FeedItem[] = [
-    ...task.activity.map((a) => ({
-      kind: 'activity' as const,
-      id: a.id,
-      authorId: a.actorId,
-      text: a.text,
-      createdAt: a.createdAt,
-    })),
-    ...task.comments.map((c) => ({
-      kind: 'comment' as const,
-      id: c.id,
-      authorId: c.authorId,
-      text: c.body,
-      createdAt: c.createdAt,
-    })),
-  ]
-  return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+/** Top-level comments (oldest first) with their replies. */
+export function commentThreads(task: Task): CommentThread[] {
+  const byTime = (a: TaskComment, b: TaskComment) => a.createdAt.localeCompare(b.createdAt)
+  return task.comments
+    .filter((c) => !c.parentId)
+    .sort(byTime)
+    .map((root) => ({ root, replies: task.comments.filter((c) => c.parentId === root.id).sort(byTime) }))
+}
+
+/** "2d ago" style label; falls back to a short date for older items. */
+export function agoLabel(iso: string): string {
+  const label = relativeTime(iso)
+  if (label === 'now') return 'just now'
+  return /^\d+[mhd]$/.test(label) ? `${label} ago` : label
 }

@@ -20,7 +20,7 @@ const now = () => new Date().toISOString()
 
 /* ---------- tasks ---------- */
 
-function touchTask(taskId: string, patch: Partial<Task>, activityText?: string) {
+function touchTask(taskId: string, patch: Partial<Task>, activityText?: string, activityStatus?: TaskStatus) {
   updateState((s) => ({
     ...s,
     tasks: s.tasks.map((t) =>
@@ -32,7 +32,13 @@ function touchTask(taskId: string, patch: Partial<Task>, activityText?: string) 
             activity: activityText
               ? [
                   ...t.activity,
-                  { id: nextId('ta'), actorId: s.currentUserId, text: activityText, createdAt: now() },
+                  {
+                    id: nextId('ta'),
+                    actorId: s.currentUserId,
+                    text: activityText,
+                    createdAt: now(),
+                    ...(activityStatus ? { status: activityStatus } : {}),
+                  },
                 ]
               : t.activity,
           }
@@ -49,7 +55,7 @@ const statusLabel: Record<TaskStatus, string> = {
 }
 
 export function setTaskStatus(taskId: string, status: TaskStatus) {
-  touchTask(taskId, { status }, `changed status to ${statusLabel[status]}`)
+  touchTask(taskId, { status }, `changed status to ${statusLabel[status]}`, status)
 }
 
 export function setTaskPriority(taskId: string, priority: TaskPriority) {
@@ -83,7 +89,7 @@ export function setTaskDescription(taskId: string, description: string) {
   touchTask(taskId, { description })
 }
 
-export function addTaskComment(taskId: string, body: string) {
+export function addTaskComment(taskId: string, body: string, parentId?: string) {
   updateState((s) => ({
     ...s,
     tasks: s.tasks.map((t) =>
@@ -93,7 +99,7 @@ export function addTaskComment(taskId: string, body: string) {
             updatedAt: now(),
             comments: [
               ...t.comments,
-              { id: nextId('tc'), authorId: s.currentUserId, body, createdAt: now() },
+              { id: nextId('tc'), authorId: s.currentUserId, body, createdAt: now(), ...(parentId ? { parentId } : {}) },
             ],
           }
         : t,

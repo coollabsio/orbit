@@ -388,40 +388,157 @@
   color: var(--control-placeholder);
 }
 
-/* activity */
+/* activity: timeline of events, then comment threads */
 .tasks-activity-heading {
-  margin: 20px 0 10px;
+  margin: 20px 0 8px;
   padding-top: 14px;
   border-top: 1px solid var(--hairline);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-heading);
 }
 
-.tasks-feed {
+.tasks-timeline {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.tasks-feed-activity {
+.tasks-timeline-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 0 7px 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* connector line: from the item's top edge to the icon, and from the icon to the bottom edge */
+.tasks-timeline-item::before,
+.tasks-timeline-item::after {
+  content: '';
+  position: absolute;
+  left: 12.5px;
+  width: 1px;
+  background: var(--line);
+}
+
+.tasks-timeline-item::before {
+  top: 0;
+  height: calc(50% - 8px);
+}
+
+.tasks-timeline-item::after {
+  top: calc(50% + 8px);
+  bottom: 0;
+}
+
+.tasks-timeline-item:first-child::before,
+.tasks-timeline-item:last-child::after {
+  display: none;
+}
+
+.tasks-timeline-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.tasks-timeline-actor {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.tasks-thread {
+  margin-top: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--recessed);
+}
+
+.tasks-thread-comment {
+  padding: 12px 14px;
+}
+
+.tasks-thread-comment + .tasks-thread-comment {
+  border-top: 1px solid var(--hairline);
+}
+
+.tasks-comment-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-  min-width: 0;
+  font-size: 13px;
 }
 
-.tasks-comment-body {
-  margin-top: 4px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--recessed);
+.tasks-comment-author {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tasks-comment-text {
+  margin-top: 6px;
   font-size: 13px;
   line-height: 19px;
   color: var(--text-primary);
   white-space: pre-wrap;
+}
+
+.tasks-thread-comment[data-reply='true'] .tasks-comment-text {
+  padding-left: 28px;
+}
+
+.tasks-reply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.tasks-reply-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.tasks-reply-input::placeholder {
+  color: var(--control-placeholder);
+}
+
+.tasks-send {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--text-secondary);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.tasks-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tasks-send:not(:disabled):hover {
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
 /* comment box at the end of the activity */

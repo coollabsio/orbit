@@ -51,6 +51,18 @@ export const tasks: Task[] = [
         body: 'I have a patch that re-lists networks on SIGHUP. Deploying to staging today.',
         createdAt: ago(3, 'h'),
       },
+      {
+        id: 'tc_3',
+        authorId: 'u_andras',
+        parentId: 'tc_2',
+        body: 'Nice — ping me when it is on staging and I will run the proxy suite.',
+        createdAt: ago(1, 'h'),
+      },
+    ],
+    activity: [
+      { id: 'ta_t1_1', actorId: 'u_cinzya', text: 'created this task', createdAt: ago(3, 'd') },
+      { id: 'ta_t1_2', actorId: 'u_shadow', text: 'changed status to In Progress', status: 'in_progress', createdAt: ago(1, 'd') },
+      { id: 'ta_t1_3', actorId: 'u_shadow', text: 'assigned Andras', createdAt: ago(5, 'h') },
     ],
   }),
   task({

@@ -72,6 +72,7 @@ export function TasksPage() {
           task={activeTask}
           project={state.projects.find((p) => p.id === activeTask?.projectId)}
           users={state.users}
+          currentUserId={state.currentUserId}
           onBack={closeTask}
         />
       ) : (

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, Calendar, TaskSquare, Xmark } from 'reicon-react'
+import { ArrowLeft, ArrowUp, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
@@ -29,11 +29,12 @@ interface TaskDetailProps {
   task: Task | undefined
   project: Project | undefined
   users: User[]
+  currentUserId: string
   onBack: () => void
 }
 
 /** Full-page task view: main column (title, description, activity, comment box) + properties column. */
-export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
+export function TaskDetail({ task, project, users, currentUserId, onBack }: TaskDetailProps) {
   const [comment, setComment] = useState('')
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
 
@@ -93,7 +94,7 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
               }}
             />
 
-            <ActivityFeed task={task} users={users} />
+            <ActivityFeed task={task} users={users} currentUserId={currentUserId} />
 
             <div className="tasks-comment-box">
               <textarea
@@ -107,8 +108,11 @@ export function TaskDetail({ task, project, users, onBack }: TaskDetailProps) {
                 }}
               />
               <div className="tasks-comment-actions">
-                <button className="button button-primary" onClick={submitComment} disabled={!comment.trim()}>
-                  Comment
+                <button type="button" className="icon-button" aria-label="Attach file" title="Attach file">
+                  <Paperclip2 size={14} />
+                </button>
+                <button type="button" className="tasks-send" aria-label="Send comment" onClick={submitComment} disabled={!comment.trim()}>
+                  <ArrowUp size={14} />
                 </button>
               </div>
             </div>
