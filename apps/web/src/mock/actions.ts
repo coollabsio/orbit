@@ -135,6 +135,18 @@ export function deleteTaskComment(taskId: string, commentId: string) {
   }))
 }
 
+/** Adds the label when missing, removes it when present. */
+export function toggleTaskLabel(taskId: string, label: string) {
+  const task = getState().tasks.find((t) => t.id === taskId)
+  if (!task) return
+  const has = task.labels.includes(label)
+  touchTask(
+    taskId,
+    { labels: has ? task.labels.filter((l) => l !== label) : [...task.labels, label] },
+    has ? `removed label ${label}` : `added label ${label}`,
+  )
+}
+
 export function createTask(input: {
   title: string
   projectId: string

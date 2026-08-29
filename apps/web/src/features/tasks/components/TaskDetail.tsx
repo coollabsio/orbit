@@ -1,4 +1,5 @@
-import { ArrowLeft, Calendar, TaskSquare, Xmark } from 'reicon-react'
+import { useMemo, useState } from 'react'
+import { Add, ArrowLeft, Calendar, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
@@ -20,6 +21,7 @@ import {
   setTaskStatus,
   setTaskTitle,
   toggleTaskAssignee,
+  toggleTaskLabel,
 } from '../../../mock/actions'
 import type { AppState, Project, Task } from '../../../mock/types'
 import { MessageInput } from '../../chat/components/MessageInput'
@@ -34,8 +36,21 @@ interface TaskDetailProps {
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
 export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
+  const [newLabel, setNewLabel] = useState('')
   const users = state.users
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
+  // every label used in the workspace, so a task can pick from the existing ones
+  const allLabels = useMemo(
+    () => Array.from(new Set(state.tasks.flatMap((t) => t.labels))).sort((a, b) => a.localeCompare(b)),
+    [state.tasks],
+  )
+
+  const submitNewLabel = () => {
+    const label = newLabel.trim().toLowerCase()
+    if (!label || !task) return
+    if (!task.labels.includes(label)) toggleTaskLabel(task.id, label)
+    setNewLabel('')
+  }
 
   return (
     <section className="pane tasks-detail-pane">
@@ -203,15 +218,69 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Labels</h4>
               <div className="tasks-side-pills">
-                {task.labels.length > 0 ? (
-                  task.labels.map((label) => (
-                    <span key={label} className="pill">
-                      {label}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-faint text-xs">No labels</span>
-                )}
+                {task.labels.map((label) => (
+                  <span key={label} className="pill tasks-label-pill">
+                    {label}
+                    <button
+                      type="button"
+                      className="tasks-label-remove"
+                      aria-label={`Remove label ${label}`}
+                      title="Remove label"
+                      onClick={() => toggleTaskLabel(task.id, label)}
+                    >
+                      <Xmark size={12} />
+                    </button>
+                  </span>
+                ))}
+                {/* add / remove labels: existing labels toggle (× on active), or type a new one */}
+                <Dropdown
+                  trigger={() => (
+                    <button className="pill tasks-label-add" aria-label="Add label">
+                      <Add size={12} />
+                      {task.labels.length === 0 ? 'Add label' : null}
+                    </button>
+                  )}
+                >
+                  {() => (
+                    <>
+                      <div className="popover-heading">Labels</div>
+                      {allLabels.map((label) => {
+                        const active = task.labels.includes(label)
+                        return (
+                          <button
+                            key={label}
+                            className="popover-option"
+                            data-selected={active || undefined}
+                            aria-pressed={active}
+                            onClick={() => toggleTaskLabel(task.id, label)}
+                          >
+                            <span className="pill">{label}</span>
+                            {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
+                          </button>
+                        )
+                      })}
+                      <div className="popover-separator" />
+                      <form
+                        className="tasks-label-new"
+                        onSubmit={(e) => {
+                          e.preventDefault()
+                          submitNewLabel()
+                        }}
+                      >
+                        <input
+                          className="input"
+                          placeholder="New label…"
+                          aria-label="New label"
+                          value={newLabel}
+                          onChange={(e) => setNewLabel(e.target.value)}
+                        />
+                        <button type="submit" className="button" disabled={!newLabel.trim()}>
+                          Add
+                        </button>
+                      </form>
+                    </>
+                  )}
+                </Dropdown>
               </div>
             </div>
 

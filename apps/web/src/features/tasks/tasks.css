@@ -507,6 +507,50 @@
   padding: 0;
 }
 
+/* labels: pills with a remove button + an add pill */
+.tasks-label-pill {
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.tasks-label-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  color: var(--text-faint);
+}
+
+.tasks-label-remove:hover {
+  background: var(--fill);
+  color: var(--text-primary);
+}
+
+.tasks-label-add {
+  gap: 4px;
+  color: var(--text-faint);
+  border-style: dashed;
+  cursor: pointer;
+}
+
+.tasks-label-add:hover {
+  color: var(--text-primary);
+}
+
+.tasks-label-new {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+}
+
+.tasks-label-new .input {
+  min-width: 0;
+  flex: 1;
+  height: 30px;
+}
+
 /* the due-date popover holds a calendar: no height cap, nested time list may overflow */
 .tasks-date-dropdown .popover {
   max-height: none;
