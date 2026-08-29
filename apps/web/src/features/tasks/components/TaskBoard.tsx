@@ -1,9 +1,9 @@
 import { AvatarStack } from '../../../components/ui/Avatar'
-import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { STATUS_LABEL, STATUS_ORDER } from '../../../components/workspace/taskMeta'
 import { setTaskStatus } from '../../../mock/actions'
 import type { Task, TaskStatus, User } from '../../../mock/types'
+import { PriorityPicker } from './PriorityPicker'
 
 export function TaskBoard({
   tasks,
@@ -55,14 +55,18 @@ export function TaskBoard({
                     }}
                     onClick={() => onOpen(task.id)}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') onOpen(task.id)
+                      if (event.key === 'Enter' && event.target === event.currentTarget) onOpen(task.id)
                     }}
                   >
+                    {/* id … assignees · priority (priority changes in place) */}
                     <div className="tasks-board-card-topline">
                       <span>{task.identifier}</span>
-                      <PriorityIcon priority={task.priority} />
+                      <span className="tasks-board-card-meta">
+                        <AvatarStack users={assignees} size={18} />
+                        <PriorityPicker task={task} align="right" />
+                      </span>
                     </div>
-                    <h3>{task.title}</h3>
+                    <h3>{task.title || 'Untitled'}</h3>
                     {task.labels.length > 0 ? (
                       <div className="tasks-board-labels">
                         {task.labels.map((label) => (
@@ -70,12 +74,6 @@ export function TaskBoard({
                         ))}
                       </div>
                     ) : null}
-                    <div className="tasks-board-card-footer">
-                      <span className="tasks-board-comment-count">
-                        {task.comments.length > 0 ? `${task.comments.length} comment${task.comments.length === 1 ? '' : 's'}` : ''}
-                      </span>
-                      <AvatarStack users={assignees} size={20} />
-                    </div>
                   </article>
                 )
               })}

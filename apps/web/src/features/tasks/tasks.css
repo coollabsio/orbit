@@ -128,10 +128,6 @@
   margin-bottom: 9px;
 }
 
-.tasks-board-comment-count {
-  min-height: 16px;
-}
-
 .tasks-board-empty {
   display: flex;
   align-items: center;
@@ -592,3 +588,16 @@
     display: none;
   }
 }
+
+/* inline pickers (priority) inside rows and cards */
+.tasks-inline-picker {
+  width: 22px;
+  height: 22px;
+}
+
+.tasks-board-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+

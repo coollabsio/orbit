@@ -1,11 +1,11 @@
 import { AvatarStack } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
-import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { STATUS_LABEL, STATUS_ORDER } from '../../../components/workspace/taskMeta'
 import { shortDate } from '../../../lib/format'
 import { setTaskStatus } from '../../../mock/actions'
 import type { Task, User } from '../../../mock/types'
+import { PriorityPicker } from './PriorityPicker'
 
 interface TaskRowProps {
   task: Task
@@ -46,7 +46,7 @@ export function TaskRow({ task, assignees, selected, dragging, onOpen, onToggleS
           <path d="M2.5 6.5 5 9l4.5-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </label>
-      <PriorityIcon priority={task.priority} />
+      <PriorityPicker task={task} />
       <span className="tasks-row-id">{task.identifier}</span>
       <div onClick={(e) => e.stopPropagation()}>
         <Dropdown
@@ -76,7 +76,7 @@ export function TaskRow({ task, assignees, selected, dragging, onOpen, onToggleS
           )}
         </Dropdown>
       </div>
-      <span className="tasks-row-title truncate">{task.title}</span>
+      <span className="tasks-row-title truncate">{task.title || 'Untitled'}</span>
       {task.labels.length > 0 ? (
         <span className="tasks-row-labels">
           {task.labels.map((label) => (
