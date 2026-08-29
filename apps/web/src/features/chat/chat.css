@@ -2097,6 +2097,13 @@
   background: var(--canvas);
 }
 
+/* full screen: fills the chat area (no left border, no fixed width) */
+.fc-thread-panel[data-fullscreen='true'] {
+  min-width: 0;
+  flex: 1;
+  border-left: 0;
+}
+
 .fc-thread-resize {
   position: absolute;
   inset-block: 0;

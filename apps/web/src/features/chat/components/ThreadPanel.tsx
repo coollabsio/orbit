@@ -1,9 +1,11 @@
 // Port of the chat reference ThreadPanel: resizable side pane (468px default, 320-720) with an
 // inline-renamable title, the root message, a separator, grouped replies, and a composer.
+// With `fullScreen` it fills the chat area instead (route /chat/:channelId/thread/:rootId).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Edit, Xmark } from 'reicon-react'
+import { ExpandIcon } from '../../../components/ui/icons/ExpandIcon'
 import { FollowIcon } from '../../../components/ui/icons/FollowIcon'
-import { useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { followThread, renameThread } from '../../../mock/actions'
 import type { AppState, Channel, ChatMessage } from '../../../mock/types'
 import { buildMentionTokens, jumpToMessage, messageMentionsCurrentUser, threadTitleOf } from '../chatLib'
@@ -19,13 +21,16 @@ export function ThreadPanel({
   root,
   onClose,
   isMobile,
+  fullScreen = false,
 }: {
   state: AppState
   channel: Channel
   root: ChatMessage
   onClose: () => void
   isMobile?: boolean
+  fullScreen?: boolean
 }) {
+  const navigate = useNavigate()
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -88,8 +93,8 @@ export function ThreadPanel({
   }
 
   return (
-    <div className="fc-thread-panel" style={isMobile ? undefined : { width }}>
-      {!isMobile ? <div className="fc-thread-resize" onPointerDown={handleResizeStart} title="Resize thread panel" /> : null}
+    <div className="fc-thread-panel" data-fullscreen={fullScreen ? 'true' : undefined} style={isMobile || fullScreen ? undefined : { width }}>
+      {!isMobile && !fullScreen ? <div className="fc-thread-resize" onPointerDown={handleResizeStart} title="Resize thread panel" /> : null}
       <div className="fc-thread-header">
         <div className="fc-thread-header-title">
           {editingTitle ? (
@@ -125,6 +130,17 @@ export function ThreadPanel({
           >
             <FollowIcon size={16} />
           </button>
+          {!fullScreen ? (
+            <button
+              type="button"
+              className="fc-thread-icon-button"
+              title="Open full screen"
+              aria-label="Open full screen"
+              onClick={() => navigate(`/chat/${channel.id}/thread/${root.id}`)}
+            >
+              <ExpandIcon size={16} />
+            </button>
+          ) : null}
           <button type="button" className="fc-thread-icon-button" title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
             <Edit size={16} />
           </button>

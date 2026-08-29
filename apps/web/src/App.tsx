@@ -29,6 +29,7 @@ export default function App() {
             <Route path="chat" element={<ChatPage />} />
             <Route path="chat/settings" element={<ServerSettingsPage />} />
             <Route path="chat/:channelId" element={<ChatPage />} />
+            <Route path="chat/:channelId/thread/:rootId" element={<ChatPage />} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings" element={<SettingsLayout />}>

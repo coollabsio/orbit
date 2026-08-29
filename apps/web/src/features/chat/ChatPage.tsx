@@ -19,7 +19,7 @@ function isMobileViewport() {
 type ThreadView = { channelId: string; kind: 'thread'; rootId: string } | { channelId: string; kind: 'new' }
 
 export function ChatPage() {
-  const { channelId } = useParams()
+  const { channelId, rootId } = useParams()
   const [searchParams] = useSearchParams()
   const state = useAppState()
   const [membersOpen, setMembersOpen] = useState(true)
@@ -43,6 +43,8 @@ export function ChatPage() {
   const threadRoot: ChatMessage | null =
     activeThread?.kind === 'thread' ? (state.chatMessages.find((m) => m.id === activeThread.rootId) ?? null) : null
   const mobile = isMobileViewport()
+  // the chat reference full-screen thread: /chat/:channelId/thread/:rootId replaces the chat area
+  const fullScreenRoot: ChatMessage | null = rootId ? (state.chatMessages.find((m) => m.id === rootId) ?? null) : null
 
   const threadPane =
     channel && activeThread ? (
@@ -67,13 +69,15 @@ export function ChatPage() {
       <ChannelSidebar
         state={state}
         activeChannelId={channel?.id ?? null}
-        activeThreadId={activeThread?.kind === 'thread' ? activeThread.rootId : null}
+        activeThreadId={fullScreenRoot ? fullScreenRoot.id : activeThread?.kind === 'thread' ? activeThread.rootId : null}
         onOpenThread={(channelId, rootId) => {
           setThreadView({ channelId, kind: 'thread', rootId })
-          if (channelId !== channel?.id) navigate(`/chat/${channelId}`)
+          if (channelId !== channel?.id || fullScreenRoot) navigate(`/chat/${channelId}`)
         }}
       />
-      {channel ? (
+      {channel && fullScreenRoot ? (
+        <ThreadPanel state={state} channel={channel} root={fullScreenRoot} onClose={() => navigate(`/chat/${channel.id}`)} fullScreen />
+      ) : channel ? (
         <>
           <ChatArea
             key={channel.id}

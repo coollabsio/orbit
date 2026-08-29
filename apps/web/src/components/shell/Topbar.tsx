@@ -3,6 +3,7 @@ import { Add, Menu, Moon, SearchNormal, Sun } from 'reicon-react'
 import { useTheme } from '../../lib/themeContext'
 import { useAppState } from '../../mock/store'
 import { createDoc } from '../../mock/actions'
+import { threadTitleOf } from '../../features/chat/chatLib'
 import { STATUS_LABEL } from '../workspace/taskMeta'
 import { TaskStatusIcon } from '../workspace/TaskStatusIcon'
 import { Dropdown } from '../ui/Dropdown'
@@ -14,7 +15,7 @@ interface Crumb {
 }
 
 function crumbsFor(pathname: string, folderParam: string | null, state: AppState): { crumbs: Crumb[]; status?: React.ReactNode } {
-  const [, root, id] = pathname.split('/')
+  const [, root, id, sub, subId] = pathname.split('/')
   switch (root) {
     case 'tasks': {
       const crumbs: Crumb[] = [{ label: 'Tasks', to: '/tasks' }]
@@ -57,8 +58,11 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
     case 'chat': {
       const crumbs: Crumb[] = [{ label: 'Chat', to: '/chat' }]
       const channel = id ? state.channels.find((c) => c.id === id) : null
+      const threadRoot = channel && sub === 'thread' && subId ? state.chatMessages.find((m) => m.id === subId) : null
       if (id === 'settings') crumbs.push({ label: 'Chat Settings' })
-      else if (channel) crumbs.push({ label: `#${channel.name}` })
+      else if (channel && threadRoot) {
+        crumbs.push({ label: `#${channel.name}`, to: `/chat/${channel.id}` }, { label: threadTitleOf(threadRoot) })
+      } else if (channel) crumbs.push({ label: `#${channel.name}` })
       return { crumbs }
     }
     case 'inbox':
