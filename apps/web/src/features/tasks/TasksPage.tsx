@@ -65,7 +65,7 @@ export function TasksPage() {
 
   return (
     <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
-      <ProjectRail projects={state.projects} tasks={state.tasks} projectId={projectFilter} onSelect={setProjectFilter} />
+      <ProjectRail projects={state.projects} projectId={projectFilter} onSelect={setProjectFilter} />
       {taskId ? (
         // a task opens as a full page in place of the list (the rail stays)
         <TaskDetail

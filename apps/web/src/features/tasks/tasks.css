@@ -19,19 +19,6 @@
   border-radius: 2px;
 }
 
-.tasks-rail-key {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-faint);
-}
-
-.tasks-rail-count {
-  margin-left: auto;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-faint);
-}
-
 .tasks-list-pane {
   flex: 1;
 }
@@ -587,6 +574,33 @@
   .tasks-row-labels {
     display: none;
   }
+}
+
+/* project rail rows: color square + name, gear only on hover */
+.tasks-rail-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.tasks-rail-row .menu-item {
+  flex: 1;
+  min-width: 0;
+  padding-right: 32px;
+}
+
+.tasks-rail-settings {
+  position: absolute;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tasks-rail-row:hover .tasks-rail-settings,
+.tasks-rail-settings:focus-visible {
+  opacity: 1;
 }
 
 /* inline pickers (priority) inside rows and cards */
