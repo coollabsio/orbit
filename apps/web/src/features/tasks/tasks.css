@@ -40,7 +40,12 @@
 .tasks-board-column {
   min-width: 0;
   border-radius: var(--radius-md);
-  background: var(--recessed);
+  background: color-mix(in srgb, var(--canvas) 55%, var(--panel));
+  transition: box-shadow 0.15s;
+}
+
+.tasks-board-column[data-drop-over='true'] {
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
 .tasks-board-column-header {
@@ -72,8 +77,20 @@
   padding: 10px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
-  background: var(--panel);
+  background: var(--base);
   cursor: pointer;
+}
+
+.tasks-board-card[data-dragging='true'] {
+  opacity: 0.4;
+}
+
+/* where the dragged card will land */
+.tasks-board-placeholder {
+  min-height: 44px;
+  border: 1px dashed var(--accent-ring);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
 }
 
 .tasks-board-card:hover {

@@ -8,7 +8,7 @@ import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
 import { TaskList } from './components/TaskList'
-import { filterTasks, resolveStatusId, statusGroups } from './tasksLib'
+import { filterTasks, resolveStatusId, statusGroups, type SortKey } from './tasksLib'
 import './tasks.css'
 
 export function TasksPage() {
@@ -17,13 +17,16 @@ export function TasksPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const state = useAppState()
 
+  // ?layout=board opens the kanban directly (deep link); the Display menu changes it afterwards
+  const [layout, setLayout] = useState<'list' | 'board'>(() => (searchParams.get('layout') === 'board' ? 'board' : 'list'))
   const [tab, setTab] = useState<'my' | 'all'>('my')
-  const [layout, setLayout] = useState<'list' | 'board'>('list')
+  const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const projectFilter = searchParams.get('project')
   const persisted = new URLSearchParams(searchParams)
   persisted.delete('new')
+  persisted.delete('layout')
   const search = persisted.toString()
   const searchSuffix = search ? `?${search}` : ''
 
@@ -92,9 +95,11 @@ export function TasksPage() {
               groups={groups}
               statusKey={statusFilter}
               assigneeId={assigneeFilter}
+              sort={sort}
               layout={layout}
               onStatusChange={setStatusFilter}
               onAssigneeChange={setAssigneeFilter}
+              onSortChange={setSort}
               onLayoutChange={setLayout}
             />
             <button className="button button-primary" onClick={() => startNewTask()}>
@@ -109,6 +114,7 @@ export function TasksPage() {
                 users={state.users}
                 statuses={state.statuses}
                 groups={groups}
+                sort={sort}
                 activeTaskId={null}
                 onOpen={openTask}
               />
@@ -118,6 +124,7 @@ export function TasksPage() {
                 users={state.users}
                 statuses={state.statuses}
                 groups={groups}
+                sort={sort}
                 onOpen={openTask}
                 onAdd={(key) => startNewTask(key)}
               />

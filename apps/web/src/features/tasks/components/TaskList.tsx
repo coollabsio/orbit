@@ -4,7 +4,7 @@ import { EmptyState } from '../../../components/ui/EmptyState'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { setTaskStatus } from '../../../mock/actions'
 import type { Task, TaskStatusDef, User } from '../../../mock/types'
-import { groupTasksByStatus, resolveStatusId, type StatusGroup } from '../tasksLib'
+import { groupTasksByStatus, resolveStatusId, type SortKey, type StatusGroup } from '../tasksLib'
 import { TaskRow } from './TaskRow'
 
 interface TaskListProps {
@@ -12,13 +12,14 @@ interface TaskListProps {
   users: User[]
   statuses: TaskStatusDef[]
   groups: StatusGroup[]
+  sort: SortKey
   onOpen: (taskId: string) => void
   onAdd: (statusKey: string) => void
 }
 
 /** Status groups: collapsible headers that also accept dropped rows (moves the task to that status). */
-export function TaskList({ tasks, users, statuses, groups, onOpen, onAdd }: TaskListProps) {
-  const taskGroups = groupTasksByStatus(tasks, groups)
+export function TaskList({ tasks, users, statuses, groups, sort, onOpen, onAdd }: TaskListProps) {
+  const taskGroups = groupTasksByStatus(tasks, groups, sort)
   const [collapsed, setCollapsed] = useState<string[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)

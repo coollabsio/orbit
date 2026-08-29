@@ -56,6 +56,19 @@ export function setTaskStatus(taskId: string, statusId: string) {
   touchTask(taskId, { statusId }, `changed status to ${name}`, statusId)
 }
 
+/** Drag and drop on the board: new column (status) and manual position inside it. */
+export function moveTask(taskId: string, statusId: string, position: number) {
+  const s = getState()
+  const task = s.tasks.find((t) => t.id === taskId)
+  if (!task) return
+  if (task.statusId !== statusId) {
+    const name = s.statuses.find((st) => st.id === statusId)?.name ?? 'Unknown'
+    touchTask(taskId, { statusId, position }, `changed status to ${name}`, statusId)
+  } else {
+    updateState((prev) => ({ ...prev, tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, position } : t)) }))
+  }
+}
+
 export function setTaskPriority(taskId: string, priority: TaskPriority) {
   touchTask(taskId, { priority }, `set priority to ${priority}`)
 }
@@ -161,6 +174,7 @@ export function createTask(input: {
     title: input.title,
     description: '',
     statusId: input.statusId ?? defaultStatusOf(s.statuses, project.id)?.id ?? '',
+    position: Math.min(0, ...s.tasks.map((t) => t.position)) - 1,
     priority: input.priority ?? 'none',
     assigneeIds: input.assigneeIds ?? [],
     creatorId: s.currentUserId,

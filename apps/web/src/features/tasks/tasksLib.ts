@@ -1,6 +1,6 @@
 import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from '../../mock/types'
 import { relativeTime } from '../../lib/format'
-import { defaultStatusOf, sortStatuses, statusKeyOf } from '../../components/workspace/taskMeta'
+import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from '../../components/workspace/taskMeta'
 
 export interface TaskFilterState {
   tab: 'my' | 'all'
@@ -49,13 +49,10 @@ export interface TaskGroup extends StatusGroup {
   tasks: Task[]
 }
 
-/** Tasks bucketed into status groups (empty groups dropped), newest first inside a group. */
-export function groupTasksByStatus(tasks: Task[], groups: StatusGroup[]): TaskGroup[] {
+/** Tasks bucketed into status groups (empty groups dropped), ordered by `sort` inside a group. */
+export function groupTasksByStatus(tasks: Task[], groups: StatusGroup[], sort: SortKey = 'manual'): TaskGroup[] {
   return groups
-    .map((group) => ({
-      ...group,
-      tasks: tasks.filter((t) => group.statusIds.includes(t.statusId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    }))
+    .map((group) => ({ ...group, tasks: sortTasks(tasks.filter((t) => group.statusIds.includes(t.statusId)), sort) }))
     .filter((group) => group.tasks.length > 0)
 }
 
@@ -108,4 +105,31 @@ export function buildFeed(task: Task): FeedEntry[] {
     }
   }
   return feed
+}
+
+export type SortKey = 'manual' | 'priority' | 'created' | 'updated' | 'title'
+
+export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'manual', label: 'Manual' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'created', label: 'Created' },
+  { key: 'updated', label: 'Last updated' },
+  { key: 'title', label: 'Title' },
+]
+
+/** Order inside a group/column. Manual = the position set by drag and drop. */
+export function sortTasks(tasks: Task[], sort: SortKey): Task[] {
+  const list = [...tasks]
+  switch (sort) {
+    case 'priority':
+      return list.sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority) || a.position - b.position)
+    case 'created':
+      return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    case 'updated':
+      return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    case 'title':
+      return list.sort((a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled'))
+    default:
+      return list.sort((a, b) => a.position - b.position)
+  }
 }

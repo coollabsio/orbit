@@ -71,6 +71,8 @@ export interface Task {
   title: string
   description: string
   statusId: string
+  /** Manual order inside a status column (drag and drop); lower comes first. */
+  position: number
   priority: TaskPriority
   assigneeIds: string[]
   creatorId: string

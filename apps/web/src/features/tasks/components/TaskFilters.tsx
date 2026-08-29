@@ -1,33 +1,38 @@
-import { Filter, Kanban, List, Setting4 } from 'reicon-react'
+import { Filter, Kanban, List, Setting4, Sort } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { User } from '../../../mock/types'
-import type { StatusGroup } from '../tasksLib'
+import { SORT_OPTIONS, type SortKey, type StatusGroup } from '../tasksLib'
 
 interface TaskFiltersProps {
   users: User[]
   groups: StatusGroup[]
   statusKey: string | null
   assigneeId: string | null
+  sort: SortKey
   layout: 'list' | 'board'
   onStatusChange: (key: string | null) => void
   onAssigneeChange: (assigneeId: string | null) => void
+  onSortChange: (sort: SortKey) => void
   onLayoutChange: (layout: 'list' | 'board') => void
 }
 
-/** Header dropdowns: one "Filter" menu (status + assignee) and one "Display" menu (layout). */
+/** Header dropdowns: "Filter" (status + assignee), "Sort" (order inside groups) and "Display" (layout). */
 export function TaskFilters({
   users,
   groups,
   statusKey,
   assigneeId,
+  sort,
   layout,
   onStatusChange,
   onAssigneeChange,
+  onSortChange,
   onLayoutChange,
 }: TaskFiltersProps) {
   const activeCount = (statusKey ? 1 : 0) + (assigneeId ? 1 : 0)
+  const sortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label ?? 'Sort'
 
   return (
     <>
@@ -89,6 +94,35 @@ export function TaskFilters({
                 </button>
               </>
             ) : null}
+          </>
+        )}
+      </Dropdown>
+
+      <Dropdown
+        align="right"
+        trigger={() => (
+          <button className="button button-ghost tasks-filter" data-active={sort !== 'manual' || undefined}>
+            <Sort size={15} />
+            {sort === 'manual' ? 'Sort' : sortLabel}
+          </button>
+        )}
+      >
+        {(close) => (
+          <>
+            <div className="popover-heading">Sort by</div>
+            {SORT_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                className="popover-option"
+                data-selected={option.key === sort || undefined}
+                onClick={() => {
+                  onSortChange(option.key)
+                  close()
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
           </>
         )}
       </Dropdown>
