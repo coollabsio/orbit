@@ -18,7 +18,7 @@ export const statuses: TaskStatusDef[] = projects.flatMap((project) =>
   })),
 )
 
-type SeedTask = Omit<Task, 'comments' | 'activity' | 'description' | 'labels' | 'dueAt' | 'statusId' | 'position'> &
+type SeedTask = Omit<Task, 'comments' | 'activity' | 'description' | 'labels' | 'attachments' | 'dueAt' | 'statusId' | 'position'> &
   Partial<Task> & { statusKey: 'todo' | 'in_progress' | 'done' | 'cancelled' }
 
 function task({ statusKey, ...partial }: SeedTask): Task {
@@ -28,6 +28,7 @@ function task({ statusKey, ...partial }: SeedTask): Task {
     position: n,
     description: '',
     labels: [],
+    attachments: [],
     dueAt: null,
     comments: [],
     activity: [

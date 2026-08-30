@@ -78,6 +78,8 @@ export interface Task {
   creatorId: string
   projectId: string
   labels: string[]
+  /** Files and images attached to the description. */
+  attachments: Attachment[]
   dueAt: string | null
   createdAt: string
   updatedAt: string

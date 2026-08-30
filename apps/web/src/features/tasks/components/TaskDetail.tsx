@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Add, ArrowLeft, Calendar, TaskSquare, Xmark } from 'reicon-react'
+import { useMemo, useRef, useState } from 'react'
+import { Add, ArrowLeft, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
@@ -9,7 +9,9 @@ import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../components/workspace/taskMeta'
 import { fullDate, timeOfDay } from '../../../lib/format'
 import {
+  addTaskAttachments,
   addTaskComment,
+  removeTaskAttachment,
   setTaskDescription,
   setTaskDueAt,
   setTaskPriority,
@@ -19,6 +21,8 @@ import {
   toggleTaskLabel,
 } from '../../../mock/actions'
 import type { AppState, Project, Task } from '../../../mock/types'
+import { clipboardFiles, fileToAttachment } from '../../chat/attachmentLib'
+import { Attachments } from '../../chat/components/Attachments'
 import { MessageInput } from '../../chat/components/MessageInput'
 import { ActivityFeed } from './ActivityFeed'
 
@@ -32,6 +36,11 @@ interface TaskDetailProps {
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
 export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   const users = state.users
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [dropOver, setDropOver] = useState(false)
+  const attach = (files: FileList | File[] | null) => {
+    if (task && files && files.length > 0) addTaskAttachments(task.id, Array.from(files).map(fileToAttachment))
+  }
   const status = state.statuses.find((s) => s.id === task?.statusId)
   const statusOptions = task ? projectStatuses(state.statuses, task.projectId) : []
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
@@ -80,16 +89,52 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
               }}
             />
 
-            <textarea
-              key={`desc-${task.id}`}
-              className="tasks-desc"
-              defaultValue={task.description}
-              placeholder="Add description…"
-              aria-label="Description"
-              onBlur={(e) => {
-                if (e.target.value !== task.description) setTaskDescription(task.id, e.target.value)
+            {/* description: paste (screenshots, files), drop, or pick attachments; they list below the text */}
+            <div
+              className="tasks-desc-wrap"
+              data-drop-over={dropOver || undefined}
+              onDragOver={(e) => {
+                if (!e.dataTransfer.types.includes('Files')) return
+                e.preventDefault()
+                if (!dropOver) setDropOver(true)
               }}
-            />
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOver(false)
+              }}
+              onDrop={(e) => {
+                if (!e.dataTransfer.types.includes('Files')) return
+                e.preventDefault()
+                setDropOver(false)
+                attach(e.dataTransfer.files)
+              }}
+            >
+              <textarea
+                key={`desc-${task.id}`}
+                className="tasks-desc"
+                defaultValue={task.description}
+                placeholder="Add description… (paste or drop images and files)"
+                aria-label="Description"
+                onBlur={(e) => {
+                  if (e.target.value !== task.description) setTaskDescription(task.id, e.target.value)
+                }}
+                onPaste={(e) => {
+                  const files = clipboardFiles(e)
+                  if (files.length === 0) return
+                  e.preventDefault()
+                  attach(files)
+                }}
+              />
+              {task.attachments.length > 0 ? (
+                <Attachments attachments={task.attachments} onRemove={(id) => removeTaskAttachment(task.id, id)} />
+              ) : null}
+              <div className="tasks-desc-tools">
+                <input ref={fileInputRef} type="file" multiple hidden aria-label="Attach files" onChange={(e) => attach(e.target.files)} />
+                <button type="button" className="button button-ghost tasks-attach" onClick={() => fileInputRef.current?.click()}>
+                  <Paperclip2 size={14} />
+                  Attach
+                </button>
+              </div>
+            </div>
 
             <ActivityFeed task={task} state={state} />
 

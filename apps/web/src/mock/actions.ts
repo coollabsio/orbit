@@ -100,6 +100,22 @@ export function setTaskDescription(taskId: string, description: string) {
   touchTask(taskId, { description })
 }
 
+export function addTaskAttachments(taskId: string, attachments: Attachment[]) {
+  const task = getState().tasks.find((t) => t.id === taskId)
+  if (!task || attachments.length === 0) return
+  touchTask(
+    taskId,
+    { attachments: [...task.attachments, ...attachments] },
+    attachments.length === 1 ? `attached ${attachments[0].fileName}` : `attached ${attachments.length} files`,
+  )
+}
+
+export function removeTaskAttachment(taskId: string, attachmentId: string) {
+  const task = getState().tasks.find((t) => t.id === taskId)
+  if (!task) return
+  touchTask(taskId, { attachments: task.attachments.filter((a) => a.id !== attachmentId) })
+}
+
 export function addTaskComment(taskId: string, body: string, parentId?: string, attachments: Attachment[] = []) {
   updateState((s) => ({
     ...s,
@@ -180,6 +196,7 @@ export function createTask(input: {
     creatorId: s.currentUserId,
     projectId: project.id,
     labels: [],
+    attachments: [],
     dueAt: null,
     createdAt: now(),
     updatedAt: now(),

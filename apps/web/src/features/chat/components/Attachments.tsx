@@ -1,12 +1,21 @@
 // Port of the chat reference Attachments: image grid (1 / 2 / 3-hero / 4+N) that opens the ImageViewer,
 // plus file cards for non-images (paperclip, name, size, download on hover).
 import { useState } from 'react'
-import { Download, Paperclip2 } from 'reicon-react'
+import { Download, Paperclip2, Xmark } from 'reicon-react'
 import type { Attachment } from '../../../mock/types'
 import { formatSize, isImage } from '../attachmentLib'
 import { ImageViewer } from './ImageViewer'
 
-export function Attachments({ attachments, hasTextContent = true }: { attachments: Attachment[]; hasTextContent?: boolean }) {
+export function Attachments({
+  attachments,
+  hasTextContent = true,
+  onRemove,
+}: {
+  attachments: Attachment[]
+  hasTextContent?: boolean
+  /** When given, every attachment gets a remove button. */
+  onRemove?: (attachmentId: string) => void
+}) {
   const [viewerImage, setViewerImage] = useState<Attachment | null>(null)
   if (attachments.length === 0) return null
 
@@ -28,6 +37,11 @@ export function Attachments({ attachments, hasTextContent = true }: { attachment
                 <img src={att.url} alt={att.fileName} loading={att.url.startsWith('data:') ? 'eager' : 'lazy'} />
               </button>
               {images.length > 4 && index === 3 ? <div className="fc-attachment-more">+{images.length - 4}</div> : null}
+              {onRemove ? (
+                <button type="button" className="fc-attachment-remove" aria-label={`Remove ${att.fileName}`} title="Remove" onClick={() => onRemove(att.id)}>
+                  <Xmark size={12} />
+                </button>
+              ) : null}
             </div>
           ))}
         </div>
@@ -36,16 +50,23 @@ export function Attachments({ attachments, hasTextContent = true }: { attachment
       {otherFiles.length > 0 ? (
         <div className="fc-file-cards">
           {otherFiles.map((att) => (
-            <a key={att.id} href={att.url} download={att.fileName} className="fc-file-card">
-              <Paperclip2 size={40} />
-              <span className="fc-file-card-text">
-                <span className="fc-file-card-name">{att.fileName}</span>
-                <span className="fc-file-card-size">{formatSize(att.fileSize)}</span>
-              </span>
-              <span className="fc-file-card-download">
-                <Download size={20} />
-              </span>
-            </a>
+            <span key={att.id} className="fc-file-card-wrap">
+              <a href={att.url} download={att.fileName} className="fc-file-card">
+                <Paperclip2 size={40} />
+                <span className="fc-file-card-text">
+                  <span className="fc-file-card-name">{att.fileName}</span>
+                  <span className="fc-file-card-size">{formatSize(att.fileSize)}</span>
+                </span>
+                <span className="fc-file-card-download">
+                  <Download size={20} />
+                </span>
+              </a>
+              {onRemove ? (
+                <button type="button" className="fc-attachment-remove" aria-label={`Remove ${att.fileName}`} title="Remove" onClick={() => onRemove(att.id)}>
+                  <Xmark size={12} />
+                </button>
+              ) : null}
+            </span>
           ))}
         </div>
       ) : null}

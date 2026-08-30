@@ -3889,3 +3889,36 @@
   height: 1px;
   background: var(--line);
 }
+
+/* removable attachments (task description): × in the corner, visible on hover */
+.fc-file-card-wrap {
+  position: relative;
+  display: block;
+}
+
+.fc-attachment-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.fc-attachment-image:hover .fc-attachment-remove,
+.fc-file-card-wrap:hover .fc-attachment-remove,
+.fc-attachment-remove:focus-visible {
+  opacity: 1;
+}
+
+.fc-attachment-remove:hover {
+  background: var(--danger);
+}

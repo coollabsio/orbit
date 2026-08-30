@@ -373,6 +373,41 @@
   color: var(--control-placeholder);
 }
 
+/* description block: drop target for files, attachment grid + attach button below the text */
+.tasks-desc-wrap {
+  margin-top: 16px;
+  border-radius: 8px;
+  transition: box-shadow 0.15s, background-color 0.15s;
+}
+
+.tasks-desc-wrap[data-drop-over='true'] {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.tasks-desc-wrap .tasks-desc {
+  margin-top: 0;
+}
+
+.tasks-desc-wrap .fc-attachments {
+  margin-top: 8px;
+  max-width: 520px;
+}
+
+.tasks-desc-tools {
+  margin-top: 6px;
+}
+
+.tasks-attach {
+  margin-left: -8px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.tasks-attach:hover {
+  color: var(--text-primary);
+}
+
 /* plain text fields: no focus ring */
 .tasks-detail-title:focus-visible,
 .tasks-desc:focus-visible {
