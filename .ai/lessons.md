@@ -27,3 +27,12 @@
 - Symptom: kanban cards went invisible while dragging and no drop indicator appeared.
 - Cause: `dragstart` set state that filtered the dragged card out of the column; the browser cancels a drag when its source element leaves the DOM (no `dragover`/`drop` fire).
 - Rule: keep the source mounted (fade it with a data attribute) and render the placeholder among the *other* items; only unmount after `drop`/`dragend`.
+
+## Never kill processes by name; only kill PIDs you started
+- `pkill -f firefox` killed the user's real Firefox during headless screenshot verification.
+- Rule: start background helpers with `cmd & echo $!`, keep the PID, and `kill <pid>` that PID only. Never pkill by a generic name (firefox, node, vite).
+- For headless Firefox screenshots: the `--screenshot` invocation exits on its own; wrap in `timeout N` instead of killing.
+
+## This workspace uses aube, not npm/npx
+- The package manager is aube (virtual store at ~/.cache/aube). Do not run npm/npx.
+- Use `aube run <script>` / `aube exec <bin>` (verify with `aube --help`) for build, tsc, lint, preview.
