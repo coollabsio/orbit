@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Paperclip, Star } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { relativeTime } from '../../../lib/format'
@@ -13,11 +14,20 @@ interface ThreadRowProps {
 
 export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
   const sender = threadSender(thread)
+  const [dragging, setDragging] = useState(false)
   return (
     <div
       className="list-row mail-row"
       data-active={active ? 'true' : undefined}
       data-unread={thread.unread ? 'true' : undefined}
+      data-dragging={dragging || undefined}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/mail-thread-id', thread.id)
+        setDragging(true)
+      }}
+      onDragEnd={() => setDragging(false)}
       role="button"
       tabIndex={0}
       onClick={() => onOpen(thread.id)}

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Add } from 'reicon-react'
-import { createMailFolder } from '../../../mock/actions'
+import { createMailFolder, moveThread } from '../../../mock/actions'
 import type { MailFolder, MailThread } from '../../../mock/types'
 import { FOLDER_ICONS, folderUnreadCount } from '../mailLib'
 
@@ -14,6 +14,7 @@ interface FolderRailProps {
 export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps) {
   const navigate = useNavigate()
   const [adding, setAdding] = useState(false)
+  const [dropFolderId, setDropFolderId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const system = folders.filter((f) => !f.custom)
   const custom = folders.filter((f) => f.custom)
@@ -30,12 +31,30 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
   const row = (folder: MailFolder) => {
     const Icon = FOLDER_ICONS[folder.icon]
     const unread = folderUnreadCount(threads, folder.id)
+    // "Starred" is virtual (filters on the star flag): it cannot hold a dropped thread
+    const droppable = folder.id !== 'f_starred'
     return (
       <button
         key={folder.id}
         className="menu-item"
         data-active={folder.id === activeFolderId || undefined}
+        data-drop-over={dropFolderId === folder.id || undefined}
         onClick={() => navigate(`/mail?folder=${folder.id}`)}
+        onDragOver={(e) => {
+          if (!droppable || !e.dataTransfer.types.includes('text/mail-thread-id')) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          if (dropFolderId !== folder.id) setDropFolderId(folder.id)
+        }}
+        onDragLeave={() => {
+          if (dropFolderId === folder.id) setDropFolderId(null)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDropFolderId(null)
+          const threadId = e.dataTransfer.getData('text/mail-thread-id')
+          if (threadId && droppable) moveThread(threadId, folder.id)
+        }}
       >
         <Icon size={16} />
         <span className="menu-item-label">{folder.name}</span>

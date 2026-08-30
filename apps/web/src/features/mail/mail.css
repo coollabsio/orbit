@@ -284,3 +284,14 @@
     border-left: none;
   }
 }
+
+/* drag a thread row onto a folder: the dragged row only changes color, the target folder highlights */
+.mail-row[data-dragging='true'] {
+  background: var(--nav-active-bg);
+  color: var(--text-primary);
+}
+
+.mail-rail .menu-item[data-drop-over='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
