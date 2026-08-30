@@ -95,7 +95,7 @@ export function MessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
-  const mention = useMentionAutocomplete(state.users, text, setText, inputRef, resizeTextarea, (user) => roleColor(state, user.id))
+  const mention = useMentionAutocomplete(state.users, text, setText, inputRef, resizeTextarea, (user) => roleColor(state, user.id), state.channels)
   const closeMention = mention.close
 
   useEffect(() => {
