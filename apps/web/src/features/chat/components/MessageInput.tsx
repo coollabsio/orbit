@@ -4,9 +4,9 @@ import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, 
 import { Add, EmojiHappy, Magnifier, Paperclip2, Reply, Xmark } from 'reicon-react'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { sendChatMessage } from '../../../mock/actions'
-import { nextId } from '../../../mock/store'
 import type { AppState, Attachment, Channel, ChatMessage } from '../../../mock/types'
 import type { EmojiEntry } from '../emojis'
+import { clipboardFiles, fileToAttachment } from '../attachmentLib'
 import { displayName, roleColor } from '../chatLib'
 import { useMentionAutocomplete } from '../useMentionAutocomplete'
 import { MentionPopover } from './MentionPopover'
@@ -135,15 +135,7 @@ export function MessageInput({
   /** Mock upload: files become attachments immediately (object URLs stand in for uploaded files). */
   function addFiles(files: FileList | File[] | null) {
     if (!files || files.length === 0) return
-    const next = Array.from(files).map(
-      (file): Attachment => ({
-        id: nextId('att'),
-        fileName: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        fileSize: file.size,
-        url: URL.createObjectURL(file),
-      }),
-    )
+    const next = Array.from(files).map(fileToAttachment)
     setAttachments((prev) => [...prev, ...next])
     setActionsOpen(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -160,22 +152,9 @@ export function MessageInput({
     })
   }
 
-  /** the chat reference handlePaste: pasted images become attachments. */
+  /** Pasted files (screenshots, copied images, files) become attachments; plain text pastes as usual. */
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const pasted = [
-      ...Array.from(event.clipboardData.files),
-      ...Array.from(event.clipboardData.items)
-        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-        .map((item) => item.getAsFile())
-        .filter((file): file is File => Boolean(file)),
-    ].filter((file) => file.type.startsWith('image/'))
-    const seen = new Set<string>()
-    const files = pasted.filter((file) => {
-      const key = `${file.type}:${file.size}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
+    const files = clipboardFiles(event)
     if (files.length === 0) return
     event.preventDefault()
     addFiles(files)
