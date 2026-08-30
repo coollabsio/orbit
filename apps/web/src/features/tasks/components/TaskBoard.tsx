@@ -57,7 +57,8 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
           sort,
         )
         const placeholderIndex = drop?.key === group.key ? drop.index : null
-        const visible = dragging ? columnTasks.filter((t) => t.id !== dragging.id) : columnTasks
+        // the dragged card stays mounted (faded): unmounting the drag source cancels the browser drag
+        const others = dragging ? columnTasks.filter((t) => t.id !== dragging.id) : columnTasks
         return (
           <section
             key={group.key}
@@ -85,15 +86,20 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
               <span className="tasks-board-count">{columnTasks.length}</span>
             </header>
             <div className="tasks-board-cards">
-              {visible.map((task, index) => {
+              {columnTasks.map((task) => {
                 const assignees = users.filter((user) => task.assigneeIds.includes(user.id))
+                const isDragged = dragging?.id === task.id
+                // placeholder slot index counts only the cards that can receive the drop
+                const slot = isDragged ? -1 : others.indexOf(task)
                 return (
                   <div key={task.id} style={{ display: 'contents' }}>
-                    {placeholderIndex === index ? <div className="tasks-board-placeholder" style={{ height: dragging?.height }} /> : null}
+                    {!isDragged && placeholderIndex === slot ? (
+                      <div className="tasks-board-placeholder" style={{ height: dragging?.height }} />
+                    ) : null}
                     <article
                       className="tasks-board-card"
                       data-active={task.id === activeTaskId || undefined}
-                      data-dragging={dragging?.id === task.id || undefined}
+                      data-dragging={isDragged || undefined}
                       draggable
                       tabIndex={0}
                       onDragStart={(event) => {
@@ -127,10 +133,10 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
                   </div>
                 )
               })}
-              {placeholderIndex !== null && placeholderIndex >= visible.length ? (
+              {placeholderIndex !== null && placeholderIndex >= others.length ? (
                 <div className="tasks-board-placeholder" style={{ height: dragging?.height }} />
               ) : null}
-              {visible.length === 0 && placeholderIndex === null ? <div className="tasks-board-empty">No tasks</div> : null}
+              {others.length === 0 && placeholderIndex === null ? <div className="tasks-board-empty">No tasks</div> : null}
             </div>
           </section>
         )
