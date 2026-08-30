@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ArrowLeft, MoreH, Trash } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
+import { EmojiPicker } from '../../../components/ui/EmojiPicker'
 import { relativeTime } from '../../../lib/format'
-import { createDoc, updateDocContent, updateDocTitle } from '../../../mock/actions'
+import { createDoc, updateDocContent, updateDocCover, updateDocIcon, updateDocTitle } from '../../../mock/actions'
 import { nextId } from '../../../mock/store'
 import type { Doc, DocBlock, User } from '../../../mock/types'
 import { ancestorsOf, numberedIndex } from '../lib'
 import { BlockEditor } from './BlockEditor'
+import { CoverBanner } from './CoverBanner'
+import { CoverSourcePanel } from './CoverSourcePanel'
 import { BlockView } from './BlockView'
 import { buildMentionTokens } from '../../chat/chatLib'
 import { PageBlock } from './PageBlock'
@@ -26,6 +29,8 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   // "Link a page" dialog opened from the slash menu; holds the block to replace.
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
+  // "Add cover" panel for a page without a cover (with a cover, the banner hosts its own panel)
+  const [coverPanelOpen, setCoverPanelOpen] = useState(false)
 
   const ancestors = ancestorsOf(docs, doc.id)
   const updatedBy = users.find((u) => u.id === doc.updatedBy)
@@ -178,7 +183,71 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
         </Dropdown>
       </div>
       <div className="pane-body docs-editor-scroll">
+        {doc.cover ? <CoverBanner key={`${doc.id}:${doc.cover}:${doc.coverPos ?? ''}`} doc={doc} /> : null}
         <div className="docs-editor-column">
+          {doc.icon ? (
+            <div className="doc-icon-row" data-cover={doc.cover ? 'true' : undefined}>
+              <Dropdown
+                className="emoji-dropdown"
+                trigger={() => (
+                  <button type="button" className="doc-icon-button" aria-label="Change icon">
+                    {doc.icon}
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <EmojiPicker
+                    onPick={(emoji) => {
+                      updateDocIcon(doc.id, emoji)
+                      close()
+                    }}
+                    onRemove={() => {
+                      updateDocIcon(doc.id, null)
+                      close()
+                    }}
+                  />
+                )}
+              </Dropdown>
+            </div>
+          ) : null}
+          {!doc.icon || !doc.cover ? (
+            <div className="doc-decor-actions">
+              {!doc.icon ? (
+                <Dropdown
+                  className="emoji-dropdown"
+                  trigger={() => (
+                    <button type="button" className="button button-ghost doc-decor-btn">
+                      😀 Add icon
+                    </button>
+                  )}
+                >
+                  {(close) => (
+                    <EmojiPicker
+                      onPick={(emoji) => {
+                        updateDocIcon(doc.id, emoji)
+                        close()
+                      }}
+                    />
+                  )}
+                </Dropdown>
+              ) : null}
+              {!doc.cover ? (
+                <button type="button" className="button button-ghost doc-decor-btn" onClick={() => setCoverPanelOpen((o) => !o)}>
+                  🖼️ Add cover
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {!doc.cover && coverPanelOpen ? (
+            <div className="doc-cover-source-inline">
+              <CoverSourcePanel
+                onPicked={(url) => {
+                  setCoverPanelOpen(false)
+                  updateDocCover(doc.id, { cover: url, coverPos: null })
+                }}
+              />
+            </div>
+          ) : null}
           <input
             className="doc-title-input"
             value={title}

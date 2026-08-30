@@ -293,6 +293,20 @@ export function updateDocTitle(docId: string, title: string) {
   }))
 }
 
+export function updateDocIcon(docId: string, icon: string | null) {
+  updateState((s) => ({
+    ...s,
+    docs: s.docs.map((d) => (d.id === docId ? { ...d, icon, updatedAt: now(), updatedBy: s.currentUserId } : d)),
+  }))
+}
+
+export function updateDocCover(docId: string, patch: { cover?: string | null; coverPos?: string | null }) {
+  updateState((s) => ({
+    ...s,
+    docs: s.docs.map((d) => (d.id === docId ? { ...d, ...patch, updatedAt: now(), updatedBy: s.currentUserId } : d)),
+  }))
+}
+
 export function updateDocContent(docId: string, content: DocBlock[]) {
   updateState((s) => ({
     ...s,

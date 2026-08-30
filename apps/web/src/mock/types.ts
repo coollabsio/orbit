@@ -91,6 +91,9 @@ export interface Doc {
   id: string
   title: string
   icon: string | null
+  /** Optional cover banner: image URL + focal point "x,y" in percent (null = centered). */
+  cover?: string | null
+  coverPos?: string | null
   parentId: string | null
   content: DocBlock[]
   createdBy: string
