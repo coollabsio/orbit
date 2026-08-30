@@ -1,7 +1,10 @@
 // the chat reference modals (Create/Edit Channel, Create/Edit Category, ConfirmDelete) rendered
 // with the Coolify modal shell and form controls.
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import { EmojiHappy } from 'reicon-react'
+import { Dropdown } from '../../../components/ui/Dropdown'
+import { EmojiPicker } from '../../../components/ui/EmojiPicker'
 import { Modal } from '../../../components/ui/Modal'
 import {
   createChannel,
@@ -74,48 +77,38 @@ function slugChannelName(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, '-')
 }
 
-function emojiPickerHint() {
-  const platform = navigator.platform.toLowerCase()
-  if (platform.includes('mac')) return 'Press ⌃⌘Space'
-  if (platform.includes('win')) return 'Press Win + .'
-  return 'Use your OS emoji shortcut'
-}
-
-/** the chat reference EmojiSelect: small emoji input + "Focus input" + Clear, with an OS picker hint. */
+/** Emoji tile that opens the picker panel (replaces the old text input + "Focus input"). */
 function EmojiSelect({ value, onChange, label = 'Emoji' }: { value: string; onChange: (v: string) => void; label?: string }) {
-  const inputRef = useRef<HTMLInputElement>(null)
   return (
     <div className="settings-field">
-      <label className="field-label" htmlFor="emoji-select">
+      <span className="field-label">
         {label} <span className="text-muted">(optional)</span>
-      </label>
-      <div className="fc-emoji-select">
-        <input
-          ref={inputRef}
-          id="emoji-select"
-          className="input fc-emoji-select-input"
-          value={value}
-          maxLength={16}
-          aria-label={`${label} unicode emoji`}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        <button
-          type="button"
-          className="button"
-          onClick={() => {
-            inputRef.current?.focus()
-            inputRef.current?.select()
-          }}
-        >
-          Focus input
-        </button>
-        {value.trim() ? (
-          <button type="button" className="button button-ghost" onClick={() => onChange('')}>
-            Clear
+      </span>
+      <Dropdown
+        className="emoji-dropdown"
+        trigger={() => (
+          <button type="button" className="emoji-tile" aria-label={value.trim() ? `${label}: ${value}` : `Set ${label.toLowerCase()}`}>
+            {value.trim() ? value : <EmojiHappy size={18} />}
           </button>
-        ) : null}
-      </div>
-      <p className="field-help">{emojiPickerHint()}; picked emoji will insert into the focused field.</p>
+        )}
+      >
+        {(close) => (
+          <EmojiPicker
+            onPick={(emoji) => {
+              onChange(emoji)
+              close()
+            }}
+            onRemove={
+              value.trim()
+                ? () => {
+                    onChange('')
+                    close()
+                  }
+                : undefined
+            }
+          />
+        )}
+      </Dropdown>
     </div>
   )
 }
