@@ -20,6 +20,7 @@
 }
 
 .tasks-list-pane {
+  position: relative;
   flex: 1;
 }
 
@@ -881,4 +882,31 @@
   inset: 0;
   cursor: pointer;
   opacity: 0;
+}
+
+/* floating toolbar for selected rows */
+.tasks-bulk-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 40;
+  display: flex;
+  width: min(560px, calc(100% - 48px));
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--elevated);
+  box-shadow: var(--shadow-popover);
+  transform: translateX(-50%);
+  animation: unsaved-bar-in 160ms ease-out;
+}
+
+.tasks-bulk-count {
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
 }
