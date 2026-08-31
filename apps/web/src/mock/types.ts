@@ -192,6 +192,15 @@ export interface Attachment {
   url: string
 }
 
+/** Uploaded emoji, used anywhere as :name:. */
+export interface CustomEmoji {
+  id: string
+  name: string
+  url: string
+  createdBy: string
+  createdAt: string
+}
+
 export interface Webhook {
   id: string
   name: string
@@ -257,6 +266,7 @@ export interface AppState {
   channels: Channel[]
   chatMessages: ChatMessage[]
   webhooks: Webhook[]
+  customEmojis: CustomEmoji[]
   /** channelId → users currently typing (mock realtime; expires = epoch ms) */
   typingUsers: Record<string, Array<{ userId: string; expires: number }>>
 

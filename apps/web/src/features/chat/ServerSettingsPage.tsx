@@ -2,22 +2,24 @@
 // Roles / Webhooks / Emoji tabs; the content column fills the rest.
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { People } from 'reicon-react'
+import { EmojiHappy, People } from 'reicon-react'
 import { WebhookIcon } from '../../components/ui/WebhookIcon'
+import { EmojiTab } from './settings/EmojiTab'
 import { RolesTab } from './settings/RolesTab'
 import { WebhooksTab } from './settings/WebhooksTab'
 import './chat.css'
 import './settings/server.css'
 
-type Tab = 'roles' | 'webhooks'
+type Tab = 'roles' | 'webhooks' | 'emoji'
 
 const navItems: { key: Tab; label: string; icon: React.ComponentType<{ size?: number }>; danger?: boolean }[] = [
   { key: 'roles', label: 'Roles', icon: People },
   { key: 'webhooks', label: 'Webhooks', icon: WebhookIcon },
+  { key: 'emoji', label: 'Emoji', icon: EmojiHappy },
 ]
 
 function isTab(value: string | null): value is Tab {
-  return value === 'roles' || value === 'webhooks'
+  return value === 'roles' || value === 'webhooks' || value === 'emoji'
 }
 
 export function ServerSettingsPage() {
@@ -63,7 +65,7 @@ export function ServerSettingsPage() {
         <div className="ss-inner" data-wide={activeTab === 'roles' ? 'true' : undefined}>
           {activeTab === 'roles' ? <RolesTab /> : null}
           {activeTab === 'webhooks' ? <WebhooksTab /> : null}
-          {null}
+          {activeTab === 'emoji' ? <EmojiTab /> : null}
         </div>
       </div>
     </div>

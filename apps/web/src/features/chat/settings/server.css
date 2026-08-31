@@ -906,3 +906,55 @@
     padding: 20px;
   }
 }
+
+/* ---------- chat settings: Emoji tab ---------- */
+.em-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.em-head-row,
+.em-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.em-head-row {
+  padding-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.em-image {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.em-name {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-faint);
+}
+
+.em-name-input {
+  height: 32px;
+  width: 200px;
+}
+
+.em-delete {
+  color: var(--text-faint);
+}
+
+.em-delete:hover {
+  color: var(--danger);
+}

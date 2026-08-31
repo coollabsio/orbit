@@ -4,6 +4,7 @@ import type {
   Channel,
   ChatCategory,
   ChatMessage,
+  CustomEmoji,
   Doc,
   DocBlock,
   MailThread,
@@ -280,6 +281,27 @@ export function reorderStatus(statusId: string, targetId: string, position: 'bef
     ...prev,
     statuses: prev.statuses.map((st) => (positions.has(st.id) ? { ...st, position: positions.get(st.id)! } : st)),
   }))
+}
+
+/* ---------- custom emojis ---------- */
+
+export function createCustomEmoji(name: string, url: string): CustomEmoji {
+  const s = getState()
+  // shortcodes are unique: "party", "party_2", …
+  let unique = name
+  let n = 2
+  while (s.customEmojis.some((e) => e.name === unique)) unique = `${name}_${n++}`
+  const emoji: CustomEmoji = { id: nextId('ce'), name: unique, url, createdBy: s.currentUserId, createdAt: now() }
+  updateState((prev) => ({ ...prev, customEmojis: [...prev.customEmojis, emoji] }))
+  return emoji
+}
+
+export function renameCustomEmoji(emojiId: string, name: string) {
+  updateState((s) => ({ ...s, customEmojis: s.customEmojis.map((e) => (e.id === emojiId ? { ...e, name } : e)) }))
+}
+
+export function deleteCustomEmoji(emojiId: string) {
+  updateState((s) => ({ ...s, customEmojis: s.customEmojis.filter((e) => e.id !== emojiId) }))
 }
 
 /* ---------- docs ---------- */

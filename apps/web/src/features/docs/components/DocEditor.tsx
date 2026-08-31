@@ -14,6 +14,7 @@ import { descendantsOf } from '../lib'
 import { BlockEditor } from './BlockEditor'
 import { CoverBanner } from './CoverBanner'
 import { MediaBlock } from './MediaBlock'
+import { Emoji } from '../../../components/ui/Emoji'
 import { CoverSourcePanel } from './CoverSourcePanel'
 import { BlockView } from './BlockView'
 import { buildMentionTokens } from '../../chat/chatLib'
@@ -247,7 +248,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                 className="emoji-dropdown"
                 trigger={() => (
                   <button type="button" className="doc-icon-button" aria-label="Change icon">
-                    {doc.icon}
+                    <Emoji value={doc.icon ?? ""} size={56} />
                   </button>
                 )}
               >

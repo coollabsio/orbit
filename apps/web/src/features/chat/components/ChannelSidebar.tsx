@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router'
 import { Add, ChevronDown, Edit, FolderAdd, Hashtag, Setting2, Trash } from 'reicon-react'
 import { deleteChatMessage, followThread, markChannelRead, renameThread, reorderChannels, reorderChatCategories } from '../../../mock/actions'
+import { Emoji } from '../../../components/ui/Emoji'
 import { FollowIcon } from '../../../components/ui/icons/FollowIcon'
 import { threadTitleOf } from '../chatLib'
 import type { AppState, Channel, ChatCategory, ChatMessage } from '../../../mock/types'
@@ -357,7 +358,7 @@ export function ChannelSidebar({
                       position={categoryDropIndicator?.categoryId === cat.id ? categoryDropIndicator.position : null}
                     />
                     <span className="fc-category-label">
-                      {cat.emoji ? <span className="fc-emoji-icon" data-size="sm">{cat.emoji}</span> : null}
+                      {cat.emoji ? <span className="fc-emoji-icon" data-size="sm"><Emoji value={cat.emoji} size={13} /></span> : null}
                       <span className="truncate">{cat.name}</span>
                     </span>
                     <ChevronDown className="fc-chevron" />
@@ -401,7 +402,7 @@ export function ChannelSidebar({
                           }}
                         >
                           <DropLine position={dropIndicator?.channelId === ch.id ? dropIndicator.position : null} />
-                          {ch.emoji ? <span className="fc-emoji-icon">{ch.emoji}</span> : <Hashtag size={16} />}
+                          {ch.emoji ? <span className="fc-emoji-icon"><Emoji value={ch.emoji} size={16} /></span> : <Hashtag size={16} />}
                           <span className="fc-channel-row-name">{ch.name}</span>
                           {ch.unreadCount > 0 && !isActive ? (
                             <span className="fc-unread-badge">{ch.unreadCount}</span>

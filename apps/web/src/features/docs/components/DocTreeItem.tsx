@@ -1,5 +1,6 @@
 import { CaretRight, MoreH, Note2, Plus, Trash } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
+import { Emoji } from '../../../components/ui/Emoji'
 import type { Doc } from '../../../mock/types'
 import { childrenOf } from '../lib'
 
@@ -101,7 +102,7 @@ export function DocTreeItem({
         ) : (
           <span className="doc-tree-chevron" aria-hidden="true" />
         )}
-        <span className="doc-tree-icon">{doc.icon ?? <Note2 size={15} />}</span>
+        <span className="doc-tree-icon">{doc.icon ? <Emoji value={doc.icon} size={15} /> : <Note2 size={15} />}</span>
         <span className="menu-item-label truncate">{doc.title || 'Untitled'}</span>
         <span className="doc-tree-actions" onClick={(e) => e.stopPropagation()}>
           <button

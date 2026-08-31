@@ -6,6 +6,7 @@ import { mailFolders, mailThreads } from './seed/mail'
 import { channels, chatCategories, chatMessages } from './seed/chat'
 import { notifications } from './seed/notifications'
 import { webhooks } from './seed/webhooks'
+import { customEmojis } from './seed/customEmojis'
 
 export function seedState(): AppState {
   return {
@@ -23,6 +24,7 @@ export function seedState(): AppState {
     channels,
     chatMessages,
     webhooks,
+    customEmojis,
     typingUsers: {},
     notifications,
   }

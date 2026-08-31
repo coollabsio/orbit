@@ -2,6 +2,7 @@
 // block parser (fenced code, headings, quotes, lists) -> inline markdown ->
 // mentionify -> linkify. Custom regex parser, zero dependencies. Shared by
 // message content and embed cards.
+import { getState } from '../../mock/store'
 import { appNavigate } from '../../lib/navigateBridge'
 import { CodeBlock } from './components/CodeBlock'
 import { isMentionBoundary, type MentionToken } from './chatLib'
@@ -203,7 +204,12 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
       )
     } else if (token.startsWith(':')) {
       const shortcode = token.slice(1, -1)
-      parts.push(EMOJI_SHORTCODES[shortcode] || token)
+      const custom = getState().customEmojis.find((e) => e.name === shortcode)
+      if (custom) {
+        parts.push(<img key={key} className="fc-custom-emoji" src={custom.url} alt={token} title={token} />)
+      } else {
+        parts.push(EMOJI_SHORTCODES[shortcode] || token)
+      }
     } else if (token.startsWith('**') || token.startsWith('__')) {
       parts.push(<strong key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-strong`, mentionTokens)}</strong>)
     } else {

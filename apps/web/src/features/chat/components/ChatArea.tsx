@@ -9,6 +9,7 @@ import type { AppState, Channel, ChatMessage } from '../../../mock/types'
 import { FilesView } from './FilesView'
 import { MessageInput, type MessageInputHandle } from './MessageInput'
 import { MessageList } from './MessageList'
+import { Emoji } from '../../../components/ui/Emoji'
 import { PinnedMessages } from './PinnedMessages'
 import { SearchPanel } from './SearchPanel'
 import { ThreadsPopover } from './ThreadsPopover'
@@ -84,7 +85,7 @@ export function ChatArea({
           <button type="button" className="fc-mobile-back" title="Back to channels" onClick={() => navigate('/chat')}>
             <ArrowLeft size={18} />
           </button>
-          {channel.emoji ? <span className="fc-emoji-icon" data-size="lg">{channel.emoji}</span> : <Hashtag size={20} />}
+          {channel.emoji ? <span className="fc-emoji-icon" data-size="lg"><Emoji value={channel.emoji} size={20} /></span> : <Hashtag size={20} />}
           <div className="fc-chat-header-title">
             <h2>{channel.name}</h2>
             {channel.description ? (

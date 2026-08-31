@@ -26,6 +26,7 @@ import { EmbedCards } from './Embeds'
 import { Attachments } from './Attachments'
 import { WebhookIcon } from '../../../components/ui/WebhookIcon'
 import { relativeTime } from '../../../lib/format'
+import { Emoji } from '../../../components/ui/Emoji'
 import { ConfirmDeleteModal } from './ChannelModals'
 
 const TOOLBAR_EMOJIS = ['👍', '👀', '😂']
@@ -461,7 +462,7 @@ function Reactions({ message, currentUserId }: { message: ChatMessage; currentUs
           data-mine={r.userIds.includes(currentUserId) ? 'true' : undefined}
           onClick={() => toggleReaction(message.id, r.emoji)}
         >
-          {r.emoji} {r.userIds.length}
+          <Emoji value={r.emoji} size={15} /> {r.userIds.length}
         </button>
       ))}
     </div>

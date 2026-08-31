@@ -1554,3 +1554,13 @@ textarea.input {
   background: var(--elevated);
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
 }
+
+/* uploaded custom emoji rendered inline */
+.app-custom-emoji {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  object-fit: contain;
+  vertical-align: -4px;
+}

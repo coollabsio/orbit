@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Magnifier } from 'reicon-react'
+import { useAppState } from '../../mock/store'
 import type { EmojiEntry } from '../../features/chat/emojis'
 
 /** Category buckets mirror the chat composer's emoji panel. */
@@ -31,6 +32,7 @@ function emojiCategory({ name, keywords }: EmojiEntry): string {
  * Remove action, search, grouped grid. The catalog is loaded lazily on first mount.
  */
 export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => void; onRemove?: () => void }) {
+  const { customEmojis } = useAppState()
   const [emojis, setEmojis] = useState<EmojiEntry[]>([])
   const [query, setQuery] = useState('')
 
@@ -75,6 +77,20 @@ export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => v
         <input value={query} placeholder="Search emoji" autoFocus aria-label="Search emoji" onChange={(e) => setQuery(e.target.value)} />
       </div>
       <div className="fc-emoji-scroll">
+        {customEmojis.filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase())).length > 0 ? (
+          <section className="fc-emoji-group">
+            <div className="fc-emoji-group-label">Custom</div>
+            <div className="fc-emoji-grid">
+              {customEmojis
+                .filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase()))
+                .map((custom) => (
+                  <button key={custom.id} type="button" title={`:${custom.name}:`} onClick={() => onPick(`:${custom.name}:`)}>
+                    <img className="app-custom-emoji" src={custom.url} alt={`:${custom.name}:`} />
+                  </button>
+                ))}
+            </div>
+          </section>
+        ) : null}
         {emojis.length === 0 ? (
           <div className="fc-emoji-empty">Loading emoji...</div>
         ) : groups.length > 0 ? (
