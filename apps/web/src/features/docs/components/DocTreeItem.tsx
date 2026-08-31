@@ -3,11 +3,25 @@ import { Dropdown } from '../../../components/ui/Dropdown'
 import type { Doc } from '../../../mock/types'
 import { childrenOf } from '../lib'
 
+export type DocDropZone = 'before' | 'after' | 'inside'
+
+export interface DocTreeDnd {
+  dragId: string | null
+  dropAt: { id: string; zone: DocDropZone } | null
+  canDropOn: (targetId: string) => boolean
+  onDragStart: (id: string) => void
+  onDragEnd: () => void
+  onDragOver: (id: string, zone: DocDropZone) => void
+  onDragLeave: (id: string) => void
+  onDrop: (id: string) => void
+}
+
 interface DocTreeItemProps {
   doc: Doc
   docs: Doc[]
   depth: number
   activeId: string | null
+  dnd: DocTreeDnd
   isExpanded: (id: string) => boolean
   onToggle: (id: string) => void
   onOpen: (id: string) => void
@@ -15,11 +29,21 @@ interface DocTreeItemProps {
   onDelete: (id: string) => void
 }
 
+/** Pointer position → drop zone: edges reorder among siblings, the middle nests inside. */
+function zoneAt(element: HTMLElement, clientY: number): DocDropZone {
+  const rect = element.getBoundingClientRect()
+  const y = clientY - rect.top
+  if (y < rect.height * 0.25) return 'before'
+  if (y > rect.height * 0.75) return 'after'
+  return 'inside'
+}
+
 export function DocTreeItem({
   doc,
   docs,
   depth,
   activeId,
+  dnd,
   isExpanded,
   onToggle,
   onOpen,
@@ -34,8 +58,32 @@ export function DocTreeItem({
       <div
         className="menu-item doc-tree-row"
         data-active={doc.id === activeId || undefined}
+        data-dragging={dnd.dragId === doc.id || undefined}
+        data-drop={dnd.dropAt?.id === doc.id ? dnd.dropAt.zone : undefined}
         style={{ paddingLeft: 6 + depth * 16 }}
+        draggable
         onClick={() => onOpen(doc.id)}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('text/doc-id', doc.id)
+          dnd.onDragStart(doc.id)
+        }}
+        onDragEnd={dnd.onDragEnd}
+        onDragOver={(e) => {
+          if (!dnd.dragId || !dnd.canDropOn(doc.id)) return
+          e.preventDefault()
+          e.stopPropagation()
+          e.dataTransfer.dropEffect = 'move'
+          dnd.onDragOver(doc.id, zoneAt(e.currentTarget, e.clientY))
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) dnd.onDragLeave(doc.id)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          dnd.onDrop(doc.id)
+        }}
       >
         {children.length > 0 ? (
           <button
@@ -97,6 +145,7 @@ export function DocTreeItem({
               docs={docs}
               depth={depth + 1}
               activeId={activeId}
+              dnd={dnd}
               isExpanded={isExpanded}
               onToggle={onToggle}
               onOpen={onOpen}

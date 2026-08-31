@@ -698,3 +698,38 @@ button.doc-tree-chevron:hover {
   position: relative;
   z-index: 20;
 }
+
+/* drag a page: source keeps the normal cursor and only changes color */
+.doc-tree-row {
+  position: relative;
+}
+
+.doc-tree-row[data-dragging='true'] {
+  background: var(--nav-active-bg);
+  color: var(--text-primary);
+}
+
+/* drop zones: edges show an insert line, the middle highlights (nest inside) */
+.doc-tree-row[data-drop='inside'] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+
+.doc-tree-row[data-drop='before']::before,
+.doc-tree-row[data-drop='after']::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.doc-tree-row[data-drop='before']::before {
+  top: -1px;
+}
+
+.doc-tree-row[data-drop='after']::after {
+  bottom: -1px;
+}
