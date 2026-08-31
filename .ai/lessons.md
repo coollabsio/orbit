@@ -33,6 +33,6 @@
 - Rule: start background helpers with `cmd & echo $!`, keep the PID, and `kill <pid>` that PID only. Never pkill by a generic name (firefox, node, vite).
 - For headless Firefox screenshots: the `--screenshot` invocation exits on its own; wrap in `timeout N` instead of killing.
 
-## This workspace uses aube, not npm/npx
-- The package manager is aube (virtual store at ~/.cache/aube). Do not run npm/npx.
-- Use `aube run <script>` / `aube exec <bin>` (verify with `aube --help`) for build, tsc, lint, preview.
+## Package-manager choice
+- The current checkout was installed with **aube** (lockfile: `apps/web/aube-lock.yaml`; virtual store at `~/.cache/aube`), so existing automation commonly uses `aube run <script>` / `aube exec <bin>`.
+- **Aube is optional.** The project is an ordinary Vite package and can be switched to Bun or pnpm at any time. Use one package manager consistently, generate its lockfile, and remove the obsolete lockfile in the same migration.
