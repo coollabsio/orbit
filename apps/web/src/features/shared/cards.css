@@ -13,6 +13,11 @@
   border: none;
   background: var(--elevated);
   box-shadow: 0 0 0 1px var(--hairline);
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.layer-card:hover {
+  box-shadow: 0 0 0 1px var(--line), 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 .layer-card-header {

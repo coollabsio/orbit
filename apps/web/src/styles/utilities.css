@@ -19,12 +19,17 @@
   background: var(--button-bg);
   color: var(--text-primary);
   cursor: pointer;
-  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s, transform 0.12s ease;
 }
 
 .button:hover:not(:disabled) {
   background: var(--button-hover-bg);
   color: var(--text-primary);
+}
+
+.button:active:not(:disabled),
+.icon-button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .button:disabled {
@@ -108,7 +113,7 @@
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   color: var(--text-faint);
-  transition: color 0.15s, background-color 0.15s;
+  transition: color 0.15s, background-color 0.15s, transform 0.12s ease;
 }
 
 .icon-button:hover {
@@ -698,6 +703,19 @@ textarea.input {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  transform-origin: top left;
+  animation: popover-enter 120ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+@keyframes popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .popover-option {

@@ -140,6 +140,16 @@
   border-radius: 6px;
 }
 
+.app-sidebar .menu-item > svg,
+.app-sidebar .menu-item-label,
+.app-sidebar .count-badge {
+  transition: opacity 0.14s ease, transform 0.18s ease;
+}
+
+.app-sidebar .menu-item:hover > svg {
+  transform: translateX(1px);
+}
+
 .app-sidebar[data-collapsed='true'] .nav-section,
 .app-sidebar[data-collapsed='true'] .menu-item-label,
 .app-sidebar[data-collapsed='true'] .count-badge {
@@ -154,6 +164,10 @@
 .app-sidebar[data-collapsed='true'] .menu-item {
   justify-content: center;
   padding-inline: 0;
+}
+
+.app-sidebar[data-collapsed='true'] .menu-item > svg {
+  transform: scale(1.04);
 }
 
 .app-sidebar[data-collapsed='true'] .app-sidebar-scroll .nav-section:not(:first-child) {

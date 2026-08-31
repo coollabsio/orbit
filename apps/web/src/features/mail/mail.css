@@ -219,6 +219,18 @@
   margin-top: 24px;
   padding-top: 20px;
   border-top: 1px solid var(--hairline);
+  animation: mail-reply-enter 160ms ease-out both;
+}
+
+@keyframes mail-reply-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .mail-reply[data-drop-over='true'] {
