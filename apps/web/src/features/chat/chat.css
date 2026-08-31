@@ -2702,7 +2702,7 @@
   aspect-ratio: auto;
 }
 
-.fc-attachment-image button {
+.fc-attachment-image .fc-attachment-open {
   display: block;
   width: 100%;
   height: 100%;

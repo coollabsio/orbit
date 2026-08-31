@@ -33,7 +33,7 @@ export function Attachments({
               data-single={images.length === 1 || undefined}
               data-hero={images.length === 3 && index === 0 ? 'true' : undefined}
             >
-              <button type="button" aria-label={`Open image ${att.fileName}`} onClick={() => setViewerImage(att)}>
+              <button type="button" className="fc-attachment-open" aria-label={`Open image ${att.fileName}`} onClick={() => setViewerImage(att)}>
                 <img src={att.url} alt={att.fileName} loading={att.url.startsWith('data:') ? 'eager' : 'lazy'} />
               </button>
               {images.length > 4 && index === 3 ? <div className="fc-attachment-more">+{images.length - 4}</div> : null}
