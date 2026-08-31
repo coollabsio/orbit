@@ -1,25 +1,23 @@
 // Chat settings: a settings sidebar replaces the channel sidebar (same width), with
-// Roles / Webhooks / Danger Zone tabs; the content column fills the rest.
+// Roles / Webhooks / Emoji tabs; the content column fills the rest.
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { People, Trash } from 'reicon-react'
+import { People } from 'reicon-react'
 import { WebhookIcon } from '../../components/ui/WebhookIcon'
-import { DangerTab } from './settings/DangerTab'
 import { RolesTab } from './settings/RolesTab'
 import { WebhooksTab } from './settings/WebhooksTab'
 import './chat.css'
 import './settings/server.css'
 
-type Tab = 'roles' | 'webhooks' | 'danger'
+type Tab = 'roles' | 'webhooks'
 
 const navItems: { key: Tab; label: string; icon: React.ComponentType<{ size?: number }>; danger?: boolean }[] = [
   { key: 'roles', label: 'Roles', icon: People },
   { key: 'webhooks', label: 'Webhooks', icon: WebhookIcon },
-  { key: 'danger', label: 'Danger Zone', icon: Trash, danger: true },
 ]
 
 function isTab(value: string | null): value is Tab {
-  return value === 'roles' || value === 'webhooks' || value === 'danger'
+  return value === 'roles' || value === 'webhooks'
 }
 
 export function ServerSettingsPage() {
@@ -65,7 +63,7 @@ export function ServerSettingsPage() {
         <div className="ss-inner" data-wide={activeTab === 'roles' ? 'true' : undefined}>
           {activeTab === 'roles' ? <RolesTab /> : null}
           {activeTab === 'webhooks' ? <WebhooksTab /> : null}
-          {activeTab === 'danger' ? <DangerTab /> : null}
+          {null}
         </div>
       </div>
     </div>

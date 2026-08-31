@@ -812,11 +812,3 @@ export function updateWorkspace(patch: { name?: string; iconUrl?: string | null 
   updateState((s) => ({ ...s, workspace: { ...s.workspace, ...patch } }))
 }
 
-/** Mock of "purge deleted messages": the mock store hard-deletes, so there is nothing to purge. */
-export function purgeDeletedMessages(): number {
-  return 0
-}
-
-export function deleteWorkspaceContent() {
-  updateState((s) => ({ ...s, chatCategories: [], channels: [], chatMessages: [], webhooks: [], roles: [] }))
-}
