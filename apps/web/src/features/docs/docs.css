@@ -769,9 +769,14 @@ button.doc-tree-chevron:hover {
   background: var(--danger);
 }
 
+/* image blocks span the full column width */
+.doc-media:has(.doc-image) {
+  width: 100%;
+}
+
 .doc-image {
   display: block;
-  max-width: min(520px, 100%);
+  width: 100%;
   overflow: hidden;
   border: 1px solid var(--hairline);
   border-radius: 8px;
@@ -780,7 +785,7 @@ button.doc-tree-chevron:hover {
 
 .doc-image img {
   display: block;
-  max-width: 100%;
+  width: 100%;
   height: auto;
 }
 
