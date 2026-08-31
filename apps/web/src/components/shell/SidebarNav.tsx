@@ -18,7 +18,6 @@ const WORKSPACE_LINKS = [
   { to: '/docs', label: 'Docs', icon: Note2 },
   { to: '/mail', label: 'Mail', icon: Sms },
   { to: '/chat', label: 'Chat', icon: Message },
-  { to: '/dm', label: 'Direct messages', icon: Messages2 },
 ]
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
@@ -64,6 +63,15 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           </NavLink>
         ))}
         <div className="nav-section">Personal</div>
+        <NavLink
+          to="/dm"
+          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          onClick={onNavigate}
+        >
+          <Messages2 size={18} />
+          <span className="menu-item-label">Direct messages</span>
+          {unreadDMs ? <span className="count-badge">{unreadDMs}</span> : null}
+        </NavLink>
         <NavLink
           to="/inbox"
           className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}

@@ -28,7 +28,7 @@ export function NewDMModal({ state, onClose, onCreated }: { state: AppState; onC
             className="dm-member-row"
             onClick={() => onCreated(getOrCreateDirectMessage(user.id))}
           >
-            <Avatar user={user} size={36} showOnline />
+            <Avatar user={user} size={36} />
             <span className="dm-member-copy">
               <strong>{user.name}</strong>
               <small>@{user.handle}</small>
