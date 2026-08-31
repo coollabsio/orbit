@@ -20,6 +20,7 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
   const navigate = useNavigate()
   const [expandedOverrides, setExpandedOverrides] = useState<Record<string, boolean>>({})
   const [forwarding, setForwarding] = useState<MailThread['messages'][number] | null>(null)
+  const [replying, setReplying] = useState(false)
   const replyRef = useRef<HTMLTextAreaElement>(null)
   const listUrl = `/mail?folder=${activeFolderId}`
   const folder = folders.find((f) => f.id === thread.folderId)
@@ -134,21 +135,27 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
                 expanded={expandedOverrides[message.id] ?? defaultExpanded}
                 onToggle={() => toggleMessage(message.id, defaultExpanded)}
                 onReply={() => {
-                  replyRef.current?.focus()
-                  replyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                  setReplying(true)
+                  requestAnimationFrame(() => {
+                    replyRef.current?.focus()
+                    replyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                  })
                 }}
                 onForward={() => setForwarding(message)}
               />
             )
           })}
-          <ReplyComposer
-            threadId={thread.id}
-            replyToName={
-              [...thread.messages].reverse().find((m) => m.from.email !== currentUserEmail)?.from
-                .name ?? threadSender(thread).name
-            }
-            textareaRef={replyRef}
-          />
+          {replying ? (
+            <ReplyComposer
+              threadId={thread.id}
+              replyToName={
+                [...thread.messages].reverse().find((m) => m.from.email !== currentUserEmail)?.from
+                  .name ?? threadSender(thread).name
+              }
+              textareaRef={replyRef}
+              onClose={() => setReplying(false)}
+            />
+          ) : null}
         </div>
       </div>
       {forwarding ? (

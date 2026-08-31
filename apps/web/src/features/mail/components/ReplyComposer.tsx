@@ -10,9 +10,10 @@ interface ReplyComposerProps {
   threadId: string
   replyToName: string
   textareaRef?: RefObject<HTMLTextAreaElement | null>
+  onClose: () => void
 }
 
-export function ReplyComposer({ threadId, replyToName, textareaRef }: ReplyComposerProps) {
+export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: ReplyComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dropOver, setDropOver] = useState(false)
@@ -29,6 +30,7 @@ export function ReplyComposer({ threadId, replyToName, textareaRef }: ReplyCompo
     sendReply(threadId, body.trim(), attachments)
     setBody('')
     setAttachments([])
+    onClose()
   }
 
   return (
@@ -86,19 +88,18 @@ export function ReplyComposer({ threadId, replyToName, textareaRef }: ReplyCompo
           <Paperclip2 size={16} />
         </button>
         <span className="text-xs text-faint">⌘⏎ to send</span>
-        {body || attachments.length > 0 ? (
-          <button
-            type="button"
-            className="icon-button mail-reply-discard"
-            aria-label="Discard reply"
-            onClick={() => {
-              setBody('')
-              setAttachments([])
-            }}
-          >
-            <Xmark size={16} />
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="icon-button mail-reply-discard"
+          aria-label="Close reply"
+          onClick={() => {
+            setBody('')
+            setAttachments([])
+            onClose()
+          }}
+        >
+          <Xmark size={16} />
+        </button>
       </div>
     </div>
   )
