@@ -139,7 +139,11 @@ export function ChatArea({
               <People size={20} weight="Filled" />
             </button>
           ) : null}
-          <div className="fc-header-search" data-open={searchOpen ? 'true' : undefined}>
+          <div
+            className="fc-header-search"
+            data-open={searchOpen ? 'true' : undefined}
+            onClick={(event) => event.currentTarget.querySelector('input')?.focus()}
+          >
             <Magnifier size={16} />
             <input
               type="text"

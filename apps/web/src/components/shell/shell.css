@@ -573,7 +573,9 @@ a.topbar-crumb:hover {
   .topbar[data-root='tasks'],
   .topbar[data-root='mail'],
   .topbar[data-root='docs'],
-  .topbar[data-root='dm'] {
+  .topbar[data-root='dm'],
+  .topbar[data-root='chat'],
+  .topbar[data-root='inbox'] {
     display: none;
   }
 
