@@ -3922,3 +3922,13 @@
 .fc-attachment-remove:hover {
   background: var(--danger);
 }
+
+/* channel mentions are links: same pill as user mentions, pointer on hover */
+a.fc-mention {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.fc-mention:hover {
+  text-decoration: underline;
+}

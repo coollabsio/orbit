@@ -1,4 +1,6 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
+import { useEffect } from 'react'
+import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router'
+import { setAppNavigate } from './lib/navigateBridge'
 import { ThemeProvider } from './lib/theme'
 import { AppShell } from './components/shell/AppShell'
 import { HomePage } from './features/home/HomePage'
@@ -14,10 +16,20 @@ import { MembersPage } from './features/settings/MembersPage'
 import { ProfilePage } from './features/profile/ProfilePage'
 import { ServerSettingsPage } from './features/chat/ServerSettingsPage'
 
+/** Hands the router's navigate function to non-component code (markdown links). */
+function NavigateBridge() {
+  const navigate = useNavigate()
+  useEffect(() => {
+    setAppNavigate((to) => void navigate(to))
+  }, [navigate])
+  return null
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
+        <NavigateBridge />
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<HomePage />} />

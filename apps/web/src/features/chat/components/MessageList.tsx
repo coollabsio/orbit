@@ -37,7 +37,7 @@ export function MessageList({
   const [showJumpToPresent, setShowJumpToPresent] = useState(false)
 
   const me = state.users.find((u) => u.id === state.currentUserId)
-  const mentionTokens = useMemo(() => buildMentionTokens(state.users), [state.users])
+  const mentionTokens = useMemo(() => buildMentionTokens(state.users, state.channels), [state.users, state.channels])
   const messages = useMemo(
     () =>
       state.chatMessages

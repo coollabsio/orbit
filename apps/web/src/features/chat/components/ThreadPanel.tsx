@@ -36,7 +36,7 @@ export function ThreadPanel({
   const [titleDraft, setTitleDraft] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const me = state.users.find((u) => u.id === state.currentUserId)
-  const mentionTokens = useMemo(() => buildMentionTokens(state.users), [state.users])
+  const mentionTokens = useMemo(() => buildMentionTokens(state.users, state.channels), [state.users, state.channels])
   const replies = useMemo(
     () =>
       state.chatMessages

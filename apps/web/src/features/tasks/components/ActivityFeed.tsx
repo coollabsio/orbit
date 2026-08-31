@@ -18,7 +18,7 @@ interface ActivityFeedProps {
  * so a change made after a comment shows below that comment.
  */
 export function ActivityFeed({ task, state }: ActivityFeedProps) {
-  const mentionTokens = useMemo(() => buildMentionTokens(state.users), [state.users])
+  const mentionTokens = useMemo(() => buildMentionTokens(state.users, state.channels), [state.users, state.channels])
   const userById = (id: string) => state.users.find((u) => u.id === id)
   const feed = buildFeed(task)
 

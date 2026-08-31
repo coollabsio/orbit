@@ -1,6 +1,6 @@
 // Helpers copied from the chat reference (frontend/src/components/chat/MessageItem.tsx
 // and frontend/src/lib/time.ts), adapted from JSON content to plain text.
-import type { AppState, ChatMessage, Role, User } from '../../mock/types'
+import type { AppState, Channel, ChatMessage, Role, User } from '../../mock/types'
 
 /* ---------- time (the chat reference lib/time.ts) ---------- */
 
@@ -55,9 +55,9 @@ export function authorColor(state: AppState, message: ChatMessage): string | und
 
 /* ---------- mentions ---------- */
 
-export type MentionToken = { label: string; color: string; kind: 'user' | 'global' }
+export type MentionToken = { label: string; color: string; kind: 'user' | 'global' | 'channel'; href?: string }
 
-export function buildMentionTokens(users: User[]): MentionToken[] {
+export function buildMentionTokens(users: User[], channels: Channel[] = []): MentionToken[] {
   return [
     { label: 'everyone', color: '#dee0fc', kind: 'global' },
     { label: 'here', color: '#dee0fc', kind: 'global' },
@@ -65,6 +65,8 @@ export function buildMentionTokens(users: User[]): MentionToken[] {
       { label: user.name, color: '#dee0fc', kind: 'user' },
       { label: user.handle, color: '#dee0fc', kind: 'user' },
     ]),
+    // "#channel" renders like a mention and navigates to the channel
+    ...channels.map((channel): MentionToken => ({ label: channel.name, color: '#dee0fc', kind: 'channel', href: `/chat/${channel.id}` })),
   ]
 }
 

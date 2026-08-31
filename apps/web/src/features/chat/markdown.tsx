@@ -2,6 +2,7 @@
 // block parser (fenced code, headings, quotes, lists) -> inline markdown ->
 // mentionify -> linkify. Custom regex parser, zero dependencies. Shared by
 // message content and embed cards.
+import { appNavigate } from '../../lib/navigateBridge'
 import { CodeBlock } from './components/CodeBlock'
 import { isMentionBoundary, type MentionToken } from './chatLib'
 
@@ -11,6 +12,12 @@ function safeHref(url: string): string {
   return /^https?:\/\//i.test(url) ? url : '#'
 }
 
+/** Links to this app (message links, task links…) navigate in place, Discord-style. */
+function internalPath(url: string): string | null {
+  const origin = window.location.origin
+  return url.startsWith(`${origin}/`) ? url.slice(origin.length) : null
+}
+
 function linkifyText(text: string): React.ReactNode[] {
   const urlRegex = /https?:\/\/[^\s<]+/g
   const parts: React.ReactNode[] = []
@@ -18,16 +25,31 @@ function linkifyText(text: string): React.ReactNode[] {
   let match: RegExpExecArray | null
   while ((match = urlRegex.exec(text)) !== null) {
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
+    const path = internalPath(match[0])
     parts.push(
-      <a
-        key={`link-${match.index}`}
-        href={safeHref(match[0])}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="fc-link"
-      >
-        {match[0]}
-      </a>,
+      path ? (
+        <a
+          key={`link-${match.index}`}
+          href={path}
+          className="fc-link"
+          onClick={(e) => {
+            e.preventDefault()
+            appNavigate(path)
+          }}
+        >
+          {match[0]}
+        </a>
+      ) : (
+        <a
+          key={`link-${match.index}`}
+          href={safeHref(match[0])}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fc-link"
+        >
+          {match[0]}
+        </a>
+      ),
     )
     lastIndex = match.index + match[0].length
   }
@@ -50,23 +72,42 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
 
   while (cursor < text.length) {
     const matched = sortedTokens.find((token) => {
-      const mentionText = `@${token.label.toLowerCase()}`
+      const mentionText = `${token.kind === 'channel' ? '#' : '@'}${token.label.toLowerCase()}`
       if (!text.slice(cursor).toLowerCase().startsWith(mentionText)) return false
       return isMentionBoundary(text[cursor + mentionText.length])
     })
     if (!matched) {
       const nextAt = text.indexOf('@', cursor + 1)
-      const end = nextAt === -1 ? text.length : nextAt
+      const nextHash = text.indexOf('#', cursor + 1)
+      const candidates = [nextAt, nextHash].filter((index) => index !== -1)
+      const end = candidates.length > 0 ? Math.min(...candidates) : text.length
       parts.push(...linkifyText(text.slice(cursor, end)))
       cursor = end
       continue
     }
 
     const value = text.slice(cursor, cursor + matched.label.length + 1)
+    const key = `${keyPrefix}-mention-${cursor}-${partIndex}`
     parts.push(
-      <span key={`${keyPrefix}-mention-${cursor}-${partIndex}`} className="fc-mention" style={{ color: matched.color }}>
-        {value}
-      </span>,
+      matched.kind === 'channel' && matched.href ? (
+        <a
+          key={key}
+          href={matched.href}
+          className="fc-mention fc-mention-channel"
+          style={{ color: matched.color }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            appNavigate(matched.href!)
+          }}
+        >
+          {value}
+        </a>
+      ) : (
+        <span key={key} className="fc-mention" style={{ color: matched.color }}>
+          {value}
+        </span>
+      ),
     )
     cursor += matched.label.length + 1
     partIndex += 1
