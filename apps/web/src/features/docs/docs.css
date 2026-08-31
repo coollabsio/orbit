@@ -450,6 +450,12 @@ button.doc-tree-chevron:hover {
   background: var(--recessed);
 }
 
+/* the ring belongs to the whole rounded box (like the chat searches), not the inner input */
+.page-link-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 .page-link-search input {
   width: 100%;
   height: 36px;
@@ -457,6 +463,12 @@ button.doc-tree-chevron:hover {
   outline: 0;
   color: var(--text-primary);
   background: transparent;
+}
+
+.page-link-search input:focus,
+.page-link-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .page-link-list {
