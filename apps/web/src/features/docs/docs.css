@@ -559,6 +559,12 @@ button.doc-tree-chevron:hover {
     line-height: 17px;
   }
 
+  /* The global mobile input rule uses 16px to avoid iOS zoom; block editors must
+     visually match their idle block instead of growing when focused. */
+  .doc-block-textarea {
+    font-size: inherit !important;
+  }
+
   .doc-block {
     padding-block: 1px;
   }
