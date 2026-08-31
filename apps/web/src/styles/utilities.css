@@ -1503,7 +1503,13 @@ textarea.input {
   width: 320px;
   max-width: min(320px, 90vw);
   flex-direction: column;
-  padding: 10px;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+/* the sticky group label must blend with the popover background, not the chat panel's */
+.emoji-picker .fc-emoji-group-label {
+  background: color-mix(in srgb, var(--recessed) 95%, transparent);
 }
 
 .emoji-picker-head {
