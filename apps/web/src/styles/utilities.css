@@ -1555,6 +1555,17 @@ textarea.input {
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
 }
 
+/* Emoji pickers may extend beyond a short modal. Keep the modal's usual scroll clipping
+   until a picker is open, then let that popover paint above the complete dialog. */
+.modal:has(.emoji-dropdown .popover),
+.modal-body:has(.emoji-dropdown .popover) {
+  overflow: visible;
+}
+
+.modal .emoji-dropdown:has(.popover) {
+  z-index: 100;
+}
+
 /* uploaded custom emoji rendered inline */
 .app-custom-emoji {
   display: inline-block;
