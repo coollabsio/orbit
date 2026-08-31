@@ -239,14 +239,14 @@ export interface ChatMessage {
   threadFollowed?: boolean
 }
 
-/** A signed-in device (Settings → Sessions). */
+/** A signed-in device (Settings → Sessions, admin view across members). */
 export interface Session {
   id: string
+  userId: string
   device: string
   browser: string
-  location: string
-  ip: string
   lastActiveAt: string
+  /** The session this browser is using right now. */
   current: boolean
 }
 
