@@ -200,7 +200,12 @@ export function BlockEditor({
         onFocus={() => {
           suppressBlurRef.current = false
         }}
-        onBlur={() => finish('close')}
+        onBlur={() => {
+          // clicking outside must close the slash menu and the mention popup too
+          setSlash(null)
+          mention.close()
+          finish('close')
+        }}
       />
       {!menuOpen && mention.open ? (
         <MentionPopover
