@@ -21,7 +21,7 @@ const WORKSPACE_LINKS = [
 ]
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
-export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const state = useAppState()
   const unreadNotifications = state.notifications.filter((n) => !n.readAt).length
   const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
@@ -38,14 +38,15 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     <>
       <button
         className="sidebar-search"
+        aria-label="Search"
+        title={collapsed ? 'Search' : undefined}
         onClick={() => {
           onNavigate?.()
           window.dispatchEvent(new CustomEvent('open-command-palette'))
         }}
       >
         <SearchNormal size={15} />
-        Search
-        <span className="kbd">⌘K</span>
+        {!collapsed ? <>Search <span className="kbd">⌘K</span></> : null}
       </button>
       <div className="app-sidebar-scroll">
         <div className="nav-section">Workspace</div>
@@ -55,6 +56,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             to={link.to}
             end={link.end}
             className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+            aria-label={link.label}
+            title={collapsed ? link.label : undefined}
             onClick={onNavigate}
           >
             <link.icon size={18} />
@@ -66,6 +69,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         <NavLink
           to="/dm"
           className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          aria-label="Direct messages"
+          title={collapsed ? 'Direct messages' : undefined}
           onClick={onNavigate}
         >
           <Messages2 size={18} />
@@ -75,6 +80,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         <NavLink
           to="/inbox"
           className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          aria-label="Inbox"
+          title={collapsed ? 'Inbox' : undefined}
           onClick={onNavigate}
         >
           <DirectInbox size={18} />
@@ -85,6 +92,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         <NavLink
           to="/settings"
           className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          aria-label="Settings"
+          title={collapsed ? 'Settings' : undefined}
           onClick={onNavigate}
         >
           <Setting2 size={18} />

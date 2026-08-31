@@ -32,7 +32,7 @@ function Check() {
 }
 
 /** Coolify `x-top-user-menu sidebar`: account pill that opens upward with Profile, Appearance, Log out. */
-export function UserMenu() {
+export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const state = useAppState()
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
@@ -76,8 +76,8 @@ export function UserMenu() {
         onClick={toggle}
       >
         <span className="user-menu-avatar">{initial}</span>
-        <span className="user-menu-name">{userName}</span>
-        <Chevron open={open} />
+        {!collapsed ? <span className="user-menu-name">{userName}</span> : null}
+        {!collapsed ? <Chevron open={open} /> : null}
       </button>
 
       {open ? (

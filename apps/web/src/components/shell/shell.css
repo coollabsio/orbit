@@ -16,19 +16,57 @@
   flex-direction: column;
   background: var(--canvas);
   border-right: 1px solid var(--line);
-  padding: 0 12px 12px;
+  padding: 0 8px 8px;
   overflow: hidden;
+  transition: width 0.18s ease, padding 0.18s ease;
+}
+
+.app-sidebar[data-collapsed='true'] {
+  width: 56px;
+  padding-inline: 8px;
 }
 
 /* brand row is 48px tall so it lines up with every pane header (Coolify h-12 top bar) */
 .app-sidebar-brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   height: 48px;
-  padding: 15px 6px 0;
-  margin-bottom: 4px;
+  padding: 0 6px;
+  margin-bottom: 8px;
   flex-shrink: 0;
+}
+
+.app-sidebar-wordmark {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.app-sidebar-collapse {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.app-sidebar-collapse:hover {
+  color: var(--text-primary);
+}
+
+.app-sidebar[data-collapsed='true'] .app-sidebar-brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.app-sidebar[data-collapsed='true'] .app-sidebar-wordmark {
+  display: none;
+}
+
+.app-sidebar[data-collapsed='true'] .app-sidebar-collapse svg {
+  transform: rotate(180deg);
 }
 
 .app-sidebar-title {
@@ -47,10 +85,10 @@
 .sidebar-search {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: var(--radius-sm);
   background: var(--nav-hover-bg);
   color: var(--text-faint);
@@ -58,6 +96,11 @@
   font-weight: 500;
   flex-shrink: 0;
   transition: background-color 0.15s;
+}
+
+.app-sidebar[data-collapsed='true'] .sidebar-search {
+  justify-content: center;
+  padding: 0;
 }
 
 .sidebar-search:hover {
@@ -75,12 +118,53 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
-/* Coolify: later nav sections get mt-3 */
+/* Coolify groups are compact, with a small visual break before each new section. */
 .app-sidebar-scroll .nav-section:not(:first-child) {
-  margin-top: 12px;
+  margin-top: 8px;
+}
+
+.app-sidebar .nav-section {
+  padding: 4px 8px 3px;
+  font-size: 10px;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+}
+
+.app-sidebar .menu-item {
+  height: 32px;
+  gap: 8px;
+  padding-inline: 8px;
+  border-radius: 6px;
+}
+
+.app-sidebar[data-collapsed='true'] .nav-section,
+.app-sidebar[data-collapsed='true'] .menu-item-label,
+.app-sidebar[data-collapsed='true'] .count-badge {
+  display: none;
+}
+
+.app-sidebar[data-collapsed='true'] .app-sidebar-scroll {
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.app-sidebar[data-collapsed='true'] .menu-item {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.app-sidebar[data-collapsed='true'] .app-sidebar-scroll .nav-section:not(:first-child) {
+  display: block;
+  height: 1px;
+  margin: 6px 4px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--hairline);
+  color: transparent;
+  font-size: 0;
 }
 
 .app-sidebar-footer {
@@ -88,7 +172,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.app-sidebar[data-collapsed='true'] .app-sidebar-footer {
+  justify-content: center;
 }
 
 /* Coolify x-top-user-menu (sidebar): h-8 rounded-full border bg-white/6 px-2 gap-1.5 max-w-36 */
@@ -109,6 +198,15 @@
   background: var(--button-bg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   transition: background-color 0.15s;
+}
+
+.app-sidebar[data-collapsed='true'] .user-menu-trigger {
+  width: 32px;
+  padding: 0 5px;
+}
+
+.mobile-drawer .app-sidebar-brand {
+  justify-content: flex-start;
 }
 
 .user-menu-trigger:hover {

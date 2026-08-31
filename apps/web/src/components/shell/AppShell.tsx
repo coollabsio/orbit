@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
-import { Home2, Message, Messages2, Note2, Sms, TaskSquare } from 'reicon-react'
+import { Home2, Message, Messages2, Note2, SidebarLeft, Sms, TaskSquare } from 'reicon-react'
 import { useAppState } from '../../mock/store'
 import { CommandPalette } from './CommandPalette'
 import { SidebarNav } from './SidebarNav'
@@ -21,6 +21,7 @@ export function AppShell() {
   const state = useAppState()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('orbit:sidebar_collapsed') === 'true')
 
   const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
   const unreadChat = state.channels.reduce((sum, c) => sum + c.unreadCount, 0)
@@ -43,16 +44,30 @@ export function AppShell() {
     }
   }, [])
 
+  useEffect(() => {
+    window.localStorage.setItem('orbit:sidebar_collapsed', String(sidebarCollapsed))
+  }, [sidebarCollapsed])
+
   return (
     <div className="app-shell">
-      <aside className="app-sidebar">
+      <aside className="app-sidebar" data-collapsed={sidebarCollapsed || undefined}>
         <div className="app-sidebar-brand">
-          <span className="app-sidebar-title">Orbit</span>
-          <span className="app-sidebar-version">v0.1.0</span>
+          <span className="app-sidebar-wordmark">
+            <span className="app-sidebar-title">{sidebarCollapsed ? 'O' : 'Orbit'}</span>
+            {!sidebarCollapsed ? <span className="app-sidebar-version">v0.1.0</span> : null}
+          </span>
+          <button
+            type="button"
+            className="icon-button app-sidebar-collapse"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          >
+            <SidebarLeft size={17} />
+          </button>
         </div>
-        <SidebarNav />
+        <SidebarNav collapsed={sidebarCollapsed} />
         <div className="app-sidebar-footer">
-          <UserMenu />
+          <UserMenu collapsed={sidebarCollapsed} />
         </div>
       </aside>
 
