@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { ArrowLeft, MoreH, Trash } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmojiPicker } from '../../../components/ui/EmojiPicker'
@@ -196,20 +196,18 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
         >
           <ArrowLeft size={16} />
         </button>
-        <nav className="docs-breadcrumbs truncate" aria-label="Breadcrumb">
+        <nav className="docs-breadcrumbs" aria-label="Page path">
           {ancestors.map((a) => (
-            <span key={a.id} style={{ display: 'contents' }}>
-              <button
-                type="button"
-                className="truncate text-faint"
-                onClick={() => navigate(`/docs/${a.id}`)}
-              >
+            <span key={a.id} className="docs-crumb">
+              <Link className="docs-crumb-link truncate" to={`/docs/${a.id}`}>
                 {a.title || 'Untitled'}
-              </button>
+              </Link>
               <span className="docs-crumb-sep">/</span>
             </span>
           ))}
-          <span className="docs-crumb-current truncate">{doc.title || 'Untitled'}</span>
+          <Link className="docs-crumb-current truncate" to={`/docs/${doc.id}`} aria-current="page">
+            {title || 'Untitled'}
+          </Link>
         </nav>
         <span className="spacer" />
         <span className="docs-updated-meta text-faint text-xs" style={{ whiteSpace: 'nowrap' }}>

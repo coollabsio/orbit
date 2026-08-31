@@ -93,11 +93,33 @@ button.doc-tree-chevron:hover {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
   font-size: 13px;
   color: var(--text-faint);
 }
 
+.docs-crumb {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.docs-crumb-link,
+.docs-crumb-current {
+  display: block;
+  min-width: 0;
+  border-radius: 4px;
+  color: var(--text-faint);
+  text-decoration: none;
+}
+
+.docs-crumb-link:hover {
+  color: var(--text-primary);
+}
+
 .docs-breadcrumbs .docs-crumb-current {
+  flex-shrink: 1;
   color: var(--text-primary);
   font-weight: 500;
 }
