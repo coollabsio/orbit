@@ -424,7 +424,7 @@ export function moveThread(threadId: string, folderId: string) {
   patchThread(threadId, { folderId })
 }
 
-export function sendReply(threadId: string, body: string) {
+export function sendReply(threadId: string, body: string, attachments: Attachment[] = []) {
   updateState((s) => {
     const me = s.users.find((u) => u.id === s.currentUserId)
     return {
@@ -443,6 +443,7 @@ export function sendReply(threadId: string, body: string) {
                   to: [t.messages[t.messages.length - 1]?.from.email ?? ''],
                   body,
                   createdAt: now(),
+                  attachments,
                 },
               ],
             }
@@ -843,4 +844,3 @@ export function assignMemberRoles(userId: string, roleIds: string[]) {
 export function updateWorkspace(patch: { name?: string; iconUrl?: string | null }) {
   updateState((s) => ({ ...s, workspace: { ...s.workspace, ...patch } }))
 }
-

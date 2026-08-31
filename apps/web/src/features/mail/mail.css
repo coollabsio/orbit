@@ -216,21 +216,18 @@
 
 /* ---------- reply composer ---------- */
 .mail-reply {
-  margin-top: 16px;
-  border: 1px solid var(--control-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--elevated) 40%, transparent);
-  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
 }
 
-.mail-reply:focus-within {
-  border-color: var(--accent-ring);
-  background: var(--elevated);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ring) 22%, transparent);
+.mail-reply[data-drop-over='true'] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
 .mail-reply-label {
-  padding: 10px 12px 0;
+  padding: 0;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
@@ -239,8 +236,8 @@
 .mail-reply-textarea {
   display: block;
   width: 100%;
-  min-height: 72px;
-  padding: 8px 12px;
+  min-height: 96px;
+  padding: 10px 0;
   border: none;
   background: transparent;
   resize: vertical;
@@ -264,8 +261,45 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--hairline);
+  padding: 8px 0 0;
+}
+
+.mail-reply-discard {
+  margin-left: auto;
+}
+
+.mail-reply .fc-attachments {
+  max-width: 520px;
+  margin: 4px 0 8px;
+}
+
+.mail-reply .fc-file-cards {
+  max-width: none;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.mail-reply .fc-file-card-wrap {
+  width: max-content;
+}
+
+.mail-reply .fc-file-card {
+  max-width: 280px;
+  padding: 7px 30px 7px 10px;
+}
+
+.mail-reply .fc-file-card > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.mail-reply .fc-file-card-download {
+  display: none;
+}
+
+.mail-reply .fc-attachment-remove {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 /* ---------- compose modal ---------- */

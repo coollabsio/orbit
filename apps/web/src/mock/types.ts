@@ -131,6 +131,7 @@ export interface MailMessage {
   to: string[]
   body: string
   createdAt: string
+  attachments?: Attachment[]
 }
 
 export interface MailThread {

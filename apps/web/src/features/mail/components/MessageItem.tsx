@@ -2,6 +2,7 @@ import { Avatar } from '../../../components/ui/Avatar'
 import { fullDate, timeOfDay } from '../../../lib/format'
 import type { MailMessage } from '../../../mock/types'
 import { firstLine } from '../mailLib'
+import { Attachments } from '../../chat/components/Attachments'
 
 interface MessageItemProps {
   message: MailMessage
@@ -36,6 +37,9 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
       {expanded ? (
         <>
           <div className="mail-message-body">{message.body}</div>
+          {message.attachments && message.attachments.length > 0 ? (
+            <Attachments attachments={message.attachments} hasTextContent={!!message.body.trim()} />
+          ) : null}
           <div className="mail-message-actions">
             <button type="button" className="button button-ghost" onClick={onReply}>
               <Reply size={15} />
