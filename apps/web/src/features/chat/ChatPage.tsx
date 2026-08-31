@@ -31,8 +31,9 @@ export function ChatPage() {
   })
   const navigate = useNavigate()
   const firstChannel = state.channels[0] ?? null
-  // no channel in the URL: show the first channel right away (the chat reference picks the first channel)
-  const channel = channelId ? (state.channels.find((c) => c.id === channelId) ?? null) : firstChannel
+  const mobile = isMobileViewport()
+  // Desktop opens the first channel by default; mobile keeps /chat as the channel list.
+  const channel = channelId ? (state.channels.find((c) => c.id === channelId) ?? null) : mobile ? null : firstChannel
 
   const toggleMembers = () => {
     if (isMobileViewport()) setMobileMembersOpen((o) => !o)
@@ -42,7 +43,6 @@ export function ChatPage() {
   const activeThread = channel && threadView?.channelId === channel.id ? threadView : null
   const threadRoot: ChatMessage | null =
     activeThread?.kind === 'thread' ? (state.chatMessages.find((m) => m.id === activeThread.rootId) ?? null) : null
-  const mobile = isMobileViewport()
   // the chat reference full-screen thread: /chat/:channelId/thread/:rootId replaces the chat area
   const fullScreenRoot: ChatMessage | null = rootId ? (state.chatMessages.find((m) => m.id === rootId) ?? null) : null
 
@@ -61,8 +61,8 @@ export function ChatPage() {
     ) : null
 
   useEffect(() => {
-    if (!channelId && firstChannel) navigate(`/chat/${firstChannel.id}`, { replace: true })
-  }, [channelId, firstChannel, navigate])
+    if (!mobile && !channelId && firstChannel) navigate(`/chat/${firstChannel.id}`, { replace: true })
+  }, [channelId, firstChannel, mobile, navigate])
 
   return (
     <div className="page chat-page" data-view={channel ? 'conversation' : 'list'}>

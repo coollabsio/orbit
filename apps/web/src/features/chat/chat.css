@@ -4325,4 +4325,21 @@ a.fc-mention:hover {
   .fc-attachments {
     margin-top: 5px;
   }
+
+  .fc-pin-notice {
+    gap: 8px;
+    margin-block: 2px;
+    padding-block: 4px;
+    font-size: 11px;
+    line-height: 15px;
+  }
+
+  .fc-pin-notice-icon {
+    width: 30px;
+  }
+
+  .fc-pin-notice-icon svg {
+    width: 14px;
+    height: 14px;
+  }
 }
