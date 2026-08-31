@@ -359,11 +359,11 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   onEdit={() => undefined}
                   onToggleTodo={() => undefined}
                 />
-              ) : (
+              ) : block.id === editingId ? (
                 <BlockEditor users={users}
                   key={block.id}
                   block={block}
-                  autoFocus={block.id === editingId}
+                  autoFocus
                   onCommit={(text, action) => commitBlock(block.id, text, action)}
                   onDelete={() => removeEmptyBlock(block.id)}
                   onChangeType={(type, text) => changeType(block.id, type, text)}
@@ -379,6 +379,15 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   onLinkPage={() => openLinkDialog(block.id)}
                   onPickMedia={(kind) => pickMedia(block.id, kind)}
                   onFiles={(files) => insertFilesAfter(block.id, files)}
+                />
+              ) : (
+                <BlockView mentionTokens={mentionTokens}
+                  key={block.id}
+                  block={block}
+                  blocks={doc.content}
+                  index={index}
+                  onEdit={() => setEditingId(block.id)}
+                  onToggleTodo={() => toggleTodo(block.id)}
                 />
               ),
             )}

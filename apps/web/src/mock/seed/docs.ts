@@ -47,6 +47,7 @@ export const docs: Doc[] = [
       block('h2', 'Environment'),
       block('code', 'DATABASE_PATH=/data/team-workspace/app.db\nFILES_ROOT=/data/team-workspace/files'),
       block('embed', 'https://coolify.io/docs'),
+      block('p', 'Tracking upstream: https://github.com/coollabsio/coolify/issues/345'),
     ],
   },
   {
