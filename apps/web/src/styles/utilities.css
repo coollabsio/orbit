@@ -1262,12 +1262,6 @@ textarea.input {
   }
 }
 
-@media (max-width: 599px) {
-  .modal-backdrop {
-    align-items: flex-start;
-  }
-}
-
 /* ---------- misc ---------- */
 .text-muted {
   color: var(--text-muted);

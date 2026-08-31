@@ -17,12 +17,14 @@
 - Greets the current user and summarizes assigned tasks, unread mail/chat, and notifications.
 - Shows My tasks, Inbox, Recent mail, and Active channels cards.
 - Content has extra top breathing room and a restrained staggered entrance.
+- The Home topbar contains search, theme, and settings actions only; the global New menu is intentionally omitted.
 
 ## Tasks
 
 Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.tsx`, `components/TaskDetail.tsx`, `ProjectSettingsPage.tsx`.
 
 - Project rail: color square, project name, hover settings gear.
+- The task-list title is a project picker: All tasks or any project can be selected without opening the project rail.
 - List and Kanban layouts share filtering and sorting.
 - Sorting: manual, priority, created, updated, title.
 - Board cards support cross-status and within-column drag placement with a visible placeholder.
@@ -84,6 +86,7 @@ Core files: `ChatPage.tsx`, `components/ChannelSidebar.tsx`, `components/ChatAre
 - Thread roots are messages; followed threads appear under channels.
 - Chat Settings replaces the channel sidebar and contains Roles, Webhooks, and Emoji. There is no chat Danger Zone.
 - Custom emoji can be uploaded, renamed, deleted, selected, and rendered app-wide.
+- On mobile, `/chat` is the channel list and a conversation's Back button returns there; desktop still opens the first channel automatically.
 
 ## Direct messages
 
@@ -104,3 +107,10 @@ Core files: `ChatPage.tsx`, `components/ChannelSidebar.tsx`, `components/ChatAre
 - Members supports role changes and removal.
 - Sessions is an admin view over all members' sessions. It shows member, device/browser, and last active only—no country or IP.
 - Chat administration remains separate at `/chat/settings`.
+
+## Mobile presentation
+
+- Tasks, Docs, Mail, Chat, DMs, and Inbox use their own compact headers instead of the global topbar.
+- Chat uses compact messages, avatars, attachment grids, date separators, and pinned system notices; header search is an icon that expands when used.
+- Docs use matching compact body typography and scaled headings while retaining block editing and media behavior.
+- Shared confirmation and input modals remain vertically and horizontally centered at mobile sizes.

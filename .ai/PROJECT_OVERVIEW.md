@@ -47,7 +47,7 @@ Routes are declared in `apps/web/src/App.tsx`.
 | `/docs/:docId` | Document editor |
 | `/mail` | Mail folders and thread list |
 | `/mail/:threadId` | Mail reader |
-| `/chat` | First chat channel |
+| `/chat` | Channel list on mobile; first chat channel on desktop |
 | `/chat/:channelId` | Channel conversation |
 | `/chat/:channelId/thread/:rootId` | Full-screen thread |
 | `/chat/settings` | Chat administration: roles, webhooks, emoji |

@@ -140,7 +140,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
             <Setting2 size={15} />
           </button>
         ) : null}
-        <Dropdown
+        {routeRoot !== 'home' ? <Dropdown
           className="topbar-new-menu"
           align="right"
           trigger={() => (
@@ -191,7 +191,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
               </button>
             </>
           )}
-        </Dropdown>
+        </Dropdown> : null}
       </div>
     </header>
   )

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Add } from 'reicon-react'
+import { Add, ChevronDown, TaskSquare } from 'reicon-react'
+import { Dropdown } from '../../components/ui/Dropdown'
 import { createTask } from '../../mock/actions'
 import { useAppState } from '../../mock/store'
 import { ProjectRail } from './components/ProjectRail'
@@ -85,7 +86,46 @@ export function TasksPage() {
       ) : (
         <section className="pane tasks-list-pane">
           <div className="pane-header">
-            <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span>
+            <Dropdown
+              className="tasks-project-picker"
+              trigger={(open) => (
+                <button type="button" className="tasks-project-trigger" data-open={open || undefined}>
+                  {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : <TaskSquare size={15} />}
+                  <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span>
+                  <ChevronDown size={14} />
+                </button>
+              )}
+            >
+              {(close) => (
+                <>
+                  <button
+                    className="popover-option"
+                    data-active={projectFilter === null || undefined}
+                    onClick={() => {
+                      setProjectFilter(null)
+                      close()
+                    }}
+                  >
+                    <TaskSquare size={15} />
+                    All tasks
+                  </button>
+                  {state.projects.map((project) => (
+                    <button
+                      key={project.id}
+                      className="popover-option"
+                      data-active={project.id === projectFilter || undefined}
+                      onClick={() => {
+                        setProjectFilter(project.id)
+                        close()
+                      }}
+                    >
+                      <span className="pill-dot" style={{ background: project.color }} />
+                      {project.name}
+                    </button>
+                  ))}
+                </>
+              )}
+            </Dropdown>
             <div className="spacer" />
             <TaskFilters
               users={state.users}

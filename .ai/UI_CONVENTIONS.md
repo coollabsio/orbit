@@ -25,6 +25,7 @@
 - Popovers use the elevated shell, line border, 12px-ish radius, and shared shadow.
 - Emoji panels must use the same `EmojiPicker`, not separately styled lookalikes.
 - Emoji popovers in modals are allowed to paint outside modal scroll containers.
+- Modals stay centered on both axes at every viewport size; do not switch mobile dialogs to top alignment.
 - Clicking outside and Escape close menus/dialogs where appropriate.
 - Destructive page/project/message operations need confirmation based on impact.
 
@@ -43,6 +44,14 @@
 - Add Reaction opens the complete shared picker, not a small emoji strip.
 - DM headers show name/avatar/presence only, not job title.
 - Channel mentions visually match user mentions and navigate to the channel.
+- Mobile conversations use compact 12px text, 30px avatars, restrained media widths, and an icon-first header.
+- `/chat` is the mobile channel list; conversation Back navigation must return there without auto-opening a channel.
+
+## Mobile navigation
+
+- The bottom dock is the primary global navigation; feature-owned headers replace the global topbar on Tasks, Docs, Mail, Chat, DMs, and Inbox.
+- Home keeps only Home, search, theme, and settings in its header. It intentionally has no New menu.
+- Dense list headers should use compact icon controls; the Tasks title doubles as the project picker.
 
 ## Attachments
 
