@@ -56,6 +56,11 @@ export function AppShell() {
             <span className="app-sidebar-title">{sidebarCollapsed ? 'O' : 'Orbit'}</span>
             {!sidebarCollapsed ? <span className="app-sidebar-version">v0.1.0</span> : null}
           </span>
+        </div>
+        <SidebarNav collapsed={sidebarCollapsed} />
+        <div className="app-sidebar-footer">
+          <UserMenu collapsed={sidebarCollapsed} />
+          <span className="spacer" />
           <button
             type="button"
             className="icon-button app-sidebar-collapse"
@@ -64,10 +69,6 @@ export function AppShell() {
           >
             <SidebarLeft size={17} />
           </button>
-        </div>
-        <SidebarNav collapsed={sidebarCollapsed} />
-        <div className="app-sidebar-footer">
-          <UserMenu collapsed={sidebarCollapsed} />
         </div>
       </aside>
 

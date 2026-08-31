@@ -62,7 +62,7 @@
 }
 
 .app-sidebar[data-collapsed='true'] .app-sidebar-wordmark {
-  display: none;
+  display: flex;
 }
 
 .app-sidebar[data-collapsed='true'] .app-sidebar-collapse svg {
@@ -178,6 +178,12 @@
 
 .app-sidebar[data-collapsed='true'] .app-sidebar-footer {
   justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-sidebar[data-collapsed='true'] .app-sidebar-footer > .spacer {
+  display: none;
 }
 
 /* Coolify x-top-user-menu (sidebar): h-8 rounded-full border bg-white/6 px-2 gap-1.5 max-w-36 */

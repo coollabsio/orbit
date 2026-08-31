@@ -67,17 +67,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
         ))}
         <div className="nav-section">Personal</div>
         <NavLink
-          to="/dm"
-          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
-          aria-label="Direct messages"
-          title={collapsed ? 'Direct messages' : undefined}
-          onClick={onNavigate}
-        >
-          <Messages2 size={18} />
-          <span className="menu-item-label">Direct messages</span>
-          {unreadDMs ? <span className="count-badge">{unreadDMs}</span> : null}
-        </NavLink>
-        <NavLink
           to="/inbox"
           className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
           aria-label="Inbox"
@@ -87,6 +76,17 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <DirectInbox size={18} />
           <span className="menu-item-label">Inbox</span>
           {unreadNotifications ? <span className="count-badge">{unreadNotifications}</span> : null}
+        </NavLink>
+        <NavLink
+          to="/dm"
+          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          aria-label="Direct messages"
+          title={collapsed ? 'Direct messages' : undefined}
+          onClick={onNavigate}
+        >
+          <Messages2 size={18} />
+          <span className="menu-item-label">Direct messages</span>
+          {unreadDMs ? <span className="count-badge">{unreadDMs}</span> : null}
         </NavLink>
         <div className="nav-section">Manage</div>
         <NavLink
