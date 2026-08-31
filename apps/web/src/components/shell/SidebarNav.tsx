@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router'
+import { NavLink } from 'react-router'
 import {
   DirectInbox,
   Home2,
@@ -22,7 +22,6 @@ const WORKSPACE_LINKS = [
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const state = useAppState()
-  const navigate = useNavigate()
   const unreadNotifications = state.notifications.filter((n) => !n.readAt).length
   const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
   const unreadChat = state.channels.reduce((sum, c) => sum + c.unreadCount, 0)
@@ -70,29 +69,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           <span className="menu-item-label">Inbox</span>
           {unreadNotifications ? <span className="count-badge">{unreadNotifications}</span> : null}
         </NavLink>
-        <div className="nav-section">Projects</div>
-        {state.projects.map((project) => (
-          <button
-            key={project.id}
-            className="menu-item"
-            onClick={() => {
-              onNavigate?.()
-              navigate(`/tasks?project=${project.id}`)
-            }}
-          >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 2,
-                background: project.color,
-                marginInline: 5,
-                flexShrink: 0,
-              }}
-            />
-            <span className="menu-item-label">{project.name}</span>
-          </button>
-        ))}
         <div className="nav-section">Manage</div>
         <NavLink
           to="/settings"

@@ -13,6 +13,7 @@ import { InboxPage } from './features/inbox/InboxPage'
 import { SettingsLayout } from './features/settings/SettingsLayout'
 import { GeneralPage } from './features/settings/GeneralPage'
 import { MembersPage } from './features/settings/MembersPage'
+import { SessionsPage } from './features/settings/SessionsPage'
 import { ProfilePage } from './features/profile/ProfilePage'
 import { ServerSettingsPage } from './features/chat/ServerSettingsPage'
 
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="settings" element={<SettingsLayout />}>
               <Route index element={<GeneralPage />} />
               <Route path="members" element={<MembersPage />} />
+              <Route path="sessions" element={<SessionsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

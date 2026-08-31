@@ -304,6 +304,16 @@ export function deleteCustomEmoji(emojiId: string) {
   updateState((s) => ({ ...s, customEmojis: s.customEmojis.filter((e) => e.id !== emojiId) }))
 }
 
+/* ---------- sessions ---------- */
+
+export function revokeSession(sessionId: string) {
+  updateState((s) => ({ ...s, sessions: s.sessions.filter((session) => session.id !== sessionId || session.current) }))
+}
+
+export function revokeOtherSessions() {
+  updateState((s) => ({ ...s, sessions: s.sessions.filter((session) => session.current) }))
+}
+
 /* ---------- docs ---------- */
 
 export function updateDocTitle(docId: string, title: string) {

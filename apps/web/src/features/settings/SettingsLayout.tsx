@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router'
-import { People, Setting2 } from 'reicon-react'
+import { People, Setting2, ShieldTick } from 'reicon-react'
 import '../shared/cards.css'
 import './settings.css'
 
@@ -13,7 +13,10 @@ interface NavItem {
 const SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Configuration',
-    items: [{ to: '/settings', label: 'General', icon: Setting2, end: true }],
+    items: [
+      { to: '/settings', label: 'General', icon: Setting2, end: true },
+      { to: '/settings/sessions', label: 'Sessions', icon: ShieldTick },
+    ],
   },
   {
     label: 'Team',

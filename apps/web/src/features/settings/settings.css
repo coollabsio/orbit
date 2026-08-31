@@ -279,3 +279,59 @@
     display: none;
   }
 }
+
+/* ---------- Sessions ---------- */
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sessions-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.sessions-row + .sessions-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.sessions-device-icon {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--text-secondary);
+}
+
+.sessions-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sessions-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.sessions-current {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.sessions-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}

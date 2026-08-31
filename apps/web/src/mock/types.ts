@@ -239,6 +239,17 @@ export interface ChatMessage {
   threadFollowed?: boolean
 }
 
+/** A signed-in device (Settings → Sessions). */
+export interface Session {
+  id: string
+  device: string
+  browser: string
+  location: string
+  ip: string
+  lastActiveAt: string
+  current: boolean
+}
+
 export interface Notification {
   id: string
   type: 'mention' | 'assignment' | 'comment' | 'github' | 'system'
@@ -267,6 +278,7 @@ export interface AppState {
   chatMessages: ChatMessage[]
   webhooks: Webhook[]
   customEmojis: CustomEmoji[]
+  sessions: Session[]
   /** channelId → users currently typing (mock realtime; expires = epoch ms) */
   typingUsers: Record<string, Array<{ userId: string; expires: number }>>
 

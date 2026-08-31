@@ -7,6 +7,7 @@ import { channels, chatCategories, chatMessages } from './seed/chat'
 import { notifications } from './seed/notifications'
 import { webhooks } from './seed/webhooks'
 import { customEmojis } from './seed/customEmojis'
+import { sessions } from './seed/sessions'
 
 export function seedState(): AppState {
   return {
@@ -25,6 +26,7 @@ export function seedState(): AppState {
     chatMessages,
     webhooks,
     customEmojis,
+    sessions,
     typingUsers: {},
     notifications,
   }
