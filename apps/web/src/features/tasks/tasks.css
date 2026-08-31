@@ -891,7 +891,8 @@
   left: 50%;
   z-index: 40;
   display: flex;
-  width: min(560px, calc(100% - 48px));
+  width: max-content;
+  max-width: calc(100% - 48px);
   align-items: center;
   gap: 4px;
   padding: 6px 8px;
