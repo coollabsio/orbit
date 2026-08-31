@@ -135,6 +135,7 @@ chatMessages.push(
       '- add an activity entry when a duplicate is skipped',
       '- backfill the `node_id` column for old rows',
       'Docs: [GitHub webhooks](https://docs.github.com/webhooks)',
+      'Upstream: https://github.com/coollabsio/coolify/issues/345 and https://github.com/coollabsio/coolify/pull/2421',
     ].join('\n'),
     ago(90, 'm'),
   ),

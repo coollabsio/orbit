@@ -12,6 +12,35 @@ function safeHref(url: string): string {
   return /^https?:\/\//i.test(url) ? url : '#'
 }
 
+/** GitHub octicons for issue / pull / discussion / repo links (16×16, currentColor). */
+function githubGlyph(kind: 'issue' | 'pull' | 'discussion' | 'repo'): React.ReactNode {
+  const paths: Record<string, string> = {
+    issue:
+      'M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z',
+    pull: 'M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z',
+    discussion:
+      'M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z',
+    repo: 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z',
+  }
+  return (
+    <svg className={`fc-gh-icon fc-gh-${kind}`} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d={paths[kind]} />
+    </svg>
+  )
+}
+
+/** Bare github.com URLs render like GitHub does: state icon + "owner/repo#123" (or "owner/repo"). */
+function githubLink(url: string): { kind: 'issue' | 'pull' | 'discussion' | 'repo'; label: string } | null {
+  const match = url.match(/^https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\/(issues|pull|discussions)\/(\d+))?(?:[/?#].*)?$/)
+  if (!match) return null
+  const [, owner, repo, section, number] = match
+  if (section && number) {
+    const kind = section === 'pull' ? 'pull' : section === 'discussions' ? 'discussion' : 'issue'
+    return { kind, label: `${owner}/${repo}#${number}` }
+  }
+  return { kind: 'repo', label: `${owner}/${repo}` }
+}
+
 /** Links to this app (message links, task links…) navigate in place, Discord-style. */
 function internalPath(url: string): string | null {
   const origin = window.location.origin
@@ -26,8 +55,21 @@ function linkifyText(text: string): React.ReactNode[] {
   while ((match = urlRegex.exec(text)) !== null) {
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
     const path = internalPath(match[0])
+    const github = path ? null : githubLink(match[0])
     parts.push(
-      path ? (
+      github ? (
+        <a
+          key={`link-${match.index}`}
+          href={safeHref(match[0])}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fc-link fc-github-link"
+          title={match[0]}
+        >
+          {githubGlyph(github.kind)}
+          {github.label}
+        </a>
+      ) : path ? (
         <a
           key={`link-${match.index}`}
           href={path}

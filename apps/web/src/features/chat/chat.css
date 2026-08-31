@@ -3932,3 +3932,29 @@ a.fc-mention {
 a.fc-mention:hover {
   text-decoration: underline;
 }
+
+/* GitHub-style rendering of bare github.com links */
+.fc-github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.fc-github-link:hover {
+  text-decoration: underline;
+}
+
+.fc-gh-icon {
+  flex-shrink: 0;
+}
+
+.fc-gh-issue,
+.fc-gh-pull {
+  color: #3fb950;
+}
+
+.fc-gh-discussion,
+.fc-gh-repo {
+  color: var(--text-muted);
+}
