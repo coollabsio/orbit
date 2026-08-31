@@ -295,3 +295,23 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+/* off-screen element used as the drag image */
+.mail-drag-ghost {
+  position: fixed;
+  top: -100px;
+  left: -100px;
+  z-index: 100;
+  max-width: 260px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--elevated);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  box-shadow: var(--shadow-popover);
+}

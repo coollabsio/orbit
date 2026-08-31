@@ -25,6 +25,13 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData('text/mail-thread-id', thread.id)
+        // drag image: a small pill with the subject, not the whole translucent row
+        const ghost = document.createElement('div')
+        ghost.className = 'mail-drag-ghost'
+        ghost.textContent = `✉️ ${thread.subject}`
+        document.body.appendChild(ghost)
+        e.dataTransfer.setDragImage(ghost, 12, 12)
+        setTimeout(() => ghost.remove(), 0)
         setDragging(true)
       }}
       onDragEnd={() => setDragging(false)}
