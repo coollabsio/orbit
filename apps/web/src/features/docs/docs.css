@@ -688,3 +688,13 @@ button.doc-tree-chevron:hover {
 .doc-decor-btn:hover {
   color: var(--text-primary);
 }
+
+/* the options dropdown anchors inside the row: never clip it */
+.doc-tree-row {
+  overflow: visible;
+}
+
+.doc-tree-actions {
+  position: relative;
+  z-index: 20;
+}
