@@ -95,7 +95,6 @@ export function EmojiTab() {
             <div key={emoji.id} className="em-row">
               <img className="em-image" src={emoji.url} alt={`:${emoji.name}:`} />
               <div className="em-name">
-                <span aria-hidden="true">:</span>
                 <input
                   className="input em-name-input"
                   value={drafts[emoji.id] ?? emoji.name}
@@ -106,7 +105,6 @@ export function EmojiTab() {
                     if (e.key === 'Enter') e.currentTarget.blur()
                   }}
                 />
-                <span aria-hidden="true">:</span>
               </div>
               <button
                 type="button"
