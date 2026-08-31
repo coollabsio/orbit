@@ -395,6 +395,46 @@
   max-width: 520px;
 }
 
+/* non-image files: compact chips instead of full-width cards */
+.tasks-desc-wrap .fc-file-cards {
+  max-width: none;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.tasks-desc-wrap .fc-file-card-wrap {
+  width: max-content;
+}
+
+.tasks-desc-wrap .fc-file-card {
+  max-width: 280px;
+  gap: 8px;
+  padding: 7px 10px;
+}
+
+.tasks-desc-wrap .fc-file-card > svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.tasks-desc-wrap .fc-file-card-name {
+  font-size: 12px;
+}
+
+.tasks-desc-wrap .fc-file-card-size {
+  font-size: 11px;
+}
+
+.tasks-desc-wrap .fc-file-card-download {
+  display: inline-flex;
+}
+
+.tasks-desc-wrap .fc-file-card-download svg {
+  width: 14px;
+  height: 14px;
+}
+
 .tasks-desc-tools {
   margin-top: 6px;
 }
