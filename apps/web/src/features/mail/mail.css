@@ -157,6 +157,13 @@
   gap: 10px;
   cursor: pointer;
   border-radius: var(--radius-sm);
+  padding: 4px;
+  margin: -4px;
+  transition: background-color 0.15s;
+}
+
+.mail-message-header:hover {
+  background: color-mix(in srgb, var(--fill) 45%, transparent);
 }
 
 .mail-message-meta {
@@ -183,6 +190,23 @@
   color: var(--text-primary);
 }
 
+.mail-message-actions {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 0 38px;
+}
+
+.mail-message-actions .button {
+  min-height: 30px;
+  padding: 4px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.mail-message-actions .button:hover {
+  color: var(--text-primary);
+}
+
 .mail-message-preview {
   margin-top: 6px;
   padding-left: 42px;
@@ -195,6 +219,14 @@
   margin-top: 16px;
   border: 1px solid var(--control-border);
   border-radius: 8px;
+  background: color-mix(in srgb, var(--elevated) 40%, transparent);
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+
+.mail-reply:focus-within {
+  border-color: var(--accent-ring);
+  background: var(--elevated);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ring) 22%, transparent);
 }
 
 .mail-reply-label {
@@ -222,8 +254,10 @@
   color: var(--control-placeholder);
 }
 
-.mail-reply-textarea:focus {
+.mail-reply-textarea:focus,
+.mail-reply-textarea:focus-visible {
   outline: none;
+  box-shadow: none;
 }
 
 .mail-reply-footer {

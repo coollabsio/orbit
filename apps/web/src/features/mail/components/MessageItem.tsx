@@ -7,9 +7,11 @@ interface MessageItemProps {
   message: MailMessage
   expanded: boolean
   onToggle: () => void
+  onReply: () => void
+  onForward: () => void
 }
 
-export function MessageItem({ message, expanded, onToggle }: MessageItemProps) {
+export function MessageItem({ message, expanded, onToggle, onReply, onForward }: MessageItemProps) {
   return (
     <div className="mail-message" data-expanded={expanded ? 'true' : undefined}>
       <div
@@ -32,10 +34,23 @@ export function MessageItem({ message, expanded, onToggle }: MessageItemProps) {
         </span>
       </div>
       {expanded ? (
-        <div className="mail-message-body">{message.body}</div>
+        <>
+          <div className="mail-message-body">{message.body}</div>
+          <div className="mail-message-actions">
+            <button type="button" className="button button-ghost" onClick={onReply}>
+              <Reply size={15} />
+              Reply
+            </button>
+            <button type="button" className="button button-ghost" onClick={onForward}>
+              <Forward size={15} />
+              Forward
+            </button>
+          </div>
+        </>
       ) : (
         <div className="mail-message-preview truncate">{firstLine(message.body)}</div>
       )}
     </div>
   )
 }
+import { Forward, Reply } from 'reicon-react'

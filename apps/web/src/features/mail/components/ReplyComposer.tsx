@@ -1,12 +1,14 @@
+import type { RefObject } from 'react'
 import { useState } from 'react'
 import { sendReply } from '../../../mock/actions'
 
 interface ReplyComposerProps {
   threadId: string
   replyToName: string
+  textareaRef?: RefObject<HTMLTextAreaElement | null>
 }
 
-export function ReplyComposer({ threadId, replyToName }: ReplyComposerProps) {
+export function ReplyComposer({ threadId, replyToName, textareaRef }: ReplyComposerProps) {
   const [body, setBody] = useState('')
   const canSend = body.trim() !== ''
 
@@ -20,6 +22,7 @@ export function ReplyComposer({ threadId, replyToName }: ReplyComposerProps) {
     <div className="mail-reply">
       <div className="mail-reply-label">Reply to {replyToName}</div>
       <textarea
+        ref={textareaRef}
         className="mail-reply-textarea"
         placeholder="Write a reply…"
         value={body}

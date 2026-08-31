@@ -5,13 +5,14 @@ import { composeMail } from '../../../mock/actions'
 
 interface ComposeModalProps {
   onClose: () => void
+  initial?: { to?: string; subject?: string; body?: string }
 }
 
-export function ComposeModal({ onClose }: ComposeModalProps) {
+export function ComposeModal({ onClose, initial }: ComposeModalProps) {
   const navigate = useNavigate()
-  const [to, setTo] = useState('')
-  const [subject, setSubject] = useState('')
-  const [body, setBody] = useState('')
+  const [to, setTo] = useState(initial?.to ?? '')
+  const [subject, setSubject] = useState(initial?.subject ?? '')
+  const [body, setBody] = useState(initial?.body ?? '')
   const canSend = to.trim() !== '' && body.trim() !== ''
 
   const send = () => {
