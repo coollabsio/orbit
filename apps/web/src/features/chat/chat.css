@@ -4238,4 +4238,91 @@ a.fc-mention:hover {
   .dm-row {
     padding-inline: 6px;
   }
+
+  /* Keep the mobile conversation dense and leave the channel title room to breathe. */
+  .fc-chat-header {
+    height: 44px;
+  }
+
+  .fc-chat-header-title h2 {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 13px;
+  }
+
+  .fc-header-search {
+    position: relative;
+    display: flex;
+    width: 30px;
+    margin: 0;
+    padding: 0;
+    justify-content: center;
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .fc-header-search[data-open='true'] {
+    position: absolute;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    padding-inline: 8px;
+  }
+
+  .fc-list-scroll {
+    padding: 6px 10px 14px;
+  }
+
+  .fc-msg {
+    padding-block: 2px;
+  }
+
+  .fc-msg[data-full='true'] {
+    margin-top: 5px;
+  }
+
+  .fc-msg-row {
+    gap: 8px;
+  }
+
+  .fc-msg-gutter,
+  .fc-avatar {
+    width: 30px;
+  }
+
+  .fc-avatar {
+    height: 30px;
+    font-size: 11px;
+  }
+
+  .fc-msg-author,
+  .fc-msg-text {
+    font-size: 12px;
+  }
+
+  .fc-msg-text {
+    line-height: 17px;
+  }
+
+  .fc-msg-header {
+    gap: 6px;
+  }
+
+  .fc-msg-time,
+  .fc-date-separator span {
+    font-size: 10px;
+  }
+
+  .fc-date-separator {
+    margin-block: 12px;
+  }
+
+  .fc-attachment-grid {
+    max-width: 320px;
+  }
+
+  .fc-attachments {
+    margin-top: 5px;
+  }
 }
