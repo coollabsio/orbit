@@ -205,6 +205,7 @@ export function BlockEditor({
       {!menuOpen && mention.open ? (
         <MentionPopover
           placement="below"
+          showHandle={false}
           suggestions={mention.suggestions}
           activeIndex={mention.activeIndex}
           onSelect={mention.insert}

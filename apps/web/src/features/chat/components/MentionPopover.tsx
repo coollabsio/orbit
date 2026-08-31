@@ -8,12 +8,15 @@ export function MentionPopover({
   onSelect,
   onHover,
   placement = 'above',
+  showHandle = true,
 }: {
   suggestions: MentionSuggestion[]
   activeIndex: number
   onSelect: (suggestion: MentionSuggestion) => void
   onHover: (index: number) => void
   placement?: 'above' | 'below'
+  /** Docs hide the right-side handle column. */
+  showHandle?: boolean
 }) {
   if (suggestions.length === 0) return null
   const channelList = suggestions[0].kind === 'channel'
@@ -36,10 +39,9 @@ export function MentionPopover({
             {suggestion.kind === 'channel' ? <Hashtag size={13} /> : suggestion.label.charAt(0).toUpperCase()}
           </span>
           <span className="fc-mention-label" style={suggestion.color ? { color: suggestion.color } : undefined}>
-            {suggestion.kind === 'channel' ? '#' : '@'}
-            {suggestion.label}
+            {suggestion.kind === 'channel' ? suggestion.label : `@${suggestion.label}`}
           </span>
-          {suggestion.kind === 'user' ? (
+          {suggestion.kind === 'user' && showHandle ? (
             <span className="fc-mention-username">
               <User size={12} />
               {suggestion.username}
