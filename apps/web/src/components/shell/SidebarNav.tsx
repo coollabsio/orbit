@@ -3,6 +3,7 @@ import {
   DirectInbox,
   Home2,
   Message,
+  Messages2,
   Note2,
   SearchNormal,
   Setting2,
@@ -17,6 +18,7 @@ const WORKSPACE_LINKS = [
   { to: '/docs', label: 'Docs', icon: Note2 },
   { to: '/mail', label: 'Mail', icon: Sms },
   { to: '/chat', label: 'Chat', icon: Message },
+  { to: '/dm', label: 'Direct messages', icon: Messages2 },
 ]
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
@@ -25,10 +27,12 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const unreadNotifications = state.notifications.filter((n) => !n.readAt).length
   const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
   const unreadChat = state.channels.reduce((sum, c) => sum + c.unreadCount, 0)
+  const unreadDMs = state.directMessages.reduce((sum, dm) => sum + dm.unreadCount, 0)
 
   const counts: Record<string, number> = {
     '/mail': unreadMail,
     '/chat': unreadChat,
+    '/dm': unreadDMs,
   }
 
   return (

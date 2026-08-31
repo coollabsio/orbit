@@ -9,6 +9,7 @@ import { TasksPage } from './features/tasks/TasksPage'
 import { DocsPage } from './features/docs/DocsPage'
 import { MailPage } from './features/mail/MailPage'
 import { ChatPage } from './features/chat/ChatPage'
+import { DMPage } from './features/chat/DMPage'
 import { InboxPage } from './features/inbox/InboxPage'
 import { SettingsLayout } from './features/settings/SettingsLayout'
 import { GeneralPage } from './features/settings/GeneralPage'
@@ -45,6 +46,8 @@ export default function App() {
             <Route path="chat/settings" element={<ServerSettingsPage />} />
             <Route path="chat/:channelId" element={<ChatPage />} />
             <Route path="chat/:channelId/thread/:rootId" element={<ChatPage />} />
+            <Route path="dm" element={<DMPage />} />
+            <Route path="dm/:dmId" element={<DMPage />} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings" element={<SettingsLayout />}>

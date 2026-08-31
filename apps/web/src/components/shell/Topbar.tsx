@@ -71,6 +71,13 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       } else if (channel) crumbs.push({ label: `#${channel.name}` })
       return { crumbs }
     }
+    case 'dm': {
+      const crumbs: Crumb[] = [{ label: 'Direct Messages', to: '/dm' }]
+      const dm = id ? state.directMessages.find((candidate) => candidate.id === id) : null
+      const participant = dm ? state.users.find((user) => user.id === dm.participantId) : null
+      if (participant) crumbs.push({ label: participant.name })
+      return { crumbs }
+    }
     case 'inbox':
       return { crumbs: [{ label: 'Inbox' }] }
     case 'profile':

@@ -5,7 +5,8 @@ import { useNavigate, useSearchParams } from 'react-router'
 import { ArrowLeft, Folder, Hashtag, Magnifier, Paperclip2, People, Xmark } from 'reicon-react'
 import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
-import type { AppState, Channel, ChatMessage } from '../../../mock/types'
+import type { AppState, Channel, ChatMessage, User } from '../../../mock/types'
+import { Avatar } from '../../../components/ui/Avatar'
 import { FilesView } from './FilesView'
 import { MessageInput, type MessageInputHandle } from './MessageInput'
 import { MessageList } from './MessageList'
@@ -27,6 +28,7 @@ export function ChatArea({
   onOpenThread,
   onNewThread,
   rightPanel,
+  dmParticipant,
 }: {
   state: AppState
   channel: Channel
@@ -36,6 +38,7 @@ export function ChatArea({
   onNewThread: () => void
   /** the chat reference rightPanel: the member list renders under the full-width header, beside the messages */
   rightPanel?: ReactNode
+  dmParticipant?: User
 }) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -82,10 +85,10 @@ export function ChatArea({
     <div className="fc-chat-area">
       <div className="fc-chat-header">
         <div className="fc-chat-header-left">
-          <button type="button" className="fc-mobile-back" title="Back to channels" onClick={() => navigate('/chat')}>
+          <button type="button" className="fc-mobile-back" title="Back to conversations" onClick={() => navigate(dmParticipant ? '/dm' : '/chat')}>
             <ArrowLeft size={18} />
           </button>
-          {channel.emoji ? <span className="fc-emoji-icon" data-size="lg"><Emoji value={channel.emoji} size={20} /></span> : <Hashtag size={20} />}
+          {dmParticipant ? <Avatar user={dmParticipant} size={28} showOnline /> : channel.emoji ? <span className="fc-emoji-icon" data-size="lg"><Emoji value={channel.emoji} size={20} /></span> : <Hashtag size={20} />}
           <div className="fc-chat-header-title">
             <h2>{channel.name}</h2>
             {channel.description ? (
@@ -131,9 +134,11 @@ export function ChatArea({
           >
             <PinIcon size={20} />
           </button>
-          <button type="button" {...headerButton(membersOpen)} title="Toggle Member List" onClick={onToggleMembers}>
-            <People size={20} weight="Filled" />
-          </button>
+          {!dmParticipant ? (
+            <button type="button" {...headerButton(membersOpen)} title="Toggle Member List" onClick={onToggleMembers}>
+              <People size={20} weight="Filled" />
+            </button>
+          ) : null}
           <div className="fc-header-search" data-open={searchOpen ? 'true' : undefined}>
             <Magnifier size={16} />
             <input

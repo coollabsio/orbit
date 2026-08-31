@@ -1,5 +1,5 @@
 import { ago } from '../../lib/format'
-import type { Attachment, Channel, ChatCategory, ChatMessage } from '../types'
+import type { Attachment, Channel, ChatCategory, ChatMessage, DirectMessage } from '../types'
 
 export const chatCategories: ChatCategory[] = [
   { id: 'cc_general', name: 'General' },
@@ -13,6 +13,12 @@ export const channels: Channel[] = [
   { id: 'c_engineering', name: 'engineering', description: 'Backend, frontend, and everything between', categoryId: 'cc_engineering', unreadCount: 3 },
   { id: 'c_infra', name: 'infra', description: 'Servers, deploys, and incidents', categoryId: 'cc_engineering', unreadCount: 1 },
   { id: 'c_support', name: 'support', description: 'Forwarded customer conversations', categoryId: 'cc_support', unreadCount: 2 },
+]
+
+export const directMessages: DirectMessage[] = [
+  { id: 'dm_andras', participantId: 'u_andras', unreadCount: 2 },
+  { id: 'dm_cinzya', participantId: 'u_cinzya', unreadCount: 0 },
+  { id: 'dm_peak', participantId: 'u_peak', unreadCount: 0 },
 ]
 
 let m = 0
@@ -54,6 +60,11 @@ function msg(
 }
 
 export const chatMessages: ChatMessage[] = [
+  msg('dm_andras', 'u_andras', 'Hey! Do you have a minute to review the deployment notes?', ago(34, 'm')),
+  msg('dm_andras', 'u_shadow', 'Sure — send them over and I will take a look.', ago(29, 'm')),
+  msg('dm_andras', 'u_andras', 'Perfect, I added the rollback section too.', ago(4, 'm')),
+  msg('dm_cinzya', 'u_cinzya', 'The certificate rotation finished without any issues 🎉', ago(2, 'd')),
+  msg('dm_peak', 'u_peak', 'I pushed the updated empty states when you have time.', ago(5, 'd')),
   // general
   msg('c_general', 'u_shadow', 'Morning everyone! Reminder: weekly sync moved to 14:00 today.', ago(26, 'h')),
   msg('c_general', 'u_adiology', 'Works for me 👍', ago(25, 'h')),

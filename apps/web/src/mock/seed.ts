@@ -3,7 +3,7 @@ import { projects, roles, users } from './seed/users'
 import { statuses, tasks } from './seed/tasks'
 import { docs } from './seed/docs'
 import { mailFolders, mailThreads } from './seed/mail'
-import { channels, chatCategories, chatMessages } from './seed/chat'
+import { channels, chatCategories, chatMessages, directMessages } from './seed/chat'
 import { notifications } from './seed/notifications'
 import { webhooks } from './seed/webhooks'
 import { customEmojis } from './seed/customEmojis'
@@ -23,6 +23,7 @@ export function seedState(): AppState {
     mailThreads,
     chatCategories,
     channels,
+    directMessages,
     chatMessages,
     webhooks,
     customEmojis,

@@ -481,6 +481,24 @@ export function composeMail(input: { to: string; subject: string; body: string }
 
 /* ---------- chat ---------- */
 
+export function getOrCreateDirectMessage(participantId: string): string {
+  const existing = getState().directMessages.find((dm) => dm.participantId === participantId)
+  if (existing) return existing.id
+  const id = nextId('dm')
+  updateState((state) => ({
+    ...state,
+    directMessages: [{ id, participantId, unreadCount: 0 }, ...state.directMessages],
+  }))
+  return id
+}
+
+export function markDirectMessageRead(dmId: string) {
+  updateState((state) => ({
+    ...state,
+    directMessages: state.directMessages.map((dm) => (dm.id === dmId ? { ...dm, unreadCount: 0 } : dm)),
+  }))
+}
+
 
 /** Mock realtime: after the current user sends a message, another member "types" for 3s. */
 export interface SendChatMessageOptions {

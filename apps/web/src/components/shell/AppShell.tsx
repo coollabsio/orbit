@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
-import { Home2, Message, Note2, Sms, TaskSquare } from 'reicon-react'
+import { Home2, Message, Messages2, Note2, Sms, TaskSquare } from 'reicon-react'
 import { useAppState } from '../../mock/store'
 import { CommandPalette } from './CommandPalette'
 import { SidebarNav } from './SidebarNav'
@@ -14,6 +14,7 @@ const DOCK_LINKS = [
   { to: '/docs', label: 'Docs', icon: Note2 },
   { to: '/mail', label: 'Mail', icon: Sms },
   { to: '/chat', label: 'Chat', icon: Message },
+  { to: '/dm', label: 'DMs', icon: Messages2 },
 ]
 
 export function AppShell() {
@@ -23,7 +24,8 @@ export function AppShell() {
 
   const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
   const unreadChat = state.channels.reduce((sum, c) => sum + c.unreadCount, 0)
-  const dockCounts: Record<string, number> = { '/mail': unreadMail, '/chat': unreadChat }
+  const unreadDMs = state.directMessages.reduce((sum, dm) => sum + dm.unreadCount, 0)
+  const dockCounts: Record<string, number> = { '/mail': unreadMail, '/chat': unreadChat, '/dm': unreadDMs }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

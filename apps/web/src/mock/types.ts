@@ -163,6 +163,12 @@ export interface Channel {
   unreadCount: number
 }
 
+export interface DirectMessage {
+  id: string
+  participantId: string
+  unreadCount: number
+}
+
 /* the chat reference webhooks: webhook-compatible embeds posted by webhooks */
 export interface EmbedField {
   name: string
@@ -276,6 +282,7 @@ export interface AppState {
   mailThreads: MailThread[]
   chatCategories: ChatCategory[]
   channels: Channel[]
+  directMessages: DirectMessage[]
   chatMessages: ChatMessage[]
   webhooks: Webhook[]
   customEmojis: CustomEmoji[]

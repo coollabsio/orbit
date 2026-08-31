@@ -4,6 +4,7 @@ import {
   DirectInbox,
   Hashtag,
   Home2,
+  Messages2,
   Note2,
   SearchNormal,
   Setting2,
@@ -37,6 +38,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_docs', icon: Note2, title: 'Go to Docs', meta: 'Navigation', to: '/docs', keywords: 'docs documents' },
       { id: 'nav_mail', icon: Sms, title: 'Go to Mail', meta: 'Navigation', to: '/mail', keywords: 'mail email' },
       { id: 'nav_chat', icon: Hashtag, title: 'Go to Chat', meta: 'Navigation', to: '/chat', keywords: 'chat channels' },
+      { id: 'nav_dm', icon: Messages2, title: 'Go to Direct Messages', meta: 'Navigation', to: '/dm', keywords: 'dm direct messages people' },
       { id: 'nav_inbox', icon: DirectInbox, title: 'Go to Inbox', meta: 'Navigation', to: '/inbox', keywords: 'inbox notifications' },
       { id: 'nav_settings', icon: Setting2, title: 'Go to Settings', meta: 'Navigation', to: '/settings', keywords: 'settings preferences' },
     ]
