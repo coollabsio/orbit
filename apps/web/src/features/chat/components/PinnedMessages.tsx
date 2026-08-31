@@ -62,7 +62,7 @@ export function PinnedMessages({ state, channel, onClose }: { state: AppState; c
           <input value={query} placeholder="Search pinned messages" autoFocus onChange={(e) => setQuery(e.target.value)} />
         </div>
       </div>
-      <div className="fc-threads-list" style={{ padding: 16 }}>
+      <div className="fc-threads-list fc-pins-scroll">
         {pins.length === 0 ? (
           <div className="fc-threads-empty">
             <PinIcon size={40} style={{ opacity: 0.3 }} />

@@ -3074,6 +3074,10 @@
   gap: 12px;
 }
 
+.fc-pins-scroll {
+  padding: 16px;
+}
+
 /* rounded-lg border bg-secondary/20 px-3 py-3 hover:bg-secondary/50 */
 .fc-pins-row {
   display: flex;
@@ -4391,5 +4395,160 @@ a.fc-mention:hover {
   .fc-embed-footer {
     gap: 5px;
     font-size: 9px;
+  }
+
+  .fc-threads-popover {
+    top: 44px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    max-width: none;
+    max-height: calc(100dvh - 108px);
+    border-radius: 10px;
+  }
+
+  .fc-threads-header {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .fc-threads-search {
+    height: 30px;
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .fc-threads-search input {
+    font-size: 12px !important;
+  }
+
+  .fc-threads-create {
+    height: 30px;
+    padding-inline: 10px;
+    font-size: 11px;
+  }
+
+  .fc-threads-list,
+  .fc-pins-scroll {
+    padding: 6px;
+  }
+
+  .fc-threads-group-label {
+    padding: 6px 6px 3px;
+    font-size: 9px;
+  }
+
+  .fc-threads-row,
+  .fc-pins-row {
+    gap: 8px;
+    padding: 7px;
+  }
+
+  .fc-threads-avatar {
+    width: 30px;
+    height: 30px;
+    font-size: 11px;
+  }
+
+  .fc-threads-row-title,
+  .fc-pins-title {
+    font-size: 12px;
+  }
+
+  .fc-threads-row-preview,
+  .fc-pins-row-meta {
+    font-size: 10px;
+  }
+
+  .fc-threads-row-time {
+    font-size: 9px;
+  }
+
+  .fc-pins-list {
+    gap: 7px;
+  }
+
+  .fc-threads-empty {
+    padding: 28px 12px;
+  }
+
+  .fc-threads-empty > svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .fc-threads-empty h3 {
+    margin-top: 5px;
+    font-size: 13px;
+  }
+
+  .fc-threads-empty p {
+    font-size: 11px;
+  }
+
+  .fc-files-bar {
+    padding: 8px 10px;
+  }
+
+  .fc-files-back {
+    height: 30px;
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+
+  .fc-files-count {
+    font-size: 10px;
+  }
+
+  .fc-files-body {
+    padding: 10px;
+  }
+
+  .fc-files-toolbar {
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .fc-files-search {
+    width: 100%;
+    height: 32px;
+  }
+
+  .fc-files-filter,
+  .fc-files-sort {
+    width: calc(50% - 4px);
+  }
+
+  .fc-files-filter .listbox-trigger,
+  .fc-files-sort .listbox-trigger {
+    height: 32px;
+    font-size: 11px;
+  }
+
+  .fc-files-sections {
+    gap: 20px;
+  }
+
+  .fc-files-grid {
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fc-files-row {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .fc-files-row-main {
+    gap: 8px;
+  }
+
+  .fc-files-row-ext {
+    width: 32px;
+    height: 32px;
+    font-size: 8px;
+  }
+
+  .fc-files-row-meta {
+    font-size: 10px;
   }
 }
