@@ -409,7 +409,7 @@
 .tasks-desc-wrap .fc-file-card {
   max-width: 280px;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 7px 30px 7px 10px;
 }
 
 .tasks-desc-wrap .fc-file-card > svg {
@@ -426,13 +426,14 @@
   font-size: 11px;
 }
 
+/* the chip itself downloads on click; the corner only hosts the remove × */
 .tasks-desc-wrap .fc-file-card-download {
-  display: inline-flex;
+  display: none;
 }
 
-.tasks-desc-wrap .fc-file-card-download svg {
-  width: 14px;
-  height: 14px;
+.tasks-desc-wrap .fc-attachment-remove {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .tasks-desc-tools {
