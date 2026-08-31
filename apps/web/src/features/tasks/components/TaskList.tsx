@@ -221,7 +221,7 @@ function BulkBar({
           </>
         )}
       </Dropdown>
-      <Dropdown direction="up" trigger={() => <button className="button button-ghost">Assignee</button>}>
+      <Dropdown direction="up" align="right" trigger={() => <button className="button button-ghost">Assignee</button>}>
         {() => (
           <>
             {users.map((u) => {
@@ -237,7 +237,7 @@ function BulkBar({
           </>
         )}
       </Dropdown>
-      <Dropdown direction="up" trigger={() => <button className="button button-ghost">Labels</button>}>
+      <Dropdown direction="up" align="right" trigger={() => <button className="button button-ghost">Labels</button>}>
         {() => (
           <>
             {allLabels.map((label) => {

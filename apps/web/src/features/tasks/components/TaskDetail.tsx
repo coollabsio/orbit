@@ -136,19 +136,6 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
               </div>
             </div>
 
-            <ActivityFeed task={task} state={state} />
-
-            {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
-            <div className="tasks-comment-composer">
-              <MessageInput
-                state={state}
-                placeholder="Leave a comment…"
-                showThreadAction={false}
-                onSend={(content, attachments) => {
-                  addTaskComment(task.id, content, undefined, attachments)
-                }}
-              />
-            </div>
           </div>
 
           <aside className="tasks-detail-side">
@@ -337,6 +324,22 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
               </Dropdown>
             </div>
           </aside>
+
+          <div className="tasks-detail-activity">
+            <ActivityFeed task={task} state={state} />
+
+            {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
+            <div className="tasks-comment-composer">
+              <MessageInput
+                state={state}
+                placeholder="Leave a comment…"
+                showThreadAction={false}
+                onSend={(content, attachments) => {
+                  addTaskComment(task.id, content, undefined, attachments)
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
     </section>

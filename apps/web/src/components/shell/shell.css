@@ -551,6 +551,30 @@ a.topbar-crumb:hover {
     display: inline-flex;
   }
 
+  .topbar[data-root='home'] .topbar-drawer-button,
+  .topbar[data-root='home'] .topbar-new-menu {
+    display: none;
+  }
+
+  .topbar[data-root='home'] .topbar-crumbs {
+    gap: 0;
+  }
+
+  .topbar[data-root='home'] .topbar-crumb {
+    color: var(--text-heading);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .topbar[data-root='home'] .topbar-actions {
+    gap: 2px;
+  }
+
+  .topbar[data-root='tasks'],
+  .topbar[data-root='mail'] {
+    display: none;
+  }
+
   .topbar-status {
     display: none;
   }

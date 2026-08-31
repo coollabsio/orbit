@@ -39,9 +39,9 @@ export function TaskFilters({
       <Dropdown
         align="right"
         trigger={() => (
-          <button className="button button-ghost tasks-filter" data-active={activeCount > 0 || undefined}>
+          <button className="button button-ghost tasks-filter" data-active={activeCount > 0 || undefined} aria-label="Filter tasks">
             <Filter size={15} />
-            Filter
+            <span className="tasks-filter-label">Filter</span>
             {activeCount > 0 ? <span className="tasks-filter-count">{activeCount}</span> : null}
           </button>
         )}
@@ -101,9 +101,9 @@ export function TaskFilters({
       <Dropdown
         align="right"
         trigger={() => (
-          <button className="button button-ghost tasks-filter" data-active={sort !== 'manual' || undefined}>
+          <button className="button button-ghost tasks-filter" data-active={sort !== 'manual' || undefined} aria-label={`Sort tasks: ${sortLabel}`}>
             <Sort size={15} />
-            {sort === 'manual' ? 'Sort' : sortLabel}
+            <span className="tasks-filter-label">{sort === 'manual' ? 'Sort' : sortLabel}</span>
           </button>
         )}
       >
@@ -130,9 +130,9 @@ export function TaskFilters({
       <Dropdown
         align="right"
         trigger={() => (
-          <button className="button button-ghost tasks-filter">
+          <button className="button button-ghost tasks-filter" aria-label="Display options">
             <Setting4 size={15} />
-            Display
+            <span className="tasks-filter-label">Display</span>
           </button>
         )}
       >

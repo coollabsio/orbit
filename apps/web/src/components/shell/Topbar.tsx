@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Add, Menu, Moon, SearchNormal, Sun } from 'reicon-react'
+import { Add, Menu, Moon, SearchNormal, Setting2, Sun } from 'reicon-react'
 import { useTheme } from '../../lib/themeContext'
 import { useAppState } from '../../mock/store'
 import { createDoc } from '../../mock/actions'
@@ -101,10 +101,11 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
   const { theme, toggleTheme } = useTheme()
 
   const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state)
+  const routeRoot = location.pathname.split('/')[1] || 'home'
 
   return (
-    <header className="topbar">
-      <button className="icon-button topbar-menu-button" onClick={onOpenDrawer} aria-label="Menu">
+    <header className="topbar" data-root={routeRoot}>
+      <button className="icon-button topbar-menu-button topbar-drawer-button" onClick={onOpenDrawer} aria-label="Menu">
         <Menu size={18} />
       </button>
       <nav className="topbar-crumbs">
@@ -129,12 +130,18 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
       </nav>
       <div className="topbar-actions">
         <button className="icon-button topbar-menu-button" onClick={onOpenPalette} aria-label="Search">
-          <SearchNormal size={18} />
+          <SearchNormal size={16} />
         </button>
         <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
         </button>
+        {routeRoot === 'home' ? (
+          <button className="icon-button topbar-settings-button" onClick={() => navigate('/settings')} aria-label="Settings">
+            <Setting2 size={15} />
+          </button>
+        ) : null}
         <Dropdown
+          className="topbar-new-menu"
           align="right"
           trigger={() => (
             <span className="button button-primary">

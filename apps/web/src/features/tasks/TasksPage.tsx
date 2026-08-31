@@ -99,9 +99,9 @@ export function TasksPage() {
               onSortChange={setSort}
               onLayoutChange={setLayout}
             />
-            <button className="button button-primary" onClick={() => startNewTask()}>
+            <button className="button button-primary" aria-label="New task" onClick={() => startNewTask()}>
               <Add size={16} />
-              New task
+              <span className="tasks-new-label">New task</span>
             </button>
           </div>
           <div className="pane-body">
