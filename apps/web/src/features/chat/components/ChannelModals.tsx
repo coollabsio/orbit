@@ -2,7 +2,7 @@
 // with the Coolify modal shell and form controls.
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { EmojiHappy } from 'reicon-react'
+import { SmileCircle } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { Emoji } from '../../../components/ui/Emoji'
 import { EmojiPicker } from '../../../components/ui/EmojiPicker'
@@ -89,7 +89,7 @@ function EmojiSelect({ value, onChange, label = 'Emoji' }: { value: string; onCh
         className="emoji-dropdown"
         trigger={() => (
           <button type="button" className="emoji-tile" aria-label={value.trim() ? `${label}: ${value}` : `Set ${label.toLowerCase()}`}>
-            {value.trim() ? <Emoji value={value} size={20} /> : <EmojiHappy size={18} />}
+            {value.trim() ? <Emoji value={value} size={20} /> : <SmileCircle size={18} />}
           </button>
         )}
       >

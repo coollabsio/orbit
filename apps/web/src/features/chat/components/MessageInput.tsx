@@ -1,7 +1,7 @@
 // Port of the chat reference MessageInput: autosize textarea, @mention autocomplete with keyboard
 // navigation, grouped emoji picker with search, + actions menu, reply bar.
 import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from 'react'
-import { Add, EmojiHappy, Paperclip2, Reply, Xmark } from 'reicon-react'
+import { Add, SmileCircle, Paperclip2, Reply, Xmark } from 'reicon-react'
 import { EmojiPicker } from '../../../components/ui/EmojiPicker'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { sendChatMessage } from '../../../mock/actions'
@@ -289,7 +289,7 @@ useEffect(() => {
               setActionsOpen(false)
             }}
           >
-            <EmojiHappy size={20} />
+            <SmileCircle size={20} />
           </button>
           {emojiOpen ? (
             <div className="fc-composer-popover fc-emoji-popover">

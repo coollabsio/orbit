@@ -1,7 +1,7 @@
 // Port of the chat reference MessageItem (the chat reference frontend/src/components/chat/MessageItem.tsx)
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Edit, EmojiHappy, Reply, Trash } from 'reicon-react'
+import { Copy, Edit, SmileCircle, Reply, Trash } from 'reicon-react'
 import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import {
@@ -544,7 +544,7 @@ function MessageContextMenu({
       <div className="fc-ctx-items">
         <button type="button" className="fc-ctx-item" onClick={() => setShowEmojis((prev) => !prev)}>
           <span className="fc-ctx-icon">
-            <EmojiHappy size={16} />
+            <SmileCircle size={16} />
           </span>
           <span>Add Reaction</span>
         </button>

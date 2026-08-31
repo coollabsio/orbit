@@ -2,7 +2,7 @@
 // Roles / Webhooks / Emoji tabs; the content column fills the rest.
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { EmojiHappy, People } from 'reicon-react'
+import { SmileCircle, People } from 'reicon-react'
 import { WebhookIcon } from '../../components/ui/WebhookIcon'
 import { EmojiTab } from './settings/EmojiTab'
 import { RolesTab } from './settings/RolesTab'
@@ -15,7 +15,7 @@ type Tab = 'roles' | 'webhooks' | 'emoji'
 const navItems: { key: Tab; label: string; icon: React.ComponentType<{ size?: number }>; danger?: boolean }[] = [
   { key: 'roles', label: 'Roles', icon: People },
   { key: 'webhooks', label: 'Webhooks', icon: WebhookIcon },
-  { key: 'emoji', label: 'Emoji', icon: EmojiHappy },
+  { key: 'emoji', label: 'Emoji', icon: SmileCircle },
 ]
 
 function isTab(value: string | null): value is Tab {
