@@ -1,50 +1,15 @@
 // Port of the chat reference MessageInput: autosize textarea, @mention autocomplete with keyboard
 // navigation, grouped emoji picker with search, + actions menu, reply bar.
 import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from 'react'
-import { Add, EmojiHappy, Magnifier, Paperclip2, Reply, Xmark } from 'reicon-react'
+import { Add, EmojiHappy, Paperclip2, Reply, Xmark } from 'reicon-react'
+import { EmojiPicker } from '../../../components/ui/EmojiPicker'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import { sendChatMessage } from '../../../mock/actions'
 import type { AppState, Attachment, Channel, ChatMessage } from '../../../mock/types'
-import type { EmojiEntry } from '../emojis'
 import { clipboardFiles, fileToAttachment } from '../attachmentLib'
 import { displayName, roleColor } from '../chatLib'
 import { useMentionAutocomplete } from '../useMentionAutocomplete'
 import { MentionPopover } from './MentionPopover'
-
-const EMOJI_CATEGORY_ORDER = ['Smileys', 'Gestures', 'Symbols', 'Objects', 'Other']
-
-function groupEmojisByCategory(emojis: EmojiEntry[]) {
-  const groups = new Map<string, EmojiEntry[]>()
-  emojis.forEach((entry) => {
-    const category = emojiCategory(entry)
-    groups.set(category, [...(groups.get(category) ?? []), entry])
-  })
-  return EMOJI_CATEGORY_ORDER.filter((category) => groups.has(category)).map((category) => ({
-    category,
-    items: groups.get(category)!,
-  }))
-}
-
-function emojiCategory({ name, keywords }: EmojiEntry): string {
-  const text = `${name} ${keywords}`
-  if (/\b(face|smil|grin|laugh|tear|kiss|heart|angry|sad|sleep|sick|hot|cold|party|emotion)\b/.test(text)) {
-    return 'Smileys'
-  }
-  if (/\b(hand|finger|fist|clap|thumb|wave|gesture|pray|writing)\b/.test(text)) {
-    return 'Gestures'
-  }
-  if (/\b(button|symbol|arrow|sign|mark|circle|square|triangle|keycap|zodiac|cross|star)\b/.test(text)) {
-    return 'Symbols'
-  }
-  if (
-    /\b(tool|book|phone|computer|card|money|clock|mail|music|game|food|drink|sport|vehicle|building|house|medical|office|light|lock|key)\b/.test(
-      text,
-    )
-  ) {
-    return 'Objects'
-  }
-  return 'Other'
-}
 
 export interface MessageInputHandle {
   addFiles: (files: FileList | File[]) => void
@@ -87,8 +52,6 @@ export function MessageInput({
   const [text, setText] = useState('')
   const [actionsOpen, setActionsOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
-  const [emojiQuery, setEmojiQuery] = useState('')
-  const [emojis, setEmojis] = useState<EmojiEntry[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [threadMode, setThreadMode] = useState(false)
   const threadModeRef = useRef(false)
@@ -110,18 +73,7 @@ export function MessageInput({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [closeMention])
 
-  useEffect(() => {
-    if (!emojiOpen || emojis.length > 0) return
-    let cancelled = false
-    import('../emojis').then(({ EMOJIS }) => {
-      if (!cancelled) setEmojis(EMOJIS)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [emojiOpen, emojis.length])
-
-  useEffect(() => {
+useEffect(() => {
     if (!replyTarget && !autoFocus) return
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [replyTarget, autoFocus])
@@ -221,17 +173,6 @@ export function MessageInput({
       handleSend()
     }
   }
-
-  const normalizedEmojiQuery = emojiQuery.trim().toLowerCase()
-  const filteredEmojis = normalizedEmojiQuery
-    ? emojis.filter(
-        ({ emoji, name, keywords }) =>
-          emoji.includes(normalizedEmojiQuery) ||
-          name.includes(normalizedEmojiQuery) ||
-          keywords.includes(normalizedEmojiQuery),
-      )
-    : emojis
-  const emojiGroups = groupEmojisByCategory(filteredEmojis)
 
   return (
     <div ref={composerRef} className="fc-composer">
@@ -352,38 +293,7 @@ export function MessageInput({
           </button>
           {emojiOpen ? (
             <div className="fc-composer-popover fc-emoji-popover">
-              <div className="fc-popover-label" style={{ padding: '0 0 8px' }}>
-                Emoji
-              </div>
-              <div className="fc-emoji-search">
-                <Magnifier size={14} />
-                <input
-                  value={emojiQuery}
-                  placeholder="Search emoji"
-                  autoFocus
-                  onChange={(e) => setEmojiQuery(e.target.value)}
-                />
-              </div>
-              <div className="fc-emoji-scroll">
-                {emojis.length === 0 ? (
-                  <div className="fc-emoji-empty">Loading emoji...</div>
-                ) : emojiGroups.length > 0 ? (
-                  emojiGroups.map((group) => (
-                    <section key={group.category} className="fc-emoji-group">
-                      <div className="fc-emoji-group-label">{group.category}</div>
-                      <div className="fc-emoji-grid">
-                        {group.items.map(({ emoji, name }) => (
-                          <button key={`${emoji}-${name}`} type="button" title={name} onClick={() => insertEmoji(emoji)}>
-                            {emoji}
-                          </button>
-                        ))}
-                      </div>
-                    </section>
-                  ))
-                ) : (
-                  <div className="fc-emoji-empty">No emoji found</div>
-                )}
-              </div>
+              <EmojiPicker onPick={insertEmoji} />
             </div>
           ) : null}
         </div>

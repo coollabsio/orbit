@@ -1507,10 +1507,7 @@ textarea.input {
   padding: 12px;
 }
 
-/* the sticky group label must blend with the popover background, not the chat panel's */
-.emoji-picker .fc-emoji-group-label {
-  background: color-mix(in srgb, var(--recessed) 95%, transparent);
-}
+
 
 .emoji-picker-head {
   display: flex;
@@ -1547,9 +1544,13 @@ textarea.input {
   color: var(--text-primary);
 }
 
-/* the dropdown that hosts the panel: no height cap or padding */
+/* the dropdown that hosts the panel: the exact chat emoji popover shell */
 .emoji-dropdown .popover {
   max-height: none;
   overflow: visible;
   padding: 0;
+  border-radius: 12px;
+  border-color: var(--line);
+  background: var(--elevated);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
 }
