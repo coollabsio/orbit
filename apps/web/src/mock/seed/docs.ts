@@ -46,6 +46,7 @@ export const docs: Doc[] = [
       block('quote', 'Rollback = redeploy the previous tagged artifact. Takes under a minute.'),
       block('h2', 'Environment'),
       block('code', 'DATABASE_PATH=/data/team-workspace/app.db\nFILES_ROOT=/data/team-workspace/files'),
+      block('embed', 'https://coolify.io/docs'),
     ],
   },
   {

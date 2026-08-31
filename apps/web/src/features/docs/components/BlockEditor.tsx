@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { cx } from '../../../lib/cx'
 import type { DocBlock, User } from '../../../mock/types'
+import { clipboardFiles } from '../../chat/attachmentLib'
 import { MentionPopover } from '../../chat/components/MentionPopover'
 import { useMentionAutocomplete } from '../../chat/useMentionAutocomplete'
 import { SLASH_ITEMS, filterSuggestionItems, getSlashState, type SlashItem } from '../slashItems'
@@ -20,6 +21,10 @@ interface BlockEditorProps {
   /** The docs reference slash actions: create a sub-page / open the link-a-page dialog. */
   onSubpage: (textWithoutSlash: string) => void
   onLinkPage: (textWithoutSlash: string) => void
+  /** "/image" and "/file" open a file picker for this block. */
+  onPickMedia: (kind: 'image' | 'file') => void
+  /** Pasted files become image/file blocks after this one. */
+  onFiles: (files: File[]) => void
 }
 
 export function BlockEditor({
@@ -33,6 +38,8 @@ export function BlockEditor({
   autoFocus,
   onSubpage,
   onLinkPage,
+  onPickMedia,
+  onFiles,
 }: BlockEditorProps) {
   const [text, setText] = useState(block.text)
   const [slash, setSlash] = useState<{ start: number; query: string } | null>(null)
@@ -105,6 +112,21 @@ export function BlockEditor({
         })
         return
       }
+      case 'media':
+        if (item.action.media === 'embed') {
+          setText('')
+          onChangeType('embed', '')
+          requestAnimationFrame(() => {
+            const el = ref.current
+            if (!el) return
+            el.focus()
+            grow(el)
+          })
+        } else {
+          suppressBlurRef.current = true
+          onPickMedia(item.action.media)
+        }
+        return
       case 'subpage':
         suppressBlurRef.current = true
         onSubpage(stripped)
@@ -180,7 +202,7 @@ export function BlockEditor({
         className="doc-block-textarea"
         rows={1}
         value={text}
-        placeholder={block.type === 'divider' ? 'Divider' : "Type '/' for commands…"}
+        placeholder={block.type === 'embed' ? 'Paste a link and press Enter…' : block.type === 'divider' ? 'Divider' : "Type '/' for commands…"}
         onChange={(e) => {
           suppressBlurRef.current = false
           setText(e.target.value)
@@ -205,6 +227,12 @@ export function BlockEditor({
           setSlash(null)
           mention.close()
           finish('close')
+        }}
+        onPaste={(e) => {
+          const files = clipboardFiles(e)
+          if (files.length === 0) return
+          e.preventDefault()
+          onFiles(files)
         }}
       />
       {!menuOpen && mention.open ? (

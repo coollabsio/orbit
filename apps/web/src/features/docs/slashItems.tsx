@@ -4,8 +4,11 @@
 import {
   Code,
   DocumentText,
+  Gallery,
+  Global,
   Link2,
   Minus,
+  Paperclip2,
   QuoteDown,
   Smallcaps,
   TaskSquare,
@@ -25,6 +28,7 @@ export interface SlashItem {
     | { kind: 'turn-into'; type: DocBlock['type'] }
     | { kind: 'subpage' }
     | { kind: 'link-page' }
+    | { kind: 'media'; media: 'embed' | 'image' | 'file' }
 }
 
 function heading(level: 1 | 2 | 3, subtext: string, aliases: string[]): SlashItem {
@@ -107,6 +111,30 @@ export const SLASH_ITEMS: SlashItem[] = [
     group: 'Basic blocks',
     icon: Code,
     action: { kind: 'turn-into', type: 'code' },
+  },
+  {
+    title: 'Embed',
+    subtext: 'Bookmark card for a link',
+    aliases: ['embed', 'bookmark', 'url', 'link'],
+    group: 'Media',
+    icon: Global,
+    action: { kind: 'media', media: 'embed' },
+  },
+  {
+    title: 'Image',
+    subtext: 'Upload an image',
+    aliases: ['image', 'img', 'picture', 'photo'],
+    group: 'Media',
+    icon: Gallery,
+    action: { kind: 'media', media: 'image' },
+  },
+  {
+    title: 'File',
+    subtext: 'Upload any file as an attachment',
+    aliases: ['file', 'attachment', 'upload'],
+    group: 'Media',
+    icon: Paperclip2,
+    action: { kind: 'media', media: 'file' },
   },
   {
     title: 'Divider',

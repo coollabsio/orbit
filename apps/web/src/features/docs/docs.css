@@ -734,3 +734,124 @@ button.doc-tree-chevron:hover {
 .doc-tree-row[data-drop='after']::after {
   bottom: -1px;
 }
+
+/* ---------- media blocks (embed / image / file) ---------- */
+.doc-media {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 4px 0;
+}
+
+.doc-media-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.doc-media:hover .doc-media-remove,
+.doc-media-remove:focus-visible {
+  opacity: 1;
+}
+
+.doc-media-remove:hover {
+  background: var(--danger);
+}
+
+.doc-image {
+  display: block;
+  max-width: min(520px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+
+.doc-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* bookmark card for embeds */
+.doc-embed {
+  display: flex;
+  width: 480px;
+  max-width: 100%;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--base);
+  padding: 10px 12px;
+  text-decoration: none;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.doc-embed:hover {
+  border-color: var(--line);
+  background: var(--elevated);
+}
+
+.doc-embed-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--text-secondary);
+}
+
+.doc-embed-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doc-embed-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.doc-embed-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* file chip: the chip itself downloads; the corner hosts the remove × */
+.doc-media-file .fc-file-card {
+  max-width: 320px;
+  gap: 8px;
+  padding: 7px 30px 7px 10px;
+}
+
+.doc-media-file .fc-file-card-download {
+  display: none;
+}
+
+.doc-media-file .doc-media-remove {
+  top: 50%;
+  transform: translateY(-50%);
+}

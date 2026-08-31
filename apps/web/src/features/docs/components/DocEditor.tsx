@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ArrowLeft, MoreH, Trash } from 'reicon-react'
 import { Dropdown } from '../../../components/ui/Dropdown'
@@ -8,10 +8,12 @@ import { createDoc, updateDocContent, updateDocCover, updateDocIcon, updateDocTi
 import { nextId } from '../../../mock/store'
 import type { Doc, DocBlock, User } from '../../../mock/types'
 import { ancestorsOf, numberedIndex } from '../lib'
+import { fileToAttachment } from '../../chat/attachmentLib'
 import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
 import { descendantsOf } from '../lib'
 import { BlockEditor } from './BlockEditor'
 import { CoverBanner } from './CoverBanner'
+import { MediaBlock } from './MediaBlock'
 import { CoverSourcePanel } from './CoverSourcePanel'
 import { BlockView } from './BlockView'
 import { buildMentionTokens } from '../../chat/chatLib'
@@ -34,6 +36,9 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   // "Add cover" panel for a page without a cover (with a cover, the banner hosts its own panel)
   const [coverPanelOpen, setCoverPanelOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // "/image" and "/file": the hidden picker fills this block (or replaces it when empty)
+  const mediaInput = useRef<HTMLInputElement>(null)
+  const [mediaTarget, setMediaTarget] = useState<{ blockId: string; kind: 'image' | 'file' } | null>(null)
 
   const ancestors = ancestorsOf(docs, doc.id)
   const updatedBy = users.find((u) => u.id === doc.updatedBy)
@@ -46,6 +51,54 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   }
 
   const setBlocks = (blocks: DocBlock[]) => updateDocContent(doc.id, blocks)
+
+  const mediaBlockFor = (file: File, kind: 'image' | 'file' | 'auto'): DocBlock => {
+    const att = fileToAttachment(file)
+    const isImage = att.mimeType.startsWith('image/') && kind !== 'file'
+    return {
+      id: nextId('db'),
+      type: isImage ? 'image' : 'file',
+      text: '',
+      url: att.url,
+      fileName: att.fileName,
+      fileSize: att.fileSize,
+      mimeType: att.mimeType,
+    }
+  }
+
+  /** Pasted or dropped files become media blocks after `blockId` (null = end of the page). */
+  const insertFilesAfter = (blockId: string | null, files: File[], kind: 'image' | 'file' | 'auto' = 'auto') => {
+    if (files.length === 0) return
+    const fresh = files.map((file) => mediaBlockFor(file, kind))
+    const at = blockId ? doc.content.findIndex((b) => b.id === blockId) : -1
+    const blocks =
+      at === -1 ? [...doc.content, ...fresh] : [...doc.content.slice(0, at + 1), ...fresh, ...doc.content.slice(at + 1)]
+    setBlocks(blocks)
+  }
+
+  const pickMedia = (blockId: string, kind: 'image' | 'file') => {
+    setMediaTarget({ blockId, kind })
+    requestAnimationFrame(() => mediaInput.current?.click())
+  }
+
+  const handlePickedMedia = (files: FileList | null) => {
+    if (!mediaTarget || !files || files.length === 0) {
+      setMediaTarget(null)
+      return
+    }
+    const fresh = Array.from(files).map((file) => mediaBlockFor(file, mediaTarget.kind))
+    const at = doc.content.findIndex((b) => b.id === mediaTarget.blockId)
+    const target = doc.content[at]
+    // an empty paragraph that only held the "/image" trigger is replaced, not kept
+    const replace = target && target.type === 'p' && target.text.trim() === ''
+    const blocks =
+      at === -1
+        ? [...doc.content, ...fresh]
+        : [...doc.content.slice(0, at + (replace ? 0 : 1)), ...fresh, ...doc.content.slice(at + 1)]
+    setBlocks(blocks)
+    setEditingId(null)
+    setMediaTarget(null)
+  }
 
   const commitBlock = (id: string, text: string, action: 'close' | 'insert') => {
     let blocks = doc.content.map((b) => (b.id === id ? { ...b, text } : b))
@@ -264,14 +317,27 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   (block, index) =>
                     !(index === 0 && block.type === 'h1' && block.text === doc.title) &&
                     block.type !== 'page' &&
-                    block.type !== 'divider',
+                    block.type !== 'divider' &&
+                    block.type !== 'image' &&
+                    block.type !== 'file' &&
+                    !(block.type === 'embed' && block.text.trim() !== ''),
                 )
                 setEditingId(firstWritable?.id ?? null)
                 e.currentTarget.blur()
               }
             }}
           />
-          <div className="doc-blocks">
+          <div
+            className="doc-blocks"
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes('Files')) e.preventDefault()
+            }}
+            onDrop={(e) => {
+              if (!e.dataTransfer.types.includes('Files')) return
+              e.preventDefault()
+              insertFilesAfter(null, Array.from(e.dataTransfer.files))
+            }}
+          >
             {doc.content.map((block, index) =>
               index === 0 && block.type === 'h1' && block.text === doc.title ? null : block.type === 'page' ? (
                 <PageBlock
@@ -281,6 +347,8 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   onOpen={(id) => navigate(`/docs/${id}`)}
                   onRemove={() => removeBlock(block.id)}
                 />
+              ) : block.type === 'image' || block.type === 'file' || (block.type === 'embed' && block.text.trim() !== '') ? (
+                <MediaBlock key={block.id} block={block} onRemove={() => removeBlock(block.id)} />
               ) : block.type === 'divider' ? (
                 <BlockView mentionTokens={mentionTokens}
                   key={block.id}
@@ -308,11 +376,25 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                   }
                   onSubpage={() => insertSubpage(block.id)}
                   onLinkPage={() => openLinkDialog(block.id)}
+                  onPickMedia={(kind) => pickMedia(block.id, kind)}
+                  onFiles={(files) => insertFilesAfter(block.id, files)}
                 />
               ),
             )}
           </div>
           <button type="button" className="doc-editor-tail" aria-label="Continue writing" onClick={addBlock} />
+          <input
+            ref={mediaInput}
+            type="file"
+            multiple
+            hidden
+            accept={mediaTarget?.kind === 'image' ? 'image/*' : undefined}
+            aria-label="Upload media"
+            onChange={(e) => {
+              handlePickedMedia(e.target.files)
+              e.target.value = ''
+            }}
+          />
         </div>
       </div>
       {linkTarget ? (
