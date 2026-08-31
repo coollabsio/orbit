@@ -116,7 +116,9 @@ useEffect(() => {
     const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 320)}px`
+    const height = Math.min(el.scrollHeight, 320)
+    el.style.height = `${height}px`
+    el.style.overflowY = el.scrollHeight > 320 ? 'auto' : 'hidden'
   }
 
   function handleChange(value: string, cursor: number) {
@@ -258,7 +260,7 @@ useEffect(() => {
           className="fc-input"
           value={text}
           rows={1}
-          style={{ height: 24 }}
+          style={{ height: 24, overflowY: 'hidden' }}
           placeholder={placeholder ?? (channel ? `${threadMode ? 'Start a thread' : 'Message'} #${channel.name}` : 'Message')}
           onChange={(e) => handleChange(e.target.value, e.target.selectionStart)}
           onClick={(e) => mention.update(text, e.currentTarget.selectionStart)}
