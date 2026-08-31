@@ -4342,4 +4342,54 @@ a.fc-mention:hover {
     width: 14px;
     height: 14px;
   }
+
+  .fc-source-badge[data-source='webhook'] {
+    height: 14px;
+    padding-inline: 3px;
+    font-size: 9px;
+    line-height: 14px;
+  }
+
+  .fc-embeds {
+    max-width: 320px;
+    margin-top: 5px;
+    gap: 5px;
+  }
+
+  .fc-embed {
+    font-size: 12px;
+  }
+
+  .fc-embed-inner {
+    gap: 10px;
+    padding: 8px;
+  }
+
+  .fc-embed-main {
+    gap: 6px;
+  }
+
+  .fc-embed-title {
+    font-size: 12px;
+  }
+
+  .fc-embed-desc {
+    font-size: 11px;
+    line-height: 16px;
+  }
+
+  .fc-embed-fields {
+    gap: 6px;
+  }
+
+  .fc-embed-field-name,
+  .fc-embed-field-value {
+    font-size: 10px;
+    line-height: 15px;
+  }
+
+  .fc-embed-footer {
+    gap: 5px;
+    font-size: 9px;
+  }
 }
