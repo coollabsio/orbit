@@ -22,7 +22,7 @@ export function DMPage() {
   const channel = dm && participant ? {
     id: dm.id,
     name: participant.name,
-    description: participant.title,
+    description: '',
     categoryId: 'direct-messages',
     unreadCount: dm.unreadCount,
   } : null
