@@ -333,11 +333,41 @@ export function createDoc(parentId: string | null): Doc {
   return doc
 }
 
+/** Deletes a page and every page below it. */
 export function deleteDoc(docId: string) {
-  updateState((s) => ({
-    ...s,
-    docs: s.docs.filter((d) => d.id !== docId && d.parentId !== docId),
-  }))
+  updateState((s) => {
+    const gone = new Set([docId])
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const d of s.docs) {
+        if (d.parentId && gone.has(d.parentId) && !gone.has(d.id)) {
+          gone.add(d.id)
+          grew = true
+        }
+      }
+    }
+    return { ...s, docs: s.docs.filter((d) => !gone.has(d.id)) }
+  })
+}
+
+/** Moves a page under `parentId` (null = root), inserted before `beforeId` (null = last sibling). */
+export function moveDoc(docId: string, parentId: string | null, beforeId: string | null = null) {
+  updateState((s) => {
+    const doc = s.docs.find((d) => d.id === docId)
+    if (!doc || docId === parentId) return s
+    // never move a page into its own subtree
+    let cursor = parentId
+    while (cursor) {
+      if (cursor === docId) return s
+      cursor = s.docs.find((d) => d.id === cursor)?.parentId ?? null
+    }
+    const moved = { ...doc, parentId, updatedAt: now(), updatedBy: s.currentUserId }
+    const rest = s.docs.filter((d) => d.id !== docId)
+    const at = beforeId ? rest.findIndex((d) => d.id === beforeId) : -1
+    const docs = at === -1 ? [...rest, moved] : [...rest.slice(0, at), moved, ...rest.slice(at)]
+    return { ...s, docs }
+  })
 }
 
 /* ---------- mail ---------- */

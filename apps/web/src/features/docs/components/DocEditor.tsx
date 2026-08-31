@@ -8,6 +8,8 @@ import { createDoc, updateDocContent, updateDocCover, updateDocIcon, updateDocTi
 import { nextId } from '../../../mock/store'
 import type { Doc, DocBlock, User } from '../../../mock/types'
 import { ancestorsOf, numberedIndex } from '../lib'
+import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
+import { descendantsOf } from '../lib'
 import { BlockEditor } from './BlockEditor'
 import { CoverBanner } from './CoverBanner'
 import { CoverSourcePanel } from './CoverSourcePanel'
@@ -31,6 +33,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   // "Add cover" panel for a page without a cover (with a cover, the banner hosts its own panel)
   const [coverPanelOpen, setCoverPanelOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const ancestors = ancestorsOf(docs, doc.id)
   const updatedBy = users.find((u) => u.id === doc.updatedBy)
@@ -173,7 +176,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
               style={{ color: 'var(--danger)' }}
               onClick={() => {
                 close()
-                onDelete()
+                setConfirmDelete(true)
               }}
             >
               <Trash size={14} />
@@ -318,6 +321,21 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
           excludeId={doc.id}
           onPick={pickLinkedPage}
           onClose={() => setLinkTarget(null)}
+        />
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDeleteModal
+          title={`Delete "${doc.title || 'Untitled'}"?`}
+          description={
+            descendantsOf(docs, doc.id).length > 0
+              ? `This will permanently delete the page and its ${descendantsOf(docs, doc.id).length} sub-page${descendantsOf(docs, doc.id).length === 1 ? '' : 's'}.`
+              : 'This will permanently delete the page.'
+          }
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false)
+            onDelete()
+          }}
         />
       ) : null}
     </section>

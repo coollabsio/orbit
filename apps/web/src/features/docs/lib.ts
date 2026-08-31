@@ -5,6 +5,20 @@ export function childrenOf(docs: Doc[], parentId: string | null): Doc[] {
   return docs.filter((d) => d.parentId === parentId)
 }
 
+/** Every page below a doc (children, grandchildren, …). */
+export function descendantsOf(docs: Doc[], docId: string): Doc[] {
+  const out: Doc[] = []
+  const queue = [docId]
+  while (queue.length > 0) {
+    const parent = queue.shift()!
+    for (const child of docs.filter((d) => d.parentId === parent)) {
+      out.push(child)
+      queue.push(child.id)
+    }
+  }
+  return out
+}
+
 /** Ancestor chain of a doc, root first, excluding the doc itself. */
 export function ancestorsOf(docs: Doc[], docId: string | null): Doc[] {
   const byId = new Map(docs.map((d) => [d.id, d]))
