@@ -3813,32 +3813,6 @@
   }
 }
 
-/* mx-2 mt-2 mb-1 flex gap-1 rounded-lg bg-secondary p-2 */
-.fc-ctx-emojis {
-  margin: 8px 8px 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 8px;
-  background: var(--fill);
-  padding: 8px;
-}
-
-.fc-ctx-emojis button {
-  display: flex;
-  width: 32px;
-  height: 32px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  font-size: 18px;
-  transition: background-color 0.15s;
-}
-
-.fc-ctx-emojis button:hover {
-  background: var(--canvas);
-}
-
 .fc-ctx-items {
   padding: 6px 4px;
 }

@@ -1,7 +1,8 @@
 // Port of the chat reference MessageItem (the chat reference frontend/src/components/chat/MessageItem.tsx)
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Copy, Edit, SmileCircle, Reply, Trash } from 'reicon-react'
+import { Copy, Edit, MoreH, SmileCircle, Reply, Trash } from 'reicon-react'
+import { EmojiPicker } from '../../../components/ui/EmojiPicker'
 import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import {
@@ -261,35 +262,16 @@ export function MessageItem({
                 {emoji}
               </button>
             ))}
-            <div className="fc-toolbar-sep" />
-            <button title="Copy message" onClick={handleCopyText}>
-              <Copy />
+            <button
+              type="button"
+              aria-label="More message actions"
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect()
+                setContextMenu({ x: rect.right, y: rect.bottom + 4 })
+              }}
+            >
+              <MoreH />
             </button>
-            {isAuthor ? (
-              <button title="Edit message" onClick={startEditing}>
-                <Edit />
-              </button>
-            ) : null}
-            <button title="Reply" onClick={handleReply}>
-              <Reply />
-            </button>
-            {onOpenThread ? (
-              <button title={hasThread ? 'Open Thread' : 'Create Thread'} onClick={openThread}>
-                <ThreadIcon size={16} />
-              </button>
-            ) : null}
-            <div className="fc-toolbar-sep" />
-            <button title={message.pinned ? 'Unpin message' : 'Pin message'} onClick={() => togglePinMessage(message.id)}>
-              <PinIcon />
-            </button>
-            {canDelete ? (
-              <>
-                <div className="fc-toolbar-sep" />
-                <button data-danger="true" title="Delete message" onClick={requestDelete}>
-                  <Trash />
-                </button>
-              </>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -500,6 +482,7 @@ function MessageContextMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [adjusted, setAdjusted] = useState(position)
+  const [showEmojis, setShowEmojis] = useState(false)
 
   useEffect(() => {
     const menu = menuRef.current
@@ -509,7 +492,7 @@ function MessageContextMenu({
       x: Math.min(Math.max(position.x, 8), window.innerWidth - rect.width - 8),
       y: Math.min(Math.max(position.y, 8), window.innerHeight - rect.height - 8),
     })
-  }, [position])
+  }, [position, showEmojis])
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -526,23 +509,15 @@ function MessageContextMenu({
     }
   }, [onClose])
 
-  const [showEmojis, setShowEmojis] = useState(false)
-
   // portal: message rows keep a transform from their enter animation, which would make
   // position:fixed resolve against the row instead of the viewport
   return createPortal(
-    <div ref={menuRef} className="fc-ctx" style={{ left: adjusted.x, top: adjusted.y }}>
+    <div ref={menuRef} className="fc-ctx" data-picker={showEmojis || undefined} style={{ left: adjusted.x, top: adjusted.y }}>
       {showEmojis ? (
-        <div className="fc-ctx-emojis">
-          {TOOLBAR_EMOJIS.map((emoji) => (
-            <button key={emoji} type="button" onClick={() => onReaction(emoji)}>
-              {emoji}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <div className="fc-ctx-items">
-        <button type="button" className="fc-ctx-item" onClick={() => setShowEmojis((prev) => !prev)}>
+        <EmojiPicker onPick={onReaction} />
+      ) : (
+        <div className="fc-ctx-items">
+        <button type="button" className="fc-ctx-item" onClick={() => setShowEmojis(true)}>
           <span className="fc-ctx-icon">
             <SmileCircle size={16} />
           </span>
@@ -594,7 +569,8 @@ function MessageContextMenu({
             </button>
           </>
         ) : null}
-      </div>
+        </div>
+      )}
     </div>,
     document.body,
   )
