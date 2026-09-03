@@ -239,7 +239,7 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Browser authentication uses cookies with secure defaults rather than exposing long-lived credentials to frontend JavaScript.
 - Password reset tokens must be single-use, time-limited, and stored so a database disclosure does not reveal usable reset links.
 - Passkeys and external identity providers remain compatible future additions, not first-milestone requirements.
-- Account enumeration, login throttling, session invalidation, cookie attributes, and recovery delivery require explicit decisions in the security and authentication sections.
+- Account enumeration, login throttling, session invalidation, and remaining cookie details require explicit decisions in the security and authentication sections.
 
 ### D-013: Make account registration invite-only
 
@@ -279,7 +279,7 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - After successful setup, the route permanently behaves as unavailable for that database; deleting the administrator must not silently reopen bootstrap.
 - Recovery from a lost final administrator requires an explicit administrative recovery procedure rather than re-enabling public bootstrap automatically.
 - The setup form uses the same password policy and secure session creation as normal authentication.
-- The mechanism used to prove that the browser user controls the installation remains an open security decision.
+- The setup token in D-015 proves that the browser user controls the installation.
 
 ### D-015: Protect browser bootstrap with a one-time setup token
 
@@ -322,40 +322,242 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - The user can view and revoke their active sessions; authorized administrators can revoke sessions as defined by policy.
 - Sensitive future operations may require recent authentication even when the session remains valid.
 
+### D-017: Support SMTP and administrator-issued password recovery
+
+**Decision:** Send password-recovery links through SMTP when it is configured. When it is not, an installation administrator can generate a short-lived recovery URL for the affected user.
+
+**Rationale:** Recovery must work in small self-hosted installations without making an email service mandatory or revealing a replacement password to an administrator.
+
+**Alternatives considered:**
+
+- **Require SMTP:** Rejected because it would add an external dependency to the first milestone.
+- **Let administrators assign passwords:** Rejected because an administrator would know the user's new credential.
+
+**Consequences:**
+
+- Recovery URLs are single-use, time-limited, and persisted only as token hashes.
+- Only installation administrators, not workspace administrators, may issue recovery links because credentials belong to global accounts.
+- Generating a link is security-audited and must not expose it through ordinary application logs.
+- SMTP delivery is asynchronous through the durable job system; the local recovery path remains available when SMTP is disabled or unhealthy.
+
+### D-018: Use fixed workspace access roles initially
+
+**Decision:** Authorization uses the fixed workspace roles Owner, Admin, and Member during the first milestone. The existing custom chat roles remain display-only until chat authorization is designed. Visitor invitations are deferred.
+
+**Rationale:** Fixed roles establish a clear, testable policy model without adding a permission editor or conflating decorative chat roles with access control.
+
+**Alternatives considered:**
+
+- **Custom permission-bearing roles:** Deferred because it would require a full permission schema, editor, compatibility rules, and policy migration strategy.
+- **Owner and Admin only:** Rejected because ordinary collaborating members are a core workflow.
+- **Enable Visitor immediately:** Deferred until its resource visibility and project-scoping semantics are designed.
+
+**Consequences:**
+
+- Every workspace has exactly one Owner.
+- Only the Owner may transfer ownership or delete the workspace.
+- Admins can manage workspace settings, projects, invitations, members, and roles but cannot alter or remove the Owner.
+- Members may create, edit, and delete task-area resources, including projects, statuses, tasks, comments, and attachments; destructive UI actions still use confirmations where appropriate.
+- Owners and Admins retain the same content capabilities as Members.
+- Backend policy checks, rather than UI visibility, enforce every permission.
+
+### D-019: Use UUIDv7 identifiers
+
+**Decision:** Persistent entities use UUIDv7 identifiers and expose them in canonical UUID string form at API boundaries.
+
+**Rationale:** UUIDv7 is a standardized, time-ordered identifier that can be generated without database coordination and remains suitable for clients, imports, and a future PostgreSQL adapter.
+
+**Alternatives considered:**
+
+- **ULID:** Rejected in favor of the more universal UUID representation.
+- **Integer identifiers:** Rejected because they require centralized allocation and are awkward for client-created records and future data movement.
+
+**Consequences:**
+
+- The database representation must preserve UUID identity and indexed ordering consistently.
+- Authorization must never infer workspace ownership or trust ordering information from an identifier.
+
+### D-020: Standardize UTC timestamp storage and transport
+
+**Decision:** Persist timestamps as UTC Unix milliseconds in SQLite integer columns and expose them as RFC 3339 UTC strings in JSON.
+
+**Rationale:** Integer storage is compact and sortable in SQLite, while RFC 3339 makes API values readable and unambiguous.
+
+**Alternatives considered:**
+
+- **RFC 3339 text in SQLite:** Rejected because it is larger and easier to format inconsistently.
+- **Unix milliseconds in JSON:** Rejected because it is less readable and self-describing for API consumers.
+
+**Consequences:**
+
+- Public API schemas use RFC 3339 strings and generated clients map them consistently.
+- Application code owns parsing, formatting, and millisecond precision; local time zones are presentation concerns only.
+
+### D-021: Soft-delete major records
+
+**Decision:** Workspaces, projects, and tasks are soft-deleted in the first milestone. Comments and attachment metadata may be hard-deleted, with durable cleanup jobs for stored files.
+
+**Rationale:** Major records have broad relationships and high recovery value. Applying soft deletion selectively avoids turning every table into a recycle-bin system.
+
+**Alternatives considered:**
+
+- **Hard-delete all records:** Rejected because accidental deletion of major resources would be immediately irreversible.
+- **Full recycle bin for every entity:** Deferred because user-facing restore workflows for every resource would expand the milestone substantially.
+
+**Consequences:**
+
+- Normal queries exclude deleted major records by default.
+- Unique constraints and restore behavior must account for soft-deleted rows explicitly.
+- Retention, permanent purge, and user-facing restoration need concrete policies before implementation.
+
+### D-022: Detect update conflicts with record versions
+
+**Decision:** Mutable records carry an integer version. Update and delete requests include the version observed by the client and receive a conflict response when it is stale.
+
+**Rationale:** Optimistic concurrency prevents one browser from silently overwriting another user's edits without requiring complex field-level merge semantics.
+
+**Alternatives considered:**
+
+- **Last write wins:** Rejected because concurrent changes could be lost without warning.
+- **Automatic field-level merging:** Deferred because it requires domain-specific conflict behavior.
+
+**Consequences:**
+
+- Successful mutations increment the version atomically.
+- The API defines a consistent conflict error and returns enough current-record context for the frontend to refresh or prompt the user.
+- TanStack Query optimistic updates must roll back or reconcile when a conflict occurs.
+
+### D-023: Use SQLx repositories for persistence
+
+**Decision:** Use SQLx with explicit SQL behind domain-oriented repository interfaces. Platform helpers standardize connection setup, transactions, identifiers, pagination, error mapping, and tests.
+
+**Rationale:** Explicit SQL keeps SQLite behavior visible and controllable while typed repository methods provide consistent application-facing DX.
+
+**Alternatives considered:**
+
+- **SeaORM entities:** Rejected because the additional ORM and generated-entity abstraction is not currently justified.
+- **A custom Eloquent-like ORM:** Rejected because implementing ORM semantics would distract from building proven application capabilities.
+
+**Consequences:**
+
+- HTTP handlers do not issue SQL directly.
+- Repository interfaces follow domain use cases rather than exposing generic active-record operations.
+- Migrations remain explicit, ordered, testable artifacts.
+
+### D-024: Build HTTP APIs with Axum and Tower
+
+**Decision:** Standardize the server on Axum for HTTP routing and extraction and Tower for middleware and service composition.
+
+**Rationale:** Axum and Tower provide composable primitives within the Tokio ecosystem while leaving room for Orbit-specific conventions around errors, validation, authentication, and state.
+
+**Alternatives considered:**
+
+- **Actix Web:** Not selected because the team prefers the Tower ecosystem and compositional model.
+- **Poem/OpenAPI:** Not selected because stronger framework coupling and a smaller ecosystem are unnecessary for the desired contract generation.
+
+**Consequences:**
+
+- The internal platform supplies narrow response, error, request-context, validation, and middleware conventions rather than wrapping all of Axum.
+- Domain and repository layers remain independent of Axum types.
+
+### D-025: Generate the TypeScript API client from OpenAPI
+
+**Decision:** Rust HTTP endpoints define an OpenAPI contract from which CI generates the TypeScript client used by frontend domain services.
+
+**Rationale:** A generated contract prevents request, response, and validation types from drifting while avoiding handwritten duplication across Rust and TypeScript.
+
+**Alternatives considered:**
+
+- **Handwritten TypeScript contracts:** Rejected because they can silently diverge from server behavior.
+- **Generate types but handwrite requests:** Rejected because endpoint definitions and error handling would still be duplicated.
+
+**Consequences:**
+
+- Generated code is not edited manually.
+- Contract generation must be deterministic and checked in CI.
+- Feature components consume frontend services or hooks rather than importing transport details throughout the view layer.
+
+### D-026: Put workspace context in API paths
+
+**Decision:** Workspace-scoped APIs include the workspace identifier explicitly in the URL, for example `/api/v1/workspaces/{workspace_id}/tasks`.
+
+**Rationale:** Explicit path scoping makes tenancy visible in routing, logs, authorization, generated clients, and concurrent browser tabs.
+
+**Alternatives considered:**
+
+- **Custom workspace header:** Rejected because it makes critical context less visible.
+- **Session-selected workspace:** Rejected because it is ambiguous across tabs and unsafe as an authorization input.
+
+**Consequences:**
+
+- Every scoped handler verifies that the authenticated global user has an active membership in the path workspace.
+- A remembered active workspace is only a navigation preference.
+- Nested resource lookups must verify workspace ownership rather than trusting resource IDs alone.
+
+### D-027: Store attachments locally behind an abstraction
+
+**Decision:** Store milestone-one attachment bytes under a configured local data directory and metadata in SQLite, behind a storage interface that can later support S3-compatible object storage.
+
+**Rationale:** Local files preserve compact self-hosting without putting large blobs and their write load into SQLite.
+
+**Alternatives considered:**
+
+- **Require S3-compatible storage:** Deferred because it would add an external service to every initial installation.
+- **SQLite blobs:** Rejected because they increase database write contention, backup size, and large-file memory pressure.
+
+**Consequences:**
+
+- Storage paths are generated, opaque, and workspace-scoped; user filenames never become trusted filesystem paths.
+- Authorization is checked before upload and download.
+- Database metadata and file operations require cleanup and reconciliation behavior for partial failure.
+- Backups include both the SQLite database and attachment directory as one consistent data set.
+
+### D-028: Use TanStack Query for frontend server state
+
+**Decision:** Use TanStack Query to manage persistent server state, loading, caching, invalidation, and optimistic mutations in migrated frontend domains.
+
+**Rationale:** It provides established server-state lifecycle behavior while allowing the generated client and Orbit domain hooks to remain explicit boundaries.
+
+**Alternatives considered:**
+
+- **Extend the custom external store into a server cache:** Rejected because it would recreate request lifecycle and invalidation behavior.
+- **Component-local fetching:** Rejected because it would scatter caching, retry, loading, and rollback logic.
+
+**Consequences:**
+
+- Query keys include workspace context and stable domain identifiers.
+- Generated transport calls are wrapped by feature-level queries and mutations.
+- Optimistic updates define snapshots, rollback, and post-success reconciliation.
+- The existing mock store remains responsible only for unmigrated domains.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
 
-- Axum for HTTP and WebSocket handling.
-- SQLx for database access.
 - A reusable platform divided into core, HTTP, database, authentication, and testing capabilities.
-- REST plus a generated TypeScript API client.
-- Local filesystem storage with a possible S3-compatible adapter.
 - A single artifact that may embed the built frontend.
 
 These choices require explicit evaluation before implementation.
 
-## Decision queue
+## Remaining decision queue
 
-Decisions will be resolved in dependency order:
+The accepted decisions above settle the first milestone, tenancy model, initial roles, core identifiers and timestamps, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. Product scope and first backend milestone
-2. Tenancy and workspace isolation
-3. Authentication and session lifecycle
-4. Authorization model
-5. Core data conventions
-6. SQLite access, migrations, backup, and recovery
-7. Durable jobs and scheduling semantics
-8. API contract, validation, errors, and client generation
-9. Realtime delivery and reconnection
-10. File and attachment storage
-11. Mail responsibilities and providers
-12. Platform/module boundaries
-13. Configuration, secrets, deployment, and observability
-14. Security controls
-15. Testing and local developer experience
-16. Incremental frontend migration
+1. Workspace invitation lifecycle
+2. Detailed session, login-throttling, and account-security behavior
+3. Soft-delete retention and restoration behavior
+4. SQLite migrations, backup, restore, and integrity checks
+5. Durable job scheduling, retry, and dead-letter semantics
+6. API validation, errors, pagination, and compatibility policy
+7. File limits, validation, cleanup, and download behavior
+8. Realtime delivery and reconnection
+9. Mail responsibilities beyond transactional SMTP
+10. Platform and Orbit module boundaries
+11. Configuration, secrets, deployment, and observability
+12. Security controls and audit records
+13. Testing and local developer experience
+14. Detailed incremental frontend migration
 
-## Open decision 1: Product scope and first backend milestone
+## Next open decision: Workspace invitation lifecycle
 
-The first milestone must be small enough to validate the database, API, authentication, authorization, testing, and frontend integration conventions without attempting to replace every mock feature simultaneously.
+The invitation design must still define expiry, resend and revocation behavior, acceptance by new and existing global users, and whether successful acceptance establishes verified ownership of the invited email address.
