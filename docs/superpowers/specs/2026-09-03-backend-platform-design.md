@@ -302,6 +302,26 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Setup responses and application logs must not echo or retain the plaintext token.
 - The browser should remove the token from its address bar after exchanging or validating it so it is not retained in history or sent as a referrer.
 
+### D-016: Use sliding sessions with an absolute lifetime
+
+**Decision:** Browser sessions expire after 30 days of inactivity and have an absolute maximum lifetime of 90 days from initial authentication.
+
+**Rationale:** Sliding expiration avoids interrupting active users, while the absolute limit ensures that every browser must periodically prove possession of the account credentials again.
+
+**Alternatives considered:**
+
+- **Fixed 30-day lifetime:** Rejected because it can sign out a user who is actively using the application.
+- **Short session with a remember-me option:** Rejected initially because it introduces another cookie and session-policy branch without a demonstrated need.
+
+**Consequences:**
+
+- Sessions use opaque cryptographically random tokens in `HttpOnly`, `Secure`, `SameSite=Lax` cookies; only a non-reversible token hash is stored.
+- Activity may advance the idle expiry but never the original 90-day absolute expiry.
+- Session activity writes should be throttled rather than updating SQLite on every request.
+- Password changes, explicit sign-out, account suspension, and administrator revocation invalidate applicable sessions immediately.
+- The user can view and revoke their active sessions; authorized administrators can revoke sessions as defined by policy.
+- Sensitive future operations may require recent authentication even when the session remains valid.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
