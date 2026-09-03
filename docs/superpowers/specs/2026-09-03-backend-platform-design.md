@@ -241,6 +241,26 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Passkeys and external identity providers remain compatible future additions, not first-milestone requirements.
 - Account enumeration, login throttling, session invalidation, cookie attributes, and recovery delivery require explicit decisions in the security and authentication sections.
 
+### D-013: Make account registration invite-only
+
+**Decision:** Initial account registration is invite-only. There is no public self-registration endpoint or installation setting that enables it in the first milestone.
+
+**Rationale:** Orbit is initially a self-hosted workspace application. Invite-only registration gives workspace administrators explicit control over membership and avoids making abuse prevention for public registration part of the first milestone.
+
+**Alternatives considered:**
+
+- **Open registration:** Rejected because anyone who could reach the installation could create an account, requiring additional abuse controls and workspace-creation policies.
+- **Administrator-configurable registration:** Deferred because its flexibility does not justify another policy branch and test matrix in the first milestone.
+
+**Consequences:**
+
+- The installation needs a separate, secure bootstrap flow for its first administrator.
+- After bootstrap, new accounts are created only through accepted invitations.
+- Invitation tokens must be single-use, time-limited, and stored so a database disclosure does not expose usable invitations.
+- Invitations must identify the target workspace and intended initial role.
+- Accepting an invitation either creates a global account or adds a membership to an existing global account with the matching verified identity.
+- Public registration can be considered later as a separate feature and threat-model decision.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
