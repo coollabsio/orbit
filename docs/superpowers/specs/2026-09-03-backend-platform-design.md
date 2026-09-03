@@ -143,6 +143,45 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Initial coordination can use one job claimant with bounded concurrent execution.
 - The application API should enqueue typed jobs without exposing queue-table details to domain code.
 
+### D-008: Support multiple workspaces in each installation
+
+**Decision:** A single Orbit installation supports multiple isolated workspaces from the initial schema onward.
+
+**Rationale:** Workspace ownership affects nearly every persistent resource, authorization decision, uniqueness rule, job, event, and stored file. Including that boundary from the beginning is substantially simpler and safer than retrofitting tenancy after application data and APIs exist.
+
+**Alternatives considered:**
+
+- **One workspace per installation:** Rejected because it would embed installation-level assumptions throughout the model and make later multi-workspace support a broad, risky migration.
+- **One database per workspace:** Rejected initially because it complicates connection management, migrations, backups, cross-workspace identity, and operations without providing necessary isolation for the intended deployment model.
+
+**Consequences:**
+
+- Workspaces share one SQLite database within an installation.
+- Every workspace-owned aggregate must carry an explicit `workspace_id`.
+- Workspace-scoped uniqueness constraints must include `workspace_id`.
+- Authorization, jobs, events, file paths, test fixtures, and queries must preserve workspace context.
+- Automated tests must attempt cross-workspace access and prove that it is rejected.
+- Custom workspace domains, per-workspace databases, and workspace billing are not implied by this decision.
+
+### D-009: Use global user identities with workspace memberships
+
+**Decision:** A user has one global account within an Orbit installation and may belong to multiple workspaces through explicit memberships.
+
+**Rationale:** Global identity avoids duplicate credentials and sessions, and it gives users a direct way to switch among workspaces without signing into separate accounts.
+
+**Alternatives considered:**
+
+- **Separate account per workspace:** Rejected because it duplicates identity and complicates login, recovery, session management, and workspace switching.
+- **Globally shared access without membership records:** Rejected because workspace authorization and roles require an explicit relationship.
+
+**Consequences:**
+
+- Authentication establishes the global user identity; authorization additionally requires a valid membership in the selected workspace.
+- Roles and workspace-specific user settings belong to the membership rather than the global user where appropriate.
+- Sessions may remember a last-selected workspace, but that selection never substitutes for a membership check.
+- Removing a membership revokes access to that workspace without deleting the global account or its other memberships.
+- Invitations target an identity attribute such as an email address and create or attach a membership when accepted.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
