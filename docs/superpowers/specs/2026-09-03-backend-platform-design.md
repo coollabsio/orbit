@@ -202,6 +202,25 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Docs, chat, direct messages, notifications, mail, webhooks, custom emoji, and other administration features remain outside this milestone unless needed directly by the accepted scope.
 - Realtime infrastructure is not a prerequisite for the first milestone.
 
+### D-011: Keep unmigrated mock features accessible
+
+**Decision:** During incremental backend migration, product areas without a real backend remain accessible using mock data while migrated foundation and task areas use persistent server data.
+
+**Rationale:** Keeping the existing mock surfaces available preserves the complete product reference and allows continued UX evaluation while backend capabilities are implemented in bounded vertical slices.
+
+**Alternatives considered:**
+
+- **Hide every unmigrated feature:** Rejected because it would remove useful working mockups and make the application appear less complete during backend development.
+- **Wait and switch the entire frontend at once:** Rejected because it creates a large integration step and delays validation of the first backend conventions.
+
+**Consequences:**
+
+- Server-owned and mock-owned domains must have an explicit boundary; the mock store must not overwrite or impersonate persistent foundation or task records.
+- Navigation between real and mock areas remains available.
+- Mock-only surfaces must be visibly identified in development so behavior is not mistaken for persistence.
+- Cross-domain mock relationships may use display-only fixtures but must not create false guarantees about server data.
+- Each later feature milestone removes its corresponding mock domain until the mock layer can be deleted.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
