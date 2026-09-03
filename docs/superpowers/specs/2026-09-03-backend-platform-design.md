@@ -221,6 +221,26 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Cross-domain mock relationships may use display-only fixtures but must not create false guarantees about server data.
 - Each later feature milestone removes its corresponding mock domain until the mock layer can be deleted.
 
+### D-012: Start with email and password authentication
+
+**Decision:** Initial authentication uses email addresses and passwords, backed by secure server-managed sessions. The initial capability also includes workspace invitations, password recovery, and a supported way to create the first administrator.
+
+**Rationale:** Email and password authentication keeps self-hosted installations independent of an external identity provider and is sufficient to validate the identity, membership, session, and authorization foundations. It avoids adding passkey and OAuth complexity to the first milestone.
+
+**Alternatives considered:**
+
+- **Password and passkeys from the beginning:** Deferred because credential enrollment, recovery, browser behavior, and additional test paths would expand the first milestone.
+- **External identity only:** Rejected initially because it would make a self-contained installation depend on provider configuration and availability.
+
+**Consequences:**
+
+- Passwords must use a modern password-hashing algorithm with per-password salts and an upgradeable cost policy.
+- Login establishes a global identity; workspace access is still determined by memberships.
+- Browser authentication uses cookies with secure defaults rather than exposing long-lived credentials to frontend JavaScript.
+- Password reset tokens must be single-use, time-limited, and stored so a database disclosure does not reveal usable reset links.
+- Passkeys and external identity providers remain compatible future additions, not first-milestone requirements.
+- Account enumeration, login throttling, session invalidation, cookie attributes, and recovery delivery require explicit decisions in the security and authentication sections.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
