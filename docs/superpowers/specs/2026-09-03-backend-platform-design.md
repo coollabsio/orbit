@@ -281,6 +281,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - The setup form uses the same password policy and secure session creation as normal authentication.
 - The mechanism used to prove that the browser user controls the installation remains an open security decision.
 
+### D-015: Protect browser bootstrap with a one-time setup token
+
+**Decision:** On first boot, Orbit generates a cryptographically random one-time setup token and prints a setup URL containing that token to the operator-visible console. The browser setup flow requires the token before it can create the first administrator.
+
+**Rationale:** A one-time token preserves browser-based onboarding while preventing an arbitrary person who discovers an unconfigured installation from claiming it.
+
+**Alternatives considered:**
+
+- **Restrict setup by source address:** Rejected because reverse proxies obscure source addresses and private networks do not establish operator identity.
+- **Leave setup open until claimed:** Rejected because deployment and discovery can race, allowing an unauthorized user to become the first administrator.
+
+**Consequences:**
+
+- The token must be generated using a cryptographically secure random source.
+- Only a non-reversible hash of the token may be persisted.
+- The token must expire and be invalidated atomically when setup succeeds.
+- Startup output must avoid printing the token again after the installation has been configured.
+- The operator needs an explicit local administrative command to rotate an unused or expired setup token.
+- Setup responses and application logs must not echo or retain the plaintext token.
+- The browser should remove the token from its address bar after exchanging or validating it so it is not retained in history or sent as a referrer.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
