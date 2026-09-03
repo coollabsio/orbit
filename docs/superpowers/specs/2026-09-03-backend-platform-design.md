@@ -182,6 +182,26 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Removing a membership revokes access to that workspace without deleting the global account or its other memberships.
 - Invitations target an identity attribute such as an email address and create or attach a membership when accepted.
 
+### D-010: Make foundation and tasks the first backend milestone
+
+**Decision:** The first usable backend milestone will deliver global account login and sessions; workspace creation and switching; invitations, memberships, and basic roles; projects and project-specific statuses; tasks, assignees, labels, comments, and task attachments; and the first real frontend API integration for those capabilities.
+
+**Rationale:** Tasks provide a broad but manageable vertical slice through authentication, tenancy, authorization, relational data, validation, uploads, API conventions, and optimistic frontend mutations. This validates the platform on real product behavior without making realtime chat or mail synchronization prerequisites.
+
+**Alternatives considered:**
+
+- **Foundation without a product feature:** Rejected because it would validate infrastructure in isolation while delivering little user-visible value.
+- **Foundation and chat:** Deferred because realtime delivery, ordering, presence, and reconnection would introduce too many new concerns into the first slice.
+- **Implement every mocked feature together:** Rejected because the scope would delay feedback and make platform mistakes expensive to unwind.
+
+**Consequences:**
+
+- The milestone is complete only when the listed task and workspace flows persist across application restarts and are exercised through the frontend.
+- Task attachments require an initial authenticated file-storage path within this milestone.
+- The first API, authorization, error, testing, and frontend data-access conventions will be proven by this slice and reused later.
+- Docs, chat, direct messages, notifications, mail, webhooks, custom emoji, and other administration features remain outside this milestone unless needed directly by the accepted scope.
+- Realtime infrastructure is not a prerequisite for the first milestone.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
