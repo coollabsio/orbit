@@ -261,6 +261,26 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Accepting an invitation either creates a global account or adds a membership to an existing global account with the matching verified identity.
 - Public registration can be considered later as a separate feature and threat-model decision.
 
+### D-014: Bootstrap the first administrator in the browser
+
+**Decision:** An unconfigured Orbit installation presents a one-time browser setup flow that creates the first global administrator, initial workspace, and owner membership.
+
+**Rationale:** A browser flow gives self-hosted operators a direct onboarding experience without requiring familiarity with container shells or application CLI commands.
+
+**Alternatives considered:**
+
+- **CLI-only bootstrap:** Rejected as the primary flow because it adds operational friction to first-time setup.
+- **Environment-provided credentials:** Rejected because passwords and other long-lived credentials can leak through deployment configuration, process environments, or automation logs.
+
+**Consequences:**
+
+- The setup route is available only while no global user exists.
+- The database transaction that creates the first user, workspace, and owner membership must be atomic and must prevent two concurrent requests from both succeeding.
+- After successful setup, the route permanently behaves as unavailable for that database; deleting the administrator must not silently reopen bootstrap.
+- Recovery from a lost final administrator requires an explicit administrative recovery procedure rather than re-enabling public bootstrap automatically.
+- The setup form uses the same password policy and secure session creation as normal authentication.
+- The mechanism used to prove that the browser user controls the installation remains an open security decision.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
