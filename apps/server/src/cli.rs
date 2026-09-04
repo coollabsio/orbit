@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use fs2::FileExt;
 use orbit_platform::{
     AttachmentMutationCoordinator, BackupService, Config, ConfigOverride, ConfigSources, Database,
-    DatabaseConfig, HttpPlatformLayer, LocalBlobStore, MigrationRunner, OriginPolicy,
+    DatabaseConfig, HttpLimits, HttpPlatformLayer, LocalBlobStore, MigrationRunner, OriginPolicy,
     TimestampMillis, UploadLimits, UploadService,
 };
 use orbit_server::attachment_routes::{AttachmentState, attachment_router};
@@ -173,7 +173,13 @@ async fn serve(cli: &Cli, listen: std::net::SocketAddr, origin: &str) -> Result<
         )))
         .merge(task_router(TaskState::new(identity, CookieMode::secure())))
         .merge(attachment_router(attachment_state.clone()))
-        .layer(HttpPlatformLayer::new(OriginPolicy::new(origin)));
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new(origin)).with_limits(HttpLimits {
+                max_body_bytes: usize::try_from(upload_limits.max_request_bytes())
+                    .unwrap_or(usize::MAX),
+                ..HttpLimits::default()
+            }),
+        );
     let listener = tokio::net::TcpListener::bind(listen)
         .await
         .map_err(operation)?;

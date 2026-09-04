@@ -2,6 +2,8 @@ use std::future::Ready;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use axum::body::{Body, to_bytes};
@@ -437,6 +439,40 @@ async fn oversized_request_is_rejected_before_the_handler() {
 
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(body_json(response).await["code"], "request_too_large");
+}
+
+#[tokio::test]
+async fn body_limit_is_streaming_and_does_not_poll_before_inner_auth_rejection() {
+    let polls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&polls);
+    let stream = futures_util::stream::poll_fn(move |_| {
+        observed.fetch_add(1, Ordering::SeqCst);
+        Poll::<Option<Result<axum::body::Bytes, io::Error>>>::Ready(None)
+    });
+    let app = Router::new()
+        .route("/probe", post(|| async { StatusCode::UNAUTHORIZED }))
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(
+                HttpLimits {
+                    max_body_bytes: 3,
+                    ..HttpLimits::default()
+                },
+            ),
+        );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/probe")
+                .header("origin", "https://orbit.test")
+                .body(Body::from_stream(stream))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

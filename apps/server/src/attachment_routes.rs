@@ -1,9 +1,12 @@
+use std::error::Error as StdError;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Extension, FromRequest, Multipart, Path, Request, State};
+use axum::extract::{
+    DefaultBodyLimit, Extension, FromRequest, Multipart, Path, Query, Request, State,
+};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -11,10 +14,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::TryStreamExt;
 use orbit_platform::{
-    AuthorizedAttachment, BlobStoreError, Id, NewAttachmentComment, NewAttachmentReference,
-    RequestId, TimestampMillis, UploadError, UploadService,
+    AuthorizedAttachment, BlobStoreError, Id, RequestId, TimestampMillis, UploadError,
+    UploadService,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -22,6 +25,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::audit::{self, AuditOutcome};
 use crate::auth_routes::CookieMode;
+use crate::repositories::attachments::{
+    AttachmentRepository, AttachmentRepositoryError, CreatedAttachment,
+};
+use crate::repositories::identity::AuthenticatedSession;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::tasks::{CommentRecord, TaskError, TaskRepository};
 
@@ -33,6 +40,7 @@ pub struct AttachmentState {
     identity: Arc<IdentityRepository>,
     tasks: Arc<TaskRepository>,
     uploads: UploadService,
+    attachments: Arc<AttachmentRepository>,
     cookie_mode: CookieMode,
 }
 
@@ -43,10 +51,15 @@ impl AttachmentState {
         uploads: UploadService,
         cookie_mode: CookieMode,
     ) -> Self {
+        let attachments = Arc::new(AttachmentRepository::new(
+            identity.database().clone(),
+            uploads.clone(),
+        ));
         Self {
             tasks: Arc::new(TaskRepository::new(identity.database().clone())),
             identity,
             uploads,
+            attachments,
             cookie_mode,
         }
     }
@@ -126,9 +139,41 @@ pub struct AttachmentRecord {
     pub created_at: TimestampMillis,
 }
 
+impl From<CreatedAttachment> for AttachmentRecord {
+    fn from(value: CreatedAttachment) -> Self {
+        Self {
+            id: value.id,
+            workspace_id: value.workspace_id,
+            task_id: value.task_id,
+            comment_id: value.comment_id,
+            owner_id: value.owner_id,
+            display_name: value.display_name,
+            media_type: value.media_type,
+            byte_size: value.byte_size,
+            created_at: value.created_at,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct AttachmentPage {
     items: Vec<AttachmentRecord>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Default, Deserialize)]
+struct PageQuery {
+    cursor: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AttachmentCursor {
+    version: u8,
+    scope: String,
+    created_at: i64,
+    id: String,
 }
 
 #[derive(Serialize)]
@@ -140,6 +185,7 @@ struct AttachmentComment {
 async fn list_task_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task)): Path<(String, String)>,
+    Query(page): Query<PageQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<AttachmentPage>, AttachmentApiError> {
@@ -153,14 +199,24 @@ async fn list_task_attachments(
         request_id.as_ref(),
     )
     .await?;
-    Ok(Json(AttachmentPage {
-        items: attachments(&state, workspace_id, task_id, None).await?,
-    }))
+    Ok(Json(
+        attachments(
+            &state,
+            workspace_id,
+            task_id,
+            None,
+            page,
+            &instance,
+            request_id.as_ref(),
+        )
+        .await?,
+    ))
 }
 
 async fn list_comment_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task, comment)): Path<(String, String, String)>,
+    Query(page): Query<PageQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<AttachmentPage>, AttachmentApiError> {
@@ -185,9 +241,18 @@ async fn list_comment_attachments(
         request_id.as_ref(),
     )
     .await?;
-    Ok(Json(AttachmentPage {
-        items: attachments(&state, workspace_id, task_id, Some(comment_id)).await?,
-    }))
+    Ok(Json(
+        attachments(
+            &state,
+            workspace_id,
+            task_id,
+            Some(comment_id),
+            page,
+            &instance,
+            request_id.as_ref(),
+        )
+        .await?,
+    ))
 }
 
 async fn upload_task_attachments(
@@ -201,7 +266,7 @@ async fn upload_task_attachments(
         .get::<RequestId>()
         .cloned()
         .map(Extension);
-    let (workspace_id, task_id, actor_id) = authorize_task(
+    let (workspace_id, task_id, session) = authorize_task(
         &state,
         request.headers(),
         &workspace,
@@ -216,7 +281,7 @@ async fn upload_task_attachments(
         workspace_id,
         task_id,
         None,
-        actor_id,
+        &session,
         &instance,
         request_id.as_ref(),
     )
@@ -236,7 +301,7 @@ async fn upload_comment_attachments(
         .get::<RequestId>()
         .cloned()
         .map(Extension);
-    let (workspace_id, task_id, actor_id) = authorize_task(
+    let (workspace_id, task_id, session) = authorize_task(
         &state,
         request.headers(),
         &workspace,
@@ -261,7 +326,7 @@ async fn upload_comment_attachments(
         workspace_id,
         task_id,
         Some(comment_id),
-        actor_id,
+        &session,
         &instance,
         request_id.as_ref(),
     )
@@ -280,7 +345,7 @@ async fn create_attachment_comment(
         .get::<RequestId>()
         .cloned()
         .map(Extension);
-    let (workspace_id, task_id, actor_id) = authorize_task(
+    let (workspace_id, task_id, session) = authorize_task(
         &state,
         request.headers(),
         &workspace,
@@ -293,50 +358,39 @@ async fn create_attachment_comment(
         &state,
         request,
         workspace_id,
-        actor_id,
+        session.user.id,
         &instance,
         request_id.as_ref(),
     )
     .await?;
-    let now = TimestampMillis::now();
     let upload = staged.upload().clone();
-    let new_comment = NewAttachmentComment::new(
-        actor_id,
-        String::new(),
-        request_id_value(request_id.as_ref()).to_owned(),
-        now,
-    );
-    let reference = NewAttachmentReference::for_new_comment(task_id, new_comment.clone());
-    if let Err(error) = state.uploads.finalize(&upload, reference.clone()).await {
-        staged.discard().await;
-        return Err(AttachmentApiError::upload(
-            error,
-            &instance,
-            request_id.as_ref(),
-        ));
-    }
-    staged.complete();
-    let records = vec![
-        attachment_by_id(&state, reference.id)
-            .await?
-            .expect("successful finalization creates its attachment metadata"),
-    ];
-    let comment = CommentRecord {
-        id: new_comment.id,
-        workspace_id,
-        task_id,
-        author_id: actor_id,
-        parent_id: None,
-        body: new_comment.body,
-        version: 0,
-        created_at: now,
-        updated_at: now,
+    let (attachment, comment) = match state
+        .attachments
+        .finalize_attachment_comment(
+            &session,
+            workspace_id,
+            task_id,
+            request_id_value(request_id.as_ref()),
+            &upload,
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            staged.discard().await;
+            return Err(AttachmentApiError::repository(
+                error,
+                &instance,
+                request_id.as_ref(),
+            ));
+        }
     };
+    staged.complete();
     Ok((
         StatusCode::CREATED,
         Json(AttachmentComment {
             comment,
-            attachments: records,
+            attachments: vec![attachment.into()],
         }),
     )
         .into_response())
@@ -349,22 +403,33 @@ async fn upload_fields(
     workspace_id: Id,
     task_id: Id,
     comment_id: Option<Id>,
-    actor_id: Id,
+    session: &AuthenticatedSession,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<Vec<AttachmentRecord>, AttachmentApiError> {
-    let mut staged_uploads =
-        stage_request(state, request, workspace_id, actor_id, instance, request_id).await?;
+    let mut staged_uploads = stage_request(
+        state,
+        request,
+        workspace_id,
+        session.user.id,
+        instance,
+        request_id,
+    )
+    .await?;
     let staged = staged_uploads.upload().clone();
-    let reference = NewAttachmentReference::validated(task_id, comment_id);
-    if let Err(error) = state.uploads.finalize(&staged, reference.clone()).await {
-        staged_uploads.discard().await;
-        return Err(AttachmentApiError::upload(error, instance, request_id));
-    }
+    let attachment = match state
+        .attachments
+        .finalize(session, workspace_id, task_id, comment_id, &staged)
+        .await
+    {
+        Ok(attachment) => attachment,
+        Err(error) => {
+            staged_uploads.discard().await;
+            return Err(AttachmentApiError::repository(error, instance, request_id));
+        }
+    };
     staged_uploads.complete();
-    Ok(vec![attachment_by_id(state, reference.id).await?.expect(
-        "successful finalization creates its attachment metadata",
-    )])
+    Ok(vec![attachment.into()])
 }
 
 async fn stage_request(
@@ -378,7 +443,8 @@ async fn stage_request(
     let mut multipart = Multipart::from_request(request, state)
         .await
         .map_err(|error| {
-            if error.into_response().status() == StatusCode::PAYLOAD_TOO_LARGE {
+            let length_limited = has_length_limit(&error);
+            if length_limited || error.into_response().status() == StatusCode::PAYLOAD_TOO_LARGE {
                 AttachmentApiError::request_too_large(instance, request_id)
             } else {
                 AttachmentApiError::invalid_multipart(instance, request_id)
@@ -392,7 +458,7 @@ async fn stage_request(
             Ok(None) => break,
             Err(error) => {
                 staged_uploads.discard().await;
-                return Err(if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                return Err(if multipart_too_large(&error) {
                     AttachmentApiError::request_too_large(instance, request_id)
                 } else {
                     AttachmentApiError::invalid_multipart(instance, request_id)
@@ -400,6 +466,10 @@ async fn stage_request(
             }
         };
         if field.name() != Some("file") {
+            if field.file_name().is_some() {
+                staged_uploads.discard().await;
+                return Err(AttachmentApiError::invalid_multipart(instance, request_id));
+            }
             continue;
         }
         if !staged_uploads.is_empty() {
@@ -408,10 +478,10 @@ async fn stage_request(
         }
         let name = field.file_name().unwrap_or("attachment").to_owned();
         let reader = StreamReader::new(field.map_err(|error| {
-            if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            if multipart_too_large(&error) {
                 io::Error::new(io::ErrorKind::FileTooLarge, error.to_string())
             } else {
-                io::Error::other(error.to_string())
+                io::Error::new(io::ErrorKind::InvalidData, error.to_string())
             }
         }));
         let staged = match state
@@ -432,6 +502,21 @@ async fn stage_request(
         return Err(AttachmentApiError::invalid_multipart(instance, request_id));
     }
     Ok(staged_uploads)
+}
+
+fn multipart_too_large(error: &axum::extract::multipart::MultipartError) -> bool {
+    error.status() == StatusCode::PAYLOAD_TOO_LARGE || has_length_limit(error)
+}
+
+fn has_length_limit(error: &(dyn StdError + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if error.is::<http_body_util::LengthLimitError>() {
+            return true;
+        }
+        source = error.source();
+    }
+    false
 }
 
 struct StagedRequest {
@@ -542,8 +627,9 @@ async fn delete_attachment(
     } else {
         format!("/api/v1/workspaces/{workspace}/tasks/{task}/attachments/{attachment}")
     };
-    let (workspace_id, task_id, actor_id) =
+    let (workspace_id, task_id, session) =
         authorize_task(state, headers, workspace, task, &instance, request_id).await?;
+    let actor_id = session.user.id;
     let attachment_id = parse_id(attachment, &instance, request_id)?;
     let comment_id = comment
         .map(|value| parse_id(value, &instance, request_id))
@@ -663,8 +749,9 @@ async fn download_attachment(
     } else {
         format!("/api/v1/workspaces/{workspace}/tasks/{task}/attachments/{attachment}/download")
     };
-    let (workspace_id, task_id, actor_id) =
+    let (workspace_id, task_id, session) =
         authorize_task(state, headers, workspace, task, &instance, request_id).await?;
+    let actor_id = session.user.id;
     let attachment_id = parse_id(attachment, &instance, request_id)?;
     let comment_id = comment
         .map(|value| parse_id(value, &instance, request_id))
@@ -711,7 +798,7 @@ async fn authorize_task(
     task: &str,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
-) -> Result<(Id, Id, Id), AttachmentApiError> {
+) -> Result<(Id, Id, AuthenticatedSession), AttachmentApiError> {
     // This function intentionally runs before Multipart is constructed or polled.
     let token = cookie_value(headers, state.cookie_mode.session_cookie_name())
         .ok_or_else(|| AttachmentApiError::unauthorized(instance, request_id))?;
@@ -727,7 +814,7 @@ async fn authorize_task(
         .get_task(workspace_id, task_id, session.user.id)
         .await
         .map_err(|error| AttachmentApiError::task(error, instance, request_id))?;
-    Ok((workspace_id, task_id, session.user.id))
+    Ok((workspace_id, task_id, session))
 }
 
 async fn require_comment(
@@ -758,32 +845,95 @@ async fn attachments(
     workspace_id: Id,
     task_id: Id,
     comment_id: Option<Id>,
-) -> Result<Vec<AttachmentRecord>, AttachmentApiError> {
-    let rows = sqlx::query(
-        "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-         byte_size, created_at FROM attachment_references WHERE workspace_id = ? AND task_id = ? \
-         AND comment_id IS ? ORDER BY created_at, id",
-    )
-    .bind(workspace_id.to_string())
-    .bind(task_id.to_string())
-    .bind(comment_id.map(|id| id.to_string()))
-    .fetch_all(state.identity.database().pool())
-    .await?;
-    rows.into_iter().map(attachment_from_row).collect()
+    page: PageQuery,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<AttachmentPage, AttachmentApiError> {
+    let scope = format!(
+        "{workspace_id}:{task_id}:{}",
+        comment_id.map_or_else(|| "task".to_owned(), |id| id.to_string())
+    );
+    let after = page
+        .cursor
+        .as_deref()
+        .map(|encoded| {
+            decode_cursor(encoded)
+                .and_then(|cursor| {
+                    if cursor.version != 1
+                        || cursor.scope != scope
+                        || cursor.id.parse::<Id>().is_err()
+                    {
+                        None
+                    } else {
+                        Some((cursor.created_at, cursor.id))
+                    }
+                })
+                .ok_or_else(|| AttachmentApiError::invalid_cursor(instance, request_id))
+        })
+        .transpose()?;
+    let limit = page.limit.unwrap_or(50).clamp(1, 100);
+    let fetch_limit = i64::try_from(limit + 1).expect("attachment page limit fits i64");
+    let comment = comment_id.map(|id| id.to_string());
+    let rows = if let Some((created_at, id)) = after {
+        sqlx::query(
+            "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
+             byte_size, created_at FROM attachment_references WHERE workspace_id = ? AND task_id = ? \
+             AND comment_id IS ? AND (created_at > ? OR (created_at = ? AND id > ?)) \
+             ORDER BY created_at, id LIMIT ?",
+        )
+        .bind(workspace_id.to_string()).bind(task_id.to_string()).bind(&comment)
+        .bind(created_at).bind(created_at).bind(id).bind(fetch_limit)
+        .fetch_all(state.identity.database().pool()).await?
+    } else {
+        sqlx::query(
+            "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
+             byte_size, created_at FROM attachment_references WHERE workspace_id = ? AND task_id = ? \
+             AND comment_id IS ? ORDER BY created_at, id LIMIT ?",
+        )
+        .bind(workspace_id.to_string()).bind(task_id.to_string()).bind(&comment).bind(fetch_limit)
+        .fetch_all(state.identity.database().pool()).await?
+    };
+    let mut items: Vec<_> = rows
+        .into_iter()
+        .map(attachment_from_row)
+        .collect::<Result<_, _>>()?;
+    let has_more = items.len() > limit;
+    items.truncate(limit);
+    let next_cursor = if has_more {
+        items
+            .last()
+            .map(|record| {
+                encode_cursor(&AttachmentCursor {
+                    version: 1,
+                    scope,
+                    created_at: record.created_at.as_millis(),
+                    id: record.id.to_string(),
+                })
+            })
+            .transpose()
+            .map_err(|_| AttachmentApiError::internal(instance, request_id))?
+    } else {
+        None
+    };
+    Ok(AttachmentPage { items, next_cursor })
 }
 
-async fn attachment_by_id(
-    state: &AttachmentState,
-    attachment_id: Id,
-) -> Result<Option<AttachmentRecord>, AttachmentApiError> {
-    let row = sqlx::query(
-        "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-         byte_size, created_at FROM attachment_references WHERE id = ?",
-    )
-    .bind(attachment_id.to_string())
-    .fetch_optional(state.identity.database().pool())
-    .await?;
-    row.map(attachment_from_row).transpose()
+fn encode_cursor(cursor: &AttachmentCursor) -> Result<String, serde_json::Error> {
+    Ok(serde_json::to_vec(cursor)?
+        .into_iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn decode_cursor(encoded: &str) -> Option<AttachmentCursor> {
+    if !encoded.len().is_multiple_of(2) || encoded.len() > 8_192 {
+        return None;
+    }
+    let bytes = (0..encoded.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).ok())
+        .collect::<Option<Vec<_>>>()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 fn attachment_from_row(
@@ -971,6 +1121,17 @@ impl AttachmentApiError {
         )
     }
 
+    fn invalid_cursor(instance: &str, request_id: Option<&Extension<RequestId>>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "Invalid cursor",
+            "The pagination cursor is invalid for this collection.",
+            instance,
+            request_id,
+        )
+    }
+
     fn internal(instance: &str, request_id: Option<&Extension<RequestId>>) -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1016,8 +1177,25 @@ impl AttachmentApiError {
             {
                 Self::request_too_large(instance, request_id)
             }
+            UploadError::BlobStore(BlobStoreError::Io { source, .. })
+                if source.kind() == io::ErrorKind::InvalidData =>
+            {
+                Self::invalid_multipart(instance, request_id)
+            }
             UploadError::Unauthorized => Self::not_found(instance, request_id),
             _ => Self::internal(instance, request_id),
+        }
+    }
+
+    fn repository(
+        error: AttachmentRepositoryError,
+        instance: &str,
+        request_id: Option<&Extension<RequestId>>,
+    ) -> Self {
+        match error {
+            AttachmentRepositoryError::NotFound => Self::not_found(instance, request_id),
+            AttachmentRepositoryError::Upload(error) => Self::upload(error, instance, request_id),
+            AttachmentRepositoryError::Database(_) => Self::internal(instance, request_id),
         }
     }
 

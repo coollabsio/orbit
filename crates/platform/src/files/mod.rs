@@ -10,9 +10,9 @@ use tokio::io::AsyncRead;
 
 pub use local::LocalBlobStore;
 pub use upload::{
-    AuthorizedAttachment, BlobDownload, ContentDisposition, DownloadMetadata, FinalizedBlob,
-    NewAttachmentComment, NewAttachmentReference, ReconcileResult, StagedUpload, UploadError,
-    UploadLimitError, UploadLimits, UploadService,
+    AuthorizedAttachment, BlobDownload, ContentDisposition, DownloadMetadata, FinalizedAttachment,
+    FinalizedBlob, NewAttachmentReference, ReconcileResult, StagedUpload, UploadError,
+    UploadFinalization, UploadLimitError, UploadLimits, UploadService,
 };
 
 pub type BlobFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, BlobStoreError>> + Send + 'a>>;

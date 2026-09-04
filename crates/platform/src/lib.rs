@@ -31,9 +31,9 @@ pub use db::{
 };
 pub use files::{
     AuthorizedAttachment, BlobDownload, BlobFuture, BlobObject, BlobReader, BlobStore,
-    BlobStoreError, ContentDisposition, DownloadMetadata, FinalizedBlob, LocalBlobStore,
-    NewAttachmentComment, NewAttachmentReference, ReconcileResult, StagedUpload, StoredObject,
-    UploadError, UploadLimitError, UploadLimits, UploadService,
+    BlobStoreError, ContentDisposition, DownloadMetadata, FinalizedAttachment, FinalizedBlob,
+    LocalBlobStore, NewAttachmentReference, ReconcileResult, StagedUpload, StoredObject,
+    UploadError, UploadFinalization, UploadLimitError, UploadLimits, UploadService,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{

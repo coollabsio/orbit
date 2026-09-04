@@ -4,13 +4,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 use super::{BlobReader, BlobStore, BlobStoreError};
-use crate::{AttachmentMutationCoordinator, Database, Id, TimestampMillis};
+use crate::{
+    AttachmentMutationCoordinator, AttachmentMutationGuard, Database, Id, TimestampMillis,
+};
 
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
@@ -83,35 +85,6 @@ pub struct NewAttachmentReference {
     pub id: Id,
     pub task_id: Id,
     pub comment_id: Option<Id>,
-    validate_target: bool,
-    new_comment: Option<NewAttachmentComment>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NewAttachmentComment {
-    pub id: Id,
-    pub author_id: Id,
-    pub body: String,
-    pub request_id: String,
-    pub created_at: TimestampMillis,
-}
-
-impl NewAttachmentComment {
-    #[must_use]
-    pub fn new(
-        author_id: Id,
-        body: String,
-        request_id: String,
-        created_at: TimestampMillis,
-    ) -> Self {
-        Self {
-            id: Id::new_v7(),
-            author_id,
-            body,
-            request_id,
-            created_at,
-        }
-    }
 }
 
 impl NewAttachmentReference {
@@ -121,30 +94,21 @@ impl NewAttachmentReference {
             id: Id::new_v7(),
             task_id,
             comment_id,
-            validate_target: false,
-            new_comment: None,
         }
     }
+}
 
-    /// Creates a reference that must resolve to a current task/comment in the upload workspace.
-    #[must_use]
-    pub fn validated(task_id: Id, comment_id: Option<Id>) -> Self {
-        Self {
-            validate_target: true,
-            ..Self::new(task_id, comment_id)
-        }
-    }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FinalizedAttachment {
+    pub blob: FinalizedBlob,
+    pub reference_id: Id,
+    pub created_at: TimestampMillis,
+}
 
-    /// Creates a validated attachment reference and its comment in the same database transaction.
-    #[must_use]
-    pub fn for_new_comment(task_id: Id, comment: NewAttachmentComment) -> Self {
-        Self {
-            comment_id: Some(comment.id),
-            validate_target: true,
-            new_comment: Some(comment),
-            ..Self::new(task_id, None)
-        }
-    }
+pub struct UploadFinalization<'a> {
+    service: &'a UploadService,
+    _operation: tokio::sync::MutexGuard<'a, ()>,
+    _mutation: AttachmentMutationGuard,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -219,6 +183,122 @@ pub struct UploadService {
     mutations: AttachmentMutationCoordinator,
     limits: UploadLimits,
     operations: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl UploadFinalization<'_> {
+    pub async fn finalize_in_transaction(
+        &self,
+        transaction: &mut Transaction<'_, Sqlite>,
+        upload: &StagedUpload,
+        attachment: NewAttachmentReference,
+        now: TimestampMillis,
+    ) -> Result<FinalizedAttachment, UploadError> {
+        let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
+        let valid: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pending_uploads \
+             WHERE id = ? AND workspace_id = ? AND user_id = ? AND temporary_path = ? \
+               AND original_name = ? AND media_type = ? AND byte_size = ? AND sha256 = ? \
+               AND state = 'staged' AND expires_at > ?",
+        )
+        .bind(upload.id.to_string())
+        .bind(upload.workspace_id.to_string())
+        .bind(upload.owner_id.to_string())
+        .bind(upload.temporary_path.to_string_lossy().as_ref())
+        .bind(&upload.display_name)
+        .bind(&upload.detected_media_type)
+        .bind(size_i64)
+        .bind(&upload.sha256)
+        .bind(now.as_millis())
+        .fetch_one(&mut **transaction)
+        .await?;
+        if valid != 1 {
+            return Err(UploadError::InvalidState);
+        }
+
+        let stored = match self.service.store.install(upload).await {
+            Err(BlobStoreError::StagedContentChanged) => {
+                return Err(UploadError::StagedContentChanged);
+            }
+            result => result?,
+        };
+        let proposed_id = Id::new_v7();
+        let quarantine_until = now.as_millis().saturating_add(QUARANTINE_MILLIS);
+        sqlx::query(
+            "INSERT OR IGNORE INTO attachment_blobs (\
+                id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until\
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(proposed_id.to_string())
+        .bind(upload.workspace_id.to_string())
+        .bind(&upload.sha256)
+        .bind(size_i64)
+        .bind(&stored.storage_key)
+        .bind(now.as_millis())
+        .bind(quarantine_until)
+        .execute(&mut **transaction)
+        .await?;
+
+        let row = sqlx::query(
+            "SELECT id, storage_key, quarantine_until FROM attachment_blobs \
+             WHERE workspace_id = ? AND sha256 = ? AND byte_size = ?",
+        )
+        .bind(upload.workspace_id.to_string())
+        .bind(&upload.sha256)
+        .bind(size_i64)
+        .fetch_one(&mut **transaction)
+        .await?;
+        let id_text: String = row.try_get("id")?;
+        let blob = FinalizedBlob {
+            id: id_text.parse().map_err(|_| UploadError::InvalidState)?,
+            workspace_id: upload.workspace_id,
+            sha256: upload.sha256.clone(),
+            size_bytes: upload.size_bytes,
+            storage_key: row.try_get("storage_key")?,
+            quarantine_until: row.try_get("quarantine_until")?,
+        };
+
+        sqlx::query(
+            "INSERT INTO attachment_references (\
+                id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type,\
+                byte_size, created_at\
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(attachment.id.to_string())
+        .bind(upload.workspace_id.to_string())
+        .bind(attachment.task_id.to_string())
+        .bind(attachment.comment_id.map(|id| id.to_string()))
+        .bind(upload.owner_id.to_string())
+        .bind(blob.id.to_string())
+        .bind(&upload.display_name)
+        .bind(&upload.detected_media_type)
+        .bind(size_i64)
+        .bind(now.as_millis())
+        .execute(&mut **transaction)
+        .await?;
+
+        let updated = sqlx::query(
+            "UPDATE pending_uploads SET state = 'complete', completed_at = ? \
+             WHERE id = ? AND workspace_id = ? AND user_id = ? AND state = 'staged' \
+               AND sha256 = ? AND byte_size = ?",
+        )
+        .bind(now.as_millis())
+        .bind(upload.id.to_string())
+        .bind(upload.workspace_id.to_string())
+        .bind(upload.owner_id.to_string())
+        .bind(&upload.sha256)
+        .bind(size_i64)
+        .execute(&mut **transaction)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(UploadError::InvalidState);
+        }
+
+        Ok(FinalizedAttachment {
+            blob,
+            reference_id: attachment.id,
+            created_at: now,
+        })
+    }
 }
 
 impl UploadService {
@@ -380,188 +460,29 @@ impl UploadService {
         result
     }
 
+    /// Holds upload/reconciliation coordination while a server-owned transaction performs
+    /// domain authorization and attachment finalization.
+    pub async fn begin_finalization(&self) -> UploadFinalization<'_> {
+        UploadFinalization {
+            service: self,
+            _operation: self.operations.lock().await,
+            _mutation: self.mutations.begin().await,
+        }
+    }
+
     pub async fn finalize(
         &self,
         upload: &StagedUpload,
         attachment: NewAttachmentReference,
     ) -> Result<FinalizedBlob, UploadError> {
-        let _operation = self.operations.lock().await;
-        let _mutation = self.mutations.begin().await;
-        let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
-        let now = self.database.database_now().await?.as_millis();
-        let valid: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM pending_uploads \
-             WHERE id = ? AND workspace_id = ? AND user_id = ? AND temporary_path = ? \
-               AND original_name = ? AND media_type = ? AND byte_size = ? AND sha256 = ? \
-               AND state = 'staged' AND expires_at > ?",
-        )
-        .bind(upload.id.to_string())
-        .bind(upload.workspace_id.to_string())
-        .bind(upload.owner_id.to_string())
-        .bind(upload.temporary_path.to_string_lossy().as_ref())
-        .bind(&upload.display_name)
-        .bind(&upload.detected_media_type)
-        .bind(size_i64)
-        .bind(&upload.sha256)
-        .bind(now)
-        .fetch_one(self.database.pool())
-        .await?;
-        if valid != 1 {
-            return Err(UploadError::InvalidState);
-        }
-
-        let quarantine_until = now.saturating_add(QUARANTINE_MILLIS);
-        let proposed_id = Id::new_v7();
+        let finalization = self.begin_finalization().await;
+        let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
-        if attachment.validate_target {
-            let target_exists: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM tasks JOIN projects ON projects.id = tasks.project_id \
-                 JOIN workspaces ON workspaces.id = tasks.workspace_id \
-                 JOIN memberships ON memberships.workspace_id = tasks.workspace_id \
-                    AND memberships.user_id = ? \
-                 JOIN users ON users.id = memberships.user_id \
-                 WHERE tasks.id = ? AND tasks.workspace_id = ? AND tasks.deleted_at IS NULL \
-                 AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL \
-                 AND users.suspended_at IS NULL AND (? IS NULL OR EXISTS ( \
-                    SELECT 1 FROM task_comments WHERE task_comments.id = ? \
-                    AND task_comments.task_id = tasks.id \
-                    AND task_comments.workspace_id = tasks.workspace_id))",
-            )
-            .bind(upload.owner_id.to_string())
-            .bind(attachment.task_id.to_string())
-            .bind(upload.workspace_id.to_string())
-            .bind(
-                attachment
-                    .new_comment
-                    .is_none()
-                    .then(|| attachment.comment_id.map(|id| id.to_string()))
-                    .flatten(),
-            )
-            .bind(
-                attachment
-                    .new_comment
-                    .is_none()
-                    .then(|| attachment.comment_id.map(|id| id.to_string()))
-                    .flatten(),
-            )
-            .fetch_one(&mut *transaction)
+        let finalized = finalization
+            .finalize_in_transaction(&mut transaction, upload, attachment, now)
             .await?;
-            if target_exists != 1 {
-                return Err(UploadError::Unauthorized);
-            }
-        }
-        if let Some(comment) = &attachment.new_comment {
-            let now = comment.created_at.as_millis();
-            sqlx::query(
-                "INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, \
-                 version, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)",
-            )
-            .bind(comment.id.to_string())
-            .bind(upload.workspace_id.to_string())
-            .bind(attachment.task_id.to_string())
-            .bind(comment.author_id.to_string())
-            .bind(&comment.body)
-            .bind(now)
-            .bind(now)
-            .execute(&mut *transaction)
-            .await?;
-            let request_id: String = comment.request_id.chars().take(128).collect();
-            sqlx::query(
-                "INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, \
-                 resource_type, resource_id, request_id, metadata_json, occurred_at) \
-                 VALUES (?, ?, ?, 'comment.created', 'success', 'comment', ?, ?, '{}', ?)",
-            )
-            .bind(Id::new_v7().to_string())
-            .bind(upload.workspace_id.to_string())
-            .bind(comment.author_id.to_string())
-            .bind(comment.id.to_string())
-            .bind(request_id)
-            .bind(now)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let stored = match self.store.install(upload).await {
-            Err(BlobStoreError::StagedContentChanged) => {
-                return Err(UploadError::StagedContentChanged);
-            }
-            result => result?,
-        };
-
-        sqlx::query(
-            "INSERT OR IGNORE INTO attachment_blobs (\
-                id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until\
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(proposed_id.to_string())
-        .bind(upload.workspace_id.to_string())
-        .bind(&upload.sha256)
-        .bind(size_i64)
-        .bind(&stored.storage_key)
-        .bind(now)
-        .bind(quarantine_until)
-        .execute(&mut *transaction)
-        .await?;
-
-        let row = sqlx::query(
-            "SELECT id, storage_key, quarantine_until FROM attachment_blobs \
-             WHERE workspace_id = ? AND sha256 = ? AND byte_size = ?",
-        )
-        .bind(upload.workspace_id.to_string())
-        .bind(&upload.sha256)
-        .bind(size_i64)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let id_text: String = row.try_get("id")?;
-        let id = id_text.parse().map_err(|_| UploadError::InvalidState)?;
-        let storage_key: String = row.try_get("storage_key")?;
-        let quarantine_until: i64 = row.try_get("quarantine_until")?;
-        let blob = FinalizedBlob {
-            id,
-            workspace_id: upload.workspace_id,
-            sha256: upload.sha256.clone(),
-            size_bytes: upload.size_bytes,
-            storage_key,
-            quarantine_until,
-        };
-
-        sqlx::query(
-            "INSERT INTO attachment_references (\
-                id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type,\
-                byte_size, created_at\
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(attachment.id.to_string())
-        .bind(upload.workspace_id.to_string())
-        .bind(attachment.task_id.to_string())
-        .bind(attachment.comment_id.map(|id| id.to_string()))
-        .bind(upload.owner_id.to_string())
-        .bind(blob.id.to_string())
-        .bind(&upload.display_name)
-        .bind(&upload.detected_media_type)
-        .bind(size_i64)
-        .bind(now)
-        .execute(&mut *transaction)
-        .await?;
-
-        let updated = sqlx::query(
-            "UPDATE pending_uploads SET state = 'complete', completed_at = ? \
-             WHERE id = ? AND workspace_id = ? AND user_id = ? AND state = 'staged' \
-               AND sha256 = ? AND byte_size = ?",
-        )
-        .bind(now)
-        .bind(upload.id.to_string())
-        .bind(upload.workspace_id.to_string())
-        .bind(upload.owner_id.to_string())
-        .bind(&upload.sha256)
-        .bind(size_i64)
-        .execute(&mut *transaction)
-        .await?;
-        if updated.rows_affected() != 1 {
-            return Err(UploadError::InvalidState);
-        }
         transaction.commit().await?;
-
-        Ok(blob)
+        Ok(finalized.blob)
     }
 
     /// Abandons a staged upload that will not be finalized, removing its temporary bytes now.

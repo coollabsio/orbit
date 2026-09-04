@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use axum::http::{Request, Response, StatusCode};
@@ -183,16 +183,8 @@ where
             let (mut parts, body) = request.into_parts();
             let instance = parts.uri.path().to_owned();
             let method = parts.method.clone();
-            let body = match to_bytes(body, limits.max_body_bytes).await {
-                Ok(body) => body,
-                Err(_) => {
-                    return Ok(finish_response(
-                        too_large_response(&request_id, &instance),
-                        &request_id,
-                        transport.is_secure(),
-                    ));
-                }
-            };
+            // Keep the body lazy so route authentication runs before an upload is read.
+            let body = Body::new(http_body_util::Limited::new(body, limits.max_body_bytes));
             strip_forwarding_headers(&mut parts.headers);
             parts.extensions.insert(request_id.clone());
             parts.extensions.insert(client_ip);
@@ -203,10 +195,7 @@ where
                 %method,
                 "http request"
             );
-            let response = match inner
-                .call(Request::from_parts(parts, Body::from(body)))
-                .await
-            {
+            let response = match inner.call(Request::from_parts(parts, body)).await {
                 Ok(response) => response,
                 Err(_) => {
                     tracing::error!(

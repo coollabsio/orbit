@@ -1,10 +1,11 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::body::{Body, Bytes, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    AttachmentMutationCoordinator, LocalBlobStore, PasswordService, TestDatabase, TimestampMillis,
-    UploadLimits, UploadService,
+    AttachmentMutationCoordinator, HttpLimits, HttpPlatformLayer, LocalBlobStore, OriginPolicy,
+    PasswordService, TestDatabase, TimestampMillis, UploadLimits, UploadService,
 };
 use orbit_server::attachment_routes::{AttachmentState, attachment_router};
 use orbit_server::auth_routes::CookieMode;
@@ -13,7 +14,7 @@ use orbit_server::task_routes::{TaskState, task_router};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-const PNG: &[u8] = b"\x89PNG\r\n\x1a\nfixture-pixels";
+const PNG: &[u8] = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02\x00\x00\x00\x0b\x49\x44\x41\x54\x78\xda\x63\x64\xf8\x0f\x00\x01\x05\x01\x01\x27\x18\xe3\x66\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
 const SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
 
 struct Fixture {
@@ -390,6 +391,40 @@ async fn upload_endpoints_reject_multiple_files_without_creating_hidden_attachme
 }
 
 #[tokio::test]
+async fn upload_rejects_a_file_bearing_part_under_another_field_name() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let boundary = "alternate-file-field";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"one.png\"\r\n\r\n{}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"other\"; filename=\"two.png\"\r\n\r\n{}\r\n--{boundary}--\r\n",
+        String::from_utf8_lossy(PNG),
+        String::from_utf8_lossy(PNG)
+    );
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(fixture.task_attachments())
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .header(header::COOKIE, &fixture.owner_cookie)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let references: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attachment_references")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(references, 0);
+}
+
+#[tokio::test]
 async fn revoked_actor_cannot_finalize_after_streaming_bytes() {
     let fixture = Fixture::new(UploadLimits::default()).await;
     let boundary = "revocation-boundary";
@@ -474,6 +509,213 @@ async fn malformed_multipart_after_a_file_discards_every_staged_temporary() {
     .await
     .unwrap();
     assert_eq!(staged, 0);
+}
+
+#[tokio::test]
+async fn truncated_multipart_inside_file_is_bad_request_and_cleans_up() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let boundary = "truncated-file";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"one.png\"\r\n\r\n{}",
+        String::from_utf8_lossy(PNG)
+    );
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(fixture.task_attachments())
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .header(header::COOKIE, &fixture.owner_cookie)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(fixture.store.temporary_files().await.unwrap().is_empty());
+    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pending_uploads")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(pending, 0);
+}
+
+#[tokio::test]
+async fn revoked_session_cannot_finalize_after_streaming_bytes() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let boundary = "session-revocation-boundary";
+    let (sender, receiver) = tokio::sync::mpsc::channel(2);
+    sender.send(Ok::<_, std::io::Error>(Bytes::from(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"late.png\"\r\n\r\n"
+    )))).await.unwrap();
+    let request = Request::builder()
+        .method("POST")
+        .uri(fixture.task_attachments())
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header(header::COOKIE, &fixture.owner_cookie)
+        .body(Body::from_stream(
+            tokio_stream::wrappers::ReceiverStream::new(receiver),
+        ))
+        .unwrap();
+    let app = fixture.app.clone();
+    let response = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    sqlx::query("UPDATE sessions SET revoked_at = ? WHERE user_id = ?")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(&fixture.owner_id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    sender.send(Ok(Bytes::from_static(PNG))).await.unwrap();
+    sender
+        .send(Ok(Bytes::from(format!("\r\n--{boundary}--\r\n"))))
+        .await
+        .unwrap();
+    drop(sender);
+    assert_eq!(response.await.unwrap().status(), StatusCode::NOT_FOUND);
+    let references: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attachment_references")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(references, 0);
+}
+
+#[tokio::test]
+async fn attachment_lists_use_keyset_cursors() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    assert_eq!(
+        fixture.upload("one.png", PNG).await.status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        fixture.upload("two.png", PNG).await.status(),
+        StatusCode::CREATED
+    );
+    let first = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!("{}?limit=1", fixture.task_attachments()),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first = response_json(first).await;
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!("{}?limit=1&cursor={cursor}", fixture.task_attachments()),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    let second = response_json(second).await;
+    assert_eq!(second["items"].as_array().unwrap().len(), 1);
+    assert_ne!(first["items"][0]["id"], second["items"][0]["id"]);
+}
+
+#[tokio::test]
+async fn configured_production_layer_allows_streaming_uploads_above_one_mibibyte() {
+    let limits = UploadLimits::new(3 * 1024 * 1024, 3 * 1024 * 1024).unwrap();
+    let fixture = Fixture::new(limits).await;
+    let app = fixture.app.clone().layer(
+        HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(HttpLimits {
+            max_body_bytes: limits.max_request_bytes() as usize,
+            ..HttpLimits::default()
+        }),
+    );
+    let bytes = vec![5; 1024 * 1024 + 1];
+    let mut request = multipart_request(
+        &fixture.task_attachments(),
+        &fixture.owner_cookie,
+        &[("large.bin", &bytes)],
+    );
+    request
+        .headers_mut()
+        .insert("origin", "https://orbit.test".parse().unwrap());
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn composed_production_router_authenticates_before_polling_upload_body() {
+    let limits = UploadLimits::default();
+    let fixture = Fixture::new(limits).await;
+    let app = fixture.app.clone().layer(
+        HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(HttpLimits {
+            max_body_bytes: limits.max_request_bytes() as usize,
+            ..HttpLimits::default()
+        }),
+    );
+    let polls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&polls);
+    let body = futures_util::stream::poll_fn(move |_| {
+        observed.fetch_add(1, Ordering::SeqCst);
+        std::task::Poll::<Option<Result<Bytes, std::io::Error>>>::Ready(None)
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(fixture.task_attachments())
+                .header("origin", "https://orbit.test")
+                .header(header::CONTENT_TYPE, "multipart/form-data; boundary=unused")
+                .body(Body::from_stream(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn composed_production_router_enforces_streaming_request_cap() {
+    let limits = UploadLimits::new(512, 512).unwrap();
+    let fixture = Fixture::new(limits).await;
+    let app = fixture.app.clone().layer(
+        HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(HttpLimits {
+            max_body_bytes: limits.max_request_bytes() as usize,
+            ..HttpLimits::default()
+        }),
+    );
+    let boundary = "production-cap";
+    let frames = vec![Ok::<_, std::io::Error>(Bytes::from(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"large.bin\"\r\n\r\n{}\r\n--{boundary}--\r\n",
+        "x".repeat(500)
+    )))];
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(fixture.task_attachments())
+                .header("origin", "https://orbit.test")
+                .header(header::COOKIE, &fixture.owner_cookie)
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from_stream(tokio_stream::iter(frames)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(fixture.store.temporary_files().await.unwrap().is_empty());
 }
 
 #[tokio::test]
