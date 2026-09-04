@@ -2,47 +2,38 @@
 
 ## Requirements
 
-- A modern JavaScript runtime/package manager
-- Node-compatible environment for Vite tooling
-- Rust only if working on `apps/server`
+- Rust 1.97.1 (installed automatically by `rust-toolchain.toml`)
+- Bun 1.3.14 or later
+- Just
 
-## Package manager: aube is optional
+## Tooling
 
-The current checkout was installed with **aube**, and `apps/web/aube-lock.yaml` records that installation. Aube is convenient but not an architectural dependency. `package.json` contains standard scripts and dependencies.
+Orbit uses Bun as its sole frontend package manager. `apps/web/bun.lock` is committed and installs must use frozen-lockfile mode.
 
-### Current aube workflow
+The root `justfile` is the standard command surface:
 
 ```bash
-cd apps/web
-aube run dev       # Vite on http://localhost:8888
-aube run build     # tsc -b && vite build
-aube run lint      # oxlint
-aube run preview   # Vite preview
+just setup
+just dev
+just test
+just check
+just build
 ```
 
-### Switching to Bun
+`just dev` starts the future Rust server on port **8080** and Vite on port **8888**, stopping both processes when the recipe exits. The initial `orbit` CLI only supplies help; its serving and maintenance subcommands arrive with later backend tasks.
+
+## Direct commands
 
 ```bash
 cd apps/web
-bun install
+bun install --frozen-lockfile
 bun run dev
 bun run build
 bun run lint
+bun run test
 ```
 
-Commit `bun.lock` and remove `aube-lock.yaml` as part of the migration so contributors do not have competing lockfiles.
-
-### Switching to pnpm
-
-```bash
-cd apps/web
-pnpm install
-pnpm dev
-pnpm build
-pnpm lint
-```
-
-Commit `pnpm-lock.yaml` and remove `aube-lock.yaml` in the same change. Do not mix package managers within one install.
+Backend commands remain usable directly, for example `cargo test --workspace` and `cargo run -p orbit-server -- --help`.
 
 ## Development server
 
@@ -52,11 +43,12 @@ Vite is configured for port **8888** in `vite.config.ts`. Use `http://localhost:
 
 ```bash
 cd apps/web
-aube run build
-aube run lint
+bun run build
+bun run lint
+bun run test
 ```
 
-Equivalent Bun/pnpm commands are valid after migration. A build is necessary because it includes TypeScript project compilation.
+A build is necessary because it includes TypeScript project compilation.
 
 For visual or interaction work, also smoke-test the exact route in a browser:
 
@@ -103,15 +95,4 @@ HTML5 drag sources must remain mounted through `dragstart`; hide/fade via attrib
 
 ## Backend phase
 
-`apps/server` has no useful implementation yet. Before adding endpoints, decide:
-
-- Authentication/session model
-- Workspace/tenant boundaries
-- Authorization rules
-- Database and migrations
-- Attachment storage
-- Mail provider integration
-- Websocket/event protocol
-- Optimistic mutation and conflict strategy
-
-The frontend currently assumes synchronous success. Preserve perceived speed with optimistic UI when networking is introduced.
+The backend starts as a Rust workspace: `orbit-platform` contains reusable platform interfaces, `orbit-domain` holds Orbit domain logic, and `orbit-server` is the `orbit` binary. Later tasks add HTTP, persistence, and operational commands. The frontend currently assumes synchronous success; preserve perceived speed with optimistic UI when networking is introduced.

@@ -1,6 +1,13 @@
 [package]
-name = "server"
-version = "0.1.0"
-edition = "2024"
+name = "orbit-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "orbit"
+path = "src/main.rs"
 
 [dependencies]
+orbit-domain = { path = "../../crates/orbit" }
+orbit-platform = { path = "../../crates/platform" }
