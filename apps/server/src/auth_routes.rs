@@ -296,7 +296,7 @@ async fn setup_complete(
         .await
         .map_err(|_| ApiError::internal("/api/v1/setup/complete", request_id.as_ref()))?;
     if !token_valid {
-        let _ = state
+        state
             .repository
             .record_security_event(
                 None,
@@ -308,7 +308,8 @@ async fn setup_complete(
                 json!({"reason":"invalid_token"}),
                 TimestampMillis::now(),
             )
-            .await;
+            .await
+            .map_err(|_| ApiError::internal("/api/v1/setup/complete", request_id.as_ref()))?;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_setup_token",
@@ -324,7 +325,7 @@ async fn setup_complete(
         })?;
     let result = state
         .repository
-        .complete_setup(
+        .complete_setup_audited(
             SetupRequest {
                 token: body.token,
                 email: body.email,
@@ -333,6 +334,7 @@ async fn setup_complete(
                 workspace_name: body.workspace_name,
                 project_name: body.project_name,
             },
+            request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
         .await
@@ -357,19 +359,6 @@ async fn setup_complete(
                 ApiError::internal("/api/v1/setup/complete", request_id.as_ref())
             }
         })?;
-    let _ = state
-        .repository
-        .record_security_event(
-            Some(result.user_id),
-            "setup.complete",
-            AuditOutcome::Success,
-            "installation",
-            None,
-            request_id_value(request_id.as_ref()),
-            json!({}),
-            TimestampMillis::now(),
-        )
-        .await;
     let session = result.session;
     let mut response = (
         StatusCode::CREATED,
@@ -427,7 +416,7 @@ async fn login(
     let reservation = match admission {
         Ok(reservation) => reservation,
         Err(ThrottleDecision::RetryAfter(delay)) => {
-            let _ = state
+            state
                 .repository
                 .record_security_event(
                     None,
@@ -439,7 +428,8 @@ async fn login(
                     json!({}),
                     TimestampMillis::now(),
                 )
-                .await;
+                .await
+                .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
             return Err(ApiError::throttled(
                 delay,
                 "/api/v1/auth/login",
@@ -476,7 +466,7 @@ async fn login(
             .expect("throttler mutex poisoned")
             .finish_failure(reservation, TimestampMillis::now());
         let actor_id = identity.as_ref().map(|identity| identity.id);
-        let _ = state
+        state
             .repository
             .record_security_event(
                 actor_id,
@@ -488,7 +478,8 @@ async fn login(
                 json!({}),
                 TimestampMillis::now(),
             )
-            .await;
+            .await
+            .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
@@ -505,12 +496,7 @@ async fn login(
         .lock()
         .expect("throttler mutex poisoned")
         .finish_success(reservation);
-    if let Some(replacement) = verification.and_then(|result| result.replacement_hash) {
-        let _ = state
-            .repository
-            .update_password_hash(identity.id, &replacement, TimestampMillis::now())
-            .await;
-    }
+    let replacement_hash = verification.and_then(|result| result.replacement_hash);
     let user = AuthenticatedUser {
         id: identity.id,
         email: identity.email,
@@ -518,22 +504,14 @@ async fn login(
     };
     let session = state
         .repository
-        .create_session(&user, TimestampMillis::now())
-        .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
-    let _ = state
-        .repository
-        .record_security_event(
-            Some(user.id),
-            "authentication.login",
-            AuditOutcome::Success,
-            "session",
-            Some(session.id),
+        .create_session_audited(
+            &user,
+            replacement_hash.as_deref(),
             request_id_value(request_id.as_ref()),
-            json!({}),
             TimestampMillis::now(),
         )
-        .await;
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
     let mut response = Json(LoginResponse {
         user: AuthUserResponse {
             id: user.id.to_string(),
@@ -561,7 +539,13 @@ async fn logout(
         authenticate(&state, &headers, "/api/v1/auth/logout", request_id.as_ref()).await?;
     let revoked = state
         .repository
-        .revoke_session(session.id, session.user.id, TimestampMillis::now())
+        .revoke_session_audited(
+            session.id,
+            session.user.id,
+            "session.logout",
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/logout", request_id.as_ref()))?;
     if !revoked {
@@ -570,19 +554,6 @@ async fn logout(
             request_id.as_ref(),
         ));
     }
-    let _ = state
-        .repository
-        .record_security_event(
-            Some(session.user.id),
-            "session.logout",
-            AuditOutcome::Success,
-            "session",
-            Some(session.id),
-            request_id_value(request_id.as_ref()),
-            json!({}),
-            TimestampMillis::now(),
-        )
-        .await;
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(
         SET_COOKIE,
@@ -626,30 +597,26 @@ async fn recovery_request(
         let expires_at = TimestampMillis::from_millis(
             TimestampMillis::now().as_millis() + Duration::from_secs(30 * 60).as_millis() as i64,
         );
-        if state
+        match state
             .repository
-            .store_recovery_token(&identity.id.to_string(), &token, expires_at)
+            .store_recovery_token_audited(
+                identity.id,
+                &token,
+                expires_at,
+                request_id_value(request_id.as_ref()),
+            )
             .await
-            .is_ok()
         {
-            let message = RecoveryMessage {
-                email: identity.email,
-                url: format!("{}/recovery?token={token}", state.public_origin),
-            };
-            let _ = state.recovery_delivery.deliver(message).await;
-            let _ = state
-                .repository
-                .record_security_event(
-                    Some(identity.id),
-                    "recovery.requested",
-                    AuditOutcome::Success,
-                    "user",
-                    Some(identity.id),
-                    request_id_value(request_id.as_ref()),
-                    json!({}),
-                    TimestampMillis::now(),
-                )
-                .await;
+            Ok(()) => {
+                let message = RecoveryMessage {
+                    email: identity.email,
+                    url: format!("{}/recovery?token={token}", state.public_origin),
+                };
+                if state.recovery_delivery.deliver(message).await.is_err() {
+                    tracing::error!("recovery delivery failed after durable request creation");
+                }
+            }
+            Err(error) => tracing::error!(%error, "recovery request transaction failed"),
         }
     }
     (
@@ -678,7 +645,7 @@ async fn recovery_complete(
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
     if !valid {
-        let _ = state
+        state
             .repository
             .record_security_event(
                 None,
@@ -690,7 +657,10 @@ async fn recovery_complete(
                 json!({"reason":"invalid_token"}),
                 TimestampMillis::now(),
             )
-            .await;
+            .await
+            .map_err(|_| {
+                ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref())
+            })?;
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_recovery_token",
@@ -703,24 +673,16 @@ async fn recovery_complete(
     let password_hash = state.passwords.hash(body.password).await.map_err(|error| {
         password_problem(error, "/api/v1/auth/recovery/complete", request_id.as_ref())
     })?;
-    let user_id = state
+    state
         .repository
-        .complete_recovery(&body.token, &password_hash, TimestampMillis::now())
-        .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
-    let _ = state
-        .repository
-        .record_security_event(
-            Some(user_id),
-            "recovery.completed",
-            AuditOutcome::Success,
-            "user",
-            Some(user_id),
+        .complete_recovery_audited(
+            &body.token,
+            &password_hash,
             request_id_value(request_id.as_ref()),
-            json!({"sessions_revoked":true}),
             TimestampMillis::now(),
         )
-        .await;
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -773,23 +735,16 @@ async fn revoke_session(
     })?;
     let revoked = state
         .repository
-        .revoke_session(id, user.id, TimestampMillis::now())
+        .revoke_session_audited(
+            id,
+            user.id,
+            "session.revoked",
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/sessions/{id}", request_id.as_ref()))?;
     if !revoked {
-        let _ = state
-            .repository
-            .record_security_event(
-                Some(user.id),
-                "session.revoked",
-                AuditOutcome::Failure,
-                "session",
-                Some(id),
-                request_id_value(request_id.as_ref()),
-                json!({"reason":"not_found"}),
-                TimestampMillis::now(),
-            )
-            .await;
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "session_not_found",
@@ -799,19 +754,6 @@ async fn revoke_session(
             request_id.as_ref(),
         ));
     }
-    let _ = state
-        .repository
-        .record_security_event(
-            Some(user.id),
-            "session.revoked",
-            AuditOutcome::Success,
-            "session",
-            Some(id),
-            request_id_value(request_id.as_ref()),
-            json!({}),
-            TimestampMillis::now(),
-        )
-        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1473,6 +1415,80 @@ mod tests {
         assert!(rows.contains(&("authentication.login".to_owned(), "success".to_owned())));
         assert!(rows.contains(&("session.logout".to_owned(), "success".to_owned())));
         assert!(rows.contains(&("recovery.requested".to_owned(), "success".to_owned())));
+    }
+
+    #[tokio::test]
+    async fn login_session_and_success_audit_commit_atomically() {
+        let (app, repository, database) = application(CookieMode::secure()).await;
+        repository
+            .database()
+            .execute(
+                "CREATE TRIGGER reject_login_audit BEFORE INSERT ON audit_events \
+                 WHEN NEW.action = 'authentication.login' AND NEW.outcome = 'success' \
+                 BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END",
+            )
+            .await
+            .unwrap();
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+
+        let response = app
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password":"correct horse battery"}),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sessions")
+                .fetch_one(database.pool())
+                .await
+                .unwrap(),
+            before
+        );
+    }
+
+    #[tokio::test]
+    async fn logout_revocation_and_success_audit_commit_atomically() {
+        let (app, repository, _) = application(CookieMode::secure()).await;
+        let login = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password":"correct horse battery"}),
+            ))
+            .await
+            .unwrap();
+        let cookie = login
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        repository.database().execute("CREATE TRIGGER reject_logout_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'session.logout' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END").await.unwrap();
+
+        let logout = app
+            .clone()
+            .oneshot(cookie_request("POST", "/api/v1/auth/logout", &cookie))
+            .await
+            .unwrap();
+
+        assert_eq!(logout.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            app.oneshot(cookie_request("GET", "/api/v1/auth/me", &cookie))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
     }
 
     async fn application(

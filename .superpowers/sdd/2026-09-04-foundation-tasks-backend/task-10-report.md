@@ -173,3 +173,44 @@ Verified each Important finding against the repository and platform job/file pri
 
 - The current binary still exposes operational CLI commands rather than an HTTP `serve` command. `run_production_retention_service` is the production lifecycle entry point for the future server composition and pairs the durable daily schedule with its worker; the configurable variant is covered end-to-end.
 - `WorkspaceRepository::new` uses the documented default `attachments` root; deployments with a configured attachment root must construct it with `with_blob_store` when composing the server.
+
+## Re-review round 2 remediation (2026-09-05)
+
+### Approach
+
+Addressed only the three remaining Important findings. Added regressions for a real `serve` lifecycle, audit/action transaction rollback, named workspace denial events, and export response production before later pages are decoded. No migration files changed.
+
+### Files changed
+
+- `apps/server/src/cli.rs`, `apps/server/Cargo.toml`, `Cargo.lock`: added the real `orbit serve` command. It runs migrations, composes auth and workspace routers, binds the listener, starts the production retention scheduler/worker with the configured attachment root, and coordinates Ctrl-C or maintenance failure shutdown.
+- `apps/server/src/repositories/identity.rs`, `apps/server/src/auth_routes.rs`: setup, login/session creation, password rehash, recovery-token creation, recovery completion/session revocation, logout, and explicit session revocation now commit their success audit records in the same database transaction. Authentication/throttling/recovery failure audit-write errors are no longer silently discarded.
+- `apps/server/src/repositories/workspaces.rs`: records Owner-role invitation denial and non-Owner workspace delete/restore denial outcomes.
+- `apps/server/src/workspace_routes.rs`: replaced all-history buffering with a one-page/one-channel-slot CSV stream; later read failures terminate the response stream with an error rather than silently returning a partial successful body.
+- `apps/server/tests/workspaces_api.rs` and auth/repository unit tests: added the named denial, transactional rollback, complete export, and bounded streaming regressions.
+
+### Red / green evidence
+
+- `serve` parsing initially failed because `Command::Serve` had no production match arm.
+- Login audit failure initially returned 200 and left a new session; the regression now receives 500 with session count unchanged.
+- The later-page export regression initially returned 500 before any response because the handler traversed every cursor page; it now returns the CSV response after the bounded first page.
+- Existing complete-export coverage still verifies all 125 rows across small cursor pages.
+- Added setup and logout audit-failure rollback coverage, plus explicit workspace denial-event assertions.
+
+### Verification
+
+- `cargo test -p orbit-server`: passed (26 library, 5 binary, 17 workspace integration tests).
+- `cargo test --workspace`: passed across all crates and doc tests.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo run -q -p orbit-server -- serve --help`: passed and exposes listener/origin/database/attachment options.
+- `git diff --check`: passed.
+- Jean reported no Orbit run environment, so no second live server was started; lifecycle behavior is exercised through CLI parsing/composition and retention integration tests.
+
+### Commit
+
+`fix(server): compose retention and durable audit` (final hash in agent handoff).
+
+### Concerns
+
+- A CSV failure after headers are sent is surfaced as a response-stream error because HTTP status can no longer be changed; it is not silently presented as a complete export.
+- The open Utoipa error-schema Minor remains intentionally out of this remediation scope.

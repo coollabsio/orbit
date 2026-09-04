@@ -1294,6 +1294,45 @@ async fn failed_security_actions_are_audited_and_global_audit_is_admin_only() {
     .await;
     let mismatch = accept_url(&app, &outsider.1, invitation["url"].as_str().unwrap()).await;
     assert_eq!(mismatch.status(), StatusCode::FORBIDDEN);
+    let outsider_invitation = create_invitation(
+        &app,
+        &setup.0,
+        &owner_cookie,
+        "audit-outsider@example.com",
+        "member",
+    )
+    .await;
+    assert_eq!(
+        accept_url(
+            &app,
+            &outsider.1,
+            outsider_invitation["url"].as_str().unwrap()
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let delete_denied = app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!("/api/v1/workspaces/{}?expected_version=0", setup.0),
+            &outsider.1,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(delete_denied.status(), StatusCode::FORBIDDEN);
+    let owner_invite_denied = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/invitations", setup.0),
+            &owner_cookie,
+            json!({"email":"owner-role@example.com","role":"owner","delivery":"manual"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(owner_invite_denied.status(), StatusCode::FORBIDDEN);
 
     let denied = app
         .clone()
@@ -1324,6 +1363,12 @@ async fn failed_security_actions_are_audited_and_global_audit_is_admin_only() {
     }));
     assert!(global["items"].as_array().unwrap().iter().any(|event| {
         event["action"] == "invitation.accept_failed" && event["outcome"] == "failure"
+    }));
+    assert!(global["items"].as_array().unwrap().iter().any(|event| {
+        event["action"] == "workspace.delete_denied" && event["outcome"] == "failure"
+    }));
+    assert!(global["items"].as_array().unwrap().iter().any(|event| {
+        event["action"] == "invitation.create_denied" && event["outcome"] == "failure"
     }));
     let export = app
         .oneshot(cookie_request(
@@ -1490,6 +1535,41 @@ async fn global_audit_export_follows_every_cursor_page() {
     )
     .unwrap();
     assert_eq!(csv.lines().skip(1).count(), 125);
+}
+
+#[tokio::test]
+async fn global_audit_export_returns_before_reading_later_pages() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let setup = setup_owner(&identity).await;
+    let owner_cookie = format!("__Host-orbit_session={}", setup.1);
+    let now = TimestampMillis::now().as_millis();
+    for index in 0..100 {
+        sqlx::query("INSERT INTO audit_events (id, action, outcome, resource_type, request_id, metadata_json, occurred_at) VALUES (?, 'stream.test', 'success', 'installation', ?, '{}', ?)")
+            .bind(Id::new_v7().to_string()).bind(format!("stream-{index}")).bind(now + index).execute(database.pool()).await.unwrap();
+    }
+    sqlx::query("INSERT INTO audit_events (id, action, outcome, resource_type, request_id, metadata_json, occurred_at) VALUES ('00000000-0000-0000-0000-000000000000', 'stream.test', 'success', 'installation', 'corrupt-tail', '{}', ?)")
+        .bind(now - 1).execute(database.pool()).await.unwrap();
+    let app = workspace_router(WorkspaceState::new(
+        identity,
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ));
+
+    let response = app
+        .oneshot(cookie_request(
+            "GET",
+            "/api/v1/admin/audit/export?action=stream.test&limit=100",
+            &owner_cookie,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/csv; charset=utf-8"
+    );
 }
 
 #[tokio::test]

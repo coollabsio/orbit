@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 
+use axum::body::Body;
 use axum::extract::{Extension, FromRequest, FromRequestParts, Path, Query, Request, State};
 use axum::http::header::{CONTENT_TYPE, COOKIE, RETRY_AFTER};
 use axum::http::request::Parts;
@@ -15,6 +16,7 @@ use orbit_platform::{
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio_stream::wrappers::ReceiverStream;
 use utoipa::ToSchema;
 
 use crate::auth_routes::{CookieMode, issued_session_cookie};
@@ -878,19 +880,58 @@ async fn export_global_audit(
     require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
     let workspace_id = optional_id(query.workspace_id, instance, request_id.as_ref())?;
     let cursor = optional_id(query.cursor, instance, request_id.as_ref())?;
-    let mut events = Vec::new();
-    let mut cursor = cursor;
-    loop {
-        let (page, next_cursor) = state
-            .workspaces
-            .global_audit(workspace_id, query.action.as_deref(), cursor, query.limit)
+    let (first_page, next_cursor) = state
+        .workspaces
+        .global_audit(workspace_id, query.action.as_deref(), cursor, query.limit)
+        .await
+        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    let repository = Arc::clone(&state.workspaces);
+    let action = query.action;
+    let page_size = query.limit;
+    let (sender, receiver) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(1);
+    tokio::spawn(async move {
+        if sender
+            .send(Ok(audit_csv_page(first_page, true)))
             .await
-            .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
-        events.extend(page);
-        let Some(next) = next_cursor else { break };
-        cursor = Some(next);
-    }
-    let mut csv = "id,workspace_id,actor_id,action,outcome,resource_type,resource_id,request_id,occurred_at\n".to_owned();
+            .is_err()
+        {
+            return;
+        }
+        let mut cursor = next_cursor;
+        while let Some(current) = cursor {
+            let result = repository
+                .global_audit(workspace_id, action.as_deref(), Some(current), page_size)
+                .await;
+            let (page, next) = match result {
+                Ok(page) => page,
+                Err(_) => {
+                    let _ = sender
+                        .send(Err(std::io::Error::other("audit export failed")))
+                        .await;
+                    return;
+                }
+            };
+            if sender.send(Ok(audit_csv_page(page, false))).await.is_err() {
+                return;
+            }
+            cursor = next;
+        }
+    });
+    let mut response = Body::from_stream(ReceiverStream::new(receiver)).into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/csv; charset=utf-8"),
+    );
+    Ok(response)
+}
+
+fn audit_csv_page(events: Vec<crate::audit::AuditEvent>, include_header: bool) -> String {
+    let mut csv = if include_header {
+        "id,workspace_id,actor_id,action,outcome,resource_type,resource_id,request_id,occurred_at\n"
+            .to_owned()
+    } else {
+        String::new()
+    };
     for event in events {
         let fields = [
             event.id.to_string(),
@@ -918,12 +959,7 @@ async fn export_global_audit(
         );
         csv.push('\n');
     }
-    let mut response = csv.into_response();
-    response.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/csv; charset=utf-8"),
-    );
-    Ok(response)
+    csv
 }
 
 async fn require_installation_admin(

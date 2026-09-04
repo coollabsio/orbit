@@ -242,6 +242,25 @@ impl IdentityRepository {
         request: SetupRequest,
         now: TimestampMillis,
     ) -> Result<SetupResult, SetupError> {
+        self.complete_setup_inner(request, now, None).await
+    }
+
+    pub async fn complete_setup_audited(
+        &self,
+        request: SetupRequest,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<SetupResult, SetupError> {
+        self.complete_setup_inner(request, now, Some(request_id))
+            .await
+    }
+
+    async fn complete_setup_inner(
+        &self,
+        request: SetupRequest,
+        now: TimestampMillis,
+        request_id: Option<&str>,
+    ) -> Result<SetupResult, SetupError> {
         let mut transaction = self
             .database
             .immediate_transaction()
@@ -257,6 +276,25 @@ impl IdentityRepository {
                 .await
                 .map_err(SetupError::Unavailable)?;
         if initialized != 0 {
+            if let Some(request_id) = request_id {
+                audit::record_global(
+                    &mut transaction,
+                    None,
+                    "setup.complete",
+                    AuditOutcome::Failure,
+                    "installation",
+                    None,
+                    request_id,
+                    serde_json::json!({"reason":"already_complete"}),
+                    now,
+                )
+                .await
+                .map_err(SetupError::Unavailable)?;
+                transaction
+                    .commit()
+                    .await
+                    .map_err(SetupError::Unavailable)?;
+            }
             return Err(SetupError::AlreadyComplete);
         }
 
@@ -271,6 +309,25 @@ impl IdentityRepository {
                 && constant_time_eq(&hash, &supplied_hash)
         });
         if !valid_token {
+            if let Some(request_id) = request_id {
+                audit::record_global(
+                    &mut transaction,
+                    None,
+                    "setup.complete",
+                    AuditOutcome::Failure,
+                    "installation",
+                    None,
+                    request_id,
+                    serde_json::json!({"reason":"invalid_token"}),
+                    now,
+                )
+                .await
+                .map_err(SetupError::Unavailable)?;
+                transaction
+                    .commit()
+                    .await
+                    .map_err(SetupError::Unavailable)?;
+            }
             return Err(SetupError::InvalidToken);
         }
 
@@ -371,6 +428,21 @@ impl IdentityRepository {
             .execute(&mut *transaction)
             .await
             .map_err(SetupError::Unavailable)?;
+        if let Some(request_id) = request_id {
+            audit::record_global(
+                &mut transaction,
+                Some(user_id),
+                "setup.complete",
+                AuditOutcome::Success,
+                "installation",
+                None,
+                request_id,
+                serde_json::json!({}),
+                now,
+            )
+            .await
+            .map_err(SetupError::Unavailable)?;
+        }
         transaction
             .commit()
             .await
@@ -537,6 +609,46 @@ impl IdentityRepository {
         Ok(())
     }
 
+    pub async fn store_recovery_token_audited(
+        &self,
+        user_id: Id,
+        token: &str,
+        expires_at: TimestampMillis,
+        request_id: &str,
+    ) -> Result<(), IdentityError> {
+        let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= ? OR user_id = ?")
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query(
+            "INSERT INTO recovery_tokens (token_hash, user_id, expires_at, created_at) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(token_hash(token).to_vec())
+        .bind(user_id.to_string())
+        .bind(expires_at.as_millis())
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(user_id),
+            "recovery.requested",
+            AuditOutcome::Success,
+            "user",
+            Some(user_id),
+            request_id,
+            serde_json::json!({}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn recovery_token_valid(
         &self,
         token: &str,
@@ -601,6 +713,79 @@ impl IdentityRepository {
         Ok(user_id)
     }
 
+    pub async fn complete_recovery_audited(
+        &self,
+        token: &str,
+        password_hash: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<Id, IdentityError> {
+        let supplied = token_hash(token);
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= ?")
+            .bind(now.as_millis())
+            .execute(&mut *transaction)
+            .await?;
+        let row =
+            sqlx::query("SELECT token_hash, user_id FROM recovery_tokens WHERE token_hash = ?")
+                .bind(supplied.to_vec())
+                .fetch_optional(&mut *transaction)
+                .await?;
+        let Some(row) = row else {
+            audit::record_global(
+                &mut transaction,
+                None,
+                "recovery.completed",
+                AuditOutcome::Failure,
+                "user",
+                None,
+                request_id,
+                serde_json::json!({"reason":"invalid_token"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(IdentityError::InvalidCredential);
+        };
+        let stored = row.get::<Vec<u8>, _>("token_hash");
+        if !constant_time_eq(&stored, &supplied) {
+            return Err(IdentityError::InvalidCredential);
+        }
+        let user_id = row
+            .get::<String, _>("user_id")
+            .parse::<Id>()
+            .map_err(|_| IdentityError::InvalidIdentifier)?;
+        sqlx::query("UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?")
+            .bind(password_hash)
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = ?")
+            .bind(stored)
+            .execute(&mut *transaction)
+            .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(user_id),
+            "recovery.completed",
+            AuditOutcome::Success,
+            "user",
+            Some(user_id),
+            request_id,
+            serde_json::json!({"sessions_revoked":true}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(user_id)
+    }
+
     pub async fn create_session(
         &self,
         user: &AuthenticatedUser,
@@ -630,6 +815,55 @@ impl IdentityRepository {
             idle_expires_at,
             absolute_expires_at,
         })
+    }
+
+    pub async fn create_session_audited(
+        &self,
+        user: &AuthenticatedUser,
+        replacement_hash: Option<&str>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<IssuedSession, IdentityError> {
+        let id = Id::new_v7();
+        let token = generate_opaque_token();
+        let mut transaction = self.database.immediate_transaction().await?;
+        if let Some(replacement_hash) = replacement_hash {
+            sqlx::query(
+                "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+            )
+            .bind(replacement_hash)
+            .bind(now.as_millis())
+            .bind(user.id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+            audit::record_global(
+                &mut transaction,
+                Some(user.id),
+                "password.rehashed",
+                AuditOutcome::Success,
+                "user",
+                Some(user.id),
+                request_id,
+                serde_json::json!({}),
+                now,
+            )
+            .await?;
+        }
+        let session = insert_session(&mut transaction, id, &token, user.id, now).await?;
+        audit::record_global(
+            &mut transaction,
+            Some(user.id),
+            "authentication.login",
+            AuditOutcome::Success,
+            "session",
+            Some(id),
+            request_id,
+            serde_json::json!({}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(session)
     }
 
     pub async fn authenticate_session(
@@ -757,6 +991,48 @@ impl IdentityRepository {
         .execute(self.database.pool())
         .await?
         .rows_affected();
+        Ok(affected == 1)
+    }
+
+    pub async fn revoke_session_audited(
+        &self,
+        session_id: Id,
+        user_id: Id,
+        action: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<bool, IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let affected = sqlx::query(
+            "UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(session_id.to_string())
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        audit::record_global(
+            &mut transaction,
+            Some(user_id),
+            action,
+            if affected == 1 {
+                AuditOutcome::Success
+            } else {
+                AuditOutcome::Failure
+            },
+            "session",
+            Some(session_id),
+            request_id,
+            if affected == 1 {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({"reason":"not_found"})
+            },
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
         Ok(affected == 1)
     }
 }
@@ -887,6 +1163,42 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!repository.setup_complete().await.unwrap());
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM users")
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM setup_tokens")
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn audited_setup_rolls_back_when_its_success_event_cannot_commit() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        repository
+            .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
+            .await
+            .unwrap();
+        database.execute("CREATE TRIGGER reject_setup_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'setup.complete' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END").await.unwrap();
+
+        assert!(
+            repository
+                .complete_setup_audited(
+                    setup_request("operator-secret"),
+                    "setup-request",
+                    TimestampMillis::from_millis(1_000)
+                )
+                .await
+                .is_err()
+        );
         assert_eq!(
             database
                 .scalar::<i64>("SELECT COUNT(*) FROM users")

@@ -6,10 +6,14 @@ use clap::{Parser, Subcommand};
 use fs2::FileExt;
 use orbit_platform::{
     BackupService, Config, ConfigOverride, ConfigSources, Database, DatabaseConfig,
-    MigrationRunner, TimestampMillis,
+    HttpPlatformLayer, LocalBlobStore, MigrationRunner, OriginPolicy, TimestampMillis,
 };
+use orbit_server::auth_routes::{AdminRecoveryDelivery, CookieMode, auth_router, initialize_auth};
 use orbit_server::repositories::identity::IdentityRepository;
+use orbit_server::repositories::workspaces::WorkspaceRepository;
+use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Parser)]
 #[command(name = "orbit", about = "Orbit operations command-line interface")]
@@ -28,6 +32,12 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:3000")]
+        listen: std::net::SocketAddr,
+        #[arg(long, default_value = "https://localhost")]
+        origin: String,
+    },
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
@@ -88,6 +98,7 @@ pub enum CliError {
 
 pub async fn run(cli: Cli) -> Result<String, CliError> {
     match &cli.command {
+        Command::Serve { listen, origin } => serve(&cli, *listen, origin).await,
         Command::Config {
             command: ConfigCommand::Show,
         } => {
@@ -105,6 +116,64 @@ pub async fn run(cli: Cli) -> Result<String, CliError> {
         Command::Seed => seed(&cli).await,
         Command::SetupToken { command } => setup_token(&cli, command).await,
     }
+}
+
+async fn serve(cli: &Cli, listen: std::net::SocketAddr, origin: &str) -> Result<String, CliError> {
+    let database = open_database(&cli.database).await?;
+    MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+        .run(&database)
+        .await
+        .map_err(operation)?;
+    let identity = std::sync::Arc::new(IdentityRepository::new(database.clone()));
+    let (auth_state, setup) = initialize_auth(
+        std::sync::Arc::clone(&identity),
+        CookieMode::secure(),
+        std::sync::Arc::new(AdminRecoveryDelivery::new(128)),
+        origin.to_owned(),
+    )
+    .await
+    .map_err(operation)?;
+    if let Some(setup) = setup {
+        eprintln!("Initial setup URL: {}", setup.url);
+    }
+    let workspaces = std::sync::Arc::new(WorkspaceRepository::with_blob_store(
+        database,
+        std::sync::Arc::new(LocalBlobStore::new(&cli.attachments)),
+    ));
+    let app = auth_router(auth_state)
+        .merge(workspace_router(WorkspaceState::with_repository(
+            identity,
+            std::sync::Arc::clone(&workspaces),
+            origin.to_owned(),
+            CookieMode::secure(),
+        )))
+        .layer(HttpPlatformLayer::new(OriginPolicy::new(origin)));
+    let listener = tokio::net::TcpListener::bind(listen)
+        .await
+        .map_err(operation)?;
+    let shutdown = CancellationToken::new();
+    let signal_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        signal_shutdown.cancel();
+    });
+    let maintenance_shutdown = shutdown.clone();
+    let maintenance = tokio::spawn(async move {
+        let result = workspaces
+            .run_production_retention_service(maintenance_shutdown.clone())
+            .await;
+        if result.is_err() {
+            maintenance_shutdown.cancel();
+        }
+        result
+    });
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown.clone().cancelled_owned())
+        .await
+        .map_err(operation)?;
+    shutdown.cancel();
+    maintenance.await.map_err(operation)?.map_err(operation)?;
+    Ok(String::new())
 }
 
 async fn setup_token(cli: &Cli, command: &SetupTokenCommand) -> Result<String, CliError> {
@@ -309,6 +378,10 @@ mod tests {
 
     #[test]
     fn parses_all_operations_subcommands() {
+        assert!(matches!(
+            Cli::try_parse_from(["orbit", "serve"]).unwrap().command,
+            Command::Serve { .. }
+        ));
         assert!(matches!(
             Cli::try_parse_from(["orbit", "config", "show"])
                 .unwrap()

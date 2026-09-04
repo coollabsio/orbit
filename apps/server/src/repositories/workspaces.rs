@@ -404,9 +404,6 @@ impl WorkspaceRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<IssuedInvitation, WorkspaceError> {
-        if role == WorkspaceRole::Owner {
-            return Err(WorkspaceError::Forbidden);
-        }
         let id = Id::new_v7();
         let token = generate_opaque_token();
         let normalized_email = normalize_email(&email);
@@ -434,6 +431,23 @@ impl WorkspaceRepository {
                 return Err(WorkspaceError::Forbidden);
             }
             Err(error) => return Err(error),
+        }
+        if role == WorkspaceRole::Owner {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                "invitation.create_denied",
+                AuditOutcome::Failure,
+                "workspace",
+                Some(workspace_id),
+                request_id,
+                json!({"reason":"owner_role_forbidden"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(WorkspaceError::Forbidden);
         }
         let already_member = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
@@ -1273,6 +1287,24 @@ impl WorkspaceRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         let role = require_role(&mut transaction, workspace_id, actor_id, !deleted).await?;
         if role != WorkspaceRole::Owner {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                if deleted {
+                    "workspace.delete_denied"
+                } else {
+                    "workspace.restore_denied"
+                },
+                AuditOutcome::Failure,
+                "workspace",
+                Some(workspace_id),
+                request_id,
+                json!({"reason":"owner_required"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
             return Err(WorkspaceError::Forbidden);
         }
         let current_version =
