@@ -25,11 +25,21 @@ impl JobKindRegistry {
         Self::default()
     }
 
-    pub fn register(&self, kind: JobKind) {
-        self.kinds
+    pub fn register(&self, kind: JobKind) -> Result<(), JobKindRegistrationError> {
+        let mut kinds = self
+            .kinds
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(kind.name().to_owned(), kind);
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match kinds.get(kind.name()) {
+            Some(existing) if existing == &kind => Ok(()),
+            Some(_) => Err(JobKindRegistrationError {
+                name: kind.name().to_owned(),
+            }),
+            None => {
+                kinds.insert(kind.name().to_owned(), kind);
+                Ok(())
+            }
+        }
     }
 
     #[must_use]
@@ -41,6 +51,12 @@ impl JobKindRegistry {
             .cloned()
             .unwrap_or_else(|| JobKind::new(name))
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("job kind {name} is already registered with a different policy")]
+pub struct JobKindRegistrationError {
+    pub name: String,
 }
 
 pub const DEFAULT_MAX_ATTEMPTS: u32 = 8;

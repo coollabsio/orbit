@@ -5,7 +5,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
-use super::{Job, JobError, JobKind, JobKindRegistry, JobPriority, JobState};
+use super::{
+    Job, JobError, JobKind, JobKindRegistrationError, JobKindRegistry, JobPriority, JobState,
+};
 use crate::{Database, Id, ParseIdError, TimestampMillis};
 
 const DEAD_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -24,6 +26,8 @@ pub enum JobStoreError {
     NotDead(Id),
     #[error("job {0} does not exist")]
     NotFound(Id),
+    #[error(transparent)]
+    KindPolicy(#[from] JobKindRegistrationError),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,8 +68,8 @@ impl JobStore {
         }
     }
 
-    pub fn register_kind(&self, kind: JobKind) {
-        self.kinds.register(kind);
+    pub fn register_kind(&self, kind: JobKind) -> Result<(), JobKindRegistrationError> {
+        self.kinds.register(kind)
     }
 
     pub(crate) fn resolve_kind(&self, name: &str) -> JobKind {
@@ -73,7 +77,7 @@ impl JobStore {
     }
 
     pub async fn enqueue(&self, job: &Job) -> Result<Id, JobStoreError> {
-        self.register_kind(job.kind.clone());
+        self.register_kind(job.kind.clone())?;
         insert_job(&self.database, job).await?;
         Ok(job.id)
     }

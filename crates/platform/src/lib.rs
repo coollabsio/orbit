@@ -22,8 +22,9 @@ pub use http::{
 pub use id::{Id, ParseIdError};
 pub use jobs::{
     CatchUpMode, Claim, ClaimSelection, CronSchedule, Job, JobContext, JobError, JobKind,
-    JobKindRegistry, JobPriority, JobQueue, JobState, JobStore, JobStoreError, RecurringSchedule,
-    ScheduleError, Scheduler, Worker, WorkerConfig, WorkerConfigError, WorkerError,
+    JobKindRegistrationError, JobKindRegistry, JobPriority, JobQueue, JobState, JobStore,
+    JobStoreError, RecurringSchedule, ScheduleError, Scheduler, Worker, WorkerConfig,
+    WorkerConfigError, WorkerError,
 };
 pub use observability::{TracingFormat, init_tracing};
 pub use problem::{ConflictMetadata, Problem};

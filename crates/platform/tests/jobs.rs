@@ -99,13 +99,15 @@ async fn worker_keeps_a_slot_available_for_critical_work() {
             Err(JobError::Retryable("cancelled".to_owned()))
         }
     })
+    .unwrap()
     .with_handler(JobKind::new("critical"), move |_| {
         let started = critical_started_in_handler.clone();
         async move {
             started.notify_one();
             Ok(())
         }
-    });
+    })
+    .unwrap();
     let shutdown = CancellationToken::new();
     let worker_task = tokio::spawn(worker.run(shutdown.clone()));
 
@@ -463,9 +465,10 @@ fn diagnostics_redact_declared_sensitive_payload_fields() {
 #[tokio::test]
 async fn worker_context_uses_the_registered_kinds_redaction_policy() {
     let (_database, store) = store().await;
+    let kind = JobKind::new("diagnostic").with_sensitive_fields(["token"]);
     JobQueue::new(store.clone())
         .enqueue(Job::new(
-            JobKind::new("diagnostic"),
+            kind.clone(),
             json!({"token": "must-not-leak"}),
             TimestampMillis::from_millis(0),
         ))
@@ -480,18 +483,16 @@ async fn worker_context_uses_the_registered_kinds_redaction_policy() {
             .unwrap()
             .with_poll_interval(Duration::from_millis(5)),
     )
-    .with_handler(
-        JobKind::new("diagnostic").with_sensitive_fields(["token"]),
-        move |context| {
-            let sender = handler_sender.clone();
-            async move {
-                if let Some(sender) = sender.lock().unwrap().take() {
-                    let _ = sender.send(context.job.diagnostic_payload());
-                }
-                Ok(())
+    .with_handler(kind, move |context| {
+        let sender = handler_sender.clone();
+        async move {
+            if let Some(sender) = sender.lock().unwrap().take() {
+                let _ = sender.send(context.job.diagnostic_payload());
             }
-        },
-    );
+            Ok(())
+        }
+    })
+    .unwrap();
     let shutdown = CancellationToken::new();
     let task = tokio::spawn(worker.run(shutdown.clone()));
 
@@ -675,7 +676,8 @@ async fn shutdown_cancels_a_pending_claim_without_starting_its_handler() {
             started.store(true, Ordering::SeqCst);
             Ok(())
         }
-    });
+    })
+    .unwrap();
     let shutdown = CancellationToken::new();
     let task = tokio::spawn(worker.run(shutdown.clone()));
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -694,9 +696,13 @@ async fn shutdown_cancels_a_pending_claim_without_starting_its_handler() {
 async fn panicking_handler_releases_kind_concurrency_for_the_next_job() {
     let (_database, store) = store().await;
     let queue = JobQueue::new(store.clone());
+    let kind = JobKind::new("panic-once").with_concurrency_limit(1);
     for _ in 0..2 {
         queue
-            .enqueue(job("panic-once", JobPriority::Normal, 0))
+            .enqueue(
+                Job::new(kind.clone(), json!({}), TimestampMillis::from_millis(0))
+                    .with_priority(JobPriority::Normal),
+            )
             .await
             .unwrap();
     }
@@ -710,20 +716,18 @@ async fn panicking_handler_releases_kind_concurrency_for_the_next_job() {
             .unwrap()
             .with_poll_interval(Duration::from_millis(5)),
     )
-    .with_handler(
-        JobKind::new("panic-once").with_concurrency_limit(1),
-        move |_| {
-            let calls = handler_calls.clone();
-            let second_started = handler_second_started.clone();
-            async move {
-                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                    panic!("controlled handler panic");
-                }
-                second_started.notify_one();
-                Ok(())
+    .with_handler(kind, move |_| {
+        let calls = handler_calls.clone();
+        let second_started = handler_second_started.clone();
+        async move {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("controlled handler panic");
             }
-        },
-    );
+            second_started.notify_one();
+            Ok(())
+        }
+    })
+    .unwrap();
     let shutdown = CancellationToken::new();
     let task = tokio::spawn(worker.run(shutdown.clone()));
 
@@ -749,4 +753,120 @@ fn sub_millisecond_intervals_are_rejected_at_construction() {
     });
 
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn conflicting_enqueue_cannot_weaken_the_canonical_kind_policy() {
+    let (_database, store) = store().await;
+    let strong = JobKind::new("immutable-policy")
+        .with_sensitive_fields(["token"])
+        .with_retry_policy(3, vec![Duration::from_secs(7), Duration::from_secs(11)])
+        .with_lease(Duration::from_secs(11 * 60));
+    let original = JobQueue::new(store.clone())
+        .enqueue(Job::new(
+            strong,
+            json!({"token": "must-not-leak"}),
+            TimestampMillis::from_millis(0),
+        ))
+        .await
+        .unwrap();
+
+    let conflict = JobQueue::new(store.clone())
+        .enqueue(Job::new(
+            JobKind::new("immutable-policy"),
+            json!({}),
+            TimestampMillis::from_millis(0),
+        ))
+        .await;
+
+    assert!(matches!(
+        conflict,
+        Err(orbit_platform::JobStoreError::KindPolicy(_))
+    ));
+    assert_eq!(
+        store
+            .get(original)
+            .await
+            .unwrap()
+            .unwrap()
+            .diagnostic_payload()["token"],
+        "[REDACTED]"
+    );
+    let claim = store
+        .claim(TimestampMillis::from_millis(0), ClaimSelection::Any)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.lease_expires_at.as_millis(), 11 * MINUTE);
+    store
+        .fail(
+            &claim,
+            JobError::Retryable("temporary".to_owned()),
+            TimestampMillis::from_millis(1_000),
+        )
+        .await
+        .unwrap();
+    let delay = store
+        .get(original)
+        .await
+        .unwrap()
+        .unwrap()
+        .available_at
+        .as_millis()
+        - 1_000;
+    assert!((7_000..=8_400).contains(&delay));
+}
+
+#[tokio::test]
+async fn schedule_upsert_propagates_a_conflicting_kind_policy() {
+    let (_database, store) = store().await;
+    store
+        .register_kind(
+            JobKind::new("schedule-policy")
+                .with_sensitive_fields(["token"])
+                .with_lease(Duration::from_secs(11 * 60)),
+        )
+        .unwrap();
+    let schedule = RecurringSchedule::interval(
+        JobKind::new("schedule-policy"),
+        json!({}),
+        Duration::from_secs(60),
+        TimestampMillis::from_millis(MINUTE),
+    );
+
+    assert!(matches!(
+        Scheduler::new(store).upsert(&schedule).await,
+        Err(orbit_platform::ScheduleError::KindPolicy(_))
+    ));
+}
+
+#[tokio::test]
+async fn handler_registration_propagates_a_conflicting_kind_policy() {
+    let (_database, store) = store().await;
+    store
+        .register_kind(
+            JobKind::new("handler-policy")
+                .with_sensitive_fields(["token"])
+                .with_lease(Duration::from_secs(11 * 60)),
+        )
+        .unwrap();
+
+    let worker = Worker::new(store, WorkerConfig::default())
+        .with_handler(JobKind::new("handler-policy"), |_| async { Ok(()) });
+
+    assert!(matches!(
+        worker,
+        Err(orbit_platform::JobKindRegistrationError { name }) if name == "handler-policy"
+    ));
+}
+
+#[tokio::test]
+async fn identical_kind_policy_registration_is_idempotent() {
+    let (_database, store) = store().await;
+    let kind = JobKind::new("same-policy")
+        .with_sensitive_fields(["token"])
+        .with_lease(Duration::from_secs(11 * 60));
+
+    store.register_kind(kind.clone()).unwrap();
+    store.register_kind(kind).unwrap();
 }

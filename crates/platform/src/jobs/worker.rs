@@ -9,8 +9,8 @@ use tokio::task::{Id as TaskId, JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    Claim, ClaimSelection, DEFAULT_HEARTBEAT, Job, JobError, JobKind, JobPriority, JobStore,
-    JobStoreError,
+    Claim, ClaimSelection, DEFAULT_HEARTBEAT, Job, JobError, JobKind, JobKindRegistrationError,
+    JobPriority, JobStore, JobStoreError,
 };
 
 type HandlerFuture = Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>;
@@ -116,17 +116,20 @@ impl Worker {
         }
     }
 
-    #[must_use]
-    pub fn with_handler<F, Fut>(mut self, kind: JobKind, handler: F) -> Self
+    pub fn with_handler<F, Fut>(
+        mut self,
+        kind: JobKind,
+        handler: F,
+    ) -> Result<Self, JobKindRegistrationError>
     where
         F: Fn(JobContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), JobError>> + Send + 'static,
     {
         let run: HandlerFn = Arc::new(move |context| Box::pin(handler(context)));
-        self.store.register_kind(kind.clone());
+        self.store.register_kind(kind.clone())?;
         self.handlers
             .insert(kind.name().to_owned(), RegisteredHandler { kind, run });
-        self
+        Ok(self)
     }
 
     pub async fn run(self, shutdown: CancellationToken) -> Result<(), WorkerError> {

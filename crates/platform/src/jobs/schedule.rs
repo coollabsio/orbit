@@ -7,7 +7,7 @@ use serde_json::Value;
 use sqlx::Row;
 use thiserror::Error;
 
-use super::{JobKind, JobPriority, JobStore};
+use super::{JobKind, JobKindRegistrationError, JobPriority, JobStore};
 use crate::{Id, ParseIdError, TimestampMillis};
 
 #[derive(Debug, Error)]
@@ -28,6 +28,8 @@ pub enum ScheduleError {
     TimestampRange,
     #[error("invalid stored schedule: {0}")]
     InvalidStoredSchedule(String),
+    #[error(transparent)]
+    KindPolicy(#[from] JobKindRegistrationError),
 }
 
 #[derive(Clone)]
@@ -185,7 +187,7 @@ impl Scheduler {
     }
 
     pub async fn upsert(&self, schedule: &RecurringSchedule) -> Result<(), ScheduleError> {
-        self.store.register_kind(schedule.kind.clone());
+        self.store.register_kind(schedule.kind.clone())?;
         sqlx::query(
             "INSERT INTO schedules (id, workspace_id, job_kind, payload_json, schedule, \
              next_run_at, catch_up_mode, consecutive_failures, enabled, updated_at) \
