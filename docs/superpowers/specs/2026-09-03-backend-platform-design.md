@@ -1199,6 +1199,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Release builds verify that the embedded frontend was generated from the matching OpenAPI client and source revision.
 - Operators configure an external reverse proxy to provide HTTPS and forward only explicitly trusted headers.
 
+
+### D-060: Provide local structured observability with opt-in export
+
+**Decision:** Production emits structured JSON logs; development uses compact readable logs. Orbit assigns UUIDv7 request IDs, traces HTTP, jobs, database operations, outbound mail, and SMTP receipt without message bodies or secrets, and exposes separate liveness and readiness checks. Prometheus metrics use a separate configurable listener that is disabled by default. OpenTelemetry export is optional and disabled by default. Orbit contacts no telemetry or error-reporting service unless the operator configures it.
+
+**Rationale:** Self-hosted operators need machine-readable diagnostics and health signals without silently sending application data elsewhere. A separate metrics listener avoids exposing operational details through the main application route.
+
+**Alternatives considered:**
+
+- **External telemetry enabled by default:** Rejected because it conflicts with self-hosted privacy expectations.
+- **One generic health endpoint:** Rejected because process liveness and safe traffic readiness have different meanings.
+- **Metrics on the public application listener:** Rejected as the default because labels and operational state can aid attackers.
+
+**Consequences:**
+
+- Orbit accepts an incoming request ID only from an explicitly trusted proxy; otherwise it generates one.
+- `/health/live` checks only that the process event loop responds. `/health/ready` checks migrations, database integrity state, writable storage, scheduler state, and critical configuration.
+- Metrics never use workspace IDs, user IDs, email addresses, task IDs, filenames, or other unbounded labels.
+- Logs redact passwords, cookies, tokens, authorization headers, message bodies, attachment contents, and mail bodies.
+- Job and request traces share correlation fields when one creates the other.
+- Operator documentation distinguishes the public HTTP listener from the optional metrics listener and recommends binding metrics to a private interface.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
