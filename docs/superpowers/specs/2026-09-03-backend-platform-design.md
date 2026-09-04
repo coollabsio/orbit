@@ -1155,6 +1155,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - New generic traits require at least two real implementations or call sites that demonstrate the variation. A likely future implementation alone is not enough.
 - Tests enforce dependency direction and keep domain tests runnable without HTTP or a production database file.
 
+
+### D-058: Use TOML configuration with deployment overrides
+
+**Decision:** TOML is the primary configuration source. Environment variables named `ORBIT__SECTION__KEY` override TOML, and CLI flags override environment variables. Secrets may come from environment variables or paired `_FILE` variables. Setting both forms for one secret is an error. Orbit loads `.env` files only in explicit development mode.
+
+**Rationale:** TOML gives operators one readable configuration file. Environment and file-based overrides support containers and secret mounts without forcing credentials into that file.
+
+**Alternatives considered:**
+
+- **TOML only:** Rejected because container deployments need practical secret and one-off setting injection.
+- **Environment variables only:** Rejected because a large application configuration becomes difficult to inspect and maintain.
+- **Store infrastructure configuration in SQLite:** Rejected initially because startup, database, listener, and recovery settings must exist before the application database is usable.
+
+**Consequences:**
+
+- Orbit resolves the complete precedence chain once at startup and validates it before migrations or network listeners begin.
+- Orbit never writes secrets back into TOML or emits them through logs, diagnostics, panic output, or CLI commands.
+- `orbit config check` validates the effective configuration. `orbit config show` displays sources and effective non-secret values while always redacting secrets.
+- `_FILE` inputs must be regular readable files with bounded size; Orbit trims one trailing line ending and otherwise preserves secret bytes.
+- Unknown TOML keys and malformed environment overrides fail validation rather than being ignored.
+- Runtime infrastructure settings require restart. Workspace product settings may still live in SQLite where appropriate.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
