@@ -1331,6 +1331,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - `just e2e` creates an isolated database and storage directory rather than using a developer's normal data.
 - Documentation lists the exact underlying commands for environments where Just is unavailable.
 
+
+### D-066: Use Bun as the frontend package manager
+
+**Decision:** Bun is the sole frontend package manager for the current development phase. Implementation will generate and commit `bun.lock`, remove `aube-lock.yaml`, and make Just and CI recipes use `bun install --frozen-lockfile` and `bun run` commands.
+
+**Rationale:** Bun is available in the development environment and provides one reproducible dependency and script path. Keeping two lockfiles or documenting an unavailable wrapper would make local and CI installs ambiguous.
+
+**Alternatives considered:**
+
+- **Keep Aube:** Rejected for now because its executable is not available in the current environment.
+- **Use npm:** Not selected because Bun is already available and preferred for this phase.
+- **Support several package managers:** Rejected because competing lockfiles can resolve different dependency graphs.
+
+**Consequences:**
+
+- `package.json` remains the script and dependency manifest; Bun owns installation and lockfile generation.
+- CI uses the committed Bun version policy and frozen lockfile mode.
+- Existing development documentation is updated to remove Aube and mixed-package-manager instructions.
+- Generated artifacts and `node_modules` remain untracked.
+- A future package-manager change must replace the lockfile and commands in one deliberate change.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
