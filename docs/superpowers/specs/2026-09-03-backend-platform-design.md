@@ -1051,6 +1051,45 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Clients treat missing or delayed ephemeral events as normal and never derive authorization or durable unread state from them.
 - Application restart begins with no users present or typing until connected clients refresh their state.
 
+
+### D-053: Send outbound email only through configured providers
+
+**Decision:** Orbit never delivers outbound email directly to recipient mail servers. Every outbound message uses a configured third-party transport. SMTP is the first supported outbound transport and sits behind an internal mail transport interface.
+
+**Rationale:** Direct internet mail delivery requires reputation management, bounce processing, retry policy, and deliverability operations that do not belong in a compact self-hosted application. A provider interface leaves room for later HTTP email providers without changing domain jobs.
+
+**Alternatives considered:**
+
+- **Direct SMTP delivery to recipient MX servers:** Rejected because each Orbit installation would need to operate as a reputable sending mail server.
+- **SMTP-specific calls throughout features:** Rejected because invitations, recovery, and notifications should not depend on one transport's API.
+
+**Consequences:**
+
+- Transactional messages are versioned templates queued through the durable job system.
+- Missing or invalid outbound configuration produces a permanent configuration failure and dead job rather than silently dropping mail.
+- Approved administrator-copyable setup, invitation, and recovery links remain available where their decisions permit them.
+- Transport credentials remain installation secrets and never enter workspace-visible job payloads or logs.
+- Later providers implement the same narrow send contract and define their own retryable error mapping.
+
+### D-054: Include an inbound SMTP receiver in Orbit
+
+**Decision:** A later mail milestone will add an SMTP receiver to the Orbit binary so an installation can accept inbound messages locally. This receiver is separate from the outbound provider interface and is not part of the foundation-and-tasks milestone.
+
+**Rationale:** Local receipt keeps inbound mailbox data under the operator's control and avoids requiring a mailbox provider for Orbit's future mail feature.
+
+**Alternatives considered:**
+
+- **External receiver forwarding to a webhook or pipe:** Rejected as the primary architecture because the chosen product direction is an integrated receiver.
+- **Treat inbound and outbound mail as one transport:** Rejected because receiving and provider-based sending have different protocols, security boundaries, and operational failure modes.
+
+**Consequences:**
+
+- The receiver needs its own listener configuration, recipient routing, message-size limits, TLS policy, queueing, parsing, abuse controls, and observability design before implementation.
+- SMTP acknowledgement occurs only after Orbit has durably accepted the raw message or can safely retry processing it.
+- Message parsing and mailbox projection happen asynchronously after durable receipt.
+- Outbound mail always continues through a third-party provider, even when the inbound receiver is enabled.
+- Whether the receiver accepts public internet delivery or only trusted relays remains undecided.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
