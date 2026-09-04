@@ -1177,11 +1177,32 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Unknown TOML keys and malformed environment overrides fail validation rather than being ignored.
 - Runtime infrastructure settings require restart. Workspace product settings may still live in SQLite where appropriate.
 
+
+### D-059: Embed the frontend and ship one production server artifact
+
+**Decision:** Production builds embed the compiled frontend assets in the Rust binary and serve the SPA, API, and WebSocket endpoint from the same origin. Orbit ships a static Linux binary and a minimal OCI image centered on `orbit serve`. Durable data, backups, and TOML configuration remain external files. Public HTTPS terminates at an external reverse proxy.
+
+**Rationale:** One application artifact matches the compact deployment goal and avoids coordinating frontend and backend versions. Same-origin delivery also simplifies secure-cookie, CSRF, and WebSocket origin behavior.
+
+**Alternatives considered:**
+
+- **Deploy the frontend separately:** Rejected because it adds version coordination, CORS, and another deployment unit without a current need.
+- **Manage public TLS certificates inside Orbit:** Rejected because reverse proxies already handle certificate issuance, renewal, and routing well.
+- **Require containers:** Rejected because a native binary is part of the desired deployment experience.
+
+**Consequences:**
+
+- The binary serves SPA fallback only for non-API browser routes and never turns unknown API paths into `index.html`.
+- SQLite, attachments, backups, and configuration use explicit external paths and are never embedded.
+- The OCI image runs as a non-root user and declares separate HTTP and optional inbound SMTP listeners.
+- Development keeps Vite separate with API and WebSocket proxying to the Rust server.
+- Release builds verify that the embedded frontend was generated from the matching OpenAPI client and source revision.
+- Operators configure an external reverse proxy to provide HTTPS and forward only explicitly trusted headers.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
 
-- A single artifact that may embed the built frontend.
 
 These choices require explicit evaluation before implementation.
 
