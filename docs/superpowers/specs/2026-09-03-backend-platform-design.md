@@ -920,6 +920,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Release notes call out contract changes even while pre-stable lockstep breaking changes are allowed.
 - API stability is reassessed before declaring the first stable Orbit release.
 
+
+### D-047: Stream bounded uploads and restrict inline rendering
+
+**Decision:** Attachments default to a maximum of 25 MiB per file and 100 MiB per request. Installation configuration may lower or raise both values. Orbit streams uploads to temporary files, allows arbitrary file types, detects content type from bytes, renders only an explicit safe image allowlist inline, and serves every other type as a download.
+
+**Rationale:** Streaming bounds memory use. Treating supplied names and types as untrusted prevents active content and misleading metadata from becoming executable browser responses while preserving general-purpose attachments.
+
+**Alternatives considered:**
+
+- **Buffer complete uploads in memory:** Rejected because concurrent uploads could exhaust process memory.
+- **Trust browser MIME declarations:** Rejected because clients control them.
+- **Serve HTML and other active formats inline:** Rejected because same-origin active content can become an account-compromise path.
+
+**Consequences:**
+
+- Limit enforcement occurs while streaming. Rejected and interrupted uploads remove their partial temporary files.
+- Content detection determines security behavior; the browser-provided MIME type remains optional metadata only.
+- The initial inline allowlist contains JPEG, PNG, GIF, and WebP. SVG is downloaded rather than rendered inline because it can contain active content.
+- Downloads use `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, and a sanitized header filename. Metadata retains the original display name subject to length and control-character validation.
+- Temporary and final storage stay on the same filesystem where possible so finalization can use an atomic rename.
+- Configuration validation rejects values that exceed platform-safe integer and disk-handling bounds.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
