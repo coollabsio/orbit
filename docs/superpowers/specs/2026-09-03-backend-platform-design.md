@@ -1221,6 +1221,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Job and request traces share correlation fields when one creates the other.
 - Operator documentation distinguishes the public HTTP listener from the optional metrics listener and recommends binding metrics to a private interface.
 
+
+### D-061: Retain append-only security audit records for one year
+
+**Decision:** Keep security audit entries for 365 days. Installation administrators may search and export all entries. Workspace Owners and Admins may view only entries scoped to their workspace. Application APIs treat audit records as append-only, and a durable maintenance job purges records after retention.
+
+**Rationale:** One year gives operators useful incident and administrative history without retaining detailed metadata forever. Scope-aware access preserves the global identity and multi-workspace boundary.
+
+**Alternatives considered:**
+
+- **Retain audit events indefinitely:** Rejected because metadata volume and privacy exposure would grow without a bound.
+- **Allow workspace administrators to see installation-wide events:** Rejected because global account and other workspace activity are outside their authority.
+- **Store only ordinary logs:** Rejected because log rotation and formatting do not provide a stable security history.
+
+**Consequences:**
+
+- Audit events cover setup; authentication and throttling outcomes; logout; password and recovery changes; session revocation; account suspension; invitations; membership and role changes; workspace deletion and restoration; configuration validation failures; backup and restore; migration failures; manual job retries; and inbound-domain changes.
+- Each entry includes UTC timestamp, stable action code, outcome, actor when known, target, workspace scope when applicable, request ID, and bounded safe metadata.
+- Entries never contain credentials, token values, cookies, passwords, mail or message bodies, or attachment contents.
+- The application does not expose update or delete operations for individual audit entries.
+- Backups preserve audit entries that remain inside retention.
+- Retention purge itself produces a bounded operational summary rather than one audit event per deleted row.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
