@@ -1,11 +1,9 @@
-use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
-use sqlx::{Row, SqliteConnection};
+use sqlx::Row;
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
@@ -16,12 +14,6 @@ use crate::{AttachmentMutationCoordinator, Database, Id};
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
 const SNIFF_BYTES: usize = 8 * 1024;
-
-#[derive(Clone, Copy)]
-enum ReferenceKey {
-    BlobId,
-    StorageKey,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UploadLimits {
@@ -82,7 +74,25 @@ pub struct StagedUpload {
     pub size_bytes: u64,
     pub detected_media_type: String,
     pub display_name: String,
-    pub temporary_path: PathBuf,
+    pub(super) temporary_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewAttachmentReference {
+    pub id: Id,
+    pub task_id: Id,
+    pub comment_id: Option<Id>,
+}
+
+impl NewAttachmentReference {
+    #[must_use]
+    pub fn new(task_id: Id, comment_id: Option<Id>) -> Self {
+        Self {
+            id: Id::new_v7(),
+            task_id,
+            comment_id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,8 +131,6 @@ pub struct BlobDownload {
     pub metadata: DownloadMetadata,
 }
 
-pub type FinalizeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, UploadError>> + Send + 'a>>;
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ReconcileResult {
     pub expired_uploads: u64,
@@ -140,6 +148,8 @@ pub enum UploadError {
     InvalidDisplayName,
     #[error("staged upload is not in a finalizable state")]
     InvalidState,
+    #[error("staged upload contents changed after validation")]
+    StagedContentChanged,
     #[error("attachment access was denied")]
     Unauthorized,
     #[error(transparent)]
@@ -209,7 +219,7 @@ impl UploadService {
         }
 
         let _mutation = self.mutations.begin().await;
-        let temporary_path = self.store.create_temporary().await?;
+        let temporary_path = self.store.create_temporary()?;
         let mut temporary = TemporaryFile::new(self.store.clone(), temporary_path.clone());
         let result = async {
             let mut output = fs::OpenOptions::new()
@@ -313,27 +323,20 @@ impl UploadService {
         result
     }
 
-    pub async fn finalize(&self, upload: &StagedUpload) -> Result<FinalizedBlob, UploadError> {
-        let (blob, ()) = self.finalize_with(upload, no_attachment_write).await?;
-        Ok(blob)
-    }
-
-    pub async fn finalize_with<T, F>(
+    pub async fn finalize(
         &self,
         upload: &StagedUpload,
-        write_attachment: F,
-    ) -> Result<(FinalizedBlob, T), UploadError>
-    where
-        F: for<'a> FnOnce(&'a mut SqliteConnection, &'a FinalizedBlob) -> FinalizeFuture<'a, T>,
-    {
+        attachment: NewAttachmentReference,
+    ) -> Result<FinalizedBlob, UploadError> {
         let _operation = self.operations.lock().await;
         let _mutation = self.mutations.begin().await;
         let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
+        let now = self.database.database_now().await?.as_millis();
         let valid: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pending_uploads \
              WHERE id = ? AND workspace_id = ? AND user_id = ? AND temporary_path = ? \
                AND original_name = ? AND media_type = ? AND byte_size = ? AND sha256 = ? \
-               AND state = 'staged'",
+               AND state = 'staged' AND expires_at > ?",
         )
         .bind(upload.id.to_string())
         .bind(upload.workspace_id.to_string())
@@ -343,17 +346,22 @@ impl UploadService {
         .bind(&upload.detected_media_type)
         .bind(size_i64)
         .bind(&upload.sha256)
+        .bind(now)
         .fetch_one(self.database.pool())
         .await?;
         if valid != 1 {
             return Err(UploadError::InvalidState);
         }
 
-        let now = self.database.database_now().await?.as_millis();
         let quarantine_until = now.saturating_add(QUARANTINE_MILLIS);
         let proposed_id = Id::new_v7();
         let mut transaction = self.database.immediate_transaction().await?;
-        let stored = self.store.install(upload).await?;
+        let stored = match self.store.install(upload).await {
+            Err(BlobStoreError::StagedContentChanged) => {
+                return Err(UploadError::StagedContentChanged);
+            }
+            result => result?,
+        };
 
         sqlx::query(
             "INSERT OR IGNORE INTO attachment_blobs (\
@@ -392,7 +400,24 @@ impl UploadService {
             quarantine_until,
         };
 
-        let attachment = write_attachment(&mut transaction, &blob).await?;
+        sqlx::query(
+            "INSERT INTO attachment_references (\
+                id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type,\
+                byte_size, created_at\
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(attachment.id.to_string())
+        .bind(upload.workspace_id.to_string())
+        .bind(attachment.task_id.to_string())
+        .bind(attachment.comment_id.map(|id| id.to_string()))
+        .bind(upload.owner_id.to_string())
+        .bind(blob.id.to_string())
+        .bind(&upload.display_name)
+        .bind(&upload.detected_media_type)
+        .bind(size_i64)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
 
         let updated = sqlx::query(
             "UPDATE pending_uploads SET state = 'complete', completed_at = ? \
@@ -412,13 +437,17 @@ impl UploadService {
         }
         transaction.commit().await?;
 
-        Ok((blob, attachment))
+        Ok(blob)
     }
 
     pub async fn reconcile(&self, now_millis: i64) -> Result<ReconcileResult, UploadError> {
         let _operation = self.operations.lock().await;
         let _mutation = self.mutations.begin().await;
         let mut result = ReconcileResult::default();
+
+        sqlx::query("SELECT blob_id FROM attachment_references WHERE 0")
+            .fetch_all(self.database.pool())
+            .await?;
 
         let expired = sqlx::query(
             "SELECT id, temporary_path FROM pending_uploads \
@@ -441,7 +470,7 @@ impl UploadService {
             .rows_affected();
         }
 
-        let reference_sources = self.reference_sources().await?;
+        let quarantine_cutoff = now_millis.saturating_sub(QUARANTINE_MILLIS);
         let quarantined =
             sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE quarantine_until <= ?")
                 .bind(now_millis)
@@ -451,19 +480,23 @@ impl UploadService {
             let id: String = row.try_get("id")?;
             let storage_key: String = row.try_get("storage_key")?;
             let mut transaction = self.database.immediate_transaction().await?;
-            let mut references = 0_i64;
-            for (table, column, key) in &reference_sources {
-                let query = format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?");
-                let value = match key {
-                    ReferenceKey::BlobId => &id,
-                    ReferenceKey::StorageKey => &storage_key,
-                };
-                references += sqlx::query_scalar::<_, i64>(&query)
-                    .bind(value)
+            let references: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?")
+                    .bind(&id)
                     .fetch_one(&mut *transaction)
                     .await?;
-            }
             if references == 0 {
+                let recently_published = self
+                    .store
+                    .blobs()
+                    .await?
+                    .into_iter()
+                    .find(|object| object.storage_key == storage_key)
+                    .is_some_and(|object| object.modified_at_millis > quarantine_cutoff);
+                if recently_published {
+                    transaction.commit().await?;
+                    continue;
+                }
                 self.store.delete(&storage_key).await?;
                 result.deleted_blobs += sqlx::query(
                     "DELETE FROM attachment_blobs WHERE id = ? AND quarantine_until <= ?",
@@ -477,7 +510,6 @@ impl UploadService {
             transaction.commit().await?;
         }
 
-        let quarantine_cutoff = now_millis.saturating_sub(QUARANTINE_MILLIS);
         for object in self.store.blobs().await? {
             if object.modified_at_millis > quarantine_cutoff {
                 continue;
@@ -535,34 +567,6 @@ impl UploadService {
         let reader = self.store.open(&attachment.storage_key).await?;
         Ok(BlobDownload { reader, metadata })
     }
-
-    async fn reference_sources(
-        &self,
-    ) -> Result<Vec<(&'static str, &'static str, ReferenceKey)>, sqlx::Error> {
-        let mut sources = Vec::new();
-        for table in ["attachments", "attachment_refs"] {
-            let exists: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
-            )
-            .bind(table)
-            .fetch_one(self.database.pool())
-            .await?;
-            if exists == 1 {
-                let pragma = format!("PRAGMA table_info({table})");
-                let columns = sqlx::query(&pragma).fetch_all(self.database.pool()).await?;
-                let names: HashSet<String> = columns
-                    .iter()
-                    .map(|column| column.get::<String, _>("name"))
-                    .collect();
-                if names.contains("blob_id") {
-                    sources.push((table, "blob_id", ReferenceKey::BlobId));
-                } else if names.contains("storage_key") {
-                    sources.push((table, "storage_key", ReferenceKey::StorageKey));
-                }
-            }
-        }
-        Ok(sources)
-    }
 }
 
 fn safe_display_name(value: &str) -> Result<String, UploadError> {
@@ -589,7 +593,7 @@ fn header_filename(value: &str) -> String {
         .collect()
 }
 
-fn detect_media_type(bytes: &[u8]) -> &'static str {
+pub(super) fn detect_media_type(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         "image/png"
     } else if bytes.starts_with(b"\xff\xd8\xff") {
@@ -613,13 +617,6 @@ fn detect_media_type(bytes: &[u8]) -> &'static str {
             "application/octet-stream"
         }
     }
-}
-
-fn no_attachment_write<'a>(
-    _connection: &'a mut SqliteConnection,
-    _blob: &'a FinalizedBlob,
-) -> FinalizeFuture<'a, ()> {
-    Box::pin(async { Ok(()) })
 }
 
 struct TemporaryFile {

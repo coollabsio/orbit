@@ -10,9 +10,9 @@ use tokio::io::AsyncRead;
 
 pub use local::LocalBlobStore;
 pub use upload::{
-    AuthorizedAttachment, BlobDownload, ContentDisposition, DownloadMetadata, FinalizeFuture,
-    FinalizedBlob, ReconcileResult, StagedUpload, UploadError, UploadLimitError, UploadLimits,
-    UploadService,
+    AuthorizedAttachment, BlobDownload, ContentDisposition, DownloadMetadata, FinalizedBlob,
+    NewAttachmentReference, ReconcileResult, StagedUpload, UploadError, UploadLimitError,
+    UploadLimits, UploadService,
 };
 
 pub type BlobFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, BlobStoreError>> + Send + 'a>>;
@@ -43,10 +43,12 @@ pub enum BlobStoreError {
     UnsafeStorageKey(String),
     #[error("temporary path is outside the blob store: {0}")]
     UnsafeTemporaryPath(PathBuf),
+    #[error("staged upload contents changed after validation")]
+    StagedContentChanged,
 }
 
 pub trait BlobStore: Send + Sync {
-    fn create_temporary(&self) -> BlobFuture<'_, PathBuf>;
+    fn create_temporary(&self) -> Result<PathBuf, BlobStoreError>;
 
     fn install<'a>(&'a self, upload: &'a StagedUpload) -> BlobFuture<'a, StoredObject>;
 

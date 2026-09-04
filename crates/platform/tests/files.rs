@@ -5,8 +5,8 @@ use std::task::{Context, Poll};
 
 use orbit_platform::{
     AttachmentMutationCoordinator, BlobFuture, BlobObject, BlobReader, BlobStore,
-    ContentDisposition, Id, LocalBlobStore, StagedUpload, StoredObject, TestDatabase, UploadError,
-    UploadLimitError, UploadLimits, UploadService,
+    ContentDisposition, Id, LocalBlobStore, NewAttachmentReference, StagedUpload, StoredObject,
+    TestDatabase, UploadError, UploadLimitError, UploadLimits, UploadService,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
 
@@ -35,6 +35,16 @@ impl Fixture {
             service,
         }
     }
+}
+
+fn attachment() -> NewAttachmentReference {
+    NewAttachmentReference::new(Id::new_v7(), None)
+}
+
+async fn only_temporary_path(store: &LocalBlobStore) -> std::path::PathBuf {
+    let files = store.temporary_files().await.unwrap();
+    assert_eq!(files.len(), 1);
+    files[0].path.clone()
 }
 
 #[tokio::test]
@@ -119,7 +129,15 @@ async fn stage_sniffs_bytes_and_never_uses_a_client_path_as_a_filesystem_path() 
     assert_eq!(png.detected_media_type, "image/png");
     assert_eq!(png.display_name, "picture.png");
     assert_eq!(png.sha256.len(), 64);
-    assert!(png.temporary_path.starts_with(fixture.store.root()));
+    assert!(
+        fixture
+            .store
+            .temporary_files()
+            .await
+            .unwrap()
+            .iter()
+            .all(|file| file.path.starts_with(fixture.store.root()))
+    );
 
     let svg = fixture
         .service
@@ -146,8 +164,12 @@ async fn finalize_deduplicates_only_inside_a_workspace_and_atomically_installs_t
         .stage(workspace_a, owner, "first.txt", &b"same bytes"[..])
         .await
         .unwrap();
-    let first_temp = first.temporary_path.clone();
-    let first_blob = fixture.service.finalize(&first).await.unwrap();
+    let first_temp = only_temporary_path(&fixture.store).await;
+    let first_blob = fixture
+        .service
+        .finalize(&first, attachment())
+        .await
+        .unwrap();
     assert!(!first_temp.exists());
     assert!(
         fixture
@@ -162,7 +184,11 @@ async fn finalize_deduplicates_only_inside_a_workspace_and_atomically_installs_t
         .stage(workspace_a, owner, "second.txt", &b"same bytes"[..])
         .await
         .unwrap();
-    let duplicate_blob = fixture.service.finalize(&duplicate).await.unwrap();
+    let duplicate_blob = fixture
+        .service
+        .finalize(&duplicate, attachment())
+        .await
+        .unwrap();
     assert_eq!(first_blob.id, duplicate_blob.id);
     assert_eq!(first_blob.storage_key, duplicate_blob.storage_key);
 
@@ -171,10 +197,22 @@ async fn finalize_deduplicates_only_inside_a_workspace_and_atomically_installs_t
         .stage(workspace_b, owner, "third.txt", &b"same bytes"[..])
         .await
         .unwrap();
-    let isolated_blob = fixture.service.finalize(&isolated).await.unwrap();
+    let isolated_blob = fixture
+        .service
+        .finalize(&isolated, attachment())
+        .await
+        .unwrap();
     assert_ne!(first_blob.id, isolated_blob.id);
     assert_ne!(first_blob.storage_key, isolated_blob.storage_key);
     assert_eq!(fixture.store.blobs().await.unwrap().len(), 2);
+    assert_eq!(
+        fixture
+            .database
+            .scalar::<i64>("SELECT COUNT(*) FROM attachment_references")
+            .await
+            .unwrap(),
+        3
+    );
 }
 
 #[tokio::test]
@@ -199,8 +237,8 @@ async fn concurrent_same_workspace_finalization_converges_on_one_blob() {
     );
 
     let (first_result, second_result) = tokio::join!(
-        fixture.service.finalize(&first),
-        other_service.finalize(&second)
+        fixture.service.finalize(&first, attachment()),
+        other_service.finalize(&second, attachment())
     );
     let first_blob = first_result.unwrap();
     let second_blob = second_result.unwrap();
@@ -216,12 +254,38 @@ async fn finalize_rejects_tampered_staged_metadata_before_moving_bytes() {
         .stage(Id::new_v7(), Id::new_v7(), "safe.txt", &b"original"[..])
         .await
         .unwrap();
-    let temporary_path = staged.temporary_path.clone();
+    let temporary_path = only_temporary_path(&fixture.store).await;
     staged.sha256 = "0".repeat(64);
 
     assert!(matches!(
-        fixture.service.finalize(&staged).await,
+        fixture.service.finalize(&staged, attachment()).await,
         Err(UploadError::InvalidState)
+    ));
+    assert!(temporary_path.exists());
+    assert!(fixture.store.blobs().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn finalize_rehashes_staged_bytes_before_publication() {
+    let fixture = Fixture::new().await;
+    let staged = fixture
+        .service
+        .stage(
+            Id::new_v7(),
+            Id::new_v7(),
+            "safe.png",
+            &b"\x89PNG\r\n\x1a\nSAFE"[..],
+        )
+        .await
+        .unwrap();
+    let temporary_path = only_temporary_path(&fixture.store).await;
+    tokio::fs::write(&temporary_path, b"<html>EVIL!!")
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        fixture.service.finalize(&staged, attachment()).await,
+        Err(UploadError::StagedContentChanged)
     ));
     assert!(temporary_path.exists());
     assert!(fixture.store.blobs().await.unwrap().is_empty());
@@ -230,23 +294,32 @@ async fn finalize_rejects_tampered_staged_metadata_before_moving_bytes() {
 #[tokio::test]
 async fn failed_attachment_write_rolls_back_blob_metadata_and_leaves_quarantined_bytes() {
     let fixture = Fixture::new().await;
-    let staged = fixture
+    let workspace = Id::new_v7();
+    let existing = fixture
         .service
-        .stage(Id::new_v7(), Id::new_v7(), "rollback.txt", &b"orphan"[..])
+        .stage(workspace, Id::new_v7(), "existing.txt", &b"existing"[..])
         .await
         .unwrap();
-
-    let result = fixture
+    let reference = attachment();
+    fixture
         .service
-        .finalize_with(&staged, |transaction, _blob| {
-            Box::pin(async move {
-                sqlx::query("INSERT INTO missing_attachment_table DEFAULT VALUES")
-                    .execute(&mut *transaction)
-                    .await?;
-                Ok(())
-            })
-        })
-        .await;
+        .finalize(&existing, reference.clone())
+        .await
+        .unwrap();
+    let staged = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "rollback.txt", &b"orphan"[..])
+        .await
+        .unwrap();
+    let temporary_path = only_temporary_path(&fixture.store).await;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&temporary_path)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH)
+        .unwrap();
+
+    let result = fixture.service.finalize(&staged, reference).await;
     assert!(matches!(result, Err(UploadError::Database(_))));
     assert_eq!(
         fixture
@@ -254,7 +327,7 @@ async fn failed_attachment_write_rolls_back_blob_metadata_and_leaves_quarantined
             .scalar::<i64>("SELECT COUNT(*) FROM attachment_blobs")
             .await
             .unwrap(),
-        0
+        1
     );
     assert_eq!(
         fixture
@@ -267,7 +340,107 @@ async fn failed_attachment_write_rolls_back_blob_metadata_and_leaves_quarantined
             .unwrap(),
         "staged"
     );
-    assert_eq!(fixture.store.blobs().await.unwrap().len(), 1);
+    assert_eq!(fixture.store.blobs().await.unwrap().len(), 2);
+    let now = fixture.database.database_now().await.unwrap().as_millis();
+    let reconciled = fixture
+        .service
+        .reconcile(now + 60 * 60 * 1000)
+        .await
+        .unwrap();
+    assert_eq!(reconciled.deleted_untracked_files, 0);
+    assert_eq!(fixture.store.blobs().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn failed_deduplicated_finalization_restarts_the_orphan_quarantine() {
+    let fixture = Fixture::new().await;
+    let workspace = Id::new_v7();
+    let orphan = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "orphan.txt", &b"same bytes"[..])
+        .await
+        .unwrap();
+    let orphan_blob = fixture
+        .service
+        .finalize(&orphan, attachment())
+        .await
+        .unwrap();
+    fixture
+        .database
+        .execute(&format!(
+            "DELETE FROM attachment_references WHERE blob_id = '{}'; \
+             UPDATE attachment_blobs SET quarantine_until = 0 WHERE id = '{}'",
+            orphan_blob.id, orphan_blob.id
+        ))
+        .await
+        .unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(fixture.store.path(&orphan_blob.storage_key).unwrap())
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH)
+        .unwrap();
+
+    let conflict = attachment();
+    let other = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "other.txt", &b"other bytes"[..])
+        .await
+        .unwrap();
+    fixture
+        .service
+        .finalize(&other, conflict.clone())
+        .await
+        .unwrap();
+    let duplicate = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "duplicate.txt", &b"same bytes"[..])
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        fixture.service.finalize(&duplicate, conflict).await,
+        Err(UploadError::Database(_))
+    ));
+    let now = fixture.database.database_now().await.unwrap().as_millis();
+    let result = fixture
+        .service
+        .reconcile(now + 60 * 60 * 1000)
+        .await
+        .unwrap();
+    assert_eq!(result.deleted_blobs, 0);
+    assert!(
+        fixture
+            .store
+            .path(&orphan_blob.storage_key)
+            .unwrap()
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn expired_pending_upload_cannot_be_finalized() {
+    let fixture = Fixture::new().await;
+    let staged = fixture
+        .service
+        .stage(Id::new_v7(), Id::new_v7(), "expired.bin", &b"expired"[..])
+        .await
+        .unwrap();
+    fixture
+        .database
+        .execute(&format!(
+            "UPDATE pending_uploads SET expires_at = 0 WHERE id = '{}'",
+            staged.id
+        ))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        fixture.service.finalize(&staged, attachment()).await,
+        Err(UploadError::InvalidState)
+    ));
+    assert!(only_temporary_path(&fixture.store).await.exists());
+    assert!(fixture.store.blobs().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -348,22 +521,12 @@ async fn reconciliation_waits_24_hours_and_queries_references_before_deleting() 
         )
         .await
         .unwrap();
-    let blob = fixture.service.finalize(&staged).await.unwrap();
+    let blob = fixture
+        .service
+        .finalize(&staged, attachment())
+        .await
+        .unwrap();
     let now = fixture.database.database_now().await.unwrap().as_millis();
-
-    fixture
-        .database
-        .execute("CREATE TABLE attachments (id TEXT PRIMARY KEY, storage_key TEXT NOT NULL);")
-        .await
-        .unwrap();
-    fixture
-        .database
-        .execute(&format!(
-            "INSERT INTO attachments (id, storage_key) VALUES ('attachment-1', '{}')",
-            blob.storage_key
-        ))
-        .await
-        .unwrap();
 
     let before = fixture
         .service
@@ -382,7 +545,7 @@ async fn reconciliation_waits_24_hours_and_queries_references_before_deleting() 
 
     fixture
         .database
-        .execute("DELETE FROM attachments")
+        .execute("DELETE FROM attachment_references")
         .await
         .unwrap();
     let deleted = fixture
@@ -395,6 +558,34 @@ async fn reconciliation_waits_24_hours_and_queries_references_before_deleting() 
 }
 
 #[tokio::test]
+async fn reconciliation_fails_closed_when_the_canonical_reference_schema_is_missing() {
+    let fixture = Fixture::new().await;
+    let staged = fixture
+        .service
+        .stage(Id::new_v7(), Id::new_v7(), "kept.bin", &b"kept"[..])
+        .await
+        .unwrap();
+    let blob = fixture
+        .service
+        .finalize(&staged, attachment())
+        .await
+        .unwrap();
+    fixture
+        .database
+        .execute(
+            "DROP TABLE attachment_references; UPDATE attachment_blobs SET quarantine_until = 0",
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        fixture.service.reconcile(i64::MAX).await,
+        Err(UploadError::Database(_))
+    ));
+    assert!(fixture.store.path(&blob.storage_key).unwrap().exists());
+}
+
+#[tokio::test]
 async fn reconciliation_expires_pending_uploads_and_removes_their_temporary_files() {
     let fixture = Fixture::new().await;
     let staged = fixture
@@ -402,6 +593,7 @@ async fn reconciliation_expires_pending_uploads_and_removes_their_temporary_file
         .stage(Id::new_v7(), Id::new_v7(), "stale.txt", &b"stale"[..])
         .await
         .unwrap();
+    let temporary_path = only_temporary_path(&fixture.store).await;
     fixture
         .database
         .execute(&format!(
@@ -413,7 +605,7 @@ async fn reconciliation_expires_pending_uploads_and_removes_their_temporary_file
 
     let result = fixture.service.reconcile(1).await.unwrap();
     assert_eq!(result.expired_uploads, 1);
-    assert!(!staged.temporary_path.exists());
+    assert!(!temporary_path.exists());
     assert_eq!(
         fixture
             .database
@@ -442,6 +634,7 @@ async fn reconciliation_removes_aged_files_that_have_no_database_record() {
         )
         .await
         .unwrap();
+    let temporary_path = only_temporary_path(&fixture.store).await;
     fixture
         .database
         .execute(&format!(
@@ -479,7 +672,7 @@ async fn reconciliation_removes_aged_files_that_have_no_database_record() {
         .await
         .unwrap();
     assert_eq!(result.deleted_untracked_files, 1);
-    assert!(!temporary.temporary_path.exists());
+    assert!(!temporary_path.exists());
     assert!(fixture.store.blobs().await.unwrap().is_empty());
 }
 
@@ -539,7 +732,7 @@ async fn reconciliation_rechecks_an_orphan_that_is_finalized_after_the_file_scan
     let reconcile_task =
         tokio::spawn(async move { reconciler.reconcile(now + 25 * 60 * 60 * 1000).await });
     listed.notified().await;
-    let blob = finalizer.finalize(&fresh).await.unwrap();
+    let blob = finalizer.finalize(&fresh, attachment()).await.unwrap();
     resume.notify_one();
     reconcile_task.await.unwrap().unwrap();
 
@@ -667,7 +860,7 @@ struct PausingBlobStore {
 }
 
 impl BlobStore for PausingBlobStore {
-    fn create_temporary(&self) -> BlobFuture<'_, std::path::PathBuf> {
+    fn create_temporary(&self) -> Result<std::path::PathBuf, orbit_platform::BlobStoreError> {
         BlobStore::create_temporary(&self.inner)
     }
 
@@ -709,7 +902,7 @@ struct PausingDeleteStore {
 }
 
 impl BlobStore for PausingDeleteStore {
-    fn create_temporary(&self) -> BlobFuture<'_, std::path::PathBuf> {
+    fn create_temporary(&self) -> Result<std::path::PathBuf, orbit_platform::BlobStoreError> {
         BlobStore::create_temporary(&self.inner)
     }
 
