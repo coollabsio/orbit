@@ -835,6 +835,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Job types with longer leases retain the 30-second heartbeat unless they explicitly choose a shorter safe interval.
 - Metrics distinguish handler failures, lease expirations, stale claimant updates, and shutdown cancellations.
 
+
+### D-043: Return RFC 9457 Problem Details errors
+
+**Decision:** API failures use RFC 9457 Problem Details with content type `application/problem+json`. Every response includes `type`, `title`, `status`, a stable machine-readable `code`, a safe `detail`, `instance`, and `request_id`. Validation failures may add an `errors` object keyed by field path. Conflict failures add the current version and safe refresh metadata.
+
+**Rationale:** A standard envelope gives generated clients and frontend forms one error path while separating stable program logic from user-facing text and private diagnostic detail.
+
+**Alternatives considered:**
+
+- **Endpoint-specific error shapes:** Rejected because clients would need custom parsing for every feature.
+- **Expose internal error strings:** Rejected because implementation and sensitive details could leak and messages would become accidental API contracts.
+
+**Consequences:**
+
+- Clients branch on HTTP status and stable `code`, never on `title` or `detail` text.
+- The `errors` object appears only when field-level validation information is useful. Each value is an ordered array of safe messages.
+- Authentication and recovery errors do not reveal whether an email address exists.
+- Unhandled failures return a generic problem and request ID. Structured logs store the underlying error under that request ID.
+- Problem `type` identifiers remain stable documentation URLs even if the public documentation is initially served by Orbit itself.
+- OpenAPI documents each declared problem code and shared problem schema.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
