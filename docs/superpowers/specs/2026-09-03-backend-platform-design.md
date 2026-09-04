@@ -942,6 +942,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Temporary and final storage stay on the same filesystem where possible so finalization can use an atomic rename.
 - Configuration validation rejects values that exceed platform-safe integer and disk-handling bounds.
 
+
+### D-048: Deduplicate attachment blobs within each workspace
+
+**Decision:** Compute SHA-256 while streaming each upload and deduplicate matching bytes only within the same workspace. Each attachment keeps its own metadata row, while matching rows reference one workspace-scoped blob. Cleanup determines liveness by querying references rather than trusting a mutable reference counter.
+
+**Rationale:** Workspace-local deduplication saves disk space without creating cross-tenant existence signals or coupling deletion correctness to a counter that can drift from actual metadata.
+
+**Alternatives considered:**
+
+- **No deduplication:** Rejected because repeated task and comment attachments would store identical bytes unnecessarily.
+- **Installation-wide deduplication:** Rejected because timing and storage behavior could reveal that another workspace holds matching content.
+- **Delete from a stored reference count:** Rejected because failed or reordered mutations can make counters incorrect.
+
+**Consequences:**
+
+- Blob identity includes `workspace_id`, SHA-256 digest, and byte size. A digest match with a different size is never treated as the same object.
+- The digest is an integrity and deduplication key, not an authorization credential.
+- Downloads authorize the attachment metadata and its owning resource before resolving the blob.
+- A cleanup job removes a blob only after a current database query finds no live or retained attachment references.
+- Newly finalized but unreferenced blobs remain quarantined for 24 hours before cleanup so interrupted transactions can be diagnosed or recovered.
+- Backup manifests include blob checksums and verification checks referenced content against them.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
