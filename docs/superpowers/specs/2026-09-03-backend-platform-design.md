@@ -591,6 +591,29 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Password values must not appear in logs, validation telemetry, panic output, or generated API examples.
 - Reset and initial-setup forms enforce the same policy as password changes.
 
+
+### D-032: Throttle failed logins without permanent lockout
+
+**Decision:** Apply progressive failed-login throttling to both the normalized email address and the effective client IP address. Return the same authentication error whether or not an account exists. Do not permanently lock accounts because of failed logins.
+
+**Rationale:** Two independent limits slow targeted and broad password guessing. Avoiding permanent lockout prevents an attacker from indefinitely denying access to a known user.
+
+**Alternatives considered:**
+
+- **Permanent or administrator-cleared lockout:** Rejected because it creates an account-denial mechanism.
+- **IP-only throttling:** Rejected because distributed attacks bypass it and shared networks can penalize unrelated users.
+- **Account-only throttling:** Rejected because it lets an attacker repeatedly target one address and ignores broad scans.
+
+**Consequences:**
+
+- The email-specific backoff starts after the fifth consecutive failure. It begins at 5 seconds, doubles on each later failure, and caps at 15 minutes.
+- The IP-specific bucket permits 50 failed attempts in a rolling 15-minute window, then returns `429 Too Many Requests` until the window allows another attempt.
+- Throttled responses include `Retry-After`; handlers do not hold connections open merely to sleep.
+- Successful authentication clears the email-specific failure state but does not clear the IP bucket.
+- Failure state expires automatically and may remain in process memory, so a server restart resets it. This is acceptable under the single-instance deployment model.
+- Client IP comes from the direct peer unless the request arrived through an explicitly configured trusted proxy. Forwarded headers from untrusted peers are ignored.
+- Security logs record throttling events without recording passwords, session tokens, or full recovery tokens.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
