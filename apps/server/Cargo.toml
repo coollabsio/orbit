@@ -9,5 +9,9 @@ name = "orbit"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+fs2 = "0.4"
 orbit-domain = { path = "../../crates/orbit" }
 orbit-platform = { path = "../../crates/platform" }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -1,34 +1,21 @@
-#[derive(Debug, PartialEq, Eq)]
-enum Command {
-    Help,
-}
+mod cli;
 
-fn parse_command(arguments: impl Iterator<Item = String>) -> Command {
-    let _ = arguments.skip(1);
+use std::process::ExitCode;
 
-    Command::Help
-}
+use clap::Parser;
 
-fn main() {
-    match parse_command(std::env::args()) {
-        Command::Help => print_help(),
-    }
-}
-
-fn print_help() {
-    println!(
-        "Orbit command-line interface\n\nUsage: orbit [OPTIONS]\n\nOptions:\n  -h, --help  Print help"
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Command, parse_command};
-
-    #[test]
-    fn recognizes_the_help_flag() {
-        let command = parse_command(["orbit", "--help"].into_iter().map(str::to_owned));
-
-        assert_eq!(command, Command::Help);
+#[tokio::main]
+async fn main() -> ExitCode {
+    match cli::run(cli::Cli::parse()).await {
+        Ok(output) => {
+            if !output.is_empty() {
+                println!("{output}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{}", cli::failure_message(&error.to_string()));
+            ExitCode::FAILURE
+        }
     }
 }
