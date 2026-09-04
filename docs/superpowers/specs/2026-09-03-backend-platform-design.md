@@ -636,6 +636,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Sign-out and revocation expire the cookie and invalidate the server-side session record.
 - Development mode must be visibly logged and cannot be enabled accidentally by a production default.
 
+
+### D-034: Separate global suspension from workspace removal
+
+**Decision:** Installation administrators may suspend a global account. A workspace Owner or Admin may remove a membership within that workspace, subject to Owner protections. These are separate operations with different scope.
+
+**Rationale:** A global identity can belong to several workspaces. Workspace administrators should control their own membership without gaining authority over the user's account or access elsewhere.
+
+**Alternatives considered:**
+
+- **Let workspace administrators suspend global accounts:** Rejected because it grants one workspace authority over unrelated workspaces.
+- **Treat membership removal as account deletion:** Rejected because it breaks the global identity model.
+
+**Consequences:**
+
+- Global suspension immediately invalidates all sessions and blocks authentication and invitation acceptance across the installation.
+- Reinstating a global account restores login eligibility but does not recreate memberships removed separately.
+- Membership removal immediately revokes access to that workspace but leaves other memberships and sessions valid. Active sessions fail authorization on their next workspace-scoped request.
+- Admins cannot remove or change the Owner. The Owner must transfer ownership before leaving a workspace.
+- Neither suspension nor membership removal deletes tasks, comments, attachments, audit records, or other authored content.
+- Security audit records identify the actor, target, scope, timestamp, and action without copying sensitive credentials.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
