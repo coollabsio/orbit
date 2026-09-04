@@ -547,7 +547,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Expiry, revocation, replacement, and successful acceptance make a token unusable.
 - Replacement happens atomically with invalidation so two tokens do not remain active after a resend.
 - Owners and Admins can list pending invitations and see their status without seeing token values.
-- Acceptance behavior for new and existing global accounts remains to be decided.
+- Acceptance behavior follows D-030.
+
+### D-030: Support SMTP and manually shared workspace invitations
+
+**Decision:** Orbit supports both SMTP-delivered invitations and invitation links copied by an Owner or Admin. A new recipient creates a global account with the invited email address. An existing recipient must sign in to the global account whose normalized email matches the invitation before accepting it.
+
+**Rationale:** Manual links keep workspace enrollment usable in installations without SMTP. Matching existing accounts by authenticated email prevents an invitation intended for one identity from being attached to another account.
+
+**Alternatives considered:**
+
+- **Require SMTP for invitations:** Rejected because SMTP is optional for self-hosted installations.
+- **Allow any signed-in user holding the token to accept:** Rejected because forwarded or leaked links could grant membership to the wrong global identity.
+
+**Consequences:**
+
+- SMTP delivery proves control of the invited address and marks it verified when the invitation is accepted.
+- A manually shared link grants the workspace membership but does not mark the global email address verified, because the link may have been forwarded through an unrelated channel.
+- Manual and SMTP invitations use the same seven-day, single-use token lifecycle.
+- A signed-in account with a different normalized email cannot accept the invitation.
+- Acceptance creates the membership and consumes the invitation in one transaction.
+- Accepting an invitation for an existing membership returns an idempotent success without creating a duplicate membership.
+- Email normalization rules must be deterministic and must not apply provider-specific transformations such as removing dots or plus tags.
 
 ## Current architectural direction, not yet accepted
 
@@ -562,21 +583,20 @@ These choices require explicit evaluation before implementation.
 
 The accepted decisions above settle the first milestone, tenancy model, initial roles, core identifiers and timestamps, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. Complete workspace invitation acceptance semantics
-2. Detailed session, login-throttling, and account-security behavior
-3. Soft-delete retention and restoration behavior
-4. SQLite migrations, backup, restore, and integrity checks
-5. Durable job scheduling, retry, and dead-letter semantics
-6. API validation, errors, pagination, and compatibility policy
-7. File limits, validation, cleanup, and download behavior
-8. Realtime delivery and reconnection
-9. Mail responsibilities beyond transactional SMTP
-10. Platform and Orbit module boundaries
-11. Configuration, secrets, deployment, and observability
-12. Security controls and audit records
-13. Testing and local developer experience
-14. Detailed incremental frontend migration
+1. Detailed session, login-throttling, and account-security behavior
+2. Soft-delete retention and restoration behavior
+3. SQLite migrations, backup, restore, and integrity checks
+4. Durable job scheduling, retry, and dead-letter semantics
+5. API validation, errors, pagination, and compatibility policy
+6. File limits, validation, cleanup, and download behavior
+7. Realtime delivery and reconnection
+8. Mail responsibilities beyond transactional SMTP
+9. Platform and Orbit module boundaries
+10. Configuration, secrets, deployment, and observability
+11. Security controls and audit records
+12. Testing and local developer experience
+13. Detailed incremental frontend migration
 
-## Next open decision: Workspace invitation lifecycle
+## Next open decision: Account security
 
-The invitation design must still define acceptance by new and existing global users and whether successful acceptance establishes verified ownership of the invited email address.
+The authentication design must still define password policy, login throttling, session-cookie deployment behavior, and account lockout or suspension semantics.
