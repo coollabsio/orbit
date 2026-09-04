@@ -176,22 +176,39 @@ impl TaskRepository {
         limit: usize,
     ) -> Result<Page<ProjectRecord>, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query(
+        let fingerprint = format!("projects:{workspace_id}");
+        let after = cursor_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at \
-             FROM projects WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY name, id",
-        )
-        .bind(workspace_id.to_string())
-        .fetch_all(self.database.pool())
-        .await?;
-        paginate(
-            rows.into_iter()
-                .map(project_from_row)
-                .collect::<Result<_, _>>()?,
-            cursor,
-            &format!("projects:{workspace_id}"),
-            limit,
-            |project| vec![project.name.clone(), project.id.to_string()],
-        )
+             FROM projects WHERE workspace_id = ",
+        );
+        query
+            .push_bind(workspace_id.to_string())
+            .push(" AND deleted_at IS NULL");
+        if let Some((name, id)) = after {
+            query
+                .push(" AND (name > ")
+                .push_bind(name.clone())
+                .push(" OR (name = ")
+                .push_bind(name)
+                .push(" AND id > ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY name, id LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let items = query
+            .build()
+            .fetch_all(self.database.pool())
+            .await?
+            .into_iter()
+            .map(project_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        finish_page(items, limit, &fingerprint, |project| {
+            vec![project.name.clone(), project.id.to_string()]
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -429,31 +446,46 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<Page<ProjectRecord>, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query(
+        let fingerprint = format!("project-trash:{workspace_id}");
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, version, deleted_at, created_at, updated_at \
-             FROM projects WHERE workspace_id = ? AND deleted_at > ? ORDER BY deleted_at DESC, id DESC",
-        )
-        .bind(workspace_id.to_string())
-        .bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS))
-        .fetch_all(self.database.pool())
-        .await?;
-        paginate(
-            rows.into_iter()
-                .map(project_from_row)
-                .collect::<Result<_, _>>()?,
-            cursor,
-            &format!("project-trash:{workspace_id}"),
-            limit,
-            |p| {
-                vec![
-                    format!(
-                        "{:020}",
-                        i64::MAX - p.deleted_at.map_or(0, TimestampMillis::as_millis)
-                    ),
-                    reverse_id(p.id),
-                ]
-            },
-        )
+             FROM projects WHERE workspace_id = ",
+        );
+        query
+            .push_bind(workspace_id.to_string())
+            .push(" AND deleted_at > ")
+            .push_bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS));
+        if let Some((deleted_at, id)) = after {
+            query
+                .push(" AND (deleted_at < ")
+                .push_bind(deleted_at)
+                .push(" OR (deleted_at = ")
+                .push_bind(deleted_at)
+                .push(" AND id < ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY deleted_at DESC, id DESC LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let items = query
+            .build()
+            .fetch_all(self.database.pool())
+            .await?
+            .into_iter()
+            .map(project_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        finish_page(items, limit, &fingerprint, |project| {
+            vec![
+                project
+                    .deleted_at
+                    .map_or(0, TimestampMillis::as_millis)
+                    .to_string(),
+                project.id.to_string(),
+            ]
+        })
     }
 
     pub async fn statuses(
@@ -465,23 +497,40 @@ impl TaskRepository {
         limit: usize,
     ) -> Result<Page<StatusRecord>, TaskError> {
         require_project(self.database.pool(), workspace_id, project_id, actor_id).await?;
-        let rows = sqlx::query(
+        let fingerprint = format!("statuses:{project_id}");
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT id, workspace_id, project_id, name, description, color, category, position, version \
-             FROM task_statuses WHERE workspace_id = ? AND project_id = ? ORDER BY position, id",
-        )
-        .bind(workspace_id.to_string())
-        .bind(project_id.to_string())
-        .fetch_all(self.database.pool())
-        .await?;
-        paginate(
-            rows.into_iter()
-                .map(status_from_row)
-                .collect::<Result<_, _>>()?,
-            cursor,
-            &format!("statuses:{project_id}"),
-            limit,
-            |s| vec![sortable_i64(s.position), s.id.to_string()],
-        )
+             FROM task_statuses WHERE workspace_id = ",
+        );
+        query
+            .push_bind(workspace_id.to_string())
+            .push(" AND project_id = ")
+            .push_bind(project_id.to_string());
+        if let Some((position, id)) = after {
+            query
+                .push(" AND (position > ")
+                .push_bind(position)
+                .push(" OR (position = ")
+                .push_bind(position)
+                .push(" AND id > ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY position, id LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let items = query
+            .build()
+            .fetch_all(self.database.pool())
+            .await?
+            .into_iter()
+            .map(status_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        finish_page(items, limit, &fingerprint, |status| {
+            vec![status.position.to_string(), status.id.to_string()]
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -537,7 +586,7 @@ impl TaskRepository {
         status_id: Id,
         actor_id: Id,
         name: String,
-        description: String,
+        description: Option<String>,
         color: String,
         category: String,
         position: i64,
@@ -549,6 +598,7 @@ impl TaskRepository {
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
+        let description = description.unwrap_or_else(|| current.description.clone());
         sqlx::query("UPDATE task_statuses SET name = ?, description = ?, color = ?, category = ?, position = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND project_id = ? AND version = ?")
             .bind(&name).bind(&description).bind(&color).bind(&category).bind(position).bind(now.as_millis()).bind(status_id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
         record_mutation(
@@ -660,16 +710,36 @@ impl TaskRepository {
         limit: usize,
     ) -> Result<Page<LabelRecord>, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query("SELECT id, workspace_id, name, color, version FROM labels WHERE workspace_id = ? ORDER BY name, id").bind(workspace_id.to_string()).fetch_all(self.database.pool()).await?;
-        paginate(
-            rows.into_iter()
-                .map(label_from_row)
-                .collect::<Result<_, _>>()?,
-            cursor,
-            &format!("labels:{workspace_id}"),
-            limit,
-            |l| vec![l.name.clone(), l.id.to_string()],
-        )
+        let fingerprint = format!("labels:{workspace_id}");
+        let after = cursor_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT id, workspace_id, name, color, version FROM labels WHERE workspace_id = ",
+        );
+        query.push_bind(workspace_id.to_string());
+        if let Some((name, id)) = after {
+            query
+                .push(" AND (name > ")
+                .push_bind(name.clone())
+                .push(" OR (name = ")
+                .push_bind(name)
+                .push(" AND id > ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY name, id LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let items = query
+            .build()
+            .fetch_all(self.database.pool())
+            .await?
+            .into_iter()
+            .map(label_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        finish_page(items, limit, &fingerprint, |label| {
+            vec![label.name.clone(), label.id.to_string()]
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -802,7 +872,7 @@ impl TaskRepository {
     ) -> Result<Page<TaskRecord>, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let fingerprint = task_fingerprint(workspace_id, filter);
-        let after = validated_cursor(cursor, &fingerprint)?;
+        let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
              tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.version, \
@@ -829,7 +899,7 @@ impl TaskRepository {
         }
         if let Some(assignee_id) = filter.assignee_id {
             query
-                .push(" AND EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id AND task_assignees.user_id = ")
+                .push(" AND EXISTS (SELECT 1 FROM task_assignees JOIN memberships ON memberships.id = task_assignees.membership_id JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id AND memberships.workspace_id = tasks.workspace_id AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL AND task_assignees.user_id = ")
                 .push_bind(assignee_id.to_string())
                 .push(")");
         }
@@ -848,11 +918,7 @@ impl TaskRepository {
                 .push_bind(pattern)
                 .push(" ESCAPE '\\')");
         }
-        if let Some(after) = after {
-            let [raw_value, raw_id] = after.as_slice() else {
-                return Err(TaskError::InvalidCursor);
-            };
-            let id: Id = raw_id.parse().map_err(|_| TaskError::InvalidCursor)?;
+        if let Some((raw_value, id)) = after {
             let operator = if filter.order == SortOrder::Asc {
                 ">"
             } else {
@@ -865,9 +931,9 @@ impl TaskRepository {
                 .push(" ")
                 .push(operator)
                 .push(" ");
-            push_cursor_value(&mut query, &filter.sort, raw_value)?;
+            push_cursor_value(&mut query, &filter.sort, &raw_value)?;
             query.push(" OR (").push(column).push(" = ");
-            push_cursor_value(&mut query, &filter.sort, raw_value)?;
+            push_cursor_value(&mut query, &filter.sort, &raw_value)?;
             query
                 .push(" AND tasks.id ")
                 .push(operator)
@@ -1192,32 +1258,44 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<Page<TaskRecord>, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query(
+        let fingerprint = format!("task-trash:{workspace_id}");
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
-             FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ? AND tasks.deleted_at > ? AND projects.deleted_at IS NULL ORDER BY tasks.deleted_at DESC, tasks.id DESC",
-        )
-        .bind(workspace_id.to_string())
-        .bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS))
-        .fetch_all(self.database.pool()).await?;
-        let mut tasks = Vec::new();
-        for row in rows {
-            tasks.push(task_from_row(self.database.pool(), row).await?);
+             FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
+        );
+        query
+            .push_bind(workspace_id.to_string())
+            .push(" AND tasks.deleted_at > ")
+            .push_bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS))
+            .push(" AND projects.deleted_at IS NULL");
+        if let Some((deleted_at, id)) = after {
+            query
+                .push(" AND (tasks.deleted_at < ")
+                .push_bind(deleted_at)
+                .push(" OR (tasks.deleted_at = ")
+                .push_bind(deleted_at)
+                .push(" AND tasks.id < ")
+                .push_bind(id.to_string())
+                .push("))");
         }
-        paginate(
-            tasks,
-            cursor,
-            &format!("task-trash:{workspace_id}"),
-            limit,
-            |task| {
-                vec![
-                    format!(
-                        "{:020}",
-                        i64::MAX - task.deleted_at.map_or(0, TimestampMillis::as_millis)
-                    ),
-                    reverse_id(task.id),
-                ]
-            },
-        )
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY tasks.deleted_at DESC, tasks.id DESC LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let rows = query.build().fetch_all(self.database.pool()).await?;
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            items.push(task_from_row(self.database.pool(), row).await?);
+        }
+        finish_page(items, limit, &fingerprint, |task| {
+            vec![
+                task.deleted_at
+                    .map_or(0, TimestampMillis::as_millis)
+                    .to_string(),
+                task.id.to_string(),
+            ]
+        })
     }
 
     pub async fn comments(
@@ -1229,22 +1307,43 @@ impl TaskRepository {
         limit: usize,
     ) -> Result<Page<CommentRecord>, TaskError> {
         self.get_task(workspace_id, task_id, actor_id).await?;
-        let rows = sqlx::query("SELECT id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at FROM task_comments WHERE workspace_id = ? AND task_id = ? ORDER BY created_at, id")
-            .bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_all(self.database.pool()).await?;
-        paginate(
-            rows.into_iter()
-                .map(comment_from_row)
-                .collect::<Result<_, _>>()?,
-            cursor,
-            &format!("comments:{task_id}"),
-            limit,
-            |comment| {
-                vec![
-                    format!("{:020}", comment.created_at.as_millis()),
-                    comment.id.to_string(),
-                ]
-            },
-        )
+        let fingerprint = format!("comments:{task_id}");
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at \
+             FROM task_comments WHERE workspace_id = ",
+        );
+        query
+            .push_bind(workspace_id.to_string())
+            .push(" AND task_id = ")
+            .push_bind(task_id.to_string());
+        if let Some((created_at, id)) = after {
+            query
+                .push(" AND (created_at > ")
+                .push_bind(created_at)
+                .push(" OR (created_at = ")
+                .push_bind(created_at)
+                .push(" AND id > ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY created_at, id LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let items = query
+            .build()
+            .fetch_all(self.database.pool())
+            .await?
+            .into_iter()
+            .map(comment_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        finish_page(items, limit, &fingerprint, |comment| {
+            vec![
+                comment.created_at.as_millis().to_string(),
+                comment.id.to_string(),
+            ]
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1429,38 +1528,30 @@ async fn update_task_in_tx(
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct Cursor {
     version: u8,
     fingerprint: String,
     key: Vec<String>,
 }
 
-fn paginate<T>(
-    items: Vec<T>,
-    cursor: Option<&str>,
+fn finish_page<T>(
+    mut items: Vec<T>,
+    limit: usize,
     fingerprint: &str,
-    requested_limit: usize,
     key: impl Fn(&T) -> Vec<String>,
 ) -> Result<Page<T>, TaskError> {
-    let after = validated_cursor(cursor, fingerprint)?;
-    let mut remaining = items
-        .into_iter()
-        .filter(|item| after.as_ref().is_none_or(|after| key(item) > *after));
-    let limit = requested_limit.clamp(1, 100);
-    let mut page = remaining.by_ref().take(limit + 1).collect::<Vec<_>>();
-    let has_more = page.len() > limit;
-    page.truncate(limit);
+    let has_more = items.len() > limit;
+    items.truncate(limit);
     let next_cursor = if has_more {
-        page.last()
+        items
+            .last()
             .map(|last| encode_cursor(fingerprint, key(last)))
             .transpose()?
     } else {
         None
     };
-    Ok(Page {
-        items: page,
-        next_cursor,
-    })
+    Ok(Page { items, next_cursor })
 }
 
 fn encode_cursor(fingerprint: &str, key: Vec<String>) -> Result<String, TaskError> {
@@ -1502,6 +1593,28 @@ fn validated_cursor(
         .transpose()
 }
 
+fn cursor_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(String, Id)>, TaskError> {
+    let Some(key) = validated_cursor(value, fingerprint)? else {
+        return Ok(None);
+    };
+    let [value, raw_id] = key.as_slice() else {
+        return Err(TaskError::InvalidCursor);
+    };
+    let id = raw_id.parse().map_err(|_| TaskError::InvalidCursor)?;
+    Ok(Some((value.clone(), id)))
+}
+
+fn cursor_i64_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(i64, Id)>, TaskError> {
+    cursor_pair(value, fingerprint)?
+        .map(|(value, id)| {
+            value
+                .parse()
+                .map(|value| (value, id))
+                .map_err(|_| TaskError::InvalidCursor)
+        })
+        .transpose()
+}
+
 fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
     format!(
         "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:r={}:q={}:sort={:?}:order={:?}",
@@ -1532,24 +1645,6 @@ fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
         TaskSort::UpdatedAt => task.updated_at.as_millis().to_string(),
     };
     vec![primary, task.id.to_string()]
-}
-
-fn sortable_i64(value: i64) -> String {
-    format!("{:016x}", (value as u64) ^ (1_u64 << 63))
-}
-
-fn hex_bytes(value: &[u8]) -> String {
-    value.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn reverse_id(id: Id) -> String {
-    hex_bytes(
-        id.to_string()
-            .bytes()
-            .map(|byte| u8::MAX - byte)
-            .collect::<Vec<_>>()
-            .as_slice(),
-    )
 }
 
 fn task_sort_column(sort: &TaskSort) -> &'static str {
@@ -1974,7 +2069,13 @@ async fn task_from_row(
 ) -> Result<TaskRecord, TaskError> {
     let id = parse_id(row.get("id"))?;
     let assignee_ids = sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM task_assignees WHERE task_id = ? ORDER BY user_id",
+        "SELECT task_assignees.user_id FROM task_assignees \
+         JOIN memberships ON memberships.id = task_assignees.membership_id \
+         JOIN users ON users.id = task_assignees.user_id \
+         JOIN tasks ON tasks.id = task_assignees.task_id \
+         WHERE task_assignees.task_id = ? AND memberships.workspace_id = tasks.workspace_id \
+         AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL \
+         ORDER BY task_assignees.user_id",
     )
     .bind(id.to_string())
     .fetch_all(pool)
@@ -2000,7 +2101,13 @@ async fn task_from_row_tx(
 ) -> Result<TaskRecord, TaskError> {
     let id = parse_id(row.get("id"))?;
     let assignee_ids = sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM task_assignees WHERE task_id = ? ORDER BY user_id",
+        "SELECT task_assignees.user_id FROM task_assignees \
+         JOIN memberships ON memberships.id = task_assignees.membership_id \
+         JOIN users ON users.id = task_assignees.user_id \
+         JOIN tasks ON tasks.id = task_assignees.task_id \
+         WHERE task_assignees.task_id = ? AND memberships.workspace_id = tasks.workspace_id \
+         AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL \
+         ORDER BY task_assignees.user_id",
     )
     .bind(id.to_string())
     .fetch_all(&mut **tx)

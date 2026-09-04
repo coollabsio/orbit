@@ -986,6 +986,535 @@ async fn comments_are_scoped_versioned_and_hard_deleted() {
     assert_eq!(exists, 0);
 }
 
+#[tokio::test]
+async fn parent_side_scope_changes_are_rejected_by_the_database() {
+    let fixture = Fixture::new().await;
+    let foreign_workspace = create_workspace(&fixture, "Foreign scope").await;
+    let foreign_project: String = sqlx::query_scalar(
+        "SELECT id FROM projects WHERE workspace_id = ? AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(&foreign_workspace)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    let foreign_status: String = sqlx::query_scalar(
+        "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+    )
+    .bind(&foreign_project)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    let (member_id, _) = add_member(&fixture, "scope-member@example.com").await;
+    let membership_id: String =
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = ? AND user_id = ?")
+            .bind(&fixture.workspace_id)
+            .bind(member_id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    let label = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/labels", fixture.workspace_id),
+                &fixture.owner_cookie,
+                json!({"name":"scope", "color":"#112233"}),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let task = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+                &fixture.owner_cookie,
+                json!({
+                    "project_id": fixture.project_id,
+                    "status_id": fixture.status_id,
+                    "title": "Scoped",
+                    "assignee_ids": [member_id],
+                    "label_ids": [label["id"]]
+                }),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let second_task = fixture.create_task("Second parent").await;
+    let parent = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks/{}/comments",
+                    fixture.workspace_id,
+                    task["id"].as_str().unwrap()
+                ),
+                &fixture.owner_cookie,
+                json!({"body":"parent"}),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}/comments",
+                fixture.workspace_id,
+                task["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!({"body":"reply", "parent_id":parent["id"]}),
+        ))
+        .await
+        .unwrap();
+
+    for (sql, first, second) in [
+        (
+            "UPDATE projects SET workspace_id = ? WHERE id = ?",
+            foreign_workspace.as_str(),
+            fixture.project_id.as_str(),
+        ),
+        (
+            "UPDATE task_statuses SET workspace_id = ?, project_id = ? WHERE id = ?",
+            foreign_workspace.as_str(),
+            foreign_project.as_str(),
+        ),
+    ] {
+        let result = if sql.contains("task_statuses") {
+            sqlx::query(sql)
+                .bind(first)
+                .bind(second)
+                .bind(&fixture.status_id)
+                .execute(fixture.database.pool())
+                .await
+        } else {
+            sqlx::query(sql)
+                .bind(first)
+                .bind(second)
+                .execute(fixture.database.pool())
+                .await
+        };
+        assert!(result.is_err(), "parent-side scope update must be rejected");
+    }
+    assert!(
+        sqlx::query(
+            "UPDATE tasks SET workspace_id = ?, project_id = ?, status_id = ? WHERE id = ?"
+        )
+        .bind(&foreign_workspace)
+        .bind(&foreign_project)
+        .bind(&foreign_status)
+        .bind(task["id"].as_str().unwrap())
+        .execute(fixture.database.pool())
+        .await
+        .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE labels SET workspace_id = ? WHERE id = ?")
+            .bind(&foreign_workspace)
+            .bind(label["id"].as_str().unwrap())
+            .execute(fixture.database.pool())
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE memberships SET workspace_id = ? WHERE id = ?")
+            .bind(&foreign_workspace)
+            .bind(&membership_id)
+            .execute(fixture.database.pool())
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE task_comments SET task_id = ? WHERE id = ?")
+            .bind(second_task["id"].as_str().unwrap())
+            .bind(parent["id"].as_str().unwrap())
+            .execute(fixture.database.pool())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn suspended_assignees_are_removed_from_reads_and_filters() {
+    let fixture = Fixture::new().await;
+    let (member_id, _) = add_member(&fixture, "suspended-assignee@example.com").await;
+    let task = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+                &fixture.owner_cookie,
+                json!({
+                    "project_id": fixture.project_id,
+                    "status_id": fixture.status_id,
+                    "title": "Assigned before suspension",
+                    "assignee_ids": [member_id]
+                }),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    sqlx::query("UPDATE users SET suspended_at = ? WHERE id = ?")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(member_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = ?")
+        .bind(task["id"].as_str().unwrap())
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(stored, 0);
+
+    sqlx::query("UPDATE users SET suspended_at = NULL WHERE id = ?")
+        .bind(member_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let membership_id: String =
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = ? AND user_id = ?")
+            .bind(&fixture.workspace_id)
+            .bind(member_id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    sqlx::query("INSERT INTO task_assignees (task_id, membership_id, user_id) VALUES (?, ?, ?)")
+        .bind(task["id"].as_str().unwrap())
+        .bind(membership_id)
+        .bind(member_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    sqlx::query("DROP TRIGGER users_remove_task_assignments_on_suspend")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE users SET suspended_at = ? WHERE id = ?")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(member_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let legacy_stored: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = ?")
+            .bind(task["id"].as_str().unwrap())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        legacy_stored, 1,
+        "simulate a pre-migration stale assignment"
+    );
+
+    let read = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks/{}",
+                    fixture.workspace_id,
+                    task["id"].as_str().unwrap()
+                ),
+                &fixture.owner_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(read["assignee_ids"], json!([]));
+    let filtered = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks?assignee_id={member_id}",
+                    fixture.workspace_id
+                ),
+                &fixture.owner_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(filtered["items"], json!([]));
+}
+
+#[tokio::test]
+async fn patch_preserves_status_description_and_text_limits_preserve_source() {
+    let fixture = Fixture::new().await;
+    let status_uri = format!(
+        "/api/v1/workspaces/{}/projects/{}/statuses",
+        fixture.workspace_id, fixture.project_id
+    );
+    let status = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &status_uri,
+                &fixture.owner_cookie,
+                json!({
+                    "name":"Review",
+                    "description":"  keep status source  ",
+                    "color":"#445566",
+                    "category":"started"
+                }),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let updated = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("{status_uri}/{}", status["id"].as_str().unwrap()),
+            &fixture.owner_cookie,
+            json!({
+                "name":"Reviewing",
+                "color":"#445566",
+                "category":"started",
+                "position":status["position"],
+                "expected_version":0
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(updated).await["description"],
+        "  keep status source  "
+    );
+
+    let task = fixture.create_task("Text source").await;
+    let comment = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}/comments",
+                fixture.workspace_id,
+                task["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!({"body":"  exact comment source  \n"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(comment.status(), StatusCode::CREATED);
+    assert_eq!(
+        response_json(comment).await["body"],
+        "  exact comment source  \n"
+    );
+
+    let oversized_bytes = "😀".repeat(300);
+    let rejected = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({
+                "project_id": fixture.project_id,
+                "status_id": fixture.status_id,
+                "title": oversized_bytes
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn generic_cursors_reject_wrong_key_arity_and_types() {
+    let fixture = Fixture::new().await;
+    let projects_uri = format!("/api/v1/workspaces/{}/projects", fixture.workspace_id);
+    for key in [json!([]), json!(["name", fixture.project_id, "extra"])] {
+        let cursor = cursor_hex(json!({
+            "version":1,
+            "fingerprint":format!("projects:{}", fixture.workspace_id),
+            "key":key
+        }));
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!("{projects_uri}?cursor={cursor}"),
+                &fixture.owner_cookie,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response_json(response).await["code"], "invalid_cursor");
+    }
+    let cursor = cursor_hex(json!({
+        "version":1,
+        "fingerprint":format!("statuses:{}", fixture.project_id),
+        "key":["not-a-position", fixture.status_id]
+    }));
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/projects/{}/statuses?cursor={cursor}",
+                fixture.workspace_id, fixture.project_id
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response_json(response).await["code"], "invalid_cursor");
+}
+
+#[tokio::test]
+async fn duplicate_batches_are_rejected_and_conflicts_link_to_readable_resources() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("Batch first").await;
+    let task_id = first["id"].as_str().unwrap();
+    let bulk_uri = format!("/api/v1/workspaces/{}/tasks/bulk", fixture.workspace_id);
+    let duplicate_bulk = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &bulk_uri,
+            &fixture.owner_cookie,
+            json!({"updates":[
+                {"id":task_id, "expected_version":0, "priority":"high"},
+                {"id":task_id, "expected_version":1, "priority":"low"}
+            ]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(duplicate_bulk.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let task_reorder_uri = format!("/api/v1/workspaces/{}/tasks/reorder", fixture.workspace_id);
+    let duplicate_task_reorder = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &task_reorder_uri,
+            &fixture.owner_cookie,
+            json!({"items":[
+                {"id":task_id, "expected_version":0, "position":1},
+                {"id":task_id, "expected_version":1, "position":2}
+            ]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        duplicate_task_reorder.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    let status_reorder_uri = format!(
+        "/api/v1/workspaces/{}/projects/{}/statuses/reorder",
+        fixture.workspace_id, fixture.project_id
+    );
+    let duplicate_status_reorder = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &status_reorder_uri,
+            &fixture.owner_cookie,
+            json!({"items":[
+                {"id":fixture.status_id, "expected_version":0, "position":1},
+                {"id":fixture.status_id, "expected_version":1, "position":2}
+            ]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        duplicate_status_reorder.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    let changed = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{task_id}",
+                fixture.workspace_id
+            ),
+            &fixture.owner_cookie,
+            json!({"priority":"urgent", "expected_version":0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::OK);
+    let stale_bulk = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &bulk_uri,
+            &fixture.owner_cookie,
+            json!({"updates":[{"id":task_id, "expected_version":0, "priority":"low"}]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stale_bulk.status(), StatusCode::CONFLICT);
+    let conflict = response_json(stale_bulk).await;
+    let refresh = conflict["conflict"]["refresh"].as_str().unwrap();
+    assert!(refresh.ends_with(&format!("/tasks/{task_id}")));
+    let refreshed = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("GET", refresh, &fixture.owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(refreshed.status(), StatusCode::OK);
+
+    let stale_reorder = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &task_reorder_uri,
+            &fixture.owner_cookie,
+            json!({"items":[{"id":task_id, "expected_version":0, "position":10}]}),
+        ))
+        .await
+        .unwrap();
+    let conflict = response_json(stale_reorder).await;
+    let refresh = conflict["conflict"]["refresh"].as_str().unwrap();
+    assert!(refresh.ends_with(&format!("/tasks/{task_id}")));
+}
+
 async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {
     let id = Id::new_v7();
     let membership_id = Id::new_v7();
@@ -1064,4 +1593,12 @@ fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {
 
 async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+fn cursor_hex(value: Value) -> String {
+    serde_json::to_vec(&value)
+        .unwrap()
+        .into_iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }

@@ -16,6 +16,8 @@ const WORKSPACE_INTEGRITY_SCHEMA: &str =
 const WORKSPACE_RETENTION_SECURITY_SCHEMA: &str =
     include_str!("../../../../apps/server/migrations/0006_workspace_retention_security.sql");
 const TASKS_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0007_tasks.sql");
+const TASK_INTEGRITY_SCHEMA: &str =
+    include_str!("../../../../apps/server/migrations/0008_task_integrity.sql");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Migration {
@@ -104,6 +106,7 @@ impl MigrationRunner {
                 Migration::new(5, WORKSPACE_INTEGRITY_SCHEMA, false),
                 Migration::new(6, WORKSPACE_RETENTION_SECURITY_SCHEMA, false),
                 Migration::new(7, TASKS_SCHEMA, false),
+                Migration::new(8, TASK_INTEGRITY_SCHEMA, false),
             ],
         )
     }

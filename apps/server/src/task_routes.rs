@@ -245,7 +245,7 @@ async fn create_project(
     let instance = format!("/api/v1/workspaces/{workspace}/projects");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
-    let name = text(body.name, 200, "name", &instance, request_id.as_ref())?;
+    let name = text(body.name, 200, 200, "name", &instance, request_id.as_ref())?;
     let key = project_key(body.key, &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
     state
@@ -275,7 +275,7 @@ async fn update_project(
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let project_id = parse_id(&project, &instance, request_id.as_ref())?;
-    let name = text(body.name, 200, "name", &instance, request_id.as_ref())?;
+    let name = text(body.name, 200, 200, "name", &instance, request_id.as_ref())?;
     let key = project_key(body.key, &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
     state
@@ -387,8 +387,7 @@ struct StatusBody {
 #[serde(deny_unknown_fields)]
 struct StatusUpdateBody {
     name: String,
-    #[serde(default)]
-    description: String,
+    description: Option<String>,
     color: String,
     category: String,
     position: i64,
@@ -445,9 +444,10 @@ async fn create_status(
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let project_id = parse_id(&project, &instance, request_id.as_ref())?;
-    let name = text(body.name, 200, "name", &instance, request_id.as_ref())?;
+    let name = text(body.name, 200, 200, "name", &instance, request_id.as_ref())?;
     let description = bounded(
         body.description,
+        20_000,
         20_000,
         "description",
         &instance,
@@ -486,14 +486,20 @@ async fn update_status(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let project_id = parse_id(&project, &instance, request_id.as_ref())?;
     let status_id = parse_id(&status, &instance, request_id.as_ref())?;
-    let name = text(body.name, 200, "name", &instance, request_id.as_ref())?;
-    let description = bounded(
-        body.description,
-        20_000,
-        "description",
-        &instance,
-        request_id.as_ref(),
-    )?;
+    let name = text(body.name, 200, 200, "name", &instance, request_id.as_ref())?;
+    let description = body
+        .description
+        .map(|value| {
+            bounded(
+                value,
+                20_000,
+                20_000,
+                "description",
+                &instance,
+                request_id.as_ref(),
+            )
+        })
+        .transpose()?;
     let color = color(body.color, &instance, request_id.as_ref())?;
     let category = category(body.category, &instance, request_id.as_ref())?;
     state
@@ -620,7 +626,7 @@ async fn create_label(
     let instance = format!("/api/v1/workspaces/{workspace}/labels");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
-    let name = text(body.name, 100, "name", &instance, request_id.as_ref())?;
+    let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
     state
         .tasks
@@ -648,7 +654,7 @@ async fn update_label(
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let label_id = parse_id(&label, &instance, request_id.as_ref())?;
-    let name = text(body.name, 100, "name", &instance, request_id.as_ref())?;
+    let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
     state
         .tasks
@@ -784,7 +790,7 @@ async fn list_tasks(
             .transpose()?,
         search: query
             .search
-            .map(|value| bounded(value, 200, "search", &instance, request_id.as_ref()))
+            .map(|value| bounded(value, 200, 200, "search", &instance, request_id.as_ref()))
             .transpose()?,
         sort: match query.sort.as_str() {
             "position" => TaskSort::Position,
@@ -844,9 +850,17 @@ async fn create_task(
     let input = CreateTask {
         project_id: parse_id(&body.project_id, &instance, request_id.as_ref())?,
         status_id: parse_id(&body.status_id, &instance, request_id.as_ref())?,
-        title: text(body.title, 500, "title", &instance, request_id.as_ref())?,
+        title: text(
+            body.title,
+            500,
+            500,
+            "title",
+            &instance,
+            request_id.as_ref(),
+        )?,
         description: bounded(
             body.description,
+            100_000,
             100_000,
             "description",
             &instance,
@@ -931,6 +945,12 @@ async fn bulk_tasks(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    reject_duplicate_ids(
+        updates.iter().map(|update| update.id),
+        "updates",
+        &instance,
+        request_id.as_ref(),
+    )?;
     state
         .tasks
         .bulk_update_tasks(
@@ -1107,7 +1127,14 @@ async fn create_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let parent_id = optional_id(body.parent_id, &instance, request_id.as_ref())?;
-    let body = text(body.body, 100_000, "body", &instance, request_id.as_ref())?;
+    let body = message(
+        body.body,
+        100_000,
+        100_000,
+        "body",
+        &instance,
+        request_id.as_ref(),
+    )?;
     state
         .tasks
         .create_comment(
@@ -1136,7 +1163,14 @@ async fn update_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
-    let body_text = text(body.body, 100_000, "body", &instance, request_id.as_ref())?;
+    let body_text = message(
+        body.body,
+        100_000,
+        100_000,
+        "body",
+        &instance,
+        request_id.as_ref(),
+    )?;
     state
         .tasks
         .update_comment(
@@ -1196,11 +1230,11 @@ fn task_update(
             status_id: optional_id(body.status_id, instance, request_id)?,
             title: body
                 .title
-                .map(|value| text(value, 500, "title", instance, request_id))
+                .map(|value| text(value, 500, 500, "title", instance, request_id))
                 .transpose()?,
             description: body
                 .description
-                .map(|value| bounded(value, 100_000, "description", instance, request_id))
+                .map(|value| bounded(value, 100_000, 100_000, "description", instance, request_id))
                 .transpose()?,
             priority: body
                 .priority
@@ -1227,7 +1261,7 @@ fn parse_reorder(
     if items.is_empty() || items.len() > 100 {
         return Err(validation("items", instance, request_id));
     }
-    items
+    let items = items
         .into_iter()
         .map(|item| {
             Ok((
@@ -1236,7 +1270,29 @@ fn parse_reorder(
                 item.position,
             ))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    reject_duplicate_ids(
+        items.iter().map(|(id, _, _)| *id),
+        "items",
+        instance,
+        request_id,
+    )?;
+    Ok(items)
+}
+
+fn reject_duplicate_ids(
+    ids: impl Iterator<Item = Id>,
+    field: &'static str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<(), ApiError> {
+    let mut ids = ids.collect::<Vec<_>>();
+    ids.sort_unstable();
+    if ids.windows(2).any(|pair| pair[0] == pair[1]) {
+        Err(validation(field, instance, request_id))
+    } else {
+        Ok(())
+    }
 }
 
 async fn scope(
@@ -1333,13 +1389,14 @@ fn parse_ids(
 
 fn text(
     value: String,
-    max: usize,
+    max_chars: usize,
+    max_bytes: usize,
     field: &'static str,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<String, ApiError> {
     let value = value.trim();
-    if value.is_empty() || value.chars().count() > max {
+    if value.is_empty() || value.chars().count() > max_chars || value.len() > max_bytes {
         Err(validation(field, instance, request_id))
     } else {
         Ok(value.to_owned())
@@ -1348,12 +1405,28 @@ fn text(
 
 fn bounded(
     value: String,
-    max: usize,
+    max_chars: usize,
+    max_bytes: usize,
     field: &'static str,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<String, ApiError> {
-    if value.chars().count() > max {
+    if value.chars().count() > max_chars || value.len() > max_bytes {
+        Err(validation(field, instance, request_id))
+    } else {
+        Ok(value)
+    }
+}
+
+fn message(
+    value: String,
+    max_chars: usize,
+    max_bytes: usize,
+    field: &'static str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<String, ApiError> {
+    if value.trim().is_empty() || value.chars().count() > max_chars || value.len() > max_bytes {
         Err(validation(field, instance, request_id))
     } else {
         Ok(value)
@@ -1566,6 +1639,7 @@ impl ApiError {
         request_id: Option<&Extension<RequestId>>,
     ) -> Self {
         let current_version = current.get("version").and_then(Value::as_u64);
+        let refresh = refresh_for_current(&current).unwrap_or_else(|| instance.clone());
         let mut error = Self::new(
             StatusCode::CONFLICT,
             "conflict",
@@ -1577,7 +1651,7 @@ impl ApiError {
         error.body.conflict = Some(ConflictBody {
             current_version,
             current: Some(current),
-            refresh: Some(instance),
+            refresh: Some(refresh),
             field: None,
         });
         error
@@ -1604,6 +1678,43 @@ impl ApiError {
         });
         error
     }
+}
+
+fn refresh_for_current(current: &Value) -> Option<String> {
+    let workspace = current.get("workspace_id")?.as_str()?;
+    let id = current.get("id")?.as_str()?;
+    if current.get("author_id").is_some() {
+        let task = current.get("task_id")?.as_str()?;
+        return Some(format!(
+            "/api/v1/workspaces/{workspace}/tasks/{task}/comments"
+        ));
+    }
+    if current.get("creator_id").is_some() {
+        if current
+            .get("deleted_at")
+            .is_some_and(|value| !value.is_null())
+        {
+            return Some(format!("/api/v1/workspaces/{workspace}/tasks/trash"));
+        }
+        return Some(format!("/api/v1/workspaces/{workspace}/tasks/{id}"));
+    }
+    if let Some(project) = current.get("project_id").and_then(Value::as_str) {
+        return Some(format!(
+            "/api/v1/workspaces/{workspace}/projects/{project}/statuses"
+        ));
+    }
+    if current.get("key").is_some() {
+        let suffix = if current
+            .get("deleted_at")
+            .is_some_and(|value| !value.is_null())
+        {
+            "/trash"
+        } else {
+            ""
+        };
+        return Some(format!("/api/v1/workspaces/{workspace}/projects{suffix}"));
+    }
+    Some(format!("/api/v1/workspaces/{workspace}/labels"))
 }
 
 impl IntoResponse for ApiError {

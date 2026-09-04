@@ -99,3 +99,34 @@ Base commit: `af8dff8`
 - `task_router` is intentionally a focused composition unit. The plan reserves final production router composition for Task 15, so this task does not edit the shared CLI/server assembly point.
 - Task/comment attachment upload, metadata, download, and attachment-only comment behavior remain Task 12. Retention already handles attachment-reference/blob cleanup for task/project purges so that later slice has a safe lifecycle boundary.
 - OpenAPI contract generation and drift checks remain Task 13. Runtime DTOs and Problem responses are implemented here without adding parallel handwritten contract artifacts.
+
+## Review remediation
+
+The independent Task 11 review identified seven Important gaps. I reproduced each at the database or HTTP boundary before changing behavior, then fixed the underlying contracts without modifying migrations `0001` through `0007`:
+
+- Added additive migration `0008_task_integrity.sql`. Scope-bearing parent identities are immutable where reassignment is not a supported operation, so project, status, task-workspace, label, membership, and comment-scope updates cannot invalidate existing joins. A suspension-side trigger removes assignments when an account becomes suspended.
+- Task reads and assignee filters independently join current memberships and non-suspended users, so pre-migration assignments for already-suspended accounts stay invisible without a destructive migration backfill.
+- Status PATCH models an omitted description explicitly and retains the current stored source rather than replacing it with an empty string.
+- Names, titles, descriptions, comments, and task search text now have explicit character and byte checks. Descriptions remain byte-for-byte unchanged, while comment validation checks non-emptiness without trimming the stored body.
+- Every collection validates a two-component typed cursor key, performs its `(sort_value, id)` continuation in SQL, and fetches at most `limit + 1` rows. The task list keeps its filter/sort-bound fingerprint and now filters assignees through current eligibility joins.
+- Task bulk updates and task/status reorders reject duplicate target IDs before opening a mutation transaction.
+- Version conflicts derive a readable, resource-specific task detail, trash, or containing collection URL from the stale record. Bulk and reorder responses therefore identify the exact stale record in `conflict.current` and provide a readable refresh location rather than the mutation endpoint.
+
+Five high-risk integration regressions cover parent-side database corruption attempts, suspension cleanup/read/filter behavior, omitted status descriptions and source preservation, malformed generic cursor schemas, duplicate batches, and stale bulk/reorder refresh links. The focused Task 11 suite now contains 19 tests.
+
+### Remediation red-green evidence
+
+1. Parent-side project scope mutation succeeded before migration 8; the direct-SQL regression now confirms all covered parent scope changes abort.
+2. Suspending an assigned user left one assignment row; suspension cleanup plus defensive joins made storage, detail reads, and assignee filtering return no assignment.
+3. An omitted status PATCH description returned an empty string, comment whitespace was normalized, and multibyte titles exceeded the intended byte boundary; the source/limit regression now passes unchanged source bytes and rejects excessive bytes.
+4. Correct-fingerprint cursors with empty, extra, or non-numeric keys returned `200`; strict cursor decoding and SQL keysets now return `400 invalid_cursor`.
+5. Duplicate task bulk input returned `200`; duplicate task/status reorder inputs had the same double-mutation risk. All now return `422 validation_failed`. A stale bulk conflict previously refreshed `/tasks/bulk`; it and stale reorder now refresh the stale task detail URL successfully.
+6. The first remediation workspace run exposed the database test's old `binary_version: 7` expectation after migration 8. Updating the schema-version expectation made the exact platform regression green.
+
+### Remediation verification
+
+- `cargo test -p orbit-server --test tasks_api`: 19 passed, 0 failed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo test --workspace`: passed after updating the schema-version expectation to 8.
+- `git diff --check`: passed.
