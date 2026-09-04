@@ -856,6 +856,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Problem `type` identifiers remain stable documentation URLs even if the public documentation is initially served by Orbit itself.
 - OpenAPI documents each declared problem code and shared problem schema.
 
+
+### D-044: Use strict request contracts and layered validation
+
+**Decision:** Mutation DTOs reject unknown JSON fields and duplicate keys. Orbit enforces body-size and nesting-depth limits before full deserialization. HTTP-boundary validation checks shape and syntax; application and domain code enforce stateful business rules. Safe field failures are returned together using JSON field paths.
+
+**Rationale:** Strict contracts catch client drift instead of silently discarding input. Separating structural validation from business rules keeps transport concerns out of the domain while still producing useful form feedback.
+
+**Alternatives considered:**
+
+- **Ignore unknown fields:** Rejected because misspelled or outdated fields could appear to succeed while losing user intent.
+- **Put all validation in handlers:** Rejected because non-HTTP callers and background jobs would bypass business rules.
+- **Return only the first field error:** Rejected because it creates repetitive form submission cycles.
+
+**Consequences:**
+
+- OpenAPI schemas and runtime DTO validation describe the same required, optional, nullable, and bounded fields.
+- Omitted, `null`, and empty values remain distinct wherever the schema permits them.
+- Orbit trims surrounding whitespace only for fields whose domain meaning requires it, such as names and email addresses.
+- Orbit never normalizes passwords, message bodies, descriptions, or original filenames.
+- Validation paths use JSON notation such as `assignees[2].user_id`.
+- Domain failures still use Problem Details and stable codes but are not forced into field errors when no single input field caused them.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
