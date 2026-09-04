@@ -747,6 +747,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Integrity results and failure transitions are logged and included in health diagnostics.
 - Backup retention must never treat a corrupt snapshot as verified.
 
+
+### D-039: Use bounded retries and retained dead jobs
+
+**Decision:** Jobs use at-least-once execution and receive 8 attempts by default. Retry delays are 10 seconds, 30 seconds, 2 minutes, 10 minutes, 1 hour, 6 hours, and 24 hours, with bounded random jitter. A job type may override its attempt count and schedule. Non-retryable validation or configuration failures move directly to dead state. Dead jobs remain for 30 days and are never retried automatically without a new explicit action.
+
+**Rationale:** A bounded schedule handles short outages and day-long provider failures without creating infinite work. Dead-job retention gives operators enough time to diagnose and retry failures while keeping the queue finite.
+
+**Alternatives considered:**
+
+- **Retry forever:** Rejected because invalid work and retired integrations would consume resources indefinitely.
+- **One global fixed interval:** Rejected because immediate transient failures and long outages need different spacing.
+- **Discard jobs after their final attempt:** Rejected because operators would lose failure context and controlled recovery.
+
+**Consequences:**
+
+- Job handlers classify errors as retryable or permanent and must remain safe under duplicate execution.
+- Jitter changes each delay by at most 20 percent and never schedules before the unjittered delay's lower bound used by tests.
+- Owners and Admins may inspect and retry jobs scoped to their workspace. Installation administrators may inspect and retry global jobs.
+- Job views and logs redact secrets and sensitive payload fields.
+- Manual retry creates a new queued execution linked to the original dead job. The original attempts and error history remain unchanged.
+- Expired dead jobs are purged by a maintenance job unless an explicit incident hold protects them.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -758,20 +780,18 @@ These choices require explicit evaluation before implementation.
 
 ## Remaining decision queue
 
-The accepted decisions above settle the first milestone, tenancy model, initial roles, core identifiers and timestamps, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
+The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. Detailed session, login-throttling, and account-security behavior
-2. Soft-delete retention and restoration behavior
-3. Durable job scheduling, retry, and dead-letter semantics
-4. API validation, errors, pagination, and compatibility policy
-5. File limits, validation, cleanup, and download behavior
-6. Realtime delivery and reconnection
-7. Mail responsibilities beyond transactional SMTP
-8. Platform and Orbit module boundaries
-9. Configuration, secrets, deployment, and observability
-10. Security controls and audit records
-11. Testing and local developer experience
-12. Detailed incremental frontend migration
+1. Complete durable job scheduling, priority, concurrency, and shutdown semantics
+2. API validation, errors, pagination, and compatibility policy
+3. File limits, validation, cleanup, and download behavior
+4. Realtime delivery and reconnection
+5. Mail responsibilities beyond transactional SMTP
+6. Platform and Orbit module boundaries
+7. Configuration, secrets, deployment, and observability
+8. Remaining security controls and audit records
+9. Testing and local developer experience
+10. Detailed incremental frontend migration
 
 ## Next open decision: Durable job semantics
 
