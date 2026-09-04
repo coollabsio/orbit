@@ -1090,6 +1090,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Outbound mail always continues through a third-party provider, even when the inbound receiver is enabled.
 - Whether the receiver accepts public internet delivery or only trusted relays remains undecided.
 
+
+### D-055: Support trusted-relay and public-MX inbound modes
+
+**Decision:** The embedded SMTP receiver supports both trusted-relay mode and direct public-MX mode. Trusted-relay mode is the default. Public-MX mode requires explicit operator opt-in and successful readiness checks.
+
+**Rationale:** Trusted relays provide a safer default for ordinary installations, while public-MX mode lets operators receive mail without another mail ingress service when they accept the operational burden.
+
+**Alternatives considered:**
+
+- **Trusted relays only:** Rejected because local direct receipt is an explicit product goal.
+- **Public MX only:** Rejected because it would force every installation to expose and operate an internet-facing mail service.
+
+**Consequences:**
+
+- Trusted-relay mode accepts mail only from configured source networks and requires authenticated SMTP or another explicitly configured trust mechanism.
+- Public-MX mode applies recipient validation, connection and message limits, TLS policy, anti-abuse controls, durable spooling, and clear rejection codes before accepting internet traffic.
+- Public-MX readiness checks cover listener reachability, configured recipient domains, hostname, TLS material when required, storage writability, and queue health. DNS guidance is reported but cannot be proven completely from inside every deployment.
+- Neither mode becomes an open relay. The inbound listener never relays arbitrary recipient mail or sends outbound messages directly.
+- Listener ports and bind addresses are independent from the HTTP server. Privileged port and container mapping remain operator configuration.
+- The future mail milestone must define spam filtering, sender authentication signals, recipient routing, raw-message retention, bounce handling, and mailbox projection before implementation.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
