@@ -5,6 +5,7 @@ mod db;
 mod health;
 mod http;
 mod id;
+mod jobs;
 mod observability;
 mod problem;
 mod time;
@@ -19,6 +20,11 @@ pub use http::{
     ClientIp, HttpLimits, HttpPlatformLayer, OriginPolicy, RequestId, RequestTransport,
 };
 pub use id::{Id, ParseIdError};
+pub use jobs::{
+    CatchUpMode, Claim, ClaimSelection, CronSchedule, Job, JobContext, JobError, JobKind,
+    JobPriority, JobQueue, JobState, JobStore, JobStoreError, RecurringSchedule, ScheduleError,
+    Scheduler, Worker, WorkerConfig, WorkerConfigError,
+};
 pub use observability::{TracingFormat, init_tracing};
 pub use problem::{ConflictMetadata, Problem};
 pub use time::TimestampMillis;
