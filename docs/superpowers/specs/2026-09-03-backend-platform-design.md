@@ -1373,6 +1373,26 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Seed identifiers and natural keys are stable so rerunning a seed updates or skips its fixtures instead of duplicating them.
 - Unmigrated feature mock data remains frontend-only and cannot leak into persistent workspace APIs.
 
+
+### D-068: Do not import browser mock state into production
+
+**Decision:** Existing in-memory frontend records are disposable and have no production import path. Useful users, projects, tasks, comments, and attachments are recreated as explicit backend development and E2E fixtures. When a task-domain route migrates, it reads only server data. Unmigrated docs, chat, mail, inbox, and related features retain their frontend mocks until their own milestones.
+
+**Rationale:** The current records are product mockups without durable identity, ownership, audit history, or trustworthy relationships. Treating them as production input would add a migration contract for data that was never meant to persist.
+
+**Alternatives considered:**
+
+- **Build a mock-to-production importer:** Rejected because it would need to invent credentials, memberships, ownership, file durability, and validation outcomes.
+- **Continue merging mock and server task records:** Rejected because users could not tell which records persist and mutations could target the wrong source.
+
+**Consequences:**
+
+- Migrated routes never fall back to mock records when the API is empty or unavailable; they show proper empty or error states.
+- Development seeds use stable fixture identities and representative relationships for screenshots, tests, and manual evaluation.
+- The backend, not browser local state, becomes the only source of truth for each migrated domain at cutover.
+- Cross-links from an unmigrated mock feature to real task data must be labeled or adapted explicitly; accidental ID matching is forbidden.
+- No production CLI or endpoint accepts the existing mock-store serialization format.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
