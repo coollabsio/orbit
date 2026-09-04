@@ -10,16 +10,54 @@ fn workspace_requires_exactly_one_owner() {
     let member = Membership::new(workspace_id, Id::new_v7(), WorkspaceRole::Member);
 
     assert_eq!(
-        Policy::validate_owner_count(&[first_owner.clone(), member.clone()]),
+        Policy::validate_owner_count(workspace_id, &[first_owner.clone(), member.clone()]),
         Ok(())
     );
     assert_eq!(
-        Policy::validate_owner_count(&[member]),
+        Policy::validate_owner_count(workspace_id, &[member]),
         Err(PolicyError::ExactlyOneOwnerRequired)
     );
     assert_eq!(
-        Policy::validate_owner_count(&[first_owner, second_owner]),
+        Policy::validate_owner_count(workspace_id, &[first_owner, second_owner]),
         Err(PolicyError::ExactlyOneOwnerRequired)
+    );
+}
+
+#[test]
+fn owner_count_is_scoped_when_another_workspace_has_only_a_member() {
+    let workspace_a = Id::new_v7();
+    let workspace_b = Id::new_v7();
+    let memberships = [
+        Membership::new(workspace_a, Id::new_v7(), WorkspaceRole::Owner),
+        Membership::new(workspace_b, Id::new_v7(), WorkspaceRole::Member),
+    ];
+
+    assert_eq!(
+        Policy::validate_owner_count(workspace_a, &memberships),
+        Ok(())
+    );
+    assert_eq!(
+        Policy::validate_owner_count(workspace_b, &memberships),
+        Err(PolicyError::ExactlyOneOwnerRequired)
+    );
+}
+
+#[test]
+fn each_workspace_owner_is_valid_in_a_combined_membership_slice() {
+    let workspace_a = Id::new_v7();
+    let workspace_b = Id::new_v7();
+    let memberships = [
+        Membership::new(workspace_a, Id::new_v7(), WorkspaceRole::Owner),
+        Membership::new(workspace_b, Id::new_v7(), WorkspaceRole::Owner),
+    ];
+
+    assert_eq!(
+        Policy::validate_owner_count(workspace_a, &memberships),
+        Ok(())
+    );
+    assert_eq!(
+        Policy::validate_owner_count(workspace_b, &memberships),
+        Ok(())
     );
 }
 

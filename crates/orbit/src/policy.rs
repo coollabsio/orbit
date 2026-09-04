@@ -139,10 +139,17 @@ impl Policy {
         Self::authorize(membership.role, action, target_role)
     }
 
-    pub fn validate_owner_count(memberships: &[Membership]) -> Result<(), PolicyError> {
+    /// Validates one workspace from a broader membership collection.
+    /// Memberships belonging to other workspaces are ignored.
+    pub fn validate_owner_count(
+        workspace_id: Id,
+        memberships: &[Membership],
+    ) -> Result<(), PolicyError> {
         let owners = memberships
             .iter()
-            .filter(|membership| membership.role == WorkspaceRole::Owner)
+            .filter(|membership| {
+                membership.workspace_id == workspace_id && membership.role == WorkspaceRole::Owner
+            })
             .count();
         if owners == 1 {
             Ok(())
