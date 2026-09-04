@@ -1,3 +1,4 @@
+pub mod attachment_routes;
 pub mod audit;
 pub mod auth_routes;
 pub mod repositories;

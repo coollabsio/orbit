@@ -9,9 +9,10 @@ name = "orbit"
 path = "src/main.rs"
 
 [dependencies]
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
+futures-util = "0.3"
 orbit-domain = { path = "../../crates/orbit" }
 orbit-platform = { path = "../../crates/platform" }
 serde = { version = "1", features = ["derive"] }
@@ -20,8 +21,11 @@ sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["io"] }
 tokio-stream = "0.1"
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 utoipa = { version = "5", features = ["axum_extras"] }
+
+[dev-dependencies]
+tempfile = "3"

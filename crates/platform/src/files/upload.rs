@@ -10,7 +10,7 @@ use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 use super::{BlobReader, BlobStore, BlobStoreError};
-use crate::{AttachmentMutationCoordinator, Database, Id};
+use crate::{AttachmentMutationCoordinator, Database, Id, TimestampMillis};
 
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
@@ -83,6 +83,35 @@ pub struct NewAttachmentReference {
     pub id: Id,
     pub task_id: Id,
     pub comment_id: Option<Id>,
+    validate_target: bool,
+    new_comment: Option<NewAttachmentComment>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewAttachmentComment {
+    pub id: Id,
+    pub author_id: Id,
+    pub body: String,
+    pub request_id: String,
+    pub created_at: TimestampMillis,
+}
+
+impl NewAttachmentComment {
+    #[must_use]
+    pub fn new(
+        author_id: Id,
+        body: String,
+        request_id: String,
+        created_at: TimestampMillis,
+    ) -> Self {
+        Self {
+            id: Id::new_v7(),
+            author_id,
+            body,
+            request_id,
+            created_at,
+        }
+    }
 }
 
 impl NewAttachmentReference {
@@ -92,6 +121,28 @@ impl NewAttachmentReference {
             id: Id::new_v7(),
             task_id,
             comment_id,
+            validate_target: false,
+            new_comment: None,
+        }
+    }
+
+    /// Creates a reference that must resolve to a current task/comment in the upload workspace.
+    #[must_use]
+    pub fn validated(task_id: Id, comment_id: Option<Id>) -> Self {
+        Self {
+            validate_target: true,
+            ..Self::new(task_id, comment_id)
+        }
+    }
+
+    /// Creates a validated attachment reference and its comment in the same database transaction.
+    #[must_use]
+    pub fn for_new_comment(task_id: Id, comment: NewAttachmentComment) -> Self {
+        Self {
+            comment_id: Some(comment.id),
+            validate_target: true,
+            new_comment: Some(comment),
+            ..Self::new(task_id, None)
         }
     }
 }
@@ -185,6 +236,11 @@ impl UploadService {
             limits,
             operations: Arc::new(tokio::sync::Mutex::new(())),
         }
+    }
+
+    #[must_use]
+    pub const fn limits(&self) -> UploadLimits {
+        self.limits
     }
 
     pub async fn stage<R>(
@@ -357,6 +413,73 @@ impl UploadService {
         let quarantine_until = now.saturating_add(QUARANTINE_MILLIS);
         let proposed_id = Id::new_v7();
         let mut transaction = self.database.immediate_transaction().await?;
+        if attachment.validate_target {
+            let target_exists: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM tasks JOIN projects ON projects.id = tasks.project_id \
+                 JOIN workspaces ON workspaces.id = tasks.workspace_id \
+                 JOIN memberships ON memberships.workspace_id = tasks.workspace_id \
+                    AND memberships.user_id = ? \
+                 JOIN users ON users.id = memberships.user_id \
+                 WHERE tasks.id = ? AND tasks.workspace_id = ? AND tasks.deleted_at IS NULL \
+                 AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL \
+                 AND users.suspended_at IS NULL AND (? IS NULL OR EXISTS ( \
+                    SELECT 1 FROM task_comments WHERE task_comments.id = ? \
+                    AND task_comments.task_id = tasks.id \
+                    AND task_comments.workspace_id = tasks.workspace_id))",
+            )
+            .bind(upload.owner_id.to_string())
+            .bind(attachment.task_id.to_string())
+            .bind(upload.workspace_id.to_string())
+            .bind(
+                attachment
+                    .new_comment
+                    .is_none()
+                    .then(|| attachment.comment_id.map(|id| id.to_string()))
+                    .flatten(),
+            )
+            .bind(
+                attachment
+                    .new_comment
+                    .is_none()
+                    .then(|| attachment.comment_id.map(|id| id.to_string()))
+                    .flatten(),
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
+            if target_exists != 1 {
+                return Err(UploadError::Unauthorized);
+            }
+        }
+        if let Some(comment) = &attachment.new_comment {
+            let now = comment.created_at.as_millis();
+            sqlx::query(
+                "INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, \
+                 version, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)",
+            )
+            .bind(comment.id.to_string())
+            .bind(upload.workspace_id.to_string())
+            .bind(attachment.task_id.to_string())
+            .bind(comment.author_id.to_string())
+            .bind(&comment.body)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *transaction)
+            .await?;
+            let request_id: String = comment.request_id.chars().take(128).collect();
+            sqlx::query(
+                "INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, \
+                 resource_type, resource_id, request_id, metadata_json, occurred_at) \
+                 VALUES (?, ?, ?, 'comment.created', 'success', 'comment', ?, ?, '{}', ?)",
+            )
+            .bind(Id::new_v7().to_string())
+            .bind(upload.workspace_id.to_string())
+            .bind(comment.author_id.to_string())
+            .bind(comment.id.to_string())
+            .bind(request_id)
+            .bind(now)
+            .execute(&mut *transaction)
+            .await?;
+        }
         let stored = match self.store.install(upload).await {
             Err(BlobStoreError::StagedContentChanged) => {
                 return Err(UploadError::StagedContentChanged);
@@ -439,6 +562,23 @@ impl UploadService {
         transaction.commit().await?;
 
         Ok(blob)
+    }
+
+    /// Abandons a staged upload that will not be finalized, removing its temporary bytes now.
+    pub async fn discard(&self, upload: &StagedUpload) -> Result<(), UploadError> {
+        let _operation = self.operations.lock().await;
+        let _mutation = self.mutations.begin().await;
+        self.store.delete_temporary(&upload.temporary_path).await?;
+        sqlx::query(
+            "UPDATE pending_uploads SET state = 'failed' WHERE id = ? AND workspace_id = ? \
+             AND user_id = ? AND state = 'staged'",
+        )
+        .bind(upload.id.to_string())
+        .bind(upload.workspace_id.to_string())
+        .bind(upload.owner_id.to_string())
+        .execute(self.database.pool())
+        .await?;
+        Ok(())
     }
 
     pub async fn reconcile(&self, now_millis: i64) -> Result<ReconcileResult, UploadError> {

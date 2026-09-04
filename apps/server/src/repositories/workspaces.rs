@@ -1740,16 +1740,39 @@ impl WorkspaceRepository {
         for row in rows {
             let id: String = row.get("id");
             let path: String = row.get("path");
+            let mut transaction = self.database.immediate_transaction().await?;
             match row.get::<String, _>("path_kind").as_str() {
-                "blob" => store.delete(&path).await?,
-                "temporary" => store.delete_temporary(std::path::Path::new(&path)).await?,
+                "blob" => {
+                    let live: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = ?",
+                    )
+                    .bind(&path)
+                    .fetch_one(&mut *transaction)
+                    .await?;
+                    if live == 0 {
+                        store.delete(&path).await?;
+                    }
+                }
+                "temporary" => {
+                    let live: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM pending_uploads WHERE temporary_path = ? \
+                         AND state IN ('receiving', 'staged')",
+                    )
+                    .bind(&path)
+                    .fetch_one(&mut *transaction)
+                    .await?;
+                    if live == 0 {
+                        store.delete_temporary(std::path::Path::new(&path)).await?;
+                    }
+                }
                 _ => continue,
             }
             purged += sqlx::query("DELETE FROM attachment_file_deletions WHERE id = ?")
                 .bind(id)
-                .execute(self.database.pool())
+                .execute(&mut *transaction)
                 .await?
                 .rows_affected();
+            transaction.commit().await?;
         }
         if purged != 0 {
             sqlx::query(

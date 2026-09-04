@@ -5,12 +5,15 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 use fs2::FileExt;
 use orbit_platform::{
-    BackupService, Config, ConfigOverride, ConfigSources, Database, DatabaseConfig,
-    HttpPlatformLayer, LocalBlobStore, MigrationRunner, OriginPolicy, TimestampMillis,
+    AttachmentMutationCoordinator, BackupService, Config, ConfigOverride, ConfigSources, Database,
+    DatabaseConfig, HttpPlatformLayer, LocalBlobStore, MigrationRunner, OriginPolicy,
+    TimestampMillis, UploadLimits, UploadService,
 };
+use orbit_server::attachment_routes::{AttachmentState, attachment_router};
 use orbit_server::auth_routes::{AdminRecoveryDelivery, CookieMode, auth_router, initialize_auth};
 use orbit_server::repositories::identity::IdentityRepository;
 use orbit_server::repositories::workspaces::WorkspaceRepository;
+use orbit_server::task_routes::{TaskState, task_router};
 use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -24,6 +27,10 @@ pub struct Cli {
     database: PathBuf,
     #[arg(long, global = true, default_value = "attachments")]
     attachments: PathBuf,
+    #[arg(long, global = true, default_value_t = 25 * 1024 * 1024)]
+    attachment_max_file_bytes: u64,
+    #[arg(long, global = true, default_value_t = 100 * 1024 * 1024)]
+    attachment_max_request_bytes: u64,
     #[arg(long, global = true, default_value = "backups")]
     backups: PathBuf,
     #[command(subcommand)]
@@ -119,6 +126,11 @@ pub async fn run(cli: Cli) -> Result<String, CliError> {
 }
 
 async fn serve(cli: &Cli, listen: std::net::SocketAddr, origin: &str) -> Result<String, CliError> {
+    let upload_limits = UploadLimits::new(
+        cli.attachment_max_file_bytes,
+        cli.attachment_max_request_bytes,
+    )
+    .map_err(operation)?;
     let database = open_database(&cli.database).await?;
     MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
         .run(&database)
@@ -136,17 +148,31 @@ async fn serve(cli: &Cli, listen: std::net::SocketAddr, origin: &str) -> Result<
     if let Some(setup) = setup {
         eprintln!("Initial setup URL: {}", setup.url);
     }
+    let store: std::sync::Arc<dyn orbit_platform::BlobStore> =
+        std::sync::Arc::new(LocalBlobStore::new(&cli.attachments));
     let workspaces = std::sync::Arc::new(WorkspaceRepository::with_blob_store(
-        database,
-        std::sync::Arc::new(LocalBlobStore::new(&cli.attachments)),
+        database.clone(),
+        std::sync::Arc::clone(&store),
     ));
+    let attachment_state = AttachmentState::new(
+        std::sync::Arc::clone(&identity),
+        UploadService::new(
+            database,
+            store,
+            AttachmentMutationCoordinator::default(),
+            upload_limits,
+        ),
+        CookieMode::secure(),
+    );
     let app = auth_router(auth_state)
         .merge(workspace_router(WorkspaceState::with_repository(
-            identity,
+            std::sync::Arc::clone(&identity),
             std::sync::Arc::clone(&workspaces),
             origin.to_owned(),
             CookieMode::secure(),
         )))
+        .merge(task_router(TaskState::new(identity, CookieMode::secure())))
+        .merge(attachment_router(attachment_state.clone()))
         .layer(HttpPlatformLayer::new(OriginPolicy::new(origin)));
     let listener = tokio::net::TcpListener::bind(listen)
         .await
@@ -167,12 +193,26 @@ async fn serve(cli: &Cli, listen: std::net::SocketAddr, origin: &str) -> Result<
         }
         result
     });
+    let attachment_shutdown = shutdown.clone();
+    let attachment_maintenance = tokio::spawn(async move {
+        let result = attachment_state
+            .run_reconciliation_service(attachment_shutdown.clone())
+            .await;
+        if result.is_err() {
+            attachment_shutdown.cancel();
+        }
+        result
+    });
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown.clone().cancelled_owned())
         .await
         .map_err(operation)?;
     shutdown.cancel();
     maintenance.await.map_err(operation)?.map_err(operation)?;
+    attachment_maintenance
+        .await
+        .map_err(operation)?
+        .map_err(operation)?;
     Ok(String::new())
 }
 
@@ -426,6 +466,22 @@ mod tests {
                 command: SetupTokenCommand::Rotate { .. }
             }
         ));
+    }
+
+    #[test]
+    fn parses_installation_attachment_upload_limits() {
+        let cli = Cli::try_parse_from([
+            "orbit",
+            "--attachment-max-file-bytes",
+            "1048576",
+            "--attachment-max-request-bytes",
+            "2097152",
+            "serve",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.attachment_max_file_bytes, 1_048_576);
+        assert_eq!(cli.attachment_max_request_bytes, 2_097_152);
     }
 
     #[tokio::test]
