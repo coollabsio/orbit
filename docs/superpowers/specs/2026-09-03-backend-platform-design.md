@@ -1352,6 +1352,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Generated artifacts and `node_modules` remain untracked.
 - A future package-manager change must replace the lockfile and commands in one deliberate change.
 
+
+### D-067: Initialize production workspaces without demo records
+
+**Decision:** A newly created production workspace receives one default project and the workflow statuses Backlog, Todo, In Progress, Done, and Cancelled. It receives no sample tasks, fake members, comments, or attachments. First-run setup lets the Owner name the workspace and rename the default project. Development and E2E environments load representative records only through explicit idempotent seed commands.
+
+**Rationale:** A small valid workflow lets users create their first task immediately without mixing demo content into production data. Explicit seeds keep development and tests rich and repeatable.
+
+**Alternatives considered:**
+
+- **Completely empty workspace:** Rejected because task creation requires a project and status workflow before the user can do useful work.
+- **Load the full mock data in production:** Rejected because users would need to distinguish and remove fake records.
+
+**Consequences:**
+
+- Workspace creation inserts the workspace, Owner membership, default project, and statuses in one transaction.
+- Status categories map to the existing task model: Backlog and Todo are unstarted, In Progress is started, Done is completed, and Cancelled is cancelled.
+- Default names may be changed later through ordinary project and status APIs.
+- `just seed` and `just e2e` refuse to target a production-mode configuration.
+- Seed identifiers and natural keys are stable so rerunning a seed updates or skips its fixtures instead of duplicating them.
+- Unmigrated feature mock data remains frontend-only and cannot leak into persistent workspace APIs.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
