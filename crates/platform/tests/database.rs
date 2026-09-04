@@ -151,7 +151,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 3
+            binary_version: 4
         }
     ));
 }

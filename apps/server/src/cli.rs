@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use crate::repositories::identity::IdentityRepository;
 use clap::{Parser, Subcommand};
 use fs2::FileExt;
 use orbit_platform::{
     BackupService, Config, ConfigOverride, ConfigSources, Database, DatabaseConfig,
     MigrationRunner, TimestampMillis,
 };
+use orbit_server::repositories::identity::IdentityRepository;
 use thiserror::Error;
 
 #[derive(Debug, Parser)]

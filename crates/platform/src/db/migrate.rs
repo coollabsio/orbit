@@ -9,6 +9,8 @@ const PLATFORM_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0
 const IDENTITY_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0002_identity.sql");
 const ATTACHMENT_REFERENCE_SCHEMA: &str =
     include_str!("../../../../apps/server/migrations/0003_attachment_references.sql");
+const WORKSPACE_SCHEMA: &str =
+    include_str!("../../../../apps/server/migrations/0004_workspaces.sql");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Migration {
@@ -93,6 +95,7 @@ impl MigrationRunner {
                 Migration::new(1, PLATFORM_SCHEMA, false),
                 Migration::new(2, IDENTITY_SCHEMA, false),
                 Migration::new(3, ATTACHMENT_REFERENCE_SCHEMA, false),
+                Migration::new(4, WORKSPACE_SCHEMA, false),
             ],
         )
     }

@@ -53,6 +53,14 @@ impl CookieMode {
         tracing::warn!(%listener, "insecure loopback authentication cookie mode enabled");
         Ok(Self { secure: false })
     }
+
+    pub(crate) const fn session_cookie_name(self) -> &'static str {
+        if self.secure {
+            SESSION_COOKIE
+        } else {
+            DEV_SESSION_COOKIE
+        }
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -689,11 +697,7 @@ async fn authenticate(
 }
 
 fn cookie_name(mode: CookieMode) -> &'static str {
-    if mode.secure {
-        SESSION_COOKIE
-    } else {
-        DEV_SESSION_COOKIE
-    }
+    mode.session_cookie_name()
 }
 
 fn session_cookie(mode: CookieMode, token: &str, expired: bool) -> String {

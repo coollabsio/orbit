@@ -1,6 +1,4 @@
-pub mod auth_routes;
 mod cli;
-pub mod repositories;
 
 use std::process::ExitCode;
 

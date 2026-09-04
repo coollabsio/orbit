@@ -7,6 +7,8 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
+use crate::audit;
+
 #[derive(Clone)]
 pub struct SetupRequest {
     pub token: String,
@@ -59,6 +61,16 @@ pub enum IdentityError {
     InvalidIdentifier,
     #[error("session or token is invalid or expired")]
     InvalidCredential,
+}
+
+#[derive(Debug, Error)]
+pub enum SuspensionError {
+    #[error("only an installation administrator may suspend accounts")]
+    Forbidden,
+    #[error("global user was not found")]
+    NotFound,
+    #[error("identity repository is unavailable")]
+    Unavailable(#[from] sqlx::Error),
 }
 
 #[derive(Clone, Debug)]
@@ -353,6 +365,77 @@ impl IdentityRepository {
         .fetch_optional(self.database.pool())
         .await?;
         row.map(decode_identity).transpose()
+    }
+
+    pub async fn set_suspended(
+        &self,
+        actor_id: Id,
+        user_id: Id,
+        suspended: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), SuspensionError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let installation_admin = sqlx::query_scalar::<_, i64>(
+            "SELECT installation_admin FROM users WHERE id = ? AND suspended_at IS NULL",
+        )
+        .bind(actor_id.to_string())
+        .fetch_optional(&mut *transaction)
+        .await?
+        .unwrap_or(0);
+        if installation_admin == 0 {
+            return Err(SuspensionError::Forbidden);
+        }
+        let changed = if suspended {
+            sqlx::query(
+                "UPDATE users SET suspended_at = COALESCE(suspended_at, ?), version = version + 1, \
+                 updated_at = ? WHERE id = ?",
+            )
+            .bind(now.as_millis())
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+        } else {
+            sqlx::query(
+                "UPDATE users SET suspended_at = NULL, version = version + 1, updated_at = ? WHERE id = ?",
+            )
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+        };
+        if changed == 0 {
+            return Err(SuspensionError::NotFound);
+        }
+        if suspended {
+            sqlx::query(
+                "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+            )
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            if suspended {
+                "account.suspended"
+            } else {
+                "account.reinstated"
+            },
+            "user",
+            Some(user_id),
+            request_id,
+            serde_json::json!({}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn update_password_hash(
