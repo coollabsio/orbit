@@ -239,7 +239,7 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Browser authentication uses cookies with secure defaults rather than exposing long-lived credentials to frontend JavaScript.
 - Password reset tokens must be single-use, time-limited, and stored so a database disclosure does not reveal usable reset links.
 - Passkeys and external identity providers remain compatible future additions, not first-milestone requirements.
-- Account enumeration, login throttling, session invalidation, and remaining cookie details require explicit decisions in the security and authentication sections.
+- Account enumeration, login throttling, session invalidation, and cookie behavior follow D-032 through D-034.
 
 ### D-013: Make account registration invite-only
 
@@ -1088,7 +1088,7 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - SMTP acknowledgement occurs only after Orbit has durably accepted the raw message or can safely retry processing it.
 - Message parsing and mailbox projection happen asynchronously after durable receipt.
 - Outbound mail always continues through a third-party provider, even when the inbound receiver is enabled.
-- Whether the receiver accepts public internet delivery or only trusted relays remains undecided.
+- Receiver exposure follows the trusted-relay and public-MX modes in D-055.
 
 
 ### D-055: Support trusted-relay and public-MX inbound modes
@@ -1393,20 +1393,31 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Cross-links from an unmigrated mock feature to real task data must be labeled or adapted explicitly; accidental ID matching is forbidden.
 - No production CLI or endpoint accepts the existing mock-store serialization format.
 
-## Current architectural direction, not yet accepted
 
-The following ideas have been discussed but are not decisions:
+### D-069: Migrate the frontend in seven runnable stages
 
+**Decision:** Replace mock-backed frontend domains in this order: application data boundary; setup and identity; workspaces; task foundations; task mutations; comments and attachments; then trash, session revocation, and realtime recovery. Each stage removes only its corresponding mock actions and leaves the application runnable. Backend and frontend work may proceed in parallel after that stage's contract is fixed.
 
-These choices require explicit evaluation before implementation.
+**Rationale:** The sequence establishes shared transport and authentication before workspace and task behavior depends on them. Small cutovers keep persistent and mocked ownership explicit and make failures easier to isolate.
 
-## Remaining decision queue
+**Alternatives considered:**
 
-The accepted decisions above settle the backend architecture, first milestone, tenancy, authentication and authorization, data conventions, SQLite operations, durable jobs, API contracts, attachments, realtime behavior, mail boundaries, crate layout, deployment, observability, and initial security controls. The remaining decisions are:
+- **Replace the entire mock store at once:** Rejected because unmigrated features would block useful backend validation and create one risky cutover.
+- **Build feature UI before shared client and auth boundaries:** Rejected because each feature would invent loading, error, and session behavior.
 
-1. Testing and local developer experience
-2. Detailed incremental frontend migration
+**Consequences:**
 
-## Next open decision: Testing and developer experience
+- Stage 1 adds the generated client, TanStack Query provider, shared Problem Details handling, authentication routing, and the mock-feature indicator.
+- Stage 2 migrates first-run setup, login, logout, recovery, current user, and session management.
+- Stage 3 migrates workspace listing, creation, switching, invitations, members, and fixed roles.
+- Stage 4 migrates projects, statuses, labels, task queries, filters, sorting, and pagination.
+- Stage 5 migrates task create and update behavior, assignment, reorder, bulk changes, optimistic updates, and stale-version conflicts.
+- Stage 6 migrates comments, replies, upload progress, downloads, image viewing, deletion, and storage-error handling.
+- Stage 7 adds trash and restore flows, session revocation, WebSocket cache updates, replay, and resync handling.
+- A migrated route never reads mock fallback data. Unmigrated feature routes continue to use their isolated mock domains.
 
-The design must define test layers, isolated databases and storage, local commands, fixtures, contract checks, and the minimum CI gate.
+## Design status
+
+Discovery for the backend platform and first persistent Orbit milestone is complete. The accepted decisions above are the implementation contract.
+
+The first implementation plan covers the foundation-and-tasks milestone from D-010 and the platform capabilities it requires. Inbound SMTP, the full mail client, chat, docs, direct messages, and other explicitly deferred product areas require their own feature specifications and implementation plans. Their decisions in this document constrain future work but do not add them to milestone one.
