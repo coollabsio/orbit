@@ -887,6 +887,75 @@ async fn reconciliation_rechecks_quarantine_after_a_concurrent_failed_deduplicat
 }
 
 #[tokio::test]
+async fn untracked_cleanup_rechecks_quarantine_after_a_failed_deduplication() {
+    let fixture = Fixture::new().await;
+    let workspace = Id::new_v7();
+    let orphan = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "orphan.bin", &b"same bytes"[..])
+        .await
+        .unwrap();
+    let stored = BlobStore::install(&fixture.store, &orphan).await.unwrap();
+    fixture
+        .database
+        .execute(&format!(
+            "DELETE FROM pending_uploads WHERE id = '{}'",
+            orphan.id
+        ))
+        .await
+        .unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(fixture.store.path(&stored.storage_key).unwrap())
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH)
+        .unwrap();
+
+    let conflict = attachment();
+    let other = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "other.bin", &b"other bytes"[..])
+        .await
+        .unwrap();
+    fixture
+        .service
+        .finalize(&other, conflict.clone())
+        .await
+        .unwrap();
+    let duplicate = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "duplicate.bin", &b"same bytes"[..])
+        .await
+        .unwrap();
+
+    let inventory_started = Arc::new(tokio::sync::Notify::new());
+    let inventory_resume = Arc::new(tokio::sync::Semaphore::new(0));
+    let reconciler = UploadService::new(
+        (*fixture.database).clone(),
+        Arc::new(InventoryProbeStore {
+            inner: fixture.store.clone(),
+            calls: Arc::new(AtomicUsize::new(0)),
+            inventory_started: inventory_started.clone(),
+            inventory_resume: inventory_resume.clone(),
+        }),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    let now = fixture.database.database_now().await.unwrap().as_millis();
+    let reconcile = tokio::spawn(async move { reconciler.reconcile(now + 60 * 60 * 1000).await });
+    inventory_started.notified().await;
+    assert!(matches!(
+        fixture.service.finalize(&duplicate, conflict).await,
+        Err(UploadError::Database(_))
+    ));
+    inventory_resume.add_permits(1);
+    let result = reconcile.await.unwrap().unwrap();
+
+    assert_eq!(result.deleted_untracked_files, 0);
+    assert!(fixture.store.path(&stored.storage_key).unwrap().exists());
+}
+
+#[tokio::test]
 async fn download_resolves_authorization_before_trying_to_open_a_blob() {
     let fixture = Fixture::new().await;
     let error = fixture

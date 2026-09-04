@@ -528,6 +528,15 @@ impl UploadService {
                     .fetch_one(&mut *transaction)
                     .await?;
             if tracked == 0 {
+                let recently_published = self
+                    .store
+                    .blob_modified_at(&object.storage_key)
+                    .await?
+                    .is_some_and(|modified_at| modified_at > quarantine_cutoff);
+                if recently_published {
+                    transaction.commit().await?;
+                    continue;
+                }
                 self.store.delete(&object.storage_key).await?;
                 result.deleted_untracked_files += 1;
             }
