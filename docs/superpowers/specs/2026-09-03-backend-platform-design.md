@@ -657,6 +657,29 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Neither suspension nor membership removal deletes tasks, comments, attachments, audit records, or other authored content.
 - Security audit records identify the actor, target, scope, timestamp, and action without copying sensitive credentials.
 
+
+### D-035: Retain deleted major records for 30 days
+
+**Decision:** Soft-deleted workspaces, projects, and tasks remain recoverable for 30 days in a simple trash view. After the retention period, a durable background job purges them and any files that are no longer referenced. Early permanent deletion is deferred.
+
+**Rationale:** Thirty days provides a useful recovery window without retaining deleted application data indefinitely. A focused trash view makes soft deletion usable rather than leaving recovery as a database-only operation.
+
+**Alternatives considered:**
+
+- **No user-facing restoration:** Rejected because soft deletion would not protect users from mistakes without an operational intervention.
+- **Keep deleted records indefinitely:** Rejected because storage and privacy obligations would grow without a retention boundary.
+- **Allow immediate permanent deletion:** Deferred because it adds a high-risk destructive path to the first milestone.
+
+**Consequences:**
+
+- Members may restore projects and tasks because Members may also delete them.
+- Only the workspace Owner may restore a deleted workspace.
+- Deleting a parent hides its descendants without rewriting every child as individually deleted.
+- Restoring a parent reveals descendants that remain within retention and were not separately deleted before the parent deletion.
+- Purge order preserves referential integrity and queues file removal only after the corresponding metadata can no longer be restored.
+- Restore detects uniqueness conflicts. It returns a conflict response rather than silently renaming restored records.
+- Trash queries remain workspace-scoped and require the same authorization as the corresponding deletion action.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
