@@ -1243,6 +1243,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Backups preserve audit entries that remain inside retention.
 - Retention purge itself produces a bounded operational summary rather than one audit event per deleted row.
 
+
+### D-062: Default to same-origin browser access and restrictive headers
+
+**Decision:** Browser API access is same-origin by default. A configurable CORS allowlist may be added only for explicitly trusted frontends. Orbit sends a restrictive Content Security Policy and standard browser security headers, rejects oversized requests before domain handling, and applies separate rate limits to authentication, recovery, invitations, uploads, and general API traffic.
+
+**Rationale:** The bundled same-origin frontend needs no permissive CORS policy. Restrictive defaults reduce cross-site credential abuse, framing, active-content execution, and resource exhaustion without requiring each feature to implement headers independently.
+
+**Alternatives considered:**
+
+- **Allow all CORS origins:** Rejected because credentialed workspace APIs must not be callable by arbitrary sites.
+- **Rely only on SameSite cookies:** Rejected because origin checks and response policies cover different browser attack paths.
+- **Leave rate limiting to every reverse proxy:** Rejected because secure behavior should not disappear in a direct self-hosted deployment.
+
+**Consequences:**
+
+- CSP defaults include `default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`, and `form-action 'self'`, with narrow generated additions for required images, styles, and WebSocket connections.
+- Inline scripts are forbidden except for the build-generated hash of the pre-paint theme bootstrap. The build fails when the embedded hash and asset differ.
+- Orbit sends `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`, and a Permissions Policy that disables unused capabilities.
+- HSTS is sent only when Orbit knows the original request used HTTPS through the direct connection or a trusted proxy.
+- Header count and size, URL length, nesting depth, and body limits are enforced before expensive parsing or authentication work where possible.
+- Each sensitive endpoint class has an explicit rate-limit policy and stable `429` problem response. Limits are configurable within safe bounds.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
