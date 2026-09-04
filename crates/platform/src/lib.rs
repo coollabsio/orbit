@@ -15,10 +15,10 @@ mod problem;
 mod time;
 
 pub use auth::{
-    AuthenticatedUser, InMemorySessionStore, IssuedSession, IssuedToken, LoginThrottler,
-    OneTimeTokenStore, PasswordError, PasswordService, PasswordVerification, SessionError,
-    SessionRecord, SessionStore, ThrottleDecision, TokenError, TokenKind, generate_opaque_token,
-    normalize_email,
+    AuthenticatedUser, COMMON_PASSWORD_DATASET_VERSION, InMemorySessionStore, IssuedSession,
+    IssuedToken, LoginReservation, LoginThrottler, OneTimeTokenStore, PasswordError,
+    PasswordExecutor, PasswordService, PasswordVerification, SessionError, SessionRecord,
+    SessionStore, ThrottleDecision, TokenError, TokenKind, generate_opaque_token, normalize_email,
 };
 pub use backup::{
     AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,

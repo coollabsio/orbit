@@ -1,15 +1,13 @@
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::rngs::OsRng;
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::Semaphore;
 use unicode_segmentation::UnicodeSegmentation;
 
-const COMMON_PASSWORDS: &[&str] = &[
-    "123456789012",
-    "letmeinletmein",
-    "password1234",
-    "qwertyqwerty",
-];
+pub const COMMON_PASSWORD_DATASET_VERSION: &str = "2026-09-04.v1";
+const COMMON_PASSWORDS: &str = include_str!("common-passwords-2026-09-04.v1.txt");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum PasswordError {
@@ -60,7 +58,7 @@ impl PasswordService {
             return Err(PasswordError::InvalidLength);
         }
         if COMMON_PASSWORDS
-            .iter()
+            .lines()
             .any(|common| password.eq_ignore_ascii_case(common))
         {
             return Err(PasswordError::CommonPassword);
@@ -106,5 +104,62 @@ impl PasswordService {
             || hash.params.get_decimal("m") != Some(self.params.m_cost())
             || hash.params.get_decimal("t") != Some(self.params.t_cost())
             || hash.params.get_decimal("p") != Some(self.params.p_cost())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PasswordExecutor {
+    service: PasswordService,
+    permits: Arc<Semaphore>,
+    max_parallelism: usize,
+}
+
+impl PasswordExecutor {
+    pub fn new(service: PasswordService, max_parallelism: usize) -> Result<Self, PasswordError> {
+        if max_parallelism == 0 {
+            return Err(PasswordError::HashingFailed);
+        }
+        Ok(Self {
+            service,
+            permits: Arc::new(Semaphore::new(max_parallelism)),
+            max_parallelism,
+        })
+    }
+
+    #[must_use]
+    pub const fn max_parallelism(&self) -> usize {
+        self.max_parallelism
+    }
+
+    pub async fn hash(&self, password: String) -> Result<String, PasswordError> {
+        let permit = Arc::clone(&self.permits)
+            .acquire_owned()
+            .await
+            .map_err(|_| PasswordError::HashingFailed)?;
+        let service = self.service.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            service.hash(&password)
+        })
+        .await
+        .map_err(|_| PasswordError::HashingFailed)?
+    }
+
+    pub async fn verify(
+        &self,
+        password: String,
+        encoded_hash: String,
+    ) -> Result<PasswordVerification, PasswordError> {
+        let permit = Arc::clone(&self.permits)
+            .acquire_owned()
+            .await
+            .map_err(|_| PasswordError::HashingFailed)?;
+        let service = self.service.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            service.verify(&password, &encoded_hash)
+        })
+        .await
+        .map_err(|_| PasswordError::HashingFailed)?
     }
 }

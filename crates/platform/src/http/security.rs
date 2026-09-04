@@ -83,11 +83,7 @@ impl OriginPolicy {
 
         let mut origins = headers.get_all(axum::http::header::ORIGIN).iter();
         let Some(origin) = origins.next() else {
-            let browser_request = headers.contains_key(axum::http::header::COOKIE)
-                || headers
-                    .keys()
-                    .any(|name| name.as_str().starts_with("sec-fetch-"));
-            return !browser_request;
+            return false;
         };
         origins.next().is_none()
             && origin

@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use crate::repositories::identity::IdentityRepository;
 use clap::{Parser, Subcommand};
 use fs2::FileExt;
 use orbit_platform::{
-    BackupService, Config, ConfigOverride, ConfigSources, Database, DatabaseConfig, MigrationRunner,
+    BackupService, Config, ConfigOverride, ConfigSources, Database, DatabaseConfig,
+    MigrationRunner, TimestampMillis,
 };
 use thiserror::Error;
 
@@ -40,6 +42,10 @@ pub enum Command {
         yes: bool,
     },
     Seed,
+    SetupToken {
+        #[command(subcommand)]
+        command: SetupTokenCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -59,6 +65,18 @@ pub enum BackupCommand {
     },
     Restore {
         id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SetupTokenCommand {
+    Init {
+        #[arg(long, default_value = "https://localhost")]
+        origin: String,
+    },
+    Rotate {
+        #[arg(long, default_value = "https://localhost")]
+        origin: String,
     },
 }
 
@@ -85,7 +103,44 @@ pub async fn run(cli: Cli) -> Result<String, CliError> {
         Command::Backup { command } => backup(&cli, command).await,
         Command::DbReset { yes } => reset(&cli, *yes).await,
         Command::Seed => seed(&cli).await,
+        Command::SetupToken { command } => setup_token(&cli, command).await,
     }
+}
+
+async fn setup_token(cli: &Cli, command: &SetupTokenCommand) -> Result<String, CliError> {
+    let database = open_database(&cli.database).await?;
+    MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+        .run(&database)
+        .await
+        .map_err(operation)?;
+    let repository = IdentityRepository::new(database);
+    let now = TimestampMillis::now();
+    let (origin, issued) = match command {
+        SetupTokenCommand::Init { origin } => {
+            let issued = repository
+                .initialize_setup_token(now)
+                .await
+                .map_err(operation)?;
+            (origin, issued)
+        }
+        SetupTokenCommand::Rotate { origin } => {
+            let issued = repository
+                .rotate_setup_token(now)
+                .await
+                .map_err(operation)?;
+            (origin, Some(issued))
+        }
+    };
+    Ok(issued.map_or_else(
+        || "setup token already exists or setup is complete".to_owned(),
+        |issued| {
+            format!(
+                "{}/setup?token={}",
+                origin.trim_end_matches('/'),
+                issued.token
+            )
+        },
+    ))
 }
 
 async fn migrate(cli: &Cli) -> Result<String, CliError> {
@@ -248,8 +303,8 @@ mod tests {
     use orbit_platform::{Config, ConfigOverride, ConfigSources};
 
     use super::{
-        BackupCommand, Cli, Command, ConfigCommand, failure_message, parent_directory,
-        redacted_config,
+        BackupCommand, Cli, Command, ConfigCommand, SetupTokenCommand, failure_message,
+        parent_directory, redacted_config, run,
     };
 
     #[test]
@@ -284,6 +339,54 @@ mod tests {
             Cli::try_parse_from(["orbit", "seed"]).unwrap().command,
             Command::Seed
         ));
+        assert!(matches!(
+            Cli::try_parse_from([
+                "orbit",
+                "setup-token",
+                "rotate",
+                "--origin",
+                "https://orbit.test"
+            ])
+            .unwrap()
+            .command,
+            Command::SetupToken {
+                command: SetupTokenCommand::Rotate { .. }
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn setup_token_commands_initialize_once_and_rotate_the_unused_secret() {
+        let database = std::env::temp_dir().join(format!(
+            "orbit-setup-token-{}-{}.sqlite",
+            std::process::id(),
+            orbit_platform::Id::new_v7()
+        ));
+        let database_arg = database.to_string_lossy().into_owned();
+        let parse = |operation: &str| {
+            Cli::try_parse_from([
+                "orbit",
+                "--database",
+                database_arg.as_str(),
+                "setup-token",
+                operation,
+                "--origin",
+                "https://orbit.test",
+            ])
+            .unwrap()
+        };
+
+        let initial = run(parse("init")).await.unwrap();
+        let repeated = run(parse("init")).await.unwrap();
+        let rotated = run(parse("rotate")).await.unwrap();
+
+        assert!(initial.starts_with("https://orbit.test/setup?token="));
+        assert_eq!(repeated, "setup token already exists or setup is complete");
+        assert!(rotated.starts_with("https://orbit.test/setup?token="));
+        assert_ne!(initial, rotated);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = fs::remove_file(format!("{}{suffix}", database.display()));
+        }
     }
 
     #[test]

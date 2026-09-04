@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_platform::{
-    AuthenticatedUser, InMemorySessionStore, LoginThrottler, OneTimeTokenStore, PasswordError,
-    PasswordService, SessionStore, ThrottleDecision, TimestampMillis, TokenKind,
+    AuthenticatedUser, COMMON_PASSWORD_DATASET_VERSION, InMemorySessionStore, LoginThrottler,
+    OneTimeTokenStore, PasswordError, PasswordExecutor, PasswordService, SessionStore,
+    ThrottleDecision, TimestampMillis, TokenKind,
 };
 
 const SECOND: i64 = 1_000;
@@ -27,6 +28,36 @@ fn password_policy_counts_characters_and_rejects_common_passwords() {
 
     // Twelve user-perceived characters are valid even though each occupies several UTF-8 bytes.
     assert!(passwords.hash(&"🦀".repeat(12)).is_ok());
+}
+
+#[test]
+fn common_password_screen_uses_a_versioned_meaningful_local_dataset() {
+    let passwords = PasswordService::default();
+
+    assert_eq!(COMMON_PASSWORD_DATASET_VERSION, "2026-09-04.v1");
+    for common in [
+        "iloveyouforever",
+        "welcome12345",
+        "administrator",
+        "football1234",
+    ] {
+        assert_eq!(passwords.hash(common), Err(PasswordError::CommonPassword));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn password_executor_moves_argon2_off_the_async_worker_and_bounds_parallelism() {
+    let executor = PasswordExecutor::new(PasswordService::default(), 1).unwrap();
+    let hashing = executor.hash("correct horse battery".to_owned());
+    let heartbeat = async {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        "responsive"
+    };
+
+    let (hash, heartbeat) = tokio::join!(hashing, heartbeat);
+    assert_eq!(heartbeat, "responsive");
+    assert!(hash.unwrap().starts_with("$argon2id$"));
+    assert_eq!(executor.max_parallelism(), 1);
 }
 
 #[test]
@@ -268,6 +299,51 @@ fn ip_throttle_allows_fifty_failures_in_a_rolling_fifteen_minutes() {
             TimestampMillis::from_millis(15 * 60 * SECOND)
         ),
         ThrottleDecision::Allowed
+    );
+}
+
+#[test]
+fn throttle_reservations_atomically_limit_concurrent_admission() {
+    let mut throttle = LoginThrottler::new();
+    let now = TimestampMillis::from_millis(0);
+    let ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 44));
+
+    let reservations = (0..6)
+        .map(|_| throttle.reserve("owner@example.com", ip, now))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reservations.iter().filter(|result| result.is_ok()).count(),
+        5
+    );
+    assert!(matches!(
+        reservations[5],
+        Err(ThrottleDecision::RetryAfter(_))
+    ));
+
+    for reservation in reservations.into_iter().flatten() {
+        throttle.finish_failure(reservation, now);
+    }
+}
+
+#[test]
+fn abandoned_throttle_reservations_expire_with_the_admission_window() {
+    let mut throttle = LoginThrottler::new();
+    let ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 45));
+
+    for _ in 0..5 {
+        throttle
+            .reserve("owner@example.com", ip, TimestampMillis::from_millis(0))
+            .unwrap();
+    }
+
+    assert!(
+        throttle
+            .reserve(
+                "owner@example.com",
+                ip,
+                TimestampMillis::from_millis(15 * 60 * SECOND + 1),
+            )
+            .is_ok()
     );
 }
 

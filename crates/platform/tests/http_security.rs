@@ -141,12 +141,12 @@ async fn unsafe_requests_reject_foreign_and_missing_origins_as_problem_details()
 }
 
 #[tokio::test]
-async fn non_browser_unsafe_request_does_not_require_an_origin() {
+async fn every_unsafe_request_requires_an_origin() {
     let app = test_app(OriginPolicy::new("https://orbit.test"));
 
     let response = app.oneshot(request("POST", "/probe")).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

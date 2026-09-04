@@ -1,18 +1,23 @@
+use std::collections::VecDeque;
+use std::future::Future;
+use std::net::SocketAddr;
 use std::net::{IpAddr, Ipv4Addr};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, FromRequest, Path, Request, State};
 use axum::http::header::{CONTENT_TYPE, COOKIE, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use orbit_platform::{
-    AuthenticatedUser, ClientIp, Id, LoginThrottler, OneTimeTokenStore, PasswordError,
-    PasswordService, RequestId, ThrottleDecision, TimestampMillis, TokenKind,
+    AuthenticatedUser, ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor,
+    PasswordService, RequestId, ThrottleDecision, TimestampMillis, generate_opaque_token,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::ToSchema;
@@ -26,36 +31,159 @@ const GENERIC_RECOVERY_DETAIL: &str =
     "If the account exists, password recovery instructions will be provided.";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CookieMode {
-    Secure,
-    LoopbackDevelopment,
+pub struct CookieMode {
+    secure: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("insecure authentication mode requires an explicit loopback listener")]
+pub struct CookieModeError;
+
+impl CookieMode {
+    #[must_use]
+    pub const fn secure() -> Self {
+        Self { secure: true }
+    }
+
+    pub fn loopback_development(listener: SocketAddr) -> Result<Self, CookieModeError> {
+        if !listener.ip().is_loopback() {
+            return Err(CookieModeError);
+        }
+        tracing::warn!(%listener, "insecure loopback authentication cookie mode enabled");
+        Ok(Self { secure: false })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecoveryMessage {
+    pub email: String,
+    pub url: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("recovery delivery is unavailable")]
+pub struct RecoveryDeliveryError;
+
+pub type RecoveryDeliveryFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), RecoveryDeliveryError>> + Send + 'a>>;
+
+pub trait RecoveryDelivery: Send + Sync {
+    fn deliver(&self, message: RecoveryMessage) -> RecoveryDeliveryFuture<'_>;
+}
+
+#[derive(Debug)]
+pub struct AdminRecoveryDelivery {
+    capacity: usize,
+    messages: Mutex<VecDeque<RecoveryMessage>>,
+}
+
+impl AdminRecoveryDelivery {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            messages: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    pub fn take_for_admin(&self) -> Option<RecoveryMessage> {
+        self.messages
+            .lock()
+            .expect("delivery mutex poisoned")
+            .pop_front()
+    }
+}
+
+impl RecoveryDelivery for AdminRecoveryDelivery {
+    fn deliver(&self, message: RecoveryMessage) -> RecoveryDeliveryFuture<'_> {
+        Box::pin(async move {
+            let mut messages = self.messages.lock().expect("delivery mutex poisoned");
+            if messages.len() == self.capacity {
+                messages.pop_front();
+            }
+            messages.push_back(message);
+            Ok(())
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SetupLaunch {
+    pub url: String,
 }
 
 #[derive(Clone)]
 pub struct AuthState {
     repository: Arc<IdentityRepository>,
-    passwords: PasswordService,
+    passwords: PasswordExecutor,
     throttler: Arc<Mutex<LoginThrottler>>,
-    recovery_tokens: Arc<OneTimeTokenStore>,
+    recovery_delivery: Arc<dyn RecoveryDelivery>,
+    public_origin: String,
     cookie_mode: CookieMode,
     dummy_hash: String,
 }
 
 impl AuthState {
     pub fn new(repository: Arc<IdentityRepository>, cookie_mode: CookieMode) -> Self {
+        Self::with_recovery_delivery(
+            repository,
+            cookie_mode,
+            Arc::new(AdminRecoveryDelivery::new(128)),
+            "https://localhost".to_owned(),
+        )
+    }
+
+    pub fn with_recovery_delivery(
+        repository: Arc<IdentityRepository>,
+        cookie_mode: CookieMode,
+        recovery_delivery: Arc<dyn RecoveryDelivery>,
+        public_origin: String,
+    ) -> Self {
         let passwords = PasswordService::default();
         let dummy_hash = passwords
             .hash("not a real account password")
             .expect("the static dummy password satisfies policy");
         Self {
             repository,
-            passwords,
+            passwords: PasswordExecutor::new(passwords, 2)
+                .expect("password executor concurrency is non-zero"),
             throttler: Arc::new(Mutex::new(LoginThrottler::new())),
-            recovery_tokens: Arc::new(OneTimeTokenStore::new()),
+            recovery_delivery,
+            public_origin: public_origin.trim_end_matches('/').to_owned(),
             cookie_mode,
             dummy_hash,
         }
     }
+}
+
+pub async fn initialize_auth(
+    repository: Arc<IdentityRepository>,
+    cookie_mode: CookieMode,
+    recovery_delivery: Arc<dyn RecoveryDelivery>,
+    public_origin: String,
+) -> Result<(AuthState, Option<SetupLaunch>), crate::repositories::identity::IdentityError> {
+    let issued = repository
+        .initialize_setup_token(TimestampMillis::now())
+        .await?;
+    let launch = issued.map(|issued| SetupLaunch {
+        url: format!(
+            "{}/setup?token={}",
+            public_origin.trim_end_matches('/'),
+            issued.token
+        ),
+    });
+    if let Some(launch) = &launch {
+        tracing::warn!(setup_url = %launch.url, "Orbit requires first-run setup");
+    }
+    Ok((
+        AuthState::with_recovery_delivery(
+            repository,
+            cookie_mode,
+            recovery_delivery,
+            public_origin,
+        ),
+        launch,
+    ))
 }
 
 pub fn auth_router(state: AuthState) -> Router {
@@ -70,6 +198,38 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/api/v1/auth/sessions", get(list_sessions))
         .route("/api/v1/auth/sessions/{id}", delete(revoke_session))
         .with_state(state)
+}
+
+struct ApiJson<T>(T);
+
+impl<S, T> FromRequest<S> for ApiJson<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let instance = request.uri().path().to_owned();
+        let request_id = request
+            .extensions()
+            .get::<RequestId>()
+            .cloned()
+            .map(Extension);
+        Json::<T>::from_request(request, state)
+            .await
+            .map(|Json(value)| Self(value))
+            .map_err(|_| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "Invalid request",
+                    "The request body is not valid for this endpoint.",
+                    instance,
+                    request_id.as_ref(),
+                )
+            })
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -102,14 +262,27 @@ struct SetupBody {
 async fn setup_complete(
     State(state): State<AuthState>,
     request_id: Option<Extension<RequestId>>,
-    Json(body): Json<SetupBody>,
+    ApiJson(body): ApiJson<SetupBody>,
 ) -> Result<Response, ApiError> {
-    let authenticated_email = body.email.trim().to_owned();
-    let authenticated_display_name = body.display_name.clone();
-    let password_hash = state
-        .passwords
-        .hash(&body.password)
-        .map_err(|error| password_problem(error, "/api/v1/setup/complete", request_id.as_ref()))?;
+    let token_valid = state
+        .repository
+        .setup_token_valid(&body.token, TimestampMillis::now())
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/setup/complete", request_id.as_ref()))?;
+    if !token_valid {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_setup_token",
+            "Invalid setup token",
+            "The setup token is invalid or expired.",
+            "/api/v1/setup/complete",
+            request_id.as_ref(),
+        ));
+    }
+    let password_hash =
+        state.passwords.hash(body.password).await.map_err(|error| {
+            password_problem(error, "/api/v1/setup/complete", request_id.as_ref())
+        })?;
     let result = state
         .repository
         .complete_setup(
@@ -145,16 +318,7 @@ async fn setup_complete(
                 ApiError::internal("/api/v1/setup/complete", request_id.as_ref())
             }
         })?;
-    let user = AuthenticatedUser {
-        id: result.user_id,
-        email: authenticated_email,
-        display_name: authenticated_display_name,
-    };
-    let session = state
-        .repository
-        .create_session(&user, TimestampMillis::now())
-        .await
-        .map_err(|_| ApiError::internal("/api/v1/setup/complete", request_id.as_ref()))?;
+    let session = result.session;
     let mut response = (
         StatusCode::CREATED,
         Json(json!({
@@ -198,23 +362,22 @@ async fn login(
     State(state): State<AuthState>,
     client_ip: Option<Extension<ClientIp>>,
     request_id: Option<Extension<RequestId>>,
-    Json(body): Json<LoginBody>,
+    ApiJson(body): ApiJson<LoginBody>,
 ) -> Result<Response, ApiError> {
     let ip = client_ip
         .map(|Extension(client_ip)| client_ip.0)
         .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let decision = state
+    let reservation = state
         .throttler
         .lock()
         .expect("throttler mutex poisoned")
-        .check(&body.email, ip, TimestampMillis::now());
-    if let ThrottleDecision::RetryAfter(delay) = decision {
-        return Err(ApiError::throttled(
-            delay,
-            "/api/v1/auth/login",
-            request_id.as_ref(),
-        ));
-    }
+        .reserve(&body.email, ip, TimestampMillis::now())
+        .map_err(|decision| match decision {
+            ThrottleDecision::RetryAfter(delay) => {
+                ApiError::throttled(delay, "/api/v1/auth/login", request_id.as_ref())
+            }
+            ThrottleDecision::Allowed => unreachable!("allowed admission returns a reservation"),
+        })?;
 
     let identity = state
         .repository
@@ -227,7 +390,11 @@ async fn login(
         .map_or(state.dummy_hash.as_str(), |identity| {
             identity.password_hash.as_str()
         });
-    let verification = state.passwords.verify(&body.password, hash).ok();
+    let verification = state
+        .passwords
+        .verify(body.password, hash.to_owned())
+        .await
+        .ok();
     let valid = identity
         .as_ref()
         .is_some_and(|identity| !identity.suspended)
@@ -237,7 +404,7 @@ async fn login(
             .throttler
             .lock()
             .expect("throttler mutex poisoned")
-            .record_failure(&body.email, ip, TimestampMillis::now());
+            .finish_failure(reservation, TimestampMillis::now());
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
@@ -253,7 +420,7 @@ async fn login(
         .throttler
         .lock()
         .expect("throttler mutex poisoned")
-        .record_success(&body.email);
+        .finish_success(reservation);
     if let Some(replacement) = verification.and_then(|result| result.replacement_hash) {
         let _ = state
             .repository
@@ -295,10 +462,17 @@ async fn logout(
 ) -> Result<Response, ApiError> {
     let session =
         authenticate(&state, &headers, "/api/v1/auth/logout", request_id.as_ref()).await?;
-    let _ = state
+    let revoked = state
         .repository
         .revoke_session(session.id, session.user.id, TimestampMillis::now())
-        .await;
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/auth/logout", request_id.as_ref()))?;
+    if !revoked {
+        return Err(ApiError::internal(
+            "/api/v1/auth/logout",
+            request_id.as_ref(),
+        ));
+    }
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(
         SET_COOKIE,
@@ -332,21 +506,27 @@ struct RecoveryRequestBody {
 #[utoipa::path(post, path = "/api/v1/auth/recovery/request", request_body = RecoveryRequestBody, responses((status = 202)))]
 async fn recovery_request(
     State(state): State<AuthState>,
-    Json(body): Json<RecoveryRequestBody>,
+    ApiJson(body): ApiJson<RecoveryRequestBody>,
 ) -> Response {
     if let Ok(Some(identity)) = state.repository.find_by_email(&body.email).await
         && !identity.suspended
-        && let Ok(issued) = state.recovery_tokens.issue(
-            TokenKind::Recovery,
-            identity.id.to_string(),
-            TimestampMillis::now(),
-            Duration::from_secs(30 * 60),
-        )
     {
-        let _ = state
+        let token = generate_opaque_token();
+        let expires_at = TimestampMillis::from_millis(
+            TimestampMillis::now().as_millis() + Duration::from_secs(30 * 60).as_millis() as i64,
+        );
+        if state
             .repository
-            .store_recovery_token(&identity.id.to_string(), &issued.token, issued.expires_at)
-            .await;
+            .store_recovery_token(&identity.id.to_string(), &token, expires_at)
+            .await
+            .is_ok()
+        {
+            let message = RecoveryMessage {
+                email: identity.email,
+                url: format!("{}/recovery?token={token}", state.public_origin),
+            };
+            let _ = state.recovery_delivery.deliver(message).await;
+        }
     }
     (
         StatusCode::ACCEPTED,
@@ -366,33 +546,29 @@ struct RecoveryCompleteBody {
 async fn recovery_complete(
     State(state): State<AuthState>,
     request_id: Option<Extension<RequestId>>,
-    Json(body): Json<RecoveryCompleteBody>,
+    ApiJson(body): ApiJson<RecoveryCompleteBody>,
 ) -> Result<StatusCode, ApiError> {
-    let password_hash = state.passwords.hash(&body.password).map_err(|error| {
-        password_problem(error, "/api/v1/auth/recovery/complete", request_id.as_ref())
-    })?;
-    let user_id = state
+    let valid = state
         .repository
-        .consume_recovery_token(&body.token, TimestampMillis::now())
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_recovery_token",
-                "Recovery failed",
-                "The recovery token is invalid or expired.",
-                "/api/v1/auth/recovery/complete",
-                request_id.as_ref(),
-            )
-        })?;
-    state
-        .repository
-        .update_password_hash(user_id, &password_hash, TimestampMillis::now())
+        .recovery_token_valid(&body.token, TimestampMillis::now())
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
+    if !valid {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_recovery_token",
+            "Recovery failed",
+            "The recovery token is invalid or expired.",
+            "/api/v1/auth/recovery/complete",
+            request_id.as_ref(),
+        ));
+    }
+    let password_hash = state.passwords.hash(body.password).await.map_err(|error| {
+        password_problem(error, "/api/v1/auth/recovery/complete", request_id.as_ref())
+    })?;
     state
         .repository
-        .revoke_user_sessions(user_id, TimestampMillis::now())
+        .complete_recovery(&body.token, &password_hash, TimestampMillis::now())
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
     Ok(StatusCode::NO_CONTENT)
@@ -496,15 +672,16 @@ async fn authenticate(
 }
 
 fn cookie_name(mode: CookieMode) -> &'static str {
-    match mode {
-        CookieMode::Secure => SESSION_COOKIE,
-        CookieMode::LoopbackDevelopment => DEV_SESSION_COOKIE,
+    if mode.secure {
+        SESSION_COOKIE
+    } else {
+        DEV_SESSION_COOKIE
     }
 }
 
 fn session_cookie(mode: CookieMode, token: &str, expired: bool) -> String {
     let mut cookie = format!("{}={token}; Path=/", cookie_name(mode));
-    if mode == CookieMode::Secure {
+    if mode.secure {
         cookie.push_str("; Secure");
     }
     cookie.push_str("; HttpOnly; SameSite=Lax");
@@ -554,7 +731,7 @@ struct ProblemBody {
     status: u16,
     code: &'static str,
     detail: &'static str,
-    instance: &'static str,
+    instance: String,
     request_id: String,
 }
 
@@ -570,7 +747,7 @@ impl ApiError {
         code: &'static str,
         title: &'static str,
         detail: &'static str,
-        instance: &'static str,
+        instance: impl Into<String>,
         request_id: Option<&Extension<RequestId>>,
     ) -> Self {
         Self {
@@ -581,7 +758,7 @@ impl ApiError {
                 status: status.as_u16(),
                 code,
                 detail,
-                instance,
+                instance: instance.into(),
                 request_id: request_id
                     .map(|Extension(value)| value.as_str().to_owned())
                     .unwrap_or_else(|| "unknown".to_owned()),
@@ -648,12 +825,12 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use super::{AuthState, CookieMode, auth_router};
+    use super::{AdminRecoveryDelivery, AuthState, CookieMode, auth_router, initialize_auth};
     use crate::repositories::identity::{IdentityRepository, SetupRequest};
 
     #[tokio::test]
     async fn auth_login_uses_a_host_only_secure_cookie() {
-        let (app, _) = application(CookieMode::Secure).await;
+        let (app, _, _database) = application(CookieMode::secure()).await;
         let response = app
             .oneshot(json_request(
                 "/api/v1/auth/login",
@@ -678,6 +855,162 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_recovery_delivers_a_usable_admin_copy_link_without_changing_public_response() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = Arc::new(IdentityRepository::new((*database).clone()));
+        setup_repository(&repository).await;
+        let delivery = Arc::new(AdminRecoveryDelivery::new(16));
+        let state = AuthState::with_recovery_delivery(
+            Arc::clone(&repository),
+            CookieMode::secure(),
+            delivery.clone(),
+            "https://orbit.test".to_owned(),
+        );
+        let app = auth_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
+
+        let response = app
+            .oneshot(json_request(
+                "/api/v1/auth/recovery/request",
+                json!({"email":"owner@example.com"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let message = delivery.take_for_admin().unwrap();
+        assert_eq!(message.email, "Owner@Example.com");
+        let token = message
+            .url
+            .strip_prefix("https://orbit.test/recovery?token=")
+            .unwrap();
+        assert!(
+            repository
+                .recovery_token_valid(token, TimestampMillis::now())
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_json_rejections_use_problem_details() {
+        let (app, _, _database) = application(CookieMode::secure()).await;
+        for request in [
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "https://orbit.test")
+                .body(Body::from("{"))
+                .unwrap(),
+            json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password":"wrong password value","extra":true}),
+            ),
+        ] {
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                "application/problem+json"
+            );
+            let problem: Value = serde_json::from_slice(&body(response).await).unwrap();
+            assert_eq!(problem["code"], "invalid_request");
+            assert!(problem["request_id"].as_str().is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_missing_origin_is_rejected_before_setup_or_recovery_mutation() {
+        let (app, _, _database) = application(CookieMode::secure()).await;
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/recovery/request")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"email":"owner@example.com"}"#))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn auth_logout_does_not_clear_cookie_when_revocation_fails() {
+        let (app, repository, _database) = application(CookieMode::secure()).await;
+        let login = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password":"correct horse battery"}),
+            ))
+            .await
+            .unwrap();
+        let cookie = login
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        repository
+            .database()
+            .execute(
+                "CREATE TRIGGER reject_logout BEFORE UPDATE OF revoked_at ON sessions \
+             BEGIN SELECT RAISE(ABORT, 'revocation unavailable'); END",
+            )
+            .await
+            .unwrap();
+
+        let logout = app
+            .clone()
+            .oneshot(cookie_request("POST", "/api/v1/auth/logout", &cookie))
+            .await
+            .unwrap();
+        assert_eq!(logout.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(logout.headers().get(header::SET_COOKIE).is_none());
+        let me = app
+            .oneshot(cookie_request("GET", "/api/v1/auth/me", &cookie))
+            .await
+            .unwrap();
+        assert_eq!(me.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_insecure_cookie_mode_requires_an_explicit_loopback_listener() {
+        assert!(CookieMode::loopback_development("127.0.0.1:8080".parse().unwrap()).is_ok());
+        assert!(CookieMode::loopback_development("0.0.0.0:8080".parse().unwrap()).is_err());
+        assert!(CookieMode::loopback_development("192.0.2.1:8080".parse().unwrap()).is_err());
+    }
+
+    #[tokio::test]
+    async fn auth_initialization_creates_and_prints_setup_url_only_once() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = Arc::new(IdentityRepository::new((*database).clone()));
+        let delivery = Arc::new(AdminRecoveryDelivery::new(16));
+        let (_, launch) = initialize_auth(
+            Arc::clone(&repository),
+            CookieMode::secure(),
+            delivery.clone(),
+            "https://orbit.test".to_owned(),
+        )
+        .await
+        .unwrap();
+        let launch = launch.unwrap();
+        assert!(launch.url.starts_with("https://orbit.test/setup?token="));
+        let (_, repeated) = initialize_auth(
+            repository,
+            CookieMode::secure(),
+            delivery,
+            "https://orbit.test".to_owned(),
+        )
+        .await
+        .unwrap();
+        assert!(repeated.is_none());
+    }
+
+    #[tokio::test]
     async fn auth_setup_creates_the_initial_session_with_the_secure_cookie_policy() {
         let database = TestDatabase::new().await.unwrap();
         let repository = Arc::new(IdentityRepository::new((*database).clone()));
@@ -688,7 +1021,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let app = auth_router(AuthState::new(repository, CookieMode::Secure)).layer(
+        let app = auth_router(AuthState::new(repository, CookieMode::secure())).layer(
             HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")),
         );
 
@@ -721,7 +1054,10 @@ mod tests {
 
     #[tokio::test]
     async fn auth_loopback_development_cookie_is_explicitly_insecure_and_unprefixed() {
-        let (app, _) = application(CookieMode::LoopbackDevelopment).await;
+        let (app, _, _database) = application(
+            CookieMode::loopback_development("127.0.0.1:8080".parse().unwrap()).unwrap(),
+        )
+        .await;
         let response = app
             .oneshot(json_request(
                 "/api/v1/auth/login",
@@ -744,7 +1080,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_login_and_recovery_errors_do_not_enumerate_accounts() {
-        let (app, _) = application(CookieMode::Secure).await;
+        let (app, _, _database) = application(CookieMode::secure()).await;
         let wrong_password = app
             .clone()
             .oneshot(json_request(
@@ -791,7 +1127,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_origin_failure_happens_before_the_login_handler() {
-        let (app, _) = application(CookieMode::Secure).await;
+        let (app, _, _database) = application(CookieMode::secure()).await;
         let mut request = json_request(
             "/api/v1/auth/login",
             json!({"email":"owner@example.com","password":"correct horse battery"}),
@@ -808,7 +1144,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_session_revocation_takes_effect_immediately() {
-        let (app, _) = application(CookieMode::Secure).await;
+        let (app, _, _database) = application(CookieMode::secure()).await;
         let login = app
             .clone()
             .oneshot(json_request(
@@ -854,7 +1190,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_sessions_survive_rebuilding_the_http_state() {
-        let (app, repository) = application(CookieMode::Secure).await;
+        let (app, repository, _database) = application(CookieMode::secure()).await;
         let login = app
             .oneshot(json_request(
                 "/api/v1/auth/login",
@@ -873,7 +1209,7 @@ mod tests {
             .unwrap()
             .to_owned();
 
-        let rebuilt = auth_router(AuthState::new(repository, CookieMode::Secure)).layer(
+        let rebuilt = auth_router(AuthState::new(repository, CookieMode::secure())).layer(
             HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")),
         );
         let me = rebuilt
@@ -883,9 +1219,20 @@ mod tests {
         assert_eq!(me.status(), StatusCode::OK);
     }
 
-    async fn application(mode: CookieMode) -> (axum::Router, Arc<IdentityRepository>) {
+    async fn application(
+        mode: CookieMode,
+    ) -> (axum::Router, Arc<IdentityRepository>, TestDatabase) {
         let database = TestDatabase::new().await.unwrap();
         let repository = Arc::new(IdentityRepository::new((*database).clone()));
+        setup_repository(&repository).await;
+        let state = AuthState::new(Arc::clone(&repository), mode);
+        let app = auth_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
+        (app, repository, database)
+    }
+
+    async fn setup_repository(repository: &IdentityRepository) {
         let now = TimestampMillis::now();
         repository
             .store_setup_token(
@@ -910,11 +1257,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let state = AuthState::new(Arc::clone(&repository), mode);
-        let app = auth_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(
-            "https://orbit.test",
-        )));
-        (app, repository)
     }
 
     fn json_request(uri: &str, value: Value) -> Request<Body> {

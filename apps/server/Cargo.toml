@@ -21,4 +21,5 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
 utoipa = { version = "5", features = ["axum_extras"] }

@@ -1,10 +1,10 @@
 use orbit_domain::{StatusCategory, WorkspaceDefaults};
 use orbit_platform::{
-    AuthenticatedUser, Database, Id, IssuedSession, SessionRecord, TimestampMillis,
+    AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, SessionRecord, TimestampMillis,
     generate_opaque_token, normalize_email,
 };
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
 #[derive(Clone)]
@@ -32,6 +32,7 @@ pub struct SetupResult {
     pub user_id: Id,
     pub workspace_id: Id,
     pub project_id: Id,
+    pub session: IssuedSession,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,9 +67,73 @@ pub struct IdentityRepository {
 }
 
 impl IdentityRepository {
+    const SETUP_TOKEN_LIFETIME_MILLIS: i64 = 30 * 60 * 1_000;
+
     #[must_use]
     pub fn new(database: Database) -> Self {
         Self { database }
+    }
+
+    #[must_use]
+    pub fn database(&self) -> &Database {
+        &self.database
+    }
+
+    pub async fn initialize_setup_token(
+        &self,
+        now: TimestampMillis,
+    ) -> Result<Option<IssuedToken>, IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query("INSERT OR IGNORE INTO installation_state (id, initialized) VALUES (1, 0)")
+            .execute(&mut *transaction)
+            .await?;
+        let initialized =
+            sqlx::query_scalar::<_, i64>("SELECT initialized FROM installation_state WHERE id = 1")
+                .fetch_one(&mut *transaction)
+                .await?;
+        if initialized != 0 {
+            return Ok(None);
+        }
+        sqlx::query("DELETE FROM setup_tokens WHERE expires_at <= ?")
+            .bind(now.as_millis())
+            .execute(&mut *transaction)
+            .await?;
+        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM setup_tokens")
+            .fetch_one(&mut *transaction)
+            .await?
+            != 0;
+        if exists {
+            transaction.commit().await?;
+            return Ok(None);
+        }
+        let issued = issue_setup_token(now);
+        insert_setup_token(&mut transaction, &issued, now).await?;
+        transaction.commit().await?;
+        Ok(Some(issued))
+    }
+
+    pub async fn rotate_setup_token(
+        &self,
+        now: TimestampMillis,
+    ) -> Result<IssuedToken, IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query("INSERT OR IGNORE INTO installation_state (id, initialized) VALUES (1, 0)")
+            .execute(&mut *transaction)
+            .await?;
+        let initialized =
+            sqlx::query_scalar::<_, i64>("SELECT initialized FROM installation_state WHERE id = 1")
+                .fetch_one(&mut *transaction)
+                .await?;
+        if initialized != 0 {
+            return Err(IdentityError::InvalidCredential);
+        }
+        sqlx::query("DELETE FROM setup_tokens")
+            .execute(&mut *transaction)
+            .await?;
+        let issued = issue_setup_token(now);
+        insert_setup_token(&mut transaction, &issued, now).await?;
+        transaction.commit().await?;
+        Ok(issued)
     }
 
     pub async fn setup_complete(&self) -> Result<bool, IdentityError> {
@@ -78,6 +143,26 @@ impl IdentityRepository {
         .fetch_one(self.database.pool())
         .await?;
         Ok(initialized != 0)
+    }
+
+    pub async fn setup_token_valid(
+        &self,
+        token: &str,
+        now: TimestampMillis,
+    ) -> Result<bool, IdentityError> {
+        if self.setup_complete().await? {
+            return Ok(false);
+        }
+        let supplied = token_hash(token);
+        let row =
+            sqlx::query("SELECT token_hash, expires_at FROM setup_tokens WHERE token_hash = ?")
+                .bind(supplied.to_vec())
+                .fetch_optional(self.database.pool())
+                .await?;
+        Ok(row.is_some_and(|row| {
+            row.get::<i64, _>("expires_at") > now.as_millis()
+                && constant_time_eq(&row.get::<Vec<u8>, _>("token_hash"), &supplied)
+        }))
     }
 
     pub async fn store_setup_token(
@@ -151,6 +236,8 @@ impl IdentityRepository {
         let email = request.email.trim().to_owned();
         let normalized_email = normalize_email(&email);
         let user_id = Id::new_v7();
+        let session_id = Id::new_v7();
+        let session_token = generate_opaque_token();
         let defaults =
             WorkspaceDefaults::new(user_id, request.workspace_name, request.project_name);
         let timestamp = now.as_millis();
@@ -227,6 +314,9 @@ impl IdentityRepository {
             .await
             .map_err(SetupError::Unavailable)?;
         }
+        let session = insert_session(&mut transaction, session_id, &session_token, user_id, now)
+            .await
+            .map_err(SetupError::Unavailable)?;
         sqlx::query(
             "UPDATE installation_state SET initialized = 1, initialized_at = ? WHERE id = 1",
         )
@@ -247,6 +337,7 @@ impl IdentityRepository {
             user_id,
             workspace_id: defaults.workspace.id,
             project_id: defaults.project.id,
+            session,
         })
     }
 
@@ -288,6 +379,12 @@ impl IdentityRepository {
         expires_at: TimestampMillis,
     ) -> Result<(), IdentityError> {
         let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= ? OR user_id = ?")
+            .bind(now.as_millis())
+            .bind(user_id)
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query(
             "INSERT INTO recovery_tokens (token_hash, user_id, expires_at, created_at) \
              VALUES (?, ?, ?, ?)",
@@ -296,36 +393,74 @@ impl IdentityRepository {
         .bind(user_id)
         .bind(expires_at.as_millis())
         .bind(now.as_millis())
-        .execute(self.database.pool())
+        .execute(&mut *transaction)
         .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
-    pub async fn consume_recovery_token(
+    pub async fn recovery_token_valid(
         &self,
         token: &str,
+        now: TimestampMillis,
+    ) -> Result<bool, IdentityError> {
+        let supplied = token_hash(token);
+        let row =
+            sqlx::query("SELECT token_hash, expires_at FROM recovery_tokens WHERE token_hash = ?")
+                .bind(supplied.to_vec())
+                .fetch_optional(self.database.pool())
+                .await?;
+        Ok(row.is_some_and(|row| {
+            row.get::<i64, _>("expires_at") > now.as_millis()
+                && constant_time_eq(&row.get::<Vec<u8>, _>("token_hash"), &supplied)
+        }))
+    }
+
+    pub async fn complete_recovery(
+        &self,
+        token: &str,
+        password_hash: &str,
         now: TimestampMillis,
     ) -> Result<Id, IdentityError> {
         let supplied = token_hash(token);
         let mut transaction = self.database.immediate_transaction().await?;
-        let rows = sqlx::query("SELECT token_hash, user_id, expires_at FROM recovery_tokens")
-            .fetch_all(&mut *transaction)
+        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= ?")
+            .bind(now.as_millis())
+            .execute(&mut *transaction)
             .await?;
-        let matched = rows.into_iter().find_map(|row| {
-            let stored = row.get::<Vec<u8>, _>("token_hash");
-            (constant_time_eq(&stored, &supplied)
-                && row.get::<i64, _>("expires_at") > now.as_millis())
-            .then(|| (stored, row.get::<String, _>("user_id")))
-        });
-        let (stored_hash, user_id) = matched.ok_or(IdentityError::InvalidIdentifier)?;
+        let row =
+            sqlx::query("SELECT token_hash, user_id FROM recovery_tokens WHERE token_hash = ?")
+                .bind(supplied.to_vec())
+                .fetch_optional(&mut *transaction)
+                .await?
+                .ok_or(IdentityError::InvalidCredential)?;
+        let stored = row.get::<Vec<u8>, _>("token_hash");
+        if !constant_time_eq(&stored, &supplied) {
+            return Err(IdentityError::InvalidCredential);
+        }
+        let user_id = row
+            .get::<String, _>("user_id")
+            .parse::<Id>()
+            .map_err(|_| IdentityError::InvalidIdentifier)?;
+        sqlx::query(
+            "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+        )
+        .bind(password_hash)
+        .bind(now.as_millis())
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = ?")
-            .bind(stored_hash)
+            .bind(stored)
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
-        user_id
-            .parse()
-            .map_err(|_| IdentityError::InvalidIdentifier)
+        Ok(user_id)
     }
 
     pub async fn create_session(
@@ -367,19 +502,20 @@ impl IdentityRepository {
         const ACTIVITY_WRITE_INTERVAL: i64 = 5 * 60 * 1_000;
         const IDLE_LIFETIME: i64 = 30 * 24 * 60 * 60 * 1_000;
         let supplied = token_hash(token);
-        let rows = sqlx::query(
+        let row = sqlx::query(
             "SELECT sessions.id AS session_id, sessions.token_hash, sessions.created_at, \
              sessions.last_activity_at, sessions.idle_expires_at, sessions.absolute_expires_at, \
              users.id AS user_id, users.email, users.display_name, users.suspended_at \
              FROM sessions JOIN users ON users.id = sessions.user_id \
-             WHERE sessions.revoked_at IS NULL",
+             WHERE sessions.token_hash = ? AND sessions.revoked_at IS NULL",
         )
-        .fetch_all(self.database.pool())
-        .await?;
-        let row = rows
-            .into_iter()
-            .find(|row| constant_time_eq(&row.get::<Vec<u8>, _>("token_hash"), &supplied))
-            .ok_or(IdentityError::InvalidCredential)?;
+        .bind(supplied.to_vec())
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(IdentityError::InvalidCredential)?;
+        if !constant_time_eq(&row.get::<Vec<u8>, _>("token_hash"), &supplied) {
+            return Err(IdentityError::InvalidCredential);
+        }
         let session_id = row
             .get::<String, _>("session_id")
             .parse::<Id>()
@@ -390,6 +526,8 @@ impl IdentityRepository {
             .map_err(|_| IdentityError::InvalidIdentifier)?;
         let idle_expires_at = row.get::<i64, _>("idle_expires_at");
         let absolute_expires_at = row.get::<i64, _>("absolute_expires_at");
+        let email = row.get::<String, _>("email");
+        let display_name = row.get::<String, _>("display_name");
         if now.as_millis() >= idle_expires_at
             || now.as_millis() >= absolute_expires_at
             || row.get::<Option<i64>, _>("suspended_at").is_some()
@@ -401,14 +539,17 @@ impl IdentityRepository {
             return Err(IdentityError::InvalidCredential);
         }
         let last_activity_at = row.get::<i64, _>("last_activity_at");
+        drop(row);
         if now.as_millis() - last_activity_at >= ACTIVITY_WRITE_INTERVAL {
             let idle_expires_at = (now.as_millis() + IDLE_LIFETIME).min(absolute_expires_at);
             sqlx::query(
-                "UPDATE sessions SET last_activity_at = ?, idle_expires_at = ? WHERE id = ?",
+                "UPDATE sessions SET last_activity_at = ?, idle_expires_at = ? \
+                 WHERE id = ? AND last_activity_at = ? AND revoked_at IS NULL",
             )
             .bind(now.as_millis())
             .bind(idle_expires_at)
             .bind(session_id.to_string())
+            .bind(last_activity_at)
             .execute(self.database.pool())
             .await?;
         }
@@ -416,8 +557,8 @@ impl IdentityRepository {
             id: session_id,
             user: AuthenticatedUser {
                 id: user_id,
-                email: row.get("email"),
-                display_name: row.get("display_name"),
+                email,
+                display_name,
             },
         })
     }
@@ -480,19 +621,60 @@ impl IdentityRepository {
         .rows_affected();
         Ok(affected == 1)
     }
+}
 
-    pub async fn revoke_user_sessions(
-        &self,
-        user_id: Id,
-        now: TimestampMillis,
-    ) -> Result<(), IdentityError> {
-        sqlx::query("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
-            .bind(now.as_millis())
-            .bind(user_id.to_string())
-            .execute(self.database.pool())
-            .await?;
-        Ok(())
+fn issue_setup_token(now: TimestampMillis) -> IssuedToken {
+    IssuedToken {
+        token: generate_opaque_token(),
+        expires_at: TimestampMillis::from_millis(
+            now.as_millis() + IdentityRepository::SETUP_TOKEN_LIFETIME_MILLIS,
+        ),
     }
+}
+
+async fn insert_setup_token(
+    transaction: &mut Transaction<'_, Sqlite>,
+    issued: &IssuedToken,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT INTO setup_tokens (token_hash, expires_at, created_at) VALUES (?, ?, ?)")
+        .bind(token_hash(&issued.token).to_vec())
+        .bind(issued.expires_at.as_millis())
+        .bind(now.as_millis())
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+async fn insert_session(
+    transaction: &mut Transaction<'_, Sqlite>,
+    id: Id,
+    token: &str,
+    user_id: Id,
+    now: TimestampMillis,
+) -> Result<IssuedSession, sqlx::Error> {
+    const DAY: i64 = 24 * 60 * 60 * 1_000;
+    let idle_expires_at = TimestampMillis::from_millis(now.as_millis() + 30 * DAY);
+    let absolute_expires_at = TimestampMillis::from_millis(now.as_millis() + 90 * DAY);
+    sqlx::query(
+        "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
+         idle_expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id.to_string())
+    .bind(token_hash(token).to_vec())
+    .bind(user_id.to_string())
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .bind(idle_expires_at.as_millis())
+    .bind(absolute_expires_at.as_millis())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(IssuedSession {
+        id,
+        token: token.to_owned(),
+        idle_expires_at,
+        absolute_expires_at,
+    })
 }
 
 fn decode_identity(row: sqlx::sqlite::SqliteRow) -> Result<StoredIdentity, IdentityError> {
@@ -541,6 +723,190 @@ mod tests {
     use orbit_platform::{PasswordService, TestDatabase, TimestampMillis};
 
     use super::{IdentityRepository, SetupError, SetupRequest};
+
+    #[tokio::test]
+    async fn auth_setup_and_initial_session_roll_back_together() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        repository
+            .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
+            .await
+            .unwrap();
+        database
+            .execute(
+                "CREATE TRIGGER reject_initial_session BEFORE INSERT ON sessions \
+                 BEGIN SELECT RAISE(ABORT, 'session unavailable'); END",
+            )
+            .await
+            .unwrap();
+
+        let result = repository
+            .complete_setup(
+                setup_request("operator-secret"),
+                TimestampMillis::from_millis(1_000),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(!repository.setup_complete().await.unwrap());
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM users")
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM setup_tokens")
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_recovery_password_change_token_use_and_session_revocation_are_atomic() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        repository
+            .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
+            .await
+            .unwrap();
+        let setup = repository
+            .complete_setup(
+                setup_request("operator-secret"),
+                TimestampMillis::from_millis(1_000),
+            )
+            .await
+            .unwrap();
+        repository
+            .store_recovery_token(
+                &setup.user_id.to_string(),
+                "recovery-secret",
+                TimestampMillis::from_millis(60_000),
+            )
+            .await
+            .unwrap();
+        database
+            .execute(
+                "CREATE TRIGGER reject_revocation BEFORE UPDATE OF revoked_at ON sessions \
+                 BEGIN SELECT RAISE(ABORT, 'revocation unavailable'); END",
+            )
+            .await
+            .unwrap();
+        let old_hash = database
+            .scalar::<String>("SELECT password_hash FROM users")
+            .await
+            .unwrap();
+        let new_hash = PasswordService::default()
+            .hash("a different secure password")
+            .unwrap();
+
+        assert!(
+            repository
+                .complete_recovery(
+                    "recovery-secret",
+                    &new_hash,
+                    TimestampMillis::from_millis(2_000)
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            database
+                .scalar::<String>("SELECT password_hash FROM users")
+                .await
+                .unwrap(),
+            old_hash
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM recovery_tokens")
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL")
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_concurrent_session_activity_performs_one_conditional_touch() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        repository
+            .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
+            .await
+            .unwrap();
+        let setup = repository
+            .complete_setup(
+                setup_request("operator-secret"),
+                TimestampMillis::from_millis(1_000),
+            )
+            .await
+            .unwrap();
+        database
+            .execute(
+                "CREATE TABLE session_touch_log (value INTEGER NOT NULL); \
+            CREATE TRIGGER count_session_touch AFTER UPDATE OF last_activity_at ON sessions \
+            BEGIN INSERT INTO session_touch_log VALUES (1); END;",
+            )
+            .await
+            .unwrap();
+        let first = repository
+            .authenticate_session(&setup.session.token, TimestampMillis::from_millis(301_000));
+        let second = repository
+            .authenticate_session(&setup.session.token, TimestampMillis::from_millis(301_000));
+        let (first, second) = tokio::join!(first, second);
+        first.unwrap();
+        second.unwrap();
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM session_touch_log")
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_setup_token_initialization_is_one_time_and_rotation_is_explicit() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        let now = TimestampMillis::from_millis(1_000);
+        let first = repository
+            .initialize_setup_token(now)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            repository
+                .initialize_setup_token(now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let rotated = repository.rotate_setup_token(now).await.unwrap();
+        assert_ne!(first.token, rotated.token);
+        repository
+            .complete_setup(setup_request(&rotated.token), now)
+            .await
+            .unwrap();
+        assert!(
+            repository
+                .initialize_setup_token(now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(repository.rotate_setup_token(now).await.is_err());
+    }
 
     #[tokio::test]
     async fn auth_concurrent_setup_requests_have_exactly_one_winner() {
@@ -687,5 +1053,68 @@ mod tests {
         assert_ne!(recovery, b"plaintext-recovery-token");
         assert_eq!(setup.len(), 32);
         assert_eq!(recovery.len(), 32);
+    }
+
+    #[tokio::test]
+    async fn auth_recovery_tokens_are_bounded_to_one_live_record_per_user() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        repository
+            .store_setup_token("operator-secret", TimestampMillis::from_millis(i64::MAX))
+            .await
+            .unwrap();
+        let setup = repository
+            .complete_setup(
+                setup_request("operator-secret"),
+                TimestampMillis::from_millis(1_000),
+            )
+            .await
+            .unwrap();
+        for token in ["first-recovery-token", "replacement-recovery-token"] {
+            repository
+                .store_recovery_token(
+                    &setup.user_id.to_string(),
+                    token,
+                    TimestampMillis::from_millis(i64::MAX),
+                )
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM recovery_tokens")
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(
+            !repository
+                .recovery_token_valid("first-recovery-token", TimestampMillis::from_millis(2_000))
+                .await
+                .unwrap()
+        );
+        assert!(
+            repository
+                .recovery_token_valid(
+                    "replacement-recovery-token",
+                    TimestampMillis::from_millis(2_000)
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    fn setup_request(token: &str) -> SetupRequest {
+        SetupRequest {
+            token: token.to_owned(),
+            email: "owner@example.com".to_owned(),
+            display_name: "Owner".to_owned(),
+            password_hash: PasswordService::default()
+                .hash("correct horse battery")
+                .unwrap(),
+            workspace_name: "Orbit".to_owned(),
+            project_name: "General".to_owned(),
+        }
     }
 }

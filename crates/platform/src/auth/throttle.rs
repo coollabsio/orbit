@@ -20,10 +20,22 @@ struct EmailFailures {
     blocked_until: TimestampMillis,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LoginReservation(u64);
+
+#[derive(Clone, Debug)]
+struct PendingAttempt {
+    email: String,
+    ip: IpAddr,
+    reserved_at: TimestampMillis,
+}
+
 #[derive(Debug, Default)]
 pub struct LoginThrottler {
     emails: HashMap<String, EmailFailures>,
     ips: HashMap<IpAddr, VecDeque<TimestampMillis>>,
+    pending: HashMap<u64, PendingAttempt>,
+    next_reservation: u64,
 }
 
 impl LoginThrottler {
@@ -50,6 +62,63 @@ impl LoginThrottler {
             );
         }
         ThrottleDecision::Allowed
+    }
+
+    pub fn reserve(
+        &mut self,
+        email: &str,
+        ip: IpAddr,
+        now: TimestampMillis,
+    ) -> Result<LoginReservation, ThrottleDecision> {
+        let decision = self.check(email, ip, now);
+        if decision != ThrottleDecision::Allowed {
+            return Err(decision);
+        }
+        let email = normalize_email(email);
+        let email_in_flight = self
+            .pending
+            .values()
+            .filter(|attempt| attempt.email == email)
+            .count();
+        let email_failures = self
+            .emails
+            .get(&email)
+            .map_or(0, |state| state.count as usize);
+        if email_failures + email_in_flight >= 5 {
+            return Err(ThrottleDecision::RetryAfter(Duration::from_secs(1)));
+        }
+        let ip_in_flight = self
+            .pending
+            .values()
+            .filter(|attempt| attempt.ip == ip)
+            .count();
+        let ip_failures = self.ips.get(&ip).map_or(0, VecDeque::len);
+        if ip_failures + ip_in_flight >= IP_FAILURE_LIMIT {
+            return Err(ThrottleDecision::RetryAfter(Duration::from_secs(1)));
+        }
+        let reservation = LoginReservation(self.next_reservation);
+        self.next_reservation = self.next_reservation.wrapping_add(1);
+        self.pending.insert(
+            reservation.0,
+            PendingAttempt {
+                email,
+                ip,
+                reserved_at: now,
+            },
+        );
+        Ok(reservation)
+    }
+
+    pub fn finish_failure(&mut self, reservation: LoginReservation, now: TimestampMillis) {
+        if let Some(attempt) = self.pending.remove(&reservation.0) {
+            self.record_failure(&attempt.email, attempt.ip, now);
+        }
+    }
+
+    pub fn finish_success(&mut self, reservation: LoginReservation) {
+        if let Some(attempt) = self.pending.remove(&reservation.0) {
+            self.record_success(&attempt.email);
+        }
     }
 
     pub fn record_failure(&mut self, email: &str, ip: IpAddr, now: TimestampMillis) {
@@ -93,6 +162,8 @@ impl LoginThrottler {
             }
             !failures.is_empty()
         });
+        self.pending
+            .retain(|_, attempt| attempt.reserved_at.as_millis() > cutoff);
     }
 }
 
