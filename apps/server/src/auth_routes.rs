@@ -712,6 +712,10 @@ fn session_cookie(mode: CookieMode, token: &str, expired: bool) -> String {
     cookie
 }
 
+pub(crate) fn issued_session_cookie(mode: CookieMode, token: &str) -> String {
+    session_cookie(mode, token, false)
+}
+
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(COOKIE)?

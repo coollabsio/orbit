@@ -77,3 +77,59 @@ Base commit: `5479074`
 - SMTP transport is intentionally not wired in this slice. The repository returns the one-time token plus persisted `smtp` provenance to the authorized use-case boundary, while the HTTP response never exposes an SMTP invitation URL.
 - Invitation acceptance currently covers authenticated existing global accounts, which is the identity-mismatch and idempotence contract exercised here. Creating a brand-new password account from an invitation will need a dedicated invite-registration flow that applies the existing password executor without weakening the signed-in existing-account rule.
 - Audit retention is enforced opportunistically on security-event writes. A later durable maintenance job should also call retention cleanup so an entirely idle installation still purges on schedule.
+
+---
+
+## Important-review remediation
+
+### Approach
+
+I verified the nine Important findings against the implementation and treated each as a contract gap. Remediation proceeded regression-first at the API/database boundary: invitation registration and default workspace data, optimistic versions, owner integrity, trash/audit retention, explicit audit outcomes and operator access, then concurrency and lifecycle coverage. Released migrations 1 through 4 remain byte-for-byte unchanged; all integrity and retention schema changes are additive migration 5.
+
+### Files changed
+
+- `apps/server/migrations/0005_workspace_integrity.sql`: adds the owner-membership pointer, owner synchronization/protection triggers, and durable maintenance summaries.
+- `apps/server/src/repositories/workspaces.rs`: adds invitation-bound account/session creation, default workspace project/status creation, expected-version checks, owner-pointer transfer, bounded trash restoration, durable retention jobs/worker/summary, explicit audit outcomes, failure events, and global audit reads.
+- `apps/server/src/repositories/identity.rs`: makes installation-admin checks reusable and records failed suspension attempts with an explicit outcome.
+- `apps/server/src/audit.rs`: accepts explicit success/failure outcomes, removes opportunistic retention, adds installation-wide filtered reads, and fails visibly rather than dropping malformed audit rows.
+- `apps/server/src/workspace_routes.rs`: adds invite registration, session-cookie issuance, expected-version DTOs, conflict refresh metadata, global audit search/export, and strict query validation.
+- `apps/server/src/auth_routes.rs`: exposes the existing secure session-cookie constructor inside the server crate so invitation registration uses the identical policy.
+- `apps/server/tests/workspaces_api.rs`: expands focused coverage from 4 to 12 tests across the reviewed high-risk boundaries.
+- `apps/server/Cargo.toml` and `Cargo.lock`: make the existing cancellation-token crate available to the server retention-worker integration test.
+- `crates/platform/src/db/migrate.rs`, `crates/platform/src/backup.rs`, and their tests: embed and accept schema version 5 while preserving prior migration checksums.
+
+### Result
+
+- A recipient without a global account can submit the invitation token, matching email, display name, and password. Password hashing uses the bounded async executor. The transaction creates the global credential, membership, invitation consumption, security audit, and durable browser session together; any session-write failure rolls everything back. Existing global accounts still must sign in and match the normalized invited email.
+- Ordinary workspace creation now uses `WorkspaceDefaults`, atomically creating the owner membership, General project, and Backlog, Todo, In Progress, Done, and Cancelled statuses.
+- Rename, role change, membership removal, ownership transfer, delete, and restore require observed versions. SQL predicates reject stale versions, and `409 conflict` responses carry `conflict.current_version` plus a refresh URL. Rename retains the authorized role/current version inside its transaction and cannot commit before a later response-building query fails.
+- Migration 5 gives each workspace a deferred owner-membership foreign key. Inserts require a pointer, owner changes validate in-workspace targets, triggers synchronize the role swap, direct role demotion/promotion is constrained, and deleting either the sole owner membership or its user is rejected while the workspace exists. Concurrent transfers serialize and leave one linked `owner` role.
+- Trash listing and restore enforce the 30-day boundary. A `workspace.retention` job uses the existing durable job store/worker, purges expired workspaces in deletion/id order through database cascades, purges audits older than 365 days, and persists one bounded count summary rather than per-row audit noise.
+- Audit writes require an explicit outcome. Invalid/mismatched invitation acceptance, forbidden membership changes, and failed suspension attempts now retain safe bounded failure events. Installation administrators can search filtered installation-wide audit history and export a CSV; workspace administrators remain limited to their active workspace scope.
+- Audit decoding now reports corrupt identifiers/metadata as a safe repository failure instead of silently omitting history and corrupting cursors.
+- Pending invitation revocation now excludes expired rows. Cursor DTOs reject unknown keys, and malformed cursors return `400 invalid_request` rather than a workspace non-enumeration response.
+
+### Red-green evidence
+
+1. New-recipient registration returned `400` because the strict token-only DTO rejected registration fields. The new route/repository path made the registration/session test green. A trigger-forced session insert failure then verified that account, membership, and token consumption all roll back.
+2. The default-workspace regression found zero projects and statuses. Reusing `WorkspaceDefaults` and inserting the workflow in the workspace transaction made it pass.
+3. The version regression returned `400` because rename did not accept an expected version. Required version DTOs, scoped compare-and-write predicates, and conflict metadata made fresh mutation/stale retry behavior green; membership-role and delete stale cases were added to the same focused test.
+4. The owner/retention regression initially could not compile because no durable retention API existed. Migration 5, the job-store enqueue path, registered worker, ordered purge, and durable summary made it pass. The same regression proves direct owner membership deletion, owner-user cascade deletion, and direct owner-role demotion fail.
+5. The global audit regression initially received `404` because no operator audit boundary existed. Installation-admin search/export plus explicit failure outcomes made it green for invitation mismatch and suspension denial while a non-admin remains forbidden.
+6. Invitation lifecycle coverage verifies the exact seven-day lifetime, expiry boundary, SMTP verification provenance, secret-redacted debug output, and concurrent normalized-email resend with exactly one usable token.
+7. Concurrent ownership transfers verify one winner and one database-linked `owner` after serialization. Pagination and foreign nested invitation IDs verify continuation and path scoping.
+
+### Verification
+
+- `cargo test -p orbit-server --test workspaces_api`: 12 passed, 0 failed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy -p orbit-server --all-targets -- -D warnings`: passed.
+- `cargo test --workspace`: passed, including all 12 workspace API regressions and every existing domain/platform/server suite.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `git diff --check`: passed.
+
+### Concerns
+
+- SMTP transport remains a later composition task. The invitation repository preserves SMTP/manual provenance and hands the secret only to the authorized delivery boundary; acceptance semantics no longer depend on transport-specific DTOs.
+- The retention worker is implemented and integration-tested through the durable job queue. Production startup still needs to schedule the recurring enqueue cadence when the serving-process composition is introduced.
+- OpenAPI error-response enumeration remains a Minor review item; success paths retain their existing Utoipa annotations, while runtime errors follow the shared stable problem contract.

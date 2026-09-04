@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
-use crate::audit;
+use crate::audit::{self, AuditOutcome};
 
 #[derive(Clone)]
 pub struct SetupRequest {
@@ -268,11 +268,13 @@ impl IdentityRepository {
         .await
         .map_err(SetupError::Unavailable)?;
         sqlx::query(
-            "INSERT INTO workspaces (id, name, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(defaults.workspace.id.to_string())
         .bind(&defaults.workspace.name)
         .bind(defaults.workspace.version as i64)
+        .bind(defaults.owner.id.to_string())
         .bind(timestamp)
         .bind(timestamp)
         .execute(&mut *transaction)
@@ -367,6 +369,16 @@ impl IdentityRepository {
         row.map(decode_identity).transpose()
     }
 
+    pub async fn is_installation_admin(&self, user_id: Id) -> Result<bool, IdentityError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE id = ? AND installation_admin = 1 AND suspended_at IS NULL",
+        )
+        .bind(user_id.to_string())
+        .fetch_one(self.database.pool())
+        .await?
+            != 0)
+    }
+
     pub async fn set_suspended(
         &self,
         actor_id: Id,
@@ -384,6 +396,19 @@ impl IdentityRepository {
         .await?
         .unwrap_or(0);
         if installation_admin == 0 {
+            audit::record_global(
+                &mut transaction,
+                Some(actor_id),
+                "account.suspension_denied",
+                AuditOutcome::Failure,
+                "user",
+                Some(user_id),
+                request_id,
+                serde_json::json!({"reason": "installation_admin_required"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
             return Err(SuspensionError::Forbidden);
         }
         let changed = if suspended {
@@ -427,6 +452,7 @@ impl IdentityRepository {
             } else {
                 "account.reinstated"
             },
+            AuditOutcome::Success,
             "user",
             Some(user_id),
             request_id,

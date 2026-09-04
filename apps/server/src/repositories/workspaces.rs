@@ -1,16 +1,21 @@
 use std::fmt;
 
-use orbit_domain::WorkspaceRole;
-use orbit_platform::{Database, Id, TimestampMillis, generate_opaque_token, normalize_email};
+use orbit_domain::{StatusCategory, WorkspaceDefaults, WorkspaceRole};
+use orbit_platform::{
+    Database, Id, IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore,
+    TimestampMillis, Worker, WorkerConfig, generate_opaque_token, normalize_email,
+};
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
-use crate::audit::{self, AuditEvent};
+use crate::audit::{self, AuditEvent, AuditOutcome};
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
+const WORKSPACE_TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
+const AUDIT_RETENTION_MILLIS: i64 = 365 * 24 * 60 * 60 * 1_000;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkspaceRecord {
@@ -83,6 +88,18 @@ pub struct AcceptanceRecord {
     pub email_verified: bool,
 }
 
+pub struct RegisteredAcceptance {
+    pub acceptance: AcceptanceRecord,
+    pub session: IssuedSession,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct MaintenanceSummary {
+    pub workspaces_purged: u64,
+    pub audit_events_purged: u64,
+    pub occurred_at: TimestampMillis,
+}
+
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("workspace resource was not found")]
@@ -95,8 +112,12 @@ pub enum WorkspaceError {
     InvalidInvitation,
     #[error("workspace invitation belongs to another email address")]
     EmailMismatch,
+    #[error("an existing global account must sign in to accept this invitation")]
+    RegistrationRequiresSignIn,
     #[error("workspace operation conflicts with current state")]
     Conflict,
+    #[error("stale version; current version is {current_version}")]
+    VersionConflict { current_version: u64 },
     #[error("workspace repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
 }
@@ -129,9 +150,11 @@ impl WorkspaceRepository {
             "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, \
              memberships.role FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
              WHERE memberships.user_id = ? AND memberships.role = 'owner' AND workspaces.deleted_at IS NOT NULL \
+             AND workspaces.deleted_at > ? \
              ORDER BY workspaces.id DESC",
         )
         .bind(user_id.to_string())
+        .bind(self.database.database_now().await?.as_millis().saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS))
         .fetch_all(self.database.pool())
         .await?;
         rows.into_iter().map(workspace_from_row).collect()
@@ -144,14 +167,16 @@ impl WorkspaceRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<WorkspaceRecord, WorkspaceError> {
-        let id = Id::new_v7();
-        let membership_id = Id::new_v7();
+        let defaults = WorkspaceDefaults::new(actor_id, name, "General");
+        let id = defaults.workspace.id;
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
-            "INSERT INTO workspaces (id, name, version, created_at, updated_at) VALUES (?, ?, 0, ?, ?)",
+            "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
+             VALUES (?, ?, 0, ?, ?, ?)",
         )
         .bind(id.to_string())
-        .bind(&name)
+        .bind(&defaults.workspace.name)
+        .bind(defaults.owner.id.to_string())
         .bind(now.as_millis())
         .bind(now.as_millis())
         .execute(&mut *transaction)
@@ -160,18 +185,20 @@ impl WorkspaceRepository {
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
              VALUES (?, ?, ?, 'owner', 0, ?, ?)",
         )
-        .bind(membership_id.to_string())
+        .bind(defaults.owner.id.to_string())
         .bind(id.to_string())
         .bind(actor_id.to_string())
         .bind(now.as_millis())
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        insert_default_project(&mut transaction, &defaults, now).await?;
         audit::record(
             &mut transaction,
             id,
             Some(actor_id),
             "workspace.created",
+            AuditOutcome::Success,
             "workspace",
             Some(id),
             request_id,
@@ -182,7 +209,7 @@ impl WorkspaceRepository {
         transaction.commit().await?;
         Ok(WorkspaceRecord {
             id,
-            name,
+            name: defaults.workspace.name,
             role: "owner".to_owned(),
             version: 0,
             deleted_at: None,
@@ -212,18 +239,48 @@ impl WorkspaceRepository {
         workspace_id: Id,
         actor_id: Id,
         name: String,
+        expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<WorkspaceRecord, WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        require_manager(&mut transaction, workspace_id, actor_id, false).await?;
+        let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
+        if actor_role == WorkspaceRole::Member {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                "workspace.update_denied",
+                AuditOutcome::Failure,
+                "workspace",
+                Some(workspace_id),
+                request_id,
+                json!({"reason": "role_forbidden"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(WorkspaceError::Forbidden);
+        }
+        let current_version = sqlx::query_scalar::<_, i64>(
+            "SELECT version FROM workspaces WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        let current_version =
+            u64::try_from(current_version).map_err(|_| WorkspaceError::Conflict)?;
+        if current_version != expected_version {
+            return Err(WorkspaceError::VersionConflict { current_version });
+        }
         sqlx::query(
             "UPDATE workspaces SET name = ?, version = version + 1, updated_at = ? \
-             WHERE id = ? AND deleted_at IS NULL",
+             WHERE id = ? AND deleted_at IS NULL AND version = ?",
         )
         .bind(&name)
         .bind(now.as_millis())
         .bind(workspace_id.to_string())
+        .bind(expected_version as i64)
         .execute(&mut *transaction)
         .await?;
         audit::record(
@@ -231,6 +288,7 @@ impl WorkspaceRepository {
             workspace_id,
             Some(actor_id),
             "workspace.updated",
+            AuditOutcome::Success,
             "workspace",
             Some(workspace_id),
             request_id,
@@ -238,18 +296,13 @@ impl WorkspaceRepository {
             now,
         )
         .await?;
-        let version = sqlx::query_scalar::<_, i64>("SELECT version FROM workspaces WHERE id = ?")
-            .bind(workspace_id.to_string())
-            .fetch_one(&mut *transaction)
-            .await?;
+        let version = current_version + 1;
         transaction.commit().await?;
         Ok(WorkspaceRecord {
             id: workspace_id,
             name,
-            role: role_name(
-                require_role_from_db(self.database.pool(), workspace_id, actor_id).await?,
-            ),
-            version: u64::try_from(version).map_err(|_| WorkspaceError::Conflict)?,
+            role: role_name(actor_role),
+            version,
             deleted_at: None,
         })
     }
@@ -367,6 +420,7 @@ impl WorkspaceRepository {
             workspace_id,
             Some(actor_id),
             "invitation.created",
+            AuditOutcome::Success,
             "workspace_invitation",
             Some(id),
             request_id,
@@ -402,11 +456,12 @@ impl WorkspaceRepository {
         require_manager(&mut transaction, workspace_id, actor_id, false).await?;
         let changed = sqlx::query(
             "UPDATE workspace_invitations SET revoked_at = ? WHERE id = ? AND workspace_id = ? \
-             AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL",
+             AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL AND expires_at > ?",
         )
         .bind(now.as_millis())
         .bind(invitation_id.to_string())
         .bind(workspace_id.to_string())
+        .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?
         .rows_affected();
@@ -418,6 +473,7 @@ impl WorkspaceRepository {
             workspace_id,
             Some(actor_id),
             "invitation.revoked",
+            AuditOutcome::Success,
             "workspace_invitation",
             Some(invitation_id),
             request_id,
@@ -445,20 +501,63 @@ impl WorkspaceRepository {
         )
         .bind(hash.to_vec())
         .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(WorkspaceError::InvalidInvitation)?;
+        .await?;
+        let Some(row) = row else {
+            audit::record_global(
+                &mut transaction,
+                Some(user_id),
+                "invitation.accept_failed",
+                AuditOutcome::Failure,
+                "workspace_invitation",
+                None,
+                request_id,
+                json!({"reason": "invalid"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(WorkspaceError::InvalidInvitation);
+        };
+        let workspace_id = parse_id(row.get("workspace_id"))?;
+        let invitation_id = parse_id(row.get("id"))?;
         if row.get::<i64, _>("expires_at") <= now.as_millis()
             || row.get::<Option<i64>, _>("accepted_at").is_some()
             || row.get::<Option<i64>, _>("revoked_at").is_some()
             || row.get::<Option<i64>, _>("replaced_at").is_some()
         {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(user_id),
+                "invitation.accept_failed",
+                AuditOutcome::Failure,
+                "workspace_invitation",
+                Some(invitation_id),
+                request_id,
+                json!({"reason": "inactive"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
             return Err(WorkspaceError::InvalidInvitation);
         }
         if row.get::<String, _>("normalized_email") != normalize_email(user_email) {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(user_id),
+                "invitation.accept_failed",
+                AuditOutcome::Failure,
+                "workspace_invitation",
+                Some(invitation_id),
+                request_id,
+                json!({"reason": "email_mismatch"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
             return Err(WorkspaceError::EmailMismatch);
         }
-        let workspace_id = parse_id(row.get("workspace_id"))?;
-        let invitation_id = parse_id(row.get("id"))?;
         let role = row.get::<String, _>("role");
         let delivery = row.get::<String, _>("delivery");
         let existing = sqlx::query_scalar::<_, String>(
@@ -509,6 +608,7 @@ impl WorkspaceRepository {
             workspace_id,
             Some(user_id),
             "invitation.accepted",
+            AuditOutcome::Success,
             "membership",
             Some(membership_id),
             request_id,
@@ -525,12 +625,185 @@ impl WorkspaceRepository {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_invited_account(
+        &self,
+        token: &str,
+        email: String,
+        display_name: String,
+        password_hash: String,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<RegisteredAcceptance, WorkspaceError> {
+        const DAY: i64 = 24 * 60 * 60 * 1_000;
+        let hash = token_hash(token);
+        let normalized_email = normalize_email(&email);
+        let user_id = Id::new_v7();
+        let membership_id = Id::new_v7();
+        let session_id = Id::new_v7();
+        let session_token = generate_opaque_token();
+        let idle_expires_at = TimestampMillis::from_millis(now.as_millis() + 30 * DAY);
+        let absolute_expires_at = TimestampMillis::from_millis(now.as_millis() + 90 * DAY);
+        let mut transaction = self.database.immediate_transaction().await?;
+        let row = sqlx::query(
+            "SELECT id, workspace_id, normalized_email, role, delivery, expires_at, accepted_at, \
+             revoked_at, replaced_at FROM workspace_invitations WHERE token_hash = ?",
+        )
+        .bind(hash.to_vec())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(row) = row else {
+            audit::record_global(
+                &mut transaction,
+                None,
+                "invitation.registration_failed",
+                AuditOutcome::Failure,
+                "workspace_invitation",
+                None,
+                request_id,
+                json!({"reason": "invalid"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(WorkspaceError::InvalidInvitation);
+        };
+        let invitation_id = parse_id(row.get("id"))?;
+        let workspace_id = parse_id(row.get("workspace_id"))?;
+        if row.get::<i64, _>("expires_at") <= now.as_millis()
+            || row.get::<Option<i64>, _>("accepted_at").is_some()
+            || row.get::<Option<i64>, _>("revoked_at").is_some()
+            || row.get::<Option<i64>, _>("replaced_at").is_some()
+        {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                None,
+                "invitation.registration_failed",
+                AuditOutcome::Failure,
+                "workspace_invitation",
+                Some(invitation_id),
+                request_id,
+                json!({"reason": "inactive"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(WorkspaceError::InvalidInvitation);
+        }
+        if row.get::<String, _>("normalized_email") != normalized_email {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                None,
+                "invitation.registration_failed",
+                AuditOutcome::Failure,
+                "workspace_invitation",
+                Some(invitation_id),
+                request_id,
+                json!({"reason": "email_mismatch"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(WorkspaceError::EmailMismatch);
+        }
+        let existing =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = ?")
+                .bind(&normalized_email)
+                .fetch_one(&mut *transaction)
+                .await?
+                != 0;
+        if existing {
+            return Err(WorkspaceError::RegistrationRequiresSignIn);
+        }
+        let role = row.get::<String, _>("role");
+        let delivery = row.get::<String, _>("delivery");
+        sqlx::query(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+             email_verified_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(user_id.to_string())
+        .bind(email)
+        .bind(normalized_email)
+        .bind(display_name)
+        .bind(password_hash)
+        .bind((delivery == "smtp").then_some(now.as_millis()))
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, 0, ?, ?)",
+        )
+        .bind(membership_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(user_id.to_string())
+        .bind(role)
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE workspace_invitations SET accepted_at = ? WHERE id = ? AND workspace_id = ?",
+        )
+        .bind(now.as_millis())
+        .bind(invitation_id.to_string())
+        .bind(workspace_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
+             idle_expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(session_id.to_string())
+        .bind(token_hash(&session_token).to_vec())
+        .bind(user_id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .bind(idle_expires_at.as_millis())
+        .bind(absolute_expires_at.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(user_id),
+            "invitation.accepted",
+            AuditOutcome::Success,
+            "membership",
+            Some(membership_id),
+            request_id,
+            json!({"delivery": delivery, "new_account": true}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(RegisteredAcceptance {
+            acceptance: AcceptanceRecord {
+                workspace_id,
+                membership_id,
+                created: true,
+                email_verified: delivery == "smtp",
+            },
+            session: IssuedSession {
+                id: session_id,
+                token: session_token,
+                idle_expires_at,
+                absolute_expires_at,
+            },
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn change_role(
         &self,
         workspace_id: Id,
         membership_id: Id,
         actor_id: Id,
         role: WorkspaceRole,
+        expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
@@ -540,24 +813,58 @@ impl WorkspaceRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
         if actor_role == WorkspaceRole::Member {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                "membership.change_denied",
+                AuditOutcome::Failure,
+                "membership",
+                Some(membership_id),
+                request_id,
+                json!({"reason": "role_forbidden"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
             return Err(WorkspaceError::Forbidden);
         }
-        let target = target_role(&mut transaction, workspace_id, membership_id).await?;
+        let (target, current_version) =
+            target_role_and_version(&mut transaction, workspace_id, membership_id).await?;
+        if current_version != expected_version {
+            return Err(WorkspaceError::VersionConflict { current_version });
+        }
         if target == WorkspaceRole::Owner {
-            return if actor_role == WorkspaceRole::Owner {
-                Err(WorkspaceError::TransferRequired)
+            let error = if actor_role == WorkspaceRole::Owner {
+                WorkspaceError::TransferRequired
             } else {
-                Err(WorkspaceError::Forbidden)
+                WorkspaceError::Forbidden
             };
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                "membership.change_denied",
+                AuditOutcome::Failure,
+                "membership",
+                Some(membership_id),
+                request_id,
+                json!({"reason": "owner_protected"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(error);
         }
         sqlx::query(
             "UPDATE memberships SET role = ?, version = version + 1, updated_at = ? \
-             WHERE id = ? AND workspace_id = ?",
+             WHERE id = ? AND workspace_id = ? AND version = ?",
         )
         .bind(role_name(role))
         .bind(now.as_millis())
         .bind(membership_id.to_string())
         .bind(workspace_id.to_string())
+        .bind(expected_version as i64)
         .execute(&mut *transaction)
         .await?;
         audit::record(
@@ -565,6 +872,7 @@ impl WorkspaceRepository {
             workspace_id,
             Some(actor_id),
             "membership.role_changed",
+            AuditOutcome::Success,
             "membership",
             Some(membership_id),
             request_id,
@@ -581,18 +889,38 @@ impl WorkspaceRepository {
         workspace_id: Id,
         membership_id: Id,
         actor_id: Id,
+        expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
-        let target = target_role(&mut transaction, workspace_id, membership_id).await?;
+        let (target, current_version) =
+            target_role_and_version(&mut transaction, workspace_id, membership_id).await?;
+        if current_version != expected_version {
+            return Err(WorkspaceError::VersionConflict { current_version });
+        }
         if target == WorkspaceRole::Owner {
-            return if actor_role == WorkspaceRole::Owner {
-                Err(WorkspaceError::TransferRequired)
+            let error = if actor_role == WorkspaceRole::Owner {
+                WorkspaceError::TransferRequired
             } else {
-                Err(WorkspaceError::Forbidden)
+                WorkspaceError::Forbidden
             };
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                "membership.remove_denied",
+                AuditOutcome::Failure,
+                "membership",
+                Some(membership_id),
+                request_id,
+                json!({"reason": "owner_protected"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(error);
         }
         if actor_role == WorkspaceRole::Member {
             let target_user = sqlx::query_scalar::<_, String>(
@@ -603,12 +931,27 @@ impl WorkspaceRepository {
             .fetch_one(&mut *transaction)
             .await?;
             if target_user != actor_id.to_string() {
+                audit::record(
+                    &mut transaction,
+                    workspace_id,
+                    Some(actor_id),
+                    "membership.remove_denied",
+                    AuditOutcome::Failure,
+                    "membership",
+                    Some(membership_id),
+                    request_id,
+                    json!({"reason": "role_forbidden"}),
+                    now,
+                )
+                .await?;
+                transaction.commit().await?;
                 return Err(WorkspaceError::Forbidden);
             }
         }
-        sqlx::query("DELETE FROM memberships WHERE id = ? AND workspace_id = ?")
+        sqlx::query("DELETE FROM memberships WHERE id = ? AND workspace_id = ? AND version = ?")
             .bind(membership_id.to_string())
             .bind(workspace_id.to_string())
+            .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?;
         audit::record(
@@ -616,6 +959,7 @@ impl WorkspaceRepository {
             workspace_id,
             Some(actor_id),
             "membership.removed",
+            AuditOutcome::Success,
             "membership",
             Some(membership_id),
             request_id,
@@ -627,11 +971,14 @@ impl WorkspaceRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn transfer_ownership(
         &self,
         workspace_id: Id,
         membership_id: Id,
         actor_id: Id,
+        expected_version: u64,
+        membership_version: u64,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
@@ -646,29 +993,61 @@ impl WorkspaceRepository {
         .await?
         .ok_or(WorkspaceError::NotFound)?;
         if actor_membership.get::<String, _>("role") != "owner" {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                "workspace.transfer_denied",
+                AuditOutcome::Failure,
+                "workspace",
+                Some(workspace_id),
+                request_id,
+                json!({"reason": "owner_required"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
             return Err(WorkspaceError::Forbidden);
         }
-        target_role(&mut transaction, workspace_id, membership_id).await?;
+        let workspace_version = sqlx::query_scalar::<_, i64>(
+            "SELECT version FROM workspaces WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        let workspace_version =
+            u64::try_from(workspace_version).map_err(|_| WorkspaceError::Conflict)?;
+        if workspace_version != expected_version {
+            return Err(WorkspaceError::VersionConflict {
+                current_version: workspace_version,
+            });
+        }
+        let (_, target_version) =
+            target_role_and_version(&mut transaction, workspace_id, membership_id).await?;
+        if target_version != membership_version {
+            return Err(WorkspaceError::VersionConflict {
+                current_version: target_version,
+            });
+        }
         let actor_membership_id = actor_membership.get::<String, _>("id");
         if actor_membership_id == membership_id.to_string() {
             return Ok(());
         }
         sqlx::query(
-            "UPDATE memberships SET role = 'admin', version = version + 1, updated_at = ? \
-             WHERE id = ? AND workspace_id = ? AND role = 'owner'",
+            "UPDATE workspaces SET owner_membership_id = ?, updated_at = ? WHERE id = ? AND version = ?",
         )
-        .bind(now.as_millis())
-        .bind(actor_membership_id)
-        .bind(workspace_id.to_string())
-        .execute(&mut *transaction)
-        .await?;
+            .bind(membership_id.to_string())
+            .bind(now.as_millis())
+            .bind(workspace_id.to_string())
+            .bind(expected_version as i64)
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query(
-            "UPDATE memberships SET role = 'owner', version = version + 1, updated_at = ? \
-             WHERE id = ? AND workspace_id = ?",
+            "UPDATE workspaces SET version = version + 1, updated_at = ? WHERE id = ? AND version = ?",
         )
         .bind(now.as_millis())
-        .bind(membership_id.to_string())
         .bind(workspace_id.to_string())
+        .bind(expected_version as i64)
         .execute(&mut *transaction)
         .await?;
         audit::record(
@@ -676,6 +1055,7 @@ impl WorkspaceRepository {
             workspace_id,
             Some(actor_id),
             "workspace.ownership_transferred",
+            AuditOutcome::Success,
             "membership",
             Some(membership_id),
             request_id,
@@ -692,6 +1072,7 @@ impl WorkspaceRepository {
         workspace_id: Id,
         actor_id: Id,
         deleted: bool,
+        expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
@@ -700,24 +1081,51 @@ impl WorkspaceRepository {
         if role != WorkspaceRole::Owner {
             return Err(WorkspaceError::Forbidden);
         }
+        let current_version =
+            sqlx::query_scalar::<_, i64>("SELECT version FROM workspaces WHERE id = ?")
+                .bind(workspace_id.to_string())
+                .fetch_one(&mut *transaction)
+                .await?;
+        let current_version =
+            u64::try_from(current_version).map_err(|_| WorkspaceError::Conflict)?;
+        if current_version != expected_version {
+            return Err(WorkspaceError::VersionConflict { current_version });
+        }
+        if !deleted {
+            let deleted_at = sqlx::query_scalar::<_, i64>(
+                "SELECT deleted_at FROM workspaces WHERE id = ? AND deleted_at IS NOT NULL",
+            )
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *transaction)
+            .await?;
+            if deleted_at
+                <= now
+                    .as_millis()
+                    .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS)
+            {
+                return Err(WorkspaceError::NotFound);
+            }
+        }
         let changed = if deleted {
             sqlx::query(
                 "UPDATE workspaces SET deleted_at = ?, version = version + 1, updated_at = ? \
-                 WHERE id = ? AND deleted_at IS NULL",
+                 WHERE id = ? AND deleted_at IS NULL AND version = ?",
             )
             .bind(now.as_millis())
             .bind(now.as_millis())
             .bind(workspace_id.to_string())
+            .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?
             .rows_affected()
         } else {
             sqlx::query(
                 "UPDATE workspaces SET deleted_at = NULL, version = version + 1, updated_at = ? \
-                 WHERE id = ? AND deleted_at IS NOT NULL",
+                 WHERE id = ? AND deleted_at IS NOT NULL AND version = ?",
             )
             .bind(now.as_millis())
             .bind(workspace_id.to_string())
+            .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?
             .rows_affected()
@@ -734,6 +1142,7 @@ impl WorkspaceRepository {
             } else {
                 "workspace.restored"
             },
+            AuditOutcome::Success,
             "workspace",
             Some(workspace_id),
             request_id,
@@ -758,6 +1167,149 @@ impl WorkspaceRepository {
         }
         Ok(audit::list(&self.database, workspace_id, cursor, page_size(limit)).await?)
     }
+
+    pub async fn global_audit(
+        &self,
+        workspace_id: Option<Id>,
+        action: Option<&str>,
+        cursor: Option<Id>,
+        limit: usize,
+    ) -> Result<(Vec<AuditEvent>, Option<Id>), WorkspaceError> {
+        Ok(audit::list_global(
+            &self.database,
+            workspace_id,
+            action,
+            cursor,
+            page_size(limit),
+        )
+        .await?)
+    }
+
+    pub async fn enqueue_retention(&self, now: TimestampMillis) -> Result<Id, WorkspaceError> {
+        let job = Job::new(
+            JobKind::new("workspace.retention").with_concurrency_limit(1),
+            json!({}),
+            now,
+        );
+        JobStore::new(self.database.clone())
+            .enqueue(&job)
+            .await
+            .map_err(|error| WorkspaceError::Unavailable(sqlx::Error::Protocol(error.to_string())))
+    }
+
+    pub fn retention_worker(
+        &self,
+        config: WorkerConfig,
+    ) -> Result<Worker, JobKindRegistrationError> {
+        let repository = self.clone();
+        Worker::new(JobStore::new(self.database.clone()), config).with_handler(
+            JobKind::new("workspace.retention").with_concurrency_limit(1),
+            move |_| {
+                let repository = repository.clone();
+                async move {
+                    let now = repository.database.database_now().await.map_err(|_| {
+                        JobError::Retryable("retention database unavailable".to_owned())
+                    })?;
+                    repository.purge_retention(now).await.map_err(|_| {
+                        JobError::Retryable("retention maintenance failed".to_owned())
+                    })?;
+                    Ok(())
+                }
+            },
+        )
+    }
+
+    pub async fn purge_retention(
+        &self,
+        now: TimestampMillis,
+    ) -> Result<MaintenanceSummary, WorkspaceError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let expired = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= ? \
+             ORDER BY deleted_at, id",
+        )
+        .bind(
+            now.as_millis()
+                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        let mut workspaces_purged = 0_u64;
+        for workspace_id in expired {
+            workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = ?")
+                .bind(workspace_id)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected();
+        }
+        let audit_events_purged = sqlx::query("DELETE FROM audit_events WHERE occurred_at < ?")
+            .bind(now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS))
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+        sqlx::query(
+            "INSERT INTO maintenance_summaries (id, kind, workspaces_purged, audit_events_purged, occurred_at) \
+             VALUES (?, 'workspace.retention', ?, ?, ?)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(workspaces_purged as i64)
+        .bind(audit_events_purged as i64)
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(MaintenanceSummary {
+            workspaces_purged,
+            audit_events_purged,
+            occurred_at: now,
+        })
+    }
+}
+
+async fn insert_default_project(
+    transaction: &mut Transaction<'_, Sqlite>,
+    defaults: &WorkspaceDefaults,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO projects (id, workspace_id, name, project_key, color, version, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(defaults.project.id.to_string())
+    .bind(defaults.workspace.id.to_string())
+    .bind(&defaults.project.name)
+    .bind(&defaults.project.key)
+    .bind(&defaults.project.color)
+    .bind(defaults.project.version as i64)
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(&mut **transaction)
+    .await?;
+    for status in &defaults.statuses {
+        sqlx::query(
+            "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, \
+             category, position, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(status.id.to_string())
+        .bind(status.workspace_id.to_string())
+        .bind(status.project_id.to_string())
+        .bind(&status.name)
+        .bind(&status.description)
+        .bind(&status.color)
+        .bind(match status.category {
+            StatusCategory::Unstarted => "unstarted",
+            StatusCategory::Started => "started",
+            StatusCategory::Completed => "completed",
+            StatusCategory::Cancelled => "cancelled",
+        })
+        .bind(status.position)
+        .bind(status.version as i64)
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
 }
 
 fn page<R, T>(
@@ -903,20 +1455,22 @@ async fn require_role_from_db(
     parse_role(&role)
 }
 
-async fn target_role(
+async fn target_role_and_version(
     transaction: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     membership_id: Id,
-) -> Result<WorkspaceRole, WorkspaceError> {
-    let role = sqlx::query_scalar::<_, String>(
-        "SELECT role FROM memberships WHERE id = ? AND workspace_id = ?",
-    )
-    .bind(membership_id.to_string())
-    .bind(workspace_id.to_string())
-    .fetch_optional(&mut **transaction)
-    .await?
-    .ok_or(WorkspaceError::NotFound)?;
-    parse_role(&role)
+) -> Result<(WorkspaceRole, u64), WorkspaceError> {
+    let row =
+        sqlx::query("SELECT role, version FROM memberships WHERE id = ? AND workspace_id = ?")
+            .bind(membership_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_optional(&mut **transaction)
+            .await?
+            .ok_or(WorkspaceError::NotFound)?;
+    let role = parse_role(&row.get::<String, _>("role"))?;
+    let version =
+        u64::try_from(row.get::<i64, _>("version")).map_err(|_| WorkspaceError::Conflict)?;
+    Ok((role, version))
 }
 
 fn parse_role(role: &str) -> Result<WorkspaceRole, WorkspaceError> {

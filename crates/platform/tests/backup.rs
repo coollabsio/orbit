@@ -50,7 +50,7 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
-    assert_eq!(snapshot.manifest.schema_version, 4);
+    assert_eq!(snapshot.manifest.schema_version, 5);
     assert_eq!(
         snapshot.manifest.application_version,
         env!("CARGO_PKG_VERSION")

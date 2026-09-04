@@ -8,12 +8,14 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use orbit_domain::WorkspaceRole;
-use orbit_platform::{Id, RequestId, TimestampMillis};
+use orbit_platform::{
+    Id, PasswordError, PasswordExecutor, PasswordService, RequestId, TimestampMillis,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::auth_routes::CookieMode;
+use crate::auth_routes::{CookieMode, issued_session_cookie};
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository, SuspensionError};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 
@@ -23,6 +25,7 @@ pub struct WorkspaceState {
     workspaces: Arc<WorkspaceRepository>,
     public_origin: String,
     cookie_mode: CookieMode,
+    passwords: PasswordExecutor,
 }
 
 impl WorkspaceState {
@@ -37,6 +40,8 @@ impl WorkspaceState {
             identity,
             public_origin: public_origin.trim_end_matches('/').to_owned(),
             cookie_mode,
+            passwords: PasswordExecutor::new(PasswordService::default(), 2)
+                .expect("password executor concurrency is non-zero"),
         }
     }
 
@@ -52,6 +57,8 @@ impl WorkspaceState {
             workspaces,
             public_origin: public_origin.trim_end_matches('/').to_owned(),
             cookie_mode,
+            passwords: PasswordExecutor::new(PasswordService::default(), 2)
+                .expect("password executor concurrency is non-zero"),
         }
     }
 }
@@ -102,6 +109,8 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             "/api/v1/admin/users/{user_id}/suspension",
             post(set_account_suspension),
         )
+        .route("/api/v1/admin/audit", get(list_global_audit))
+        .route("/api/v1/admin/audit/export", get(export_global_audit))
         .with_state(state)
 }
 
@@ -171,6 +180,13 @@ struct CreateWorkspaceBody {
     name: String,
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct RenameWorkspaceBody {
+    name: String,
+    expected_version: u64,
+}
+
 #[utoipa::path(post, path = "/api/v1/workspaces", request_body = CreateWorkspaceBody, responses((status = 201)))]
 async fn create_workspace(
     State(state): State<WorkspaceState>,
@@ -226,13 +242,13 @@ async fn get_workspace(
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}", request_body = CreateWorkspaceBody, responses((status = 200)))]
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}", request_body = RenameWorkspaceBody, responses((status = 200)))]
 async fn rename_workspace(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-    ApiJson(body): ApiJson<CreateWorkspaceBody>,
+    ApiJson(body): ApiJson<RenameWorkspaceBody>,
 ) -> Result<Json<crate::repositories::workspaces::WorkspaceRecord>, ApiError> {
     let instance = format!("/api/v1/workspaces/{workspace_id}");
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
@@ -244,6 +260,7 @@ async fn rename_workspace(
             workspace_id,
             session.user.id,
             name,
+            body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -253,10 +270,17 @@ async fn rename_workspace(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PageQuery {
     cursor: Option<String>,
     #[serde(default = "default_limit")]
     limit: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MutationQuery {
+    expected_version: u64,
 }
 
 #[derive(Serialize)]
@@ -307,6 +331,7 @@ impl From<RoleBody> for WorkspaceRole {
 #[serde(deny_unknown_fields)]
 struct RoleChangeBody {
     role: RoleBody,
+    expected_version: u64,
 }
 
 #[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}", request_body = RoleChangeBody, responses((status = 204)))]
@@ -328,6 +353,7 @@ async fn change_member_role(
             membership_id,
             session.user.id,
             body.role.into(),
+            body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -340,6 +366,7 @@ async fn change_member_role(
 async fn remove_member(
     State(state): State<WorkspaceState>,
     Path((workspace_id, membership_id)): Path<(String, String)>,
+    ApiQuery(mutation): ApiQuery<MutationQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<StatusCode, ApiError> {
@@ -353,6 +380,7 @@ async fn remove_member(
             workspace_id,
             membership_id,
             session.user.id,
+            mutation.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -365,6 +393,8 @@ async fn remove_member(
 #[serde(deny_unknown_fields)]
 struct TransferBody {
     membership_id: String,
+    expected_version: u64,
+    membership_version: u64,
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/transfer-ownership", request_body = TransferBody, responses((status = 204)))]
@@ -385,6 +415,8 @@ async fn transfer_ownership(
             workspace_id,
             membership_id,
             session.user.id,
+            body.expected_version,
+            body.membership_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -525,6 +557,12 @@ async fn revoke_invitation(
 #[serde(deny_unknown_fields)]
 struct AcceptBody {
     token: String,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    password: Option<String>,
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/invitations/accept", request_body = AcceptBody, responses((status = 200)))]
@@ -533,31 +571,97 @@ async fn accept_invitation(
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<AcceptBody>,
-) -> Result<Json<crate::repositories::workspaces::AcceptanceRecord>, ApiError> {
+) -> Result<Response, ApiError> {
     let instance = "/api/v1/workspaces/invitations/accept";
-    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
-    state
+    if cookie_value(&headers, state.cookie_mode.session_cookie_name()).is_some() {
+        let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+        let accepted = state
+            .workspaces
+            .accept_invitation(
+                &body.token,
+                session.user.id,
+                &session.user.email,
+                request_id_value(request_id.as_ref()),
+                TimestampMillis::now(),
+            )
+            .await
+            .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+        return Ok(Json(accepted).into_response());
+    }
+    let email = body
+        .email
+        .ok_or_else(|| registration_field_problem("email", instance, request_id.as_ref()))?;
+    let display_name = body
+        .display_name
+        .ok_or_else(|| registration_field_problem("display_name", instance, request_id.as_ref()))?;
+    let password = body
+        .password
+        .ok_or_else(|| registration_field_problem("password", instance, request_id.as_ref()))?;
+    if email.trim().is_empty() || !email.contains('@') || display_name.trim().is_empty() {
+        return Err(registration_field_problem(
+            "registration",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let password_hash = state
+        .passwords
+        .hash(password)
+        .await
+        .map_err(|error| password_problem(error, instance, request_id.as_ref()))?;
+    let registered = state
         .workspaces
-        .accept_invitation(
+        .register_invited_account(
             &body.token,
-            session.user.id,
-            &session.user.email,
+            email.trim().to_owned(),
+            display_name.trim().to_owned(),
+            password_hash,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
         .await
-        .map(Json)
-        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
+        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    let cookie = issued_session_cookie(state.cookie_mode, &registered.session.token);
+    let mut response = (StatusCode::CREATED, Json(registered.acceptance)).into_response();
+    response.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&cookie).map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Internal server error",
+                "An unexpected error occurred. Use the request ID when contacting support.",
+                instance,
+                request_id.as_ref(),
+            )
+        })?,
+    );
+    Ok(response)
 }
 
 #[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}", responses((status = 204)))]
 async fn delete_workspace(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
+    ApiQuery(mutation): ApiQuery<MutationQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<StatusCode, ApiError> {
-    set_deleted(state, workspace_id, headers, request_id, true).await
+    set_deleted(
+        state,
+        workspace_id,
+        headers,
+        request_id,
+        true,
+        mutation.expected_version,
+    )
+    .await
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct RestoreBody {
+    expected_version: u64,
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/restore", responses((status = 204)))]
@@ -566,8 +670,17 @@ async fn restore_workspace(
     Path(workspace_id): Path<String>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<RestoreBody>,
 ) -> Result<StatusCode, ApiError> {
-    set_deleted(state, workspace_id, headers, request_id, false).await
+    set_deleted(
+        state,
+        workspace_id,
+        headers,
+        request_id,
+        false,
+        body.expected_version,
+    )
+    .await
 }
 
 async fn set_deleted(
@@ -576,6 +689,7 @@ async fn set_deleted(
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     deleted: bool,
+    expected_version: u64,
 ) -> Result<StatusCode, ApiError> {
     let instance = if deleted {
         format!("/api/v1/workspaces/{workspace_id}")
@@ -590,6 +704,7 @@ async fn set_deleted(
             workspace_id,
             session.user.id,
             deleted,
+            expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -665,6 +780,130 @@ async fn set_account_suspension(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdminAuditQuery {
+    workspace_id: Option<String>,
+    action: Option<String>,
+    cursor: Option<String>,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+async fn list_global_audit(
+    State(state): State<WorkspaceState>,
+    ApiQuery(query): ApiQuery<AdminAuditQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Page<crate::audit::AuditEvent>>, ApiError> {
+    let instance = "/api/v1/admin/audit";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
+    let workspace_id = optional_id(query.workspace_id, instance, request_id.as_ref())?;
+    let cursor = optional_id(query.cursor, instance, request_id.as_ref())?;
+    let (items, next_cursor) = state
+        .workspaces
+        .global_audit(workspace_id, query.action.as_deref(), cursor, query.limit)
+        .await
+        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    Ok(Json(Page { items, next_cursor }))
+}
+
+async fn export_global_audit(
+    State(state): State<WorkspaceState>,
+    ApiQuery(query): ApiQuery<AdminAuditQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Response, ApiError> {
+    let instance = "/api/v1/admin/audit/export";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
+    let workspace_id = optional_id(query.workspace_id, instance, request_id.as_ref())?;
+    let cursor = optional_id(query.cursor, instance, request_id.as_ref())?;
+    let (events, _) = state
+        .workspaces
+        .global_audit(workspace_id, query.action.as_deref(), cursor, query.limit)
+        .await
+        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    let mut csv = "id,workspace_id,actor_id,action,outcome,resource_type,resource_id,request_id,occurred_at\n".to_owned();
+    for event in events {
+        let fields = [
+            event.id.to_string(),
+            event
+                .workspace_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            event.actor_id.map(|id| id.to_string()).unwrap_or_default(),
+            event.action,
+            event.outcome,
+            event.resource_type,
+            event
+                .resource_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            event.request_id,
+            event.occurred_at.to_string(),
+        ];
+        csv.push_str(
+            &fields
+                .into_iter()
+                .map(|field| csv_field(&field))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        csv.push('\n');
+    }
+    let mut response = csv.into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/csv; charset=utf-8"),
+    );
+    Ok(response)
+}
+
+async fn require_installation_admin(
+    state: &WorkspaceState,
+    user_id: Id,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<(), ApiError> {
+    if state
+        .identity
+        .is_installation_admin(user_id)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Internal server error",
+                "An unexpected error occurred. Use the request ID when contacting support.",
+                instance,
+                request_id,
+            )
+        })?
+    {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "installation_admin_required",
+            "Installation administrator required",
+            "Only an installation administrator may access global audit records.",
+            instance,
+            request_id,
+        ))
+    }
+}
+
+fn csv_field(value: &str) -> String {
+    let value = if matches!(value.chars().next(), Some('=' | '+' | '-' | '@')) {
+        format!("'{value}")
+    } else {
+        value.to_owned()
+    };
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
 async fn authenticate(
     state: &WorkspaceState,
     headers: &HeaderMap,
@@ -731,7 +970,18 @@ fn optional_id(
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<Option<Id>, ApiError> {
     value
-        .map(|value| parse_id(&value, instance, request_id))
+        .map(|value| {
+            value.parse().map_err(|_| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "Invalid request",
+                    "The request query is not valid for this endpoint.",
+                    instance,
+                    request_id,
+                )
+            })
+        })
         .transpose()
 }
 
@@ -801,6 +1051,14 @@ fn workspace_problem(
             instance,
             request_id,
         ),
+        WorkspaceError::RegistrationRequiresSignIn => ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Authentication required",
+            "The invited account already exists. Sign in to accept this invitation.",
+            instance,
+            request_id,
+        ),
         WorkspaceError::Conflict => ApiError::new(
             StatusCode::CONFLICT,
             "workspace_conflict",
@@ -809,6 +1067,9 @@ fn workspace_problem(
             instance,
             request_id,
         ),
+        WorkspaceError::VersionConflict { current_version } => {
+            ApiError::conflict(current_version, instance.clone(), instance, request_id)
+        }
         WorkspaceError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -818,6 +1079,50 @@ fn workspace_problem(
             request_id,
         ),
     }
+}
+
+fn registration_field_problem(
+    _field: &str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_registration",
+        "Invalid registration",
+        "Email, display name, and a valid password are required.",
+        instance,
+        request_id,
+    )
+}
+
+fn password_problem(
+    error: PasswordError,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    let detail = match error {
+        PasswordError::InvalidLength => "Password must contain between 12 and 128 characters.",
+        PasswordError::CommonPassword => "Choose a password that is not commonly used.",
+        PasswordError::InvalidHash | PasswordError::HashingFailed => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Internal server error",
+                "An unexpected error occurred. Use the request ID when contacting support.",
+                instance,
+                request_id,
+            );
+        }
+    };
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_password",
+        "Invalid password",
+        detail,
+        instance,
+        request_id,
+    )
 }
 
 fn suspension_problem(
@@ -871,6 +1176,14 @@ struct ProblemBody {
     detail: &'static str,
     instance: String,
     request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict: Option<ConflictBody>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConflictBody {
+    current_version: u64,
+    refresh: String,
 }
 
 struct ApiError {
@@ -899,6 +1212,33 @@ impl ApiError {
                 request_id: request_id
                     .map(|Extension(value)| value.as_str().to_owned())
                     .unwrap_or_else(|| "unknown".to_owned()),
+                conflict: None,
+            }),
+        }
+    }
+
+    fn conflict(
+        current_version: u64,
+        refresh: String,
+        instance: String,
+        request_id: Option<&Extension<RequestId>>,
+    ) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            body: Box::new(ProblemBody {
+                type_uri: "https://docs.orbit.dev/problems/conflict".to_owned(),
+                title: "Conflict",
+                status: StatusCode::CONFLICT.as_u16(),
+                code: "conflict",
+                detail: "The resource changed after it was read. Refresh and retry.",
+                instance,
+                request_id: request_id
+                    .map(|Extension(value)| value.as_str().to_owned())
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                conflict: Some(ConflictBody {
+                    current_version,
+                    refresh,
+                }),
             }),
         }
     }
