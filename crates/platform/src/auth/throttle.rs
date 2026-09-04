@@ -84,7 +84,12 @@ impl LoginThrottler {
             .emails
             .get(&email)
             .map_or(0, |state| state.count as usize);
-        if email_failures + email_in_flight >= 5 {
+        let email_capacity = if email_failures >= 5 {
+            1
+        } else {
+            5 - email_failures
+        };
+        if email_in_flight >= email_capacity {
             return Err(ThrottleDecision::RetryAfter(Duration::from_secs(1)));
         }
         let ip_in_flight = self

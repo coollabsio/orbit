@@ -326,6 +326,39 @@ fn throttle_reservations_atomically_limit_concurrent_admission() {
 }
 
 #[test]
+fn throttle_admits_one_probe_after_backoff_and_advances_progressive_delay() {
+    let mut throttle = LoginThrottler::new();
+    let ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 46));
+    let email = "owner@example.com";
+    let initial = TimestampMillis::from_millis(0);
+
+    for _ in 0..5 {
+        let reservation = throttle.reserve(email, ip, initial).unwrap();
+        throttle.finish_failure(reservation, initial);
+    }
+
+    let after_first_backoff = TimestampMillis::from_millis(5 * SECOND);
+    let probe = throttle
+        .reserve(email, ip, after_first_backoff)
+        .expect("the next attempt is admitted after the five-second backoff");
+    assert!(matches!(
+        throttle.reserve(email, ip, after_first_backoff),
+        Err(ThrottleDecision::RetryAfter(_))
+    ));
+
+    throttle.finish_failure(probe, after_first_backoff);
+    assert_eq!(
+        throttle.check(email, ip, after_first_backoff),
+        ThrottleDecision::RetryAfter(Duration::from_secs(10))
+    );
+    assert!(
+        throttle
+            .reserve(email, ip, TimestampMillis::from_millis(15 * SECOND),)
+            .is_ok()
+    );
+}
+
+#[test]
 fn abandoned_throttle_reservations_expire_with_the_admission_window() {
     let mut throttle = LoginThrottler::new();
     let ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 45));

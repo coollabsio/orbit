@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::net::{IpAddr, Ipv4Addr};
@@ -54,10 +55,20 @@ impl CookieMode {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct RecoveryMessage {
     pub email: String,
     pub url: String,
+}
+
+impl fmt::Debug for RecoveryMessage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RecoveryMessage")
+            .field("email", &self.email)
+            .field("url", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
@@ -107,9 +118,18 @@ impl RecoveryDelivery for AdminRecoveryDelivery {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct SetupLaunch {
     pub url: String,
+}
+
+impl fmt::Debug for SetupLaunch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SetupLaunch")
+            .field("url", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Clone)]
@@ -172,9 +192,6 @@ pub async fn initialize_auth(
             issued.token
         ),
     });
-    if let Some(launch) = &launch {
-        tracing::warn!(setup_url = %launch.url, "Orbit requires first-run setup");
-    }
     Ok((
         AuthState::with_recovery_delivery(
             repository,
@@ -826,6 +843,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{AdminRecoveryDelivery, AuthState, CookieMode, auth_router, initialize_auth};
+    use super::{RecoveryMessage, SetupLaunch};
     use crate::repositories::identity::{IdentityRepository, SetupRequest};
 
     #[tokio::test]
@@ -890,6 +908,23 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn auth_secret_bearing_urls_are_redacted_from_debug_output() {
+        let secret = "secret-bearer-token";
+        let recovery = RecoveryMessage {
+            email: "owner@example.com".to_owned(),
+            url: format!("https://orbit.test/recovery?token={secret}"),
+        };
+        let setup = SetupLaunch {
+            url: format!("https://orbit.test/setup?token={secret}"),
+        };
+
+        for output in [format!("{recovery:?}"), format!("{setup:?}")] {
+            assert!(output.contains("[REDACTED]"));
+            assert!(!output.contains(secret));
+        }
     }
 
     #[tokio::test]
@@ -985,7 +1020,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auth_initialization_creates_and_prints_setup_url_only_once() {
+    async fn auth_initialization_returns_setup_url_only_once() {
         let database = TestDatabase::new().await.unwrap();
         let repository = Arc::new(IdentityRepository::new((*database).clone()));
         let delivery = Arc::new(AdminRecoveryDelivery::new(16));

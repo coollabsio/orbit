@@ -133,3 +133,30 @@ I converted each Important review finding into a regression at the narrowest res
 
 - The administrator-copy delivery is deliberately bounded and in-process. Production composition must retain the delivery handle for an operator UI or provide an SMTP-backed `RecoveryDelivery`; the authentication route already exposes the required injection point and never returns the secret publicly.
 - Setup-token URLs and recovery URLs contain bearer secrets and therefore must only be shown through trusted operator channels and redacted from ordinary request logs.
+
+---
+
+## Re-review round 1 remediation
+
+### Approach and result
+
+- Added a regression that builds five failures, waits through the five-second backoff, races the next admission, and verifies exactly one probe is accepted. A failed probe advances the policy to ten seconds, after which the next probe is admitted. The reservation capacity now permits one in-flight probe once progressive throttling has started while still limiting the initial wave to five total attempts.
+- Added a regression that formats setup and recovery delivery values with `Debug` and verifies the bearer token is absent. `SetupLaunch` and `RecoveryMessage` now provide explicit redacted `Debug` implementations.
+- Removed the full setup URL from tracing. `initialize_auth` returns the secret-bearing launch value to its caller, and the operations CLI remains the deliberate console-output boundary.
+
+### Red and green evidence
+
+- `throttle_admits_one_probe_after_backoff_and_advances_progressive_delay` initially failed because the first post-backoff reservation returned a one-second retry. It passes after separating the one-probe capacity from the initial five-attempt capacity.
+- `auth_secret_bearing_urls_are_redacted_from_debug_output` initially failed because derived output contained the full URL and no redaction marker. It passes with manual redacted formatters.
+
+### Verification
+
+- `cargo test -p orbit-platform --test auth`: 15 passed, 0 failed.
+- `cargo test -p orbit-server auth`: 22 passed, 0 failed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy -p orbit-platform --test auth -- -D warnings`: passed.
+- `cargo clippy -p orbit-server --all-targets -- -D warnings`: passed.
+
+### Concerns
+
+- No blocking concerns remain from the re-review. Bearer URLs still intentionally cross the explicit operator/SMTP delivery boundaries and must not be logged by their consumers.
