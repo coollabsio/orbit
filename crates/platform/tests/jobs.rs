@@ -1,10 +1,11 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use orbit_platform::{
-    CatchUpMode, ClaimSelection, CronSchedule, Job, JobError, JobKind, JobPriority, JobQueue,
-    JobState, JobStore, RecurringSchedule, Scheduler, TestDatabase, TimestampMillis, Worker,
-    WorkerConfig,
+    CatchUpMode, ClaimSelection, CronSchedule, Job, JobError, JobKind, JobKindRegistry,
+    JobPriority, JobQueue, JobState, JobStore, RecurringSchedule, Scheduler, TestDatabase,
+    TimestampMillis, Worker, WorkerConfig,
 };
 use serde_json::json;
 use tokio::sync::Notify;
@@ -519,4 +520,233 @@ async fn stored_job_debug_output_never_exposes_payload_values() {
     let diagnostic = format!("{:?}", store.get(id).await.unwrap().unwrap());
 
     assert!(!diagnostic.contains("must-not-leak"));
+}
+
+#[tokio::test]
+async fn stored_job_diagnostics_keep_the_registered_sensitive_field_policy() {
+    let database = TestDatabase::new().await.unwrap();
+    let kinds = JobKindRegistry::new();
+    let writer = JobStore::with_registry((*database).clone(), kinds.clone());
+    let id = JobQueue::new(writer)
+        .enqueue(Job::new(
+            JobKind::new("round-trip-secret").with_sensitive_fields(["token"]),
+            json!({"token": "must-not-leak", "safe": "visible"}),
+            TimestampMillis::from_millis(0),
+        ))
+        .await
+        .unwrap();
+
+    let reader = JobStore::with_registry((*database).clone(), kinds);
+    let diagnostic = reader.get(id).await.unwrap().unwrap().diagnostic_payload();
+
+    assert_eq!(diagnostic["token"], "[REDACTED]");
+    assert_eq!(diagnostic["safe"], "visible");
+}
+
+#[tokio::test]
+async fn direct_claim_and_failure_use_the_canonical_custom_kind_policy() {
+    let database = TestDatabase::new().await.unwrap();
+    let kinds = JobKindRegistry::new();
+    let writer = JobStore::with_registry((*database).clone(), kinds.clone());
+    let custom = JobKind::new("custom-direct")
+        .with_retry_policy(3, vec![Duration::from_secs(7), Duration::from_secs(11)])
+        .with_lease(Duration::from_secs(11 * 60));
+    let id = JobQueue::new(writer)
+        .enqueue(Job::new(custom, json!({}), TimestampMillis::from_millis(0)))
+        .await
+        .unwrap();
+
+    let store = JobStore::with_registry((*database).clone(), kinds);
+    let claim = store
+        .claim(TimestampMillis::from_millis(0), ClaimSelection::Any)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.lease_expires_at.as_millis(), 11 * MINUTE);
+    store
+        .fail(
+            &claim,
+            JobError::Retryable("temporary".to_owned()),
+            TimestampMillis::from_millis(1_000),
+        )
+        .await
+        .unwrap();
+    let queued = store.get(id).await.unwrap().unwrap();
+    let delay = queued.available_at.as_millis() - 1_000;
+    assert!((7_000..=8_400).contains(&delay));
+    assert_eq!(queued.max_attempts, 3);
+}
+
+#[tokio::test]
+async fn materialized_schedule_keeps_the_canonical_custom_kind_policy() {
+    let database = TestDatabase::new().await.unwrap();
+    let kinds = JobKindRegistry::new();
+    let writer = JobStore::with_registry((*database).clone(), kinds.clone());
+    let custom = JobKind::new("custom-scheduled")
+        .with_sensitive_fields(["token"])
+        .with_retry_policy(3, vec![Duration::from_secs(7), Duration::from_secs(11)])
+        .with_lease(Duration::from_secs(11 * 60));
+    let scheduler = Scheduler::new(writer);
+    let schedule = RecurringSchedule::interval(
+        custom,
+        json!({"token": "must-not-leak"}),
+        Duration::from_secs(60),
+        TimestampMillis::from_millis(MINUTE),
+    );
+    scheduler.upsert(&schedule).await.unwrap();
+    let store = JobStore::with_registry((*database).clone(), kinds);
+    let scheduler = Scheduler::new(store.clone());
+    let id = scheduler
+        .materialize_due(TimestampMillis::from_millis(MINUTE))
+        .await
+        .unwrap()[0];
+
+    let materialized = store.get(id).await.unwrap().unwrap();
+    assert_eq!(materialized.max_attempts, 3);
+    assert_eq!(materialized.diagnostic_payload()["token"], "[REDACTED]");
+    let claim = store
+        .claim(TimestampMillis::from_millis(MINUTE), ClaimSelection::Any)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.lease_expires_at.as_millis(), 12 * MINUTE);
+    store
+        .fail(
+            &claim,
+            JobError::Retryable("temporary".to_owned()),
+            TimestampMillis::from_millis(MINUTE + 1_000),
+        )
+        .await
+        .unwrap();
+    let queued = store.get(id).await.unwrap().unwrap();
+    let delay = queued.available_at.as_millis() - (MINUTE + 1_000);
+    assert!((7_000..=8_400).contains(&delay));
+}
+
+#[tokio::test]
+async fn database_clock_drives_claim_lease_deadlines() {
+    let (_database, store) = store().await;
+    JobQueue::new(store.clone())
+        .enqueue(job("database-clock", JobPriority::Normal, 0))
+        .await
+        .unwrap();
+    let before = store.database_now().await.unwrap();
+
+    let claim = store
+        .claim_at_database_time(ClaimSelection::Any)
+        .await
+        .unwrap()
+        .unwrap();
+    let after = store.database_now().await.unwrap();
+
+    assert!(
+        claim.lease_expires_at.as_millis()
+            >= before.as_millis() + Duration::from_secs(5 * 60).as_millis() as i64
+    );
+    assert!(
+        claim.lease_expires_at.as_millis()
+            <= after.as_millis() + Duration::from_secs(5 * 60).as_millis() as i64
+    );
+}
+
+#[tokio::test]
+async fn shutdown_cancels_a_pending_claim_without_starting_its_handler() {
+    let (database, store) = store().await;
+    JobQueue::new(store.clone())
+        .enqueue(job("blocked-claim", JobPriority::Normal, 0))
+        .await
+        .unwrap();
+    let mut write_lock = database.transaction().await.unwrap();
+    sqlx::query("UPDATE jobs SET updated_at = updated_at WHERE kind = 'blocked-claim'")
+        .execute(&mut *write_lock)
+        .await
+        .unwrap();
+    let started = Arc::new(AtomicBool::new(false));
+    let handler_started = started.clone();
+    let worker = Worker::new(
+        store,
+        WorkerConfig::new(1)
+            .unwrap()
+            .with_poll_interval(Duration::from_millis(5)),
+    )
+    .with_handler(JobKind::new("blocked-claim"), move |_| {
+        let started = handler_started.clone();
+        async move {
+            started.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    });
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(worker.run(shutdown.clone()));
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("worker must cancel its pending claim")
+        .unwrap()
+        .unwrap();
+    assert!(!started.load(Ordering::SeqCst));
+    write_lock.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn panicking_handler_releases_kind_concurrency_for_the_next_job() {
+    let (_database, store) = store().await;
+    let queue = JobQueue::new(store.clone());
+    for _ in 0..2 {
+        queue
+            .enqueue(job("panic-once", JobPriority::Normal, 0))
+            .await
+            .unwrap();
+    }
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    let second_started = Arc::new(Notify::new());
+    let handler_second_started = second_started.clone();
+    let worker = Worker::new(
+        store,
+        WorkerConfig::new(2)
+            .unwrap()
+            .with_poll_interval(Duration::from_millis(5)),
+    )
+    .with_handler(
+        JobKind::new("panic-once").with_concurrency_limit(1),
+        move |_| {
+            let calls = handler_calls.clone();
+            let second_started = handler_second_started.clone();
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    panic!("controlled handler panic");
+                }
+                second_started.notify_one();
+                Ok(())
+            }
+        },
+    );
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(worker.run(shutdown.clone()));
+
+    tokio::time::timeout(Duration::from_secs(1), second_started.notified())
+        .await
+        .expect("the second limit-one job must run after the first panics");
+    shutdown.cancel();
+    let result = task.await.unwrap();
+
+    assert!(result.is_err(), "the worker must surface the handler panic");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn sub_millisecond_intervals_are_rejected_at_construction() {
+    let result = std::panic::catch_unwind(|| {
+        RecurringSchedule::interval(
+            JobKind::new("too-fast"),
+            json!({}),
+            Duration::from_nanos(1),
+            TimestampMillis::from_millis(0),
+        )
+    });
+
+    assert!(result.is_err());
 }

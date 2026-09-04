@@ -1,18 +1,17 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::task::JoinSet;
+use tokio::task::{Id as TaskId, JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::{
     Claim, ClaimSelection, DEFAULT_HEARTBEAT, Job, JobError, JobKind, JobPriority, JobStore,
     JobStoreError,
 };
-use crate::TimestampMillis;
 
 type HandlerFuture = Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>;
 type HandlerFn = Arc<dyn Fn(JobContext) -> HandlerFuture + Send + Sync>;
@@ -47,6 +46,14 @@ pub struct WorkerConfig {
 pub enum WorkerConfigError {
     #[error("worker concurrency must be positive")]
     ZeroConcurrency,
+}
+
+#[derive(Debug, Error)]
+pub enum WorkerError {
+    #[error(transparent)]
+    Store(#[from] JobStoreError),
+    #[error("job handler panicked for kind {kind}")]
+    HandlerPanicked { kind: String },
 }
 
 impl WorkerConfig {
@@ -116,28 +123,28 @@ impl Worker {
         Fut: Future<Output = Result<(), JobError>> + Send + 'static,
     {
         let run: HandlerFn = Arc::new(move |context| Box::pin(handler(context)));
+        self.store.register_kind(kind.clone());
         self.handlers
             .insert(kind.name().to_owned(), RegisteredHandler { kind, run });
         self
     }
 
-    pub async fn run(self, shutdown: CancellationToken) -> Result<(), JobStoreError> {
-        let mut tasks: JoinSet<(String, JobPriority, Result<(), JobStoreError>)> = JoinSet::new();
+    pub async fn run(self, shutdown: CancellationToken) -> Result<(), WorkerError> {
+        let mut tasks: JoinSet<Result<(), JobStoreError>> = JoinSet::new();
+        let mut task_metadata = HashMap::<TaskId, TaskMetadata>::new();
         let mut active_by_kind = BTreeMap::<String, usize>::new();
         let mut active_noncritical = 0usize;
         let mut first_error = None;
 
         loop {
-            while let Some(result) = tasks.try_join_next() {
-                if let Ok((kind, priority, result)) = result {
-                    decrement(&mut active_by_kind, &kind);
-                    if priority != JobPriority::Critical {
-                        active_noncritical = active_noncritical.saturating_sub(1);
-                    }
-                    if let Err(error) = result {
-                        first_error.get_or_insert(error);
-                    }
-                }
+            while let Some(result) = tasks.try_join_next_with_id() {
+                handle_join(
+                    result,
+                    &mut task_metadata,
+                    &mut active_by_kind,
+                    &mut active_noncritical,
+                    &mut first_error,
+                );
             }
             if shutdown.is_cancelled() {
                 break;
@@ -145,21 +152,30 @@ impl Worker {
 
             let excluded = excluded_kinds(&self.handlers, &active_by_kind);
             let mut claimed = false;
-            if tasks.len() < self.config.concurrency
-                && let Some(claim) = self
-                    .store
-                    .claim_excluding(TimestampMillis::now(), ClaimSelection::Critical, &excluded)
-                    .await?
-            {
-                self.spawn_claim(
-                    &mut tasks,
-                    &mut active_by_kind,
-                    &mut active_noncritical,
-                    claim,
-                    shutdown.clone(),
-                )
-                .await?;
-                claimed = true;
+            if tasks.len() < self.config.concurrency {
+                let claim = tokio::select! {
+                    biased;
+                    () = shutdown.cancelled() => break,
+                    result = self.store.claim_excluding_at_database_time(
+                        ClaimSelection::Critical,
+                        &excluded,
+                    ) => result?,
+                };
+                if let Some(claim) = claim {
+                    tokio::select! {
+                        biased;
+                        () = shutdown.cancelled() => break,
+                        result = self.spawn_claim(
+                            &mut tasks,
+                            &mut task_metadata,
+                            &mut active_by_kind,
+                            &mut active_noncritical,
+                            claim,
+                            shutdown.clone(),
+                        ) => result?,
+                    }
+                    claimed = true;
+                }
             }
 
             let noncritical_slots = if self.config.concurrency == 1 {
@@ -172,23 +188,27 @@ impl Worker {
                 && active_noncritical < noncritical_slots
             {
                 let excluded = excluded_kinds(&self.handlers, &active_by_kind);
-                if let Some(claim) = self
-                    .store
-                    .claim_excluding(
-                        TimestampMillis::now(),
+                let claim = tokio::select! {
+                    biased;
+                    () = shutdown.cancelled() => break,
+                    result = self.store.claim_excluding_at_database_time(
                         ClaimSelection::NonCritical,
                         &excluded,
-                    )
-                    .await?
-                {
-                    self.spawn_claim(
-                        &mut tasks,
-                        &mut active_by_kind,
-                        &mut active_noncritical,
-                        claim,
-                        shutdown.clone(),
-                    )
-                    .await?;
+                    ) => result?,
+                };
+                if let Some(claim) = claim {
+                    tokio::select! {
+                        biased;
+                        () = shutdown.cancelled() => break,
+                        result = self.spawn_claim(
+                            &mut tasks,
+                            &mut task_metadata,
+                            &mut active_by_kind,
+                            &mut active_noncritical,
+                            claim,
+                            shutdown.clone(),
+                        ) => result?,
+                    }
                     claimed = true;
                 }
             }
@@ -203,10 +223,14 @@ impl Worker {
         }
 
         let drain = async {
-            while let Some(result) = tasks.join_next().await {
-                if let Ok((_kind, _priority, Err(error))) = result {
-                    first_error.get_or_insert(error);
-                }
+            while let Some(result) = tasks.join_next_with_id().await {
+                handle_join(
+                    result,
+                    &mut task_metadata,
+                    &mut active_by_kind,
+                    &mut active_noncritical,
+                    &mut first_error,
+                );
             }
         };
         if tokio::time::timeout(self.config.drain_timeout, drain)
@@ -225,7 +249,8 @@ impl Worker {
 
     async fn spawn_claim(
         &self,
-        tasks: &mut JoinSet<(String, JobPriority, Result<(), JobStoreError>)>,
+        tasks: &mut JoinSet<Result<(), JobStoreError>>,
+        task_metadata: &mut HashMap<TaskId, TaskMetadata>,
         active_by_kind: &mut BTreeMap<String, usize>,
         active_noncritical: &mut usize,
         claim: Claim,
@@ -245,12 +270,56 @@ impl Worker {
         let handler = self.handlers.get(&kind_name).cloned();
         let store = self.store.clone();
         let heartbeat_interval = self.config.heartbeat_interval;
-        tasks.spawn(async move {
-            let result =
-                execute_claim(store, job, claim, handler, heartbeat_interval, shutdown).await;
-            (kind_name, priority, result)
-        });
+        let task = tasks.spawn(execute_claim(
+            store,
+            job,
+            claim,
+            handler,
+            heartbeat_interval,
+            shutdown,
+        ));
+        task_metadata.insert(
+            task.id(),
+            TaskMetadata {
+                kind: kind_name,
+                priority,
+            },
+        );
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct TaskMetadata {
+    kind: String,
+    priority: JobPriority,
+}
+
+fn handle_join(
+    result: Result<(TaskId, Result<(), JobStoreError>), JoinError>,
+    metadata: &mut HashMap<TaskId, TaskMetadata>,
+    active_by_kind: &mut BTreeMap<String, usize>,
+    active_noncritical: &mut usize,
+    first_error: &mut Option<WorkerError>,
+) {
+    let (task_id, task_result, panicked) = match result {
+        Ok((task_id, result)) => (task_id, Some(result), false),
+        Err(error) => (error.id(), None, error.is_panic()),
+    };
+    let Some(metadata) = metadata.remove(&task_id) else {
+        return;
+    };
+    decrement(active_by_kind, &metadata.kind);
+    if metadata.priority != JobPriority::Critical {
+        *active_noncritical = active_noncritical.saturating_sub(1);
+    }
+    if panicked {
+        tracing::error!(job_kind = metadata.kind, "job handler panicked");
+        first_error.get_or_insert(WorkerError::HandlerPanicked {
+            kind: metadata.kind,
+        });
+    } else if let Some(Err(error)) = task_result {
+        first_error.get_or_insert(WorkerError::Store(error));
     }
 }
 
@@ -303,9 +372,6 @@ async fn execute_claim(
             ))
         }),
     };
-    store
-        .heartbeat_with_lease(&claim, TimestampMillis::now(), kind.lease())
-        .await?;
     let mut heartbeat = tokio::time::interval(heartbeat_interval);
     heartbeat.tick().await;
     let mut shutting_down = false;
@@ -313,16 +379,17 @@ async fn execute_claim(
     loop {
         tokio::select! {
             result = &mut future => {
-                let now = TimestampMillis::now();
+                let now = store.database_now().await?;
                 match result {
                     Ok(()) => { store.complete(&claim, now).await?; }
                     Err(_) if shutting_down => {}
-                    Err(error) => { store.fail_with_kind(&claim, error, now, &kind).await?; }
+                    Err(error) => { store.fail(&claim, error, now).await?; }
                 }
                 return Ok(());
             }
             _ = heartbeat.tick() => {
-                if !store.heartbeat_with_lease(&claim, TimestampMillis::now(), kind.lease()).await? {
+                let now = store.database_now().await?;
+                if !store.heartbeat(&claim, now).await? {
                     return Ok(());
                 }
             }

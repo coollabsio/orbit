@@ -11,6 +11,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Decode, Sqlite, SqlitePool, Transaction, Type};
 use thiserror::Error;
 
+use crate::TimestampMillis;
+
 pub use migrate::{Migration, MigrationError, MigrationRunner, PendingMigration};
 pub use test_db::{TestDatabase, TestDatabaseError};
 
@@ -138,6 +140,23 @@ impl Database {
 
     pub async fn transaction(&self) -> Result<Transaction<'_, Sqlite>, sqlx::Error> {
         self.inner.pool.begin().await
+    }
+
+    pub(crate) async fn immediate_transaction(
+        &self,
+    ) -> Result<Transaction<'_, Sqlite>, sqlx::Error> {
+        self.inner.pool.begin_with("BEGIN IMMEDIATE").await
+    }
+
+    /// Returns UTC wall time as observed by SQLite, at millisecond precision.
+    pub async fn database_now(&self) -> Result<TimestampMillis, sqlx::Error> {
+        let milliseconds = sqlx::query_scalar(
+            "SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 \
+             + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)",
+        )
+        .fetch_one(&self.inner.pool)
+        .await?;
+        Ok(TimestampMillis::from_millis(milliseconds))
     }
 
     pub(crate) fn pool(&self) -> &SqlitePool {

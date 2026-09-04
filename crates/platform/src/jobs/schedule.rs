@@ -120,8 +120,8 @@ impl RecurringSchedule {
         next_run_at: TimestampMillis,
     ) -> Self {
         assert!(
-            !interval.is_zero(),
-            "fixed schedule intervals must be positive"
+            interval.as_millis() > 0,
+            "fixed schedule intervals must be at least one millisecond"
         );
         Self {
             id: Id::new_v7(),
@@ -185,6 +185,7 @@ impl Scheduler {
     }
 
     pub async fn upsert(&self, schedule: &RecurringSchedule) -> Result<(), ScheduleError> {
+        self.store.register_kind(schedule.kind.clone());
         sqlx::query(
             "INSERT INTO schedules (id, workspace_id, job_kind, payload_json, schedule, \
              next_run_at, catch_up_mode, consecutive_failures, enabled, updated_at) \
@@ -220,7 +221,7 @@ impl Scheduler {
         .await?;
         let mut created = Vec::new();
         for row in rows {
-            let schedule = decode_schedule(&row)?;
+            let schedule = decode_schedule(&row, &self.store)?;
             let (occurrences, next_run_at) = due_occurrences(&schedule, now)?;
             let mut transaction = self.store.database().transaction().await?;
             for occurrence in occurrences {
@@ -264,7 +265,10 @@ impl Scheduler {
     }
 }
 
-fn decode_schedule(row: &sqlx::sqlite::SqliteRow) -> Result<RecurringSchedule, ScheduleError> {
+fn decode_schedule(
+    row: &sqlx::sqlite::SqliteRow,
+    store: &JobStore,
+) -> Result<RecurringSchedule, ScheduleError> {
     let encoded: String = row.try_get("schedule")?;
     let recurrence = if let Some(milliseconds) = encoded.strip_prefix("interval:") {
         let milliseconds = milliseconds
@@ -282,7 +286,7 @@ fn decode_schedule(row: &sqlx::sqlite::SqliteRow) -> Result<RecurringSchedule, S
     Ok(RecurringSchedule {
         id: Id::from_str(row.try_get::<&str, _>("id")?)?,
         workspace_id: row.try_get("workspace_id")?,
-        kind: JobKind::new(row.try_get::<String, _>("job_kind")?),
+        kind: store.resolve_kind(row.try_get("job_kind")?),
         payload: serde_json::from_str(row.try_get::<&str, _>("payload_json")?)?,
         recurrence,
         next_run_at: TimestampMillis::from_millis(row.try_get("next_run_at")?),

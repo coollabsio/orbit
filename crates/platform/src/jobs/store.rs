@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
-use super::{DEFAULT_LEASE, Job, JobError, JobKind, JobPriority, JobState};
+use super::{Job, JobError, JobKind, JobKindRegistry, JobPriority, JobState};
 use crate::{Database, Id, ParseIdError, TimestampMillis};
 
 const DEAD_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -39,24 +39,41 @@ pub struct Claim {
     pub attempt: u32,
     pub claim_token: String,
     pub lease_expires_at: TimestampMillis,
+    lease_duration: Duration,
 }
 
 #[derive(Clone, Debug)]
 pub struct JobStore {
     database: Database,
     lease_owner: String,
+    kinds: JobKindRegistry,
 }
 
 impl JobStore {
     #[must_use]
     pub fn new(database: Database) -> Self {
+        Self::with_registry(database, JobKindRegistry::new())
+    }
+
+    #[must_use]
+    pub fn with_registry(database: Database, kinds: JobKindRegistry) -> Self {
         Self {
             database,
             lease_owner: Id::new_v7().to_string(),
+            kinds,
         }
     }
 
+    pub fn register_kind(&self, kind: JobKind) {
+        self.kinds.register(kind);
+    }
+
+    pub(crate) fn resolve_kind(&self, name: &str) -> JobKind {
+        self.kinds.resolve(name)
+    }
+
     pub async fn enqueue(&self, job: &Job) -> Result<Id, JobStoreError> {
+        self.register_kind(job.kind.clone());
         insert_job(&self.database, job).await?;
         Ok(job.id)
     }
@@ -70,7 +87,7 @@ impl JobStore {
         .bind(id.to_string())
         .fetch_optional(self.database.pool())
         .await?;
-        row.map(|row| decode_job(&row)).transpose()
+        row.map(|row| decode_job(&row, &self.kinds)).transpose()
     }
 
     pub async fn claim(
@@ -81,13 +98,34 @@ impl JobStore {
         self.claim_excluding(now, selection, &[]).await
     }
 
+    pub async fn database_now(&self) -> Result<TimestampMillis, JobStoreError> {
+        Ok(self.database.database_now().await?)
+    }
+
+    pub async fn claim_at_database_time(
+        &self,
+        selection: ClaimSelection,
+    ) -> Result<Option<Claim>, JobStoreError> {
+        let now = self.database_now().await?;
+        self.claim(now, selection).await
+    }
+
+    pub(crate) async fn claim_excluding_at_database_time(
+        &self,
+        selection: ClaimSelection,
+        excluded_kinds: &[String],
+    ) -> Result<Option<Claim>, JobStoreError> {
+        let now = self.database_now().await?;
+        self.claim_excluding(now, selection, excluded_kinds).await
+    }
+
     pub(crate) async fn claim_excluding(
         &self,
         now: TimestampMillis,
         selection: ClaimSelection,
         excluded_kinds: &[String],
     ) -> Result<Option<Claim>, JobStoreError> {
-        let mut transaction = self.database.transaction().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
         let rows = sqlx::query(
             "SELECT id, state, attempt_count, max_attempts, claim_token, kind FROM jobs \
              WHERE ((state = 'queued' AND available_at <= ?) \
@@ -110,7 +148,11 @@ impl JobStore {
             if excluded_kinds.contains(&kind) {
                 continue;
             }
-            if let Some(claim) = self.claim_row(&mut transaction, &row, now).await? {
+            let policy = self.kinds.resolve(&kind);
+            if let Some(claim) = self
+                .claim_row(&mut transaction, &row, now, policy.lease())
+                .await?
+            {
                 transaction.commit().await?;
                 return Ok(Some(claim));
             }
@@ -125,6 +167,7 @@ impl JobStore {
         transaction: &mut Transaction<'_, Sqlite>,
         row: &sqlx::sqlite::SqliteRow,
         now: TimestampMillis,
+        lease: Duration,
     ) -> Result<Option<Claim>, JobStoreError> {
         let id: String = row.try_get("id")?;
         let state: String = row.try_get("state")?;
@@ -160,7 +203,7 @@ impl JobStore {
 
         let attempt = previous_attempt + 1;
         let claim_token = Id::new_v7().to_string();
-        let lease_expires_at = add_duration(now, DEFAULT_LEASE);
+        let lease_expires_at = add_duration(now, lease);
         let update = if state == "running" {
             sqlx::query(
                 "UPDATE jobs SET state = 'running', attempt_count = ?, lease_owner = ?, \
@@ -210,6 +253,7 @@ impl JobStore {
                 .map_err(|_| JobStoreError::InvalidData("attempt count overflow".to_owned()))?,
             claim_token,
             lease_expires_at,
+            lease_duration: lease,
         }))
     }
 
@@ -218,7 +262,8 @@ impl JobStore {
         claim: &Claim,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        self.heartbeat_with_lease(claim, now, DEFAULT_LEASE).await
+        self.heartbeat_with_lease(claim, now, claim.lease_duration)
+            .await
     }
 
     pub(crate) async fn heartbeat_with_lease(
@@ -271,20 +316,9 @@ impl JobStore {
         error: JobError,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        self.fail_with_kind(claim, error, now, &JobKind::new("default"))
-            .await
-    }
-
-    pub(crate) async fn fail_with_kind(
-        &self,
-        claim: &Claim,
-        error: JobError,
-        now: TimestampMillis,
-        kind: &JobKind,
-    ) -> Result<bool, JobStoreError> {
         let mut transaction = self.database.transaction().await?;
-        let max_attempts: Option<i64> = sqlx::query_scalar(
-            "SELECT max_attempts FROM jobs WHERE id = ? AND state = 'running' \
+        let row = sqlx::query(
+            "SELECT max_attempts, kind FROM jobs WHERE id = ? AND state = 'running' \
              AND attempt_count = ? AND claim_token = ?",
         )
         .bind(claim.job_id.to_string())
@@ -292,10 +326,12 @@ impl JobStore {
         .bind(&claim.claim_token)
         .fetch_optional(&mut *transaction)
         .await?;
-        let Some(max_attempts) = max_attempts else {
+        let Some(row) = row else {
             transaction.commit().await?;
             return Ok(false);
         };
+        let max_attempts: i64 = row.try_get("max_attempts")?;
+        let kind = self.kinds.resolve(row.try_get("kind")?);
 
         let message = error.to_string();
         let retry_delay = match error {
@@ -414,7 +450,10 @@ pub(crate) async fn insert_job(database: &Database, job: &Job) -> Result<u64, Jo
     .rows_affected())
 }
 
-fn decode_job(row: &sqlx::sqlite::SqliteRow) -> Result<Job, JobStoreError> {
+fn decode_job(
+    row: &sqlx::sqlite::SqliteRow,
+    kinds: &JobKindRegistry,
+) -> Result<Job, JobStoreError> {
     fn optional_id(value: Option<String>) -> Result<Option<Id>, ParseIdError> {
         value.map(|value| Id::from_str(&value)).transpose()
     }
@@ -429,7 +468,7 @@ fn decode_job(row: &sqlx::sqlite::SqliteRow) -> Result<Job, JobStoreError> {
             .try_get::<Option<i64>, _>("scheduled_for")?
             .map(TimestampMillis::from_millis),
         manual_retry_of: optional_id(row.try_get("manual_retry_of")?)?,
-        kind: JobKind::new(row.try_get::<String, _>("kind")?),
+        kind: kinds.resolve(row.try_get("kind")?),
         payload: serde_json::from_str(row.try_get::<&str, _>("payload_json")?)?,
         state: JobState::parse(row.try_get("state")?)?,
         priority: JobPriority::parse(row.try_get("priority")?)?,

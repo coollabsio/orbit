@@ -2,7 +2,8 @@ mod schedule;
 mod store;
 mod worker;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -11,7 +12,36 @@ use crate::{Id, TimestampMillis};
 
 pub use schedule::{CatchUpMode, CronSchedule, RecurringSchedule, ScheduleError, Scheduler};
 pub use store::{Claim, ClaimSelection, JobQueue, JobStore, JobStoreError};
-pub use worker::{JobContext, Worker, WorkerConfig, WorkerConfigError};
+pub use worker::{JobContext, Worker, WorkerConfig, WorkerConfigError, WorkerError};
+
+#[derive(Clone, Debug, Default)]
+pub struct JobKindRegistry {
+    kinds: Arc<RwLock<BTreeMap<String, JobKind>>>,
+}
+
+impl JobKindRegistry {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&self, kind: JobKind) {
+        self.kinds
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(kind.name().to_owned(), kind);
+    }
+
+    #[must_use]
+    pub fn resolve(&self, name: &str) -> JobKind {
+        self.kinds
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| JobKind::new(name))
+    }
+}
 
 pub const DEFAULT_MAX_ATTEMPTS: u32 = 8;
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(5 * 60);
