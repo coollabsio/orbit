@@ -1,19 +1,20 @@
+use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 
 use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE};
-use axum::http::{HeaderValue, Request, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::routing::{get, post};
-use axum::{Extension, Router};
+use axum::{Extension, Json, Router};
 use ipnet::IpNet;
 use orbit_platform::{
     ClientIp, HealthCheck, HealthRegistry, HttpLimits, HttpPlatformLayer, Id, OriginPolicy,
-    RequestId,
+    RequestId, RequestTransport,
 };
 use serde_json::Value;
-use tower::ServiceExt;
+use tower::{Layer, ServiceExt, service_fn};
 
 fn test_app(policy: OriginPolicy) -> Router {
     Router::new()
@@ -39,6 +40,24 @@ fn test_app(policy: OriginPolicy) -> Router {
         .route(
             "/unavailable",
             get(|| async { StatusCode::SERVICE_UNAVAILABLE }),
+        )
+        .route(
+            "/forwarding-view",
+            get(
+                |headers: HeaderMap,
+                 Extension(request_id): Extension<RequestId>,
+                 Extension(ip): Extension<ClientIp>,
+                 Extension(transport): Extension<RequestTransport>| async move {
+                    Json(serde_json::json!({
+                        "request_id": request_id.as_str(),
+                        "client_ip": ip.0.to_string(),
+                        "secure": transport.is_secure(),
+                        "has_request_id_header": headers.contains_key("x-request-id"),
+                        "has_forwarded_for_header": headers.contains_key("x-forwarded-for"),
+                        "has_forwarded_proto_header": headers.contains_key("x-forwarded-proto"),
+                    }))
+                },
+            ),
         )
         .layer(HttpPlatformLayer::new(policy))
 }
@@ -128,7 +147,7 @@ async fn untrusted_forwarded_headers_are_ignored_and_a_uuid_v7_request_id_is_gen
     let policy =
         OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
     let app = test_app(policy);
-    let mut request = request("GET", "/probe");
+    let mut request = request("GET", "/forwarding-view");
     request
         .extensions_mut()
         .insert(ConnectInfo(SocketAddr::from((
@@ -158,11 +177,13 @@ async fn untrusted_forwarded_headers_are_ignored_and_a_uuid_v7_request_id_is_gen
             .get("strict-transport-security")
             .is_none()
     );
-    let body = to_bytes(response.into_body(), 1024).await.unwrap();
-    assert_eq!(
-        String::from_utf8(body.to_vec()).unwrap(),
-        format!("{response_id}|192.0.2.10")
-    );
+    let body = body_json(response).await;
+    assert_eq!(body["request_id"], response_id);
+    assert_eq!(body["client_ip"], "192.0.2.10");
+    assert_eq!(body["secure"], false);
+    assert_eq!(body["has_request_id_header"], false);
+    assert_eq!(body["has_forwarded_for_header"], false);
+    assert_eq!(body["has_forwarded_proto_header"], false);
 }
 
 #[tokio::test]
@@ -170,7 +191,7 @@ async fn trusted_proxy_headers_are_validated_and_used() {
     let policy =
         OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
     let app = test_app(policy);
-    let mut request = request("GET", "/probe");
+    let mut request = request("GET", "/forwarding-view");
     request
         .extensions_mut()
         .insert(ConnectInfo(SocketAddr::from((
@@ -191,11 +212,13 @@ async fn trusted_proxy_headers_are_validated_and_used() {
 
     assert_eq!(response.headers()["x-request-id"], "edge-request-123");
     assert!(response.headers().contains_key("strict-transport-security"));
-    let body = to_bytes(response.into_body(), 1024).await.unwrap();
-    assert_eq!(
-        String::from_utf8(body.to_vec()).unwrap(),
-        "edge-request-123|203.0.113.9"
-    );
+    let body = body_json(response).await;
+    assert_eq!(body["request_id"], "edge-request-123");
+    assert_eq!(body["client_ip"], "203.0.113.9");
+    assert_eq!(body["secure"], true);
+    assert_eq!(body["has_request_id_header"], false);
+    assert_eq!(body["has_forwarded_for_header"], false);
+    assert_eq!(body["has_forwarded_proto_header"], false);
 }
 
 #[tokio::test]
@@ -284,6 +307,34 @@ async fn internal_errors_are_replaced_with_safe_problem_details_and_the_request_
     let problem = body_json(response).await;
     assert_eq!(problem["code"], "internal_error");
     assert_eq!(problem["request_id"], response_id);
+    assert!(!problem.to_string().contains("hunter2"));
+}
+
+#[tokio::test]
+async fn fallible_inner_service_error_becomes_a_safe_correlated_problem_response() {
+    let service = HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).layer(
+        service_fn(|_request: Request<Body>| async {
+            Err::<axum::response::Response, _>(io::Error::other("database password=hunter2"))
+        }),
+    );
+
+    let response = service
+        .oneshot(request("GET", "/fallible"))
+        .await
+        .expect("the platform boundary must absorb inner service errors");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert!(response.headers().contains_key(CONTENT_SECURITY_POLICY));
+    let response_id = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(Id::from_str(&response_id).is_ok());
+    let problem = body_json(response).await;
+    assert_eq!(problem["request_id"], response_id);
+    assert_eq!(problem["code"], "internal_error");
     assert!(!problem.to_string().contains("hunter2"));
 }
 

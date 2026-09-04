@@ -2,6 +2,7 @@ mod limits;
 mod request_id;
 mod security;
 
+use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -12,14 +13,14 @@ use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use axum::http::{Request, Response, StatusCode};
 use axum::response::Response as AxumResponse;
-use tower::{Layer, Service};
+use tower::{Layer, Service, ServiceExt};
 
 use crate::Problem;
 
 pub use limits::HttpLimits;
 pub use request_id::RequestId;
-pub use security::{ClientIp, OriginPolicy};
-use security::{add_security_headers, inspect_request};
+pub use security::{ClientIp, OriginPolicy, RequestTransport};
+use security::{add_security_headers, inspect_request, strip_forwarding_headers};
 
 /// Applies Orbit's request identity, proxy, origin, limit, and response policy.
 #[derive(Clone, Debug)]
@@ -70,16 +71,15 @@ where
     S::Error: Send + 'static,
 {
     type Response = AxumResponse;
-    type Error = S::Error;
+    type Error = Infallible;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(context)
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request<Body>) -> Self::Future {
-        let clone = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, clone);
+        let inner = self.inner.clone();
         let policy = self.origin_policy.clone();
         let limits = self.limits;
 
@@ -90,8 +90,8 @@ where
                 .map(|connect| connect.0.ip());
             let directly_secure = request.uri().scheme_str() == Some("https");
             let inspected = inspect_request(request.headers(), request.uri(), peer, &policy);
-            let (request_id, client_ip, secure) = match inspected {
-                Ok(values) => (values.request_id, values.client_ip, values.secure),
+            let (request_id, client_ip, transport) = match inspected {
+                Ok(values) => (values.request_id, values.client_ip, values.transport),
                 Err(()) => {
                     let request_id = RequestId::new();
                     return Ok(finish_response(
@@ -120,7 +120,7 @@ where
                         request.uri().path(),
                     ),
                     &request_id,
-                    secure,
+                    transport.is_secure(),
                 ));
             }
 
@@ -128,7 +128,7 @@ where
                 return Ok(finish_response(
                     too_large_response(&request_id, request.uri().path()),
                     &request_id,
-                    secure,
+                    transport.is_secure(),
                 ));
             }
 
@@ -141,21 +141,38 @@ where
                     return Ok(finish_response(
                         too_large_response(&request_id, &instance),
                         &request_id,
-                        secure,
+                        transport.is_secure(),
                     ));
                 }
             };
+            strip_forwarding_headers(&mut parts.headers);
             parts.extensions.insert(request_id.clone());
             parts.extensions.insert(client_ip);
+            parts.extensions.insert(transport);
 
             tracing::debug!(
                 request_id = request_id.as_str(),
                 %method,
                 "http request"
             );
-            let response = inner
-                .call(Request::from_parts(parts, Body::from(body)))
-                .await?;
+            let response = match inner
+                .oneshot(Request::from_parts(parts, Body::from(body)))
+                .await
+            {
+                Ok(response) => response,
+                Err(_) => {
+                    tracing::error!(
+                        request_id = request_id.as_str(),
+                        error_type = std::any::type_name::<S::Error>(),
+                        "inner HTTP service failed"
+                    );
+                    return Ok(finish_response(
+                        Problem::internal(request_id.as_str(), &instance).into_response(),
+                        &request_id,
+                        transport.is_secure(),
+                    ));
+                }
+            };
             let response = if response.status() == StatusCode::INTERNAL_SERVER_ERROR {
                 let status = response.status();
                 tracing::error!(request_id = request_id.as_str(), %status, "http request failed");
@@ -164,7 +181,11 @@ where
                 response
             };
 
-            Ok(finish_response(response, &request_id, secure))
+            Ok(finish_response(
+                response,
+                &request_id,
+                transport.is_secure(),
+            ))
         })
     }
 }

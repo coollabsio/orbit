@@ -17,6 +17,20 @@ const X_REQUEST_ID: &str = "x-request-id";
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ClientIp(pub IpAddr);
 
+/// Canonical original request transport after applying trusted proxy headers.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RequestTransport {
+    Http,
+    Https,
+}
+
+impl RequestTransport {
+    #[must_use]
+    pub const fn is_secure(self) -> bool {
+        matches!(self, Self::Https)
+    }
+}
+
 /// Same-origin browser policy and explicitly trusted reverse-proxy networks.
 #[derive(Clone, Debug)]
 pub struct OriginPolicy {
@@ -87,7 +101,7 @@ impl OriginPolicy {
 pub(crate) struct RequestSecurity {
     pub client_ip: ClientIp,
     pub request_id: RequestId,
-    pub secure: bool,
+    pub transport: RequestTransport,
 }
 
 pub(crate) fn inspect_request(
@@ -99,7 +113,11 @@ pub(crate) fn inspect_request(
     let trusted = policy.is_trusted_proxy(peer);
     let mut client_ip = peer.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     let mut request_id = RequestId::new();
-    let mut secure = uri.scheme_str() == Some("https");
+    let mut transport = if uri.scheme_str() == Some("https") {
+        RequestTransport::Https
+    } else {
+        RequestTransport::Http
+    };
 
     if trusted {
         if let Some(value) = single_header(headers, X_FORWARDED_FOR)? {
@@ -123,9 +141,9 @@ pub(crate) fn inspect_request(
                 RequestId::from_trusted_header(value.to_str().map_err(|_| ())?).ok_or(())?;
         }
         if let Some(value) = single_header(headers, X_FORWARDED_PROTO)? {
-            secure = match value.to_str().map_err(|_| ())? {
-                "https" => true,
-                "http" => false,
+            transport = match value.to_str().map_err(|_| ())? {
+                "https" => RequestTransport::Https,
+                "http" => RequestTransport::Http,
                 _ => return Err(()),
             };
         }
@@ -134,8 +152,14 @@ pub(crate) fn inspect_request(
     Ok(RequestSecurity {
         client_ip: ClientIp(client_ip),
         request_id,
-        secure,
+        transport,
     })
+}
+
+pub(crate) fn strip_forwarding_headers(headers: &mut HeaderMap) {
+    headers.remove(X_REQUEST_ID);
+    headers.remove(X_FORWARDED_FOR);
+    headers.remove(X_FORWARDED_PROTO);
 }
 
 fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a HeaderValue>, ()> {

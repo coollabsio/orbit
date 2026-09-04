@@ -15,7 +15,9 @@ pub use db::{
     PendingMigration, TestDatabase, TestDatabaseError,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
-pub use http::{ClientIp, HttpLimits, HttpPlatformLayer, OriginPolicy, RequestId};
+pub use http::{
+    ClientIp, HttpLimits, HttpPlatformLayer, OriginPolicy, RequestId, RequestTransport,
+};
 pub use id::{Id, ParseIdError};
 pub use observability::{TracingFormat, init_tracing};
 pub use problem::{ConflictMetadata, Problem};
