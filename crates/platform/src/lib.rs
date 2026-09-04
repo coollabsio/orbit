@@ -3,6 +3,7 @@
 mod backup;
 mod config;
 mod db;
+mod files;
 mod health;
 mod http;
 mod id;
@@ -20,6 +21,12 @@ pub use config::{Config, ConfigError, ConfigOverride, ConfigSources, HttpConfig,
 pub use db::{
     Database, DatabaseConfig, DatabaseError, Migration, MigrationError, MigrationRunner,
     PendingMigration, TestDatabase, TestDatabaseError,
+};
+pub use files::{
+    AuthorizedAttachment, BlobDownload, BlobFuture, BlobObject, BlobReader, BlobStore,
+    BlobStoreError, ContentDisposition, DownloadMetadata, FinalizeFuture, FinalizedBlob,
+    LocalBlobStore, ReconcileResult, StagedUpload, StoredObject, UploadError, UploadLimitError,
+    UploadLimits, UploadService,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
