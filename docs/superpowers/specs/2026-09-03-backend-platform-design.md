@@ -614,6 +614,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Client IP comes from the direct peer unless the request arrived through an explicitly configured trusted proxy. Forwarded headers from untrusted peers are ignored.
 - Security logs record throttling events without recording passwords, session tokens, or full recovery tokens.
 
+
+### D-033: Use host-only secure session cookies and origin checks
+
+**Decision:** Browser sessions use a host-only cookie with the `__Host-` prefix, `Secure`, `HttpOnly`, and `SameSite=Lax`. Production requires HTTPS. Plain HTTP cookies are allowed only in an explicit development mode bound to loopback. State-changing browser requests must pass an origin check.
+
+**Rationale:** These defaults keep session credentials out of frontend JavaScript, prevent domain-wide cookie injection, and provide layered CSRF protection while supporting ordinary same-site navigation.
+
+**Alternatives considered:**
+
+- **Bearer tokens in browser storage:** Rejected because frontend JavaScript and an XSS flaw could read long-lived credentials.
+- **Cross-site session cookies by default:** Rejected because Orbit does not require cross-site embedding and the CSRF exposure is larger.
+- **Secure-cookie exceptions inferred from hostnames:** Rejected because security behavior should follow an explicit environment mode.
+
+**Consequences:**
+
+- Production startup fails when configuration would serve authentication over known plain HTTP, except when a trusted reverse proxy supplies the original HTTPS scheme.
+- Orbit trusts forwarded scheme and client-address headers only from explicitly configured proxy addresses.
+- The cookie path is `/` and no `Domain` attribute is set, as required by the `__Host-` prefix.
+- Unsafe HTTP methods require an allowed `Origin`; missing or mismatched origins fail before domain handlers run. Non-browser API authentication can be designed separately later.
+- Sign-out and revocation expire the cookie and invalidate the server-side session record.
+- Development mode must be visibly logged and cannot be enabled accidentally by a production default.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
