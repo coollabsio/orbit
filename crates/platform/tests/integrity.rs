@@ -62,3 +62,34 @@ async fn a_failed_quick_check_makes_readiness_fail() {
     assert!(!readiness.ready);
     assert!(!readiness.checks["database_integrity"].ready);
 }
+
+#[tokio::test]
+async fn full_check_rejects_foreign_key_orphans() {
+    let database = orbit_platform::TestDatabase::new().await.unwrap();
+    database
+        .execute(
+            "CREATE TABLE integrity_parent (id INTEGER PRIMARY KEY);\
+             CREATE TABLE integrity_child (\
+                 id INTEGER PRIMARY KEY,\
+                 parent_id INTEGER NOT NULL REFERENCES integrity_parent(id)\
+             );\
+             PRAGMA foreign_keys = OFF;\
+             INSERT INTO integrity_child (id, parent_id) VALUES (1, 999);\
+             PRAGMA foreign_keys = ON;",
+        )
+        .await
+        .unwrap();
+
+    let error = IntegrityService::new(Database::clone(&database))
+        .full()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        IntegrityError::Failed {
+            check: "foreign_key_check",
+            ..
+        }
+    ));
+}

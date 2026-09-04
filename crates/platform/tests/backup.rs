@@ -50,6 +50,11 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
+    assert_eq!(snapshot.manifest.schema_version, 1);
+    assert_eq!(
+        snapshot.manifest.application_version,
+        env!("CARGO_PKG_VERSION")
+    );
     let database = snapshot
         .manifest
         .files
@@ -67,6 +72,44 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
         .find(|file| file.path == "attachments/record.txt")
         .unwrap();
     assert_eq!(attachment.sha256, checksum(b"attachment contents"));
+}
+
+#[tokio::test]
+async fn verify_and_restore_reject_a_newer_schema_before_touching_the_target() {
+    let fixture = Fixture::new().await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    let mut manifest = snapshot.manifest;
+    manifest.schema_version = 999;
+    fs::write(
+        snapshot.path.join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    assert!(matches!(
+        fixture.service.verify(&snapshot.id).await,
+        Err(BackupError::UnsupportedSchema { .. })
+    ));
+
+    let target_database = fixture._root.path().join("target.sqlite");
+    let target_attachments = fixture._root.path().join("target-attachments");
+    fs::write(&target_database, b"unchanged database").unwrap();
+    fs::create_dir_all(&target_attachments).unwrap();
+    fs::write(target_attachments.join("old.txt"), b"unchanged attachment").unwrap();
+    let before = fs::read(&target_database).unwrap();
+
+    assert!(matches!(
+        fixture
+            .service
+            .restore_to(&snapshot.id, &target_database, &target_attachments)
+            .await,
+        Err(BackupError::UnsupportedSchema { .. })
+    ));
+    assert_eq!(fs::read(&target_database).unwrap(), before);
+    assert_eq!(
+        fs::read(target_attachments.join("old.txt")).unwrap(),
+        b"unchanged attachment"
+    );
 }
 
 #[tokio::test]
@@ -121,6 +164,23 @@ async fn restore_recovers_the_database_record_and_attachment() {
         fs::read(restored_attachments.join("record.txt")).unwrap(),
         b"attachment contents"
     );
+}
+
+#[tokio::test]
+async fn restore_rejects_a_database_nested_in_the_attachment_target() {
+    let fixture = Fixture::new().await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    let restored_attachments = fixture._root.path().join("overlapping-restore");
+    let restored_database = restored_attachments.join("orbit.sqlite");
+
+    let error = fixture
+        .service
+        .restore_to(&snapshot.id, &restored_database, &restored_attachments)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, BackupError::RestorePathOverlap { .. }));
+    assert!(!restored_attachments.exists());
 }
 
 #[tokio::test]
@@ -245,4 +305,52 @@ async fn backup_pauses_attachment_mutations_at_the_coordination_guard() {
 
     drop(mutation);
     backup.await.unwrap().unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rejects_a_backup_root_nested_under_attachments_before_copying() {
+    let fixture = Fixture::new().await;
+    let attachments = fixture._root.path().join("overlap-attachments");
+    fs::create_dir_all(&attachments).unwrap();
+    std::os::unix::fs::symlink("missing", attachments.join("0-unsupported")).unwrap();
+    let backup_root = attachments.join("backups");
+    let service = BackupService::new(&backup_root, &attachments);
+
+    let error = service.create(&fixture.database).await.unwrap_err();
+
+    assert!(matches!(error, BackupError::PathOverlap { .. }));
+    assert!(!backup_root.exists());
+}
+
+#[tokio::test]
+async fn rejects_attachments_nested_under_the_backup_root() {
+    let fixture = Fixture::new().await;
+    let backup_root = fixture._root.path().join("outer-backups");
+    let attachments = backup_root.join("live-attachments");
+    let service = BackupService::new(&backup_root, &attachments);
+
+    let error = service.create(&fixture.database).await.unwrap_err();
+
+    assert!(matches!(error, BackupError::PathOverlap { .. }));
+    assert!(!backup_root.exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_snapshot_creation_removes_its_hidden_temporary_directory() {
+    let fixture = Fixture::new().await;
+    let attachments = fixture._root.path().join("bad-attachments");
+    fs::create_dir_all(&attachments).unwrap();
+    std::os::unix::fs::symlink("missing", attachments.join("unsupported")).unwrap();
+    let backup_root = fixture._root.path().join("cleanup-backups");
+    let service = BackupService::new(&backup_root, &attachments);
+
+    assert!(service.create(&fixture.database).await.is_err());
+
+    let snapshots = backup_root.join("snapshots");
+    assert!(
+        !snapshots.exists() || fs::read_dir(snapshots).unwrap().next().is_none(),
+        "failed snapshots must not leave hidden temporary trees"
+    );
 }

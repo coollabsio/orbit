@@ -1,4 +1,4 @@
-use sqlx::query_scalar;
+use sqlx::{query, query_scalar};
 use thiserror::Error;
 
 use crate::{Database, HealthCheck, HealthRegistry};
@@ -28,7 +28,21 @@ impl IntegrityService {
     }
 
     pub async fn full(&self) -> Result<(), IntegrityError> {
-        self.run("integrity_check").await
+        self.run("integrity_check").await?;
+        let violations = query("PRAGMA foreign_key_check")
+            .fetch_all(self.database.pool())
+            .await
+            .map_err(|error| IntegrityError::Failed {
+                check: "foreign_key_check",
+                details: error.to_string(),
+            })?;
+        if violations.is_empty() {
+            return Ok(());
+        }
+        Err(IntegrityError::Failed {
+            check: "foreign_key_check",
+            details: format!("{} violation(s)", violations.len()),
+        })
     }
 
     pub fn register_readiness(&self, registry: &mut HealthRegistry) {
