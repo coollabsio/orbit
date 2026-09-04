@@ -1111,6 +1111,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Listener ports and bind addresses are independent from the HTTP server. Privileged port and container mapping remain operator configuration.
 - The future mail milestone must define spam filtering, sender authentication signals, recipient routing, raw-message retention, bounce handling, and mailbox projection before implementation.
 
+
+### D-056: Route inbound domains to workspace mailboxes
+
+**Decision:** Installation administrators assign each inbound domain to exactly one workspace. Workspace Owners and Admins create personal or shared mailboxes and aliases under assigned domains. Personal mailboxes belong to a workspace membership; shared mailboxes grant access to selected memberships. Unknown recipients are rejected during SMTP `RCPT TO`. Catch-all routing is deferred.
+
+**Rationale:** Domain ownership provides an unambiguous tenant boundary before Orbit accepts message data. Membership-scoped mailboxes preserve workspace isolation even when one global user belongs to several workspaces.
+
+**Alternatives considered:**
+
+- **Attach personal mailboxes directly to global users:** Rejected because the same identity can have unrelated addresses and permissions in different workspaces.
+- **Accept unknown recipients and bounce later:** Rejected because backscatter is abusive and wastes storage and processing.
+- **Enable catch-all addresses immediately:** Deferred until spam and routing behavior has production evidence.
+
+**Consequences:**
+
+- Domain matching is case-insensitive. Orbit preserves the displayed local part but routes it case-insensitively within a domain.
+- Database constraints prevent a domain from being active in two workspaces in the same installation.
+- Removing a membership suspends its personal mailbox access without deleting retained messages or changing other recipients' shared-mailbox access.
+- SMTP recipient validation performs a workspace-scoped mailbox or alias lookup before accepting message content.
+- Aliases resolve to one mailbox initially; distribution lists and forwarding rules require later design.
+- Detailed spam filtering, raw-message retention, mailbox synchronization, threading, and sending UI behavior belong to a separate mail feature specification.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -1122,15 +1144,14 @@ These choices require explicit evaluation before implementation.
 
 ## Remaining decision queue
 
-The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment handling, realtime behavior, and frontend server-state library. The remaining decisions will be resolved in this order:
+The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment handling, realtime behavior, mail boundaries, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. Mail responsibilities beyond transactional SMTP
-2. Platform and Orbit module boundaries
-3. Configuration, secrets, deployment, and observability
-4. Remaining security controls and audit records
-5. Testing and local developer experience
-6. Detailed incremental frontend migration
+1. Platform and Orbit module boundaries
+2. Configuration, secrets, deployment, and observability
+3. Remaining security controls and audit records
+4. Testing and local developer experience
+5. Detailed incremental frontend migration
 
-## Next open decision: Mail responsibilities
+## Next open decision: Code and module boundaries
 
-The design must distinguish platform-owned transactional email from Orbit's future inbox and mail-client synchronization feature.
+The design must define the initial Cargo workspace, dependency direction, and the threshold for extracting platform modules into separate reusable crates.
