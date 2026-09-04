@@ -13,7 +13,7 @@ use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use axum::http::{Request, Response, StatusCode};
 use axum::response::Response as AxumResponse;
-use tower::{Layer, Service, ServiceExt};
+use tower::{Layer, Service};
 
 use crate::Problem;
 
@@ -53,15 +53,35 @@ impl<S> Layer<S> for HttpPlatformLayer {
             inner,
             origin_policy: self.origin_policy.clone(),
             limits: self.limits,
+            readiness: InnerReadiness::Checking,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
+enum InnerReadiness {
+    Checking,
+    Ready,
+    Failed,
+}
+
+#[derive(Debug)]
 pub struct HttpPlatformService<S> {
     inner: S,
     origin_policy: OriginPolicy,
     limits: HttpLimits,
+    readiness: InnerReadiness,
+}
+
+impl<S: Clone> Clone for HttpPlatformService<S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            origin_policy: self.origin_policy.clone(),
+            limits: self.limits,
+            readiness: InnerReadiness::Checking,
+        }
+    }
 }
 
 impl<S> Service<Request<Body>> for HttpPlatformService<S>
@@ -74,12 +94,27 @@ where
     type Error = Infallible;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self.readiness {
+            InnerReadiness::Ready | InnerReadiness::Failed => Poll::Ready(Ok(())),
+            InnerReadiness::Checking => match self.inner.poll_ready(context) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Ok(())) => {
+                    self.readiness = InnerReadiness::Ready;
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Ready(Err(_)) => {
+                    self.readiness = InnerReadiness::Failed;
+                    Poll::Ready(Ok(()))
+                }
+            },
+        }
     }
 
     fn call(&mut self, request: Request<Body>) -> Self::Future {
-        let inner = self.inner.clone();
+        let readiness = std::mem::replace(&mut self.readiness, InnerReadiness::Checking);
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
         let policy = self.origin_policy.clone();
         let limits = self.limits;
 
@@ -132,6 +167,19 @@ where
                 ));
             }
 
+            if matches!(readiness, InnerReadiness::Failed) {
+                tracing::error!(
+                    request_id = request_id.as_str(),
+                    error_type = std::any::type_name::<S::Error>(),
+                    "inner HTTP service readiness failed"
+                );
+                return Ok(finish_response(
+                    Problem::internal(request_id.as_str(), request.uri().path()).into_response(),
+                    &request_id,
+                    transport.is_secure(),
+                ));
+            }
+
             let (mut parts, body) = request.into_parts();
             let instance = parts.uri.path().to_owned();
             let method = parts.method.clone();
@@ -156,7 +204,7 @@ where
                 "http request"
             );
             let response = match inner
-                .oneshot(Request::from_parts(parts, Body::from(body)))
+                .call(Request::from_parts(parts, Body::from(body)))
                 .await
             {
                 Ok(response) => response,

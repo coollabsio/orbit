@@ -1,6 +1,8 @@
+use std::future::Ready;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use std::task::{Context, Poll, Waker};
 
 use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
@@ -14,7 +16,41 @@ use orbit_platform::{
     RequestId, RequestTransport,
 };
 use serde_json::Value;
-use tower::{Layer, ServiceExt, service_fn};
+use tower::{Layer, Service, ServiceExt, service_fn};
+
+#[derive(Clone)]
+struct PendingService;
+
+impl Service<Request<Body>> for PendingService {
+    type Response = axum::response::Response;
+    type Error = io::Error;
+    type Future = Ready<Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Pending
+    }
+
+    fn call(&mut self, _request: Request<Body>) -> Self::Future {
+        panic!("a pending service must not be called")
+    }
+}
+
+#[derive(Clone)]
+struct ReadinessErrorService;
+
+impl Service<Request<Body>> for ReadinessErrorService {
+    type Response = axum::response::Response;
+    type Error = io::Error;
+    type Future = Ready<Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Err(io::Error::other("database password=hunter2")))
+    }
+
+    fn call(&mut self, _request: Request<Body>) -> Self::Future {
+        panic!("a service with failed readiness must not be called")
+    }
+}
 
 fn test_app(policy: OriginPolicy) -> Router {
     Router::new()
@@ -332,6 +368,38 @@ async fn fallible_inner_service_error_becomes_a_safe_correlated_problem_response
         .unwrap()
         .to_owned();
     assert!(Id::from_str(&response_id).is_ok());
+    let problem = body_json(response).await;
+    assert_eq!(problem["request_id"], response_id);
+    assert_eq!(problem["code"], "internal_error");
+    assert!(!problem.to_string().contains("hunter2"));
+}
+
+#[test]
+fn pending_inner_readiness_applies_backpressure_at_the_platform_boundary() {
+    let mut service =
+        HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).layer(PendingService);
+    let mut context = Context::from_waker(Waker::noop());
+
+    assert!(matches!(service.poll_ready(&mut context), Poll::Pending));
+}
+
+#[tokio::test]
+async fn inner_readiness_error_becomes_a_safe_correlated_problem_response() {
+    let service = HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test"))
+        .layer(ReadinessErrorService);
+
+    let response = service
+        .oneshot(request("GET", "/readiness-error"))
+        .await
+        .expect("the platform boundary must absorb inner readiness errors");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    let response_id = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
     let problem = body_json(response).await;
     assert_eq!(problem["request_id"], response_id);
     assert_eq!(problem["code"], "internal_error");
