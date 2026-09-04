@@ -791,6 +791,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Ordinary handler failures affect the materialized job and its retries, not the schedule definition.
 - Schedule edits and enable or disable actions are audited.
 
+
+### D-041: Bound worker concurrency and drain on shutdown
+
+**Decision:** Jobs use low, normal, high, or critical priority and FIFO order within the same priority and availability time. Worker concurrency defaults to 4 and is configurable per installation. A job type may set a lower concurrency limit. One execution slot is reserved for critical work. During shutdown, the worker stops claiming immediately, gives active jobs 30 seconds to finish, then cancels local tasks and leaves their leases to expire.
+
+**Rationale:** A small default protects SQLite and self-hosted machines while still allowing independent network work to overlap. Reserved critical capacity prevents bulk maintenance work from blocking urgent jobs. Lease recovery is safer than recording interrupted work as an ordinary failure.
+
+**Alternatives considered:**
+
+- **Unlimited asynchronous jobs:** Rejected because it could exhaust connections, memory, file handles, or provider quotas.
+- **Strict single-job execution:** Rejected because unrelated network-bound work would block unnecessarily.
+- **Wait forever during shutdown:** Rejected because deployment and recovery could hang on a stuck handler.
+
+**Consequences:**
+
+- Priority affects claim order but does not interrupt a running lower-priority job.
+- Each job type inherits the global concurrency unless it declares a smaller positive limit.
+- The worker passes a cancellation signal to handlers. Handlers should stop at safe boundaries and must not convert shutdown cancellation into a final job failure.
+- After the drain deadline, incomplete jobs remain leased until the recovery rule makes them claimable again.
+- Configuration validation rejects zero concurrency and reserves critical capacity without exceeding the configured global limit.
+- Metrics expose queued and active jobs by priority and type, plus shutdown drain outcomes.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
