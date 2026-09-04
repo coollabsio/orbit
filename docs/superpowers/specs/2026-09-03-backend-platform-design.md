@@ -1133,11 +1133,32 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Aliases resolve to one mailbox initially; distribution lists and forwarding rules require later design.
 - Detailed spam filtering, raw-message retention, mailbox synchronization, threading, and sending UI behavior belong to a separate mail feature specification.
 
+
+### D-057: Start with three Rust crates and strict dependency direction
+
+**Decision:** The Cargo workspace begins with `apps/server` for the binary, CLI, startup, adapters, and dependency wiring; `crates/platform` for reusable infrastructure modules; and `crates/orbit` for Orbit domain types, application services, and ports. Platform modules become separate crates only when a second internal application needs them or measured dependency isolation provides a concrete benefit.
+
+**Rationale:** Three crates establish the important application and infrastructure boundaries without turning every capability into a package before reuse exists.
+
+**Alternatives considered:**
+
+- **One server crate:** Rejected because Orbit domain code and reusable platform code would be difficult to separate later.
+- **One crate per platform capability immediately:** Rejected because it adds manifests, feature coordination, and public interfaces before those boundaries are proven.
+
+**Consequences:**
+
+- `platform` never depends on `orbit`.
+- `orbit` may depend on small platform value types and interfaces but does not depend on Axum or SQLx.
+- `server` implements and wires Axum handlers, SQLx repositories, storage adapters, mail transports, jobs, and runtime configuration.
+- Feature modules do not query another feature's tables directly. They call its application service or a declared port.
+- Platform capabilities begin as focused modules with private implementation details inside `crates/platform`.
+- New generic traits require at least two real implementations or call sites that demonstrate the variation. A likely future implementation alone is not enough.
+- Tests enforce dependency direction and keep domain tests runnable without HTTP or a production database file.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
 
-- A reusable platform divided into core, HTTP, database, authentication, and testing capabilities.
 - A single artifact that may embed the built frontend.
 
 These choices require explicit evaluation before implementation.
