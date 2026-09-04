@@ -986,6 +986,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Download responses resolve attachment metadata first and never expose internal filesystem paths or blob keys.
 - Milestone one has no permanent public or bearer-token attachment URLs.
 
+
+### D-050: Use authenticated WebSockets for realtime delivery
+
+**Decision:** Each browser tab opens one authenticated WebSocket connection. HTTP remains the mutation transport. The socket carries server events, subscription control, presence, and typing. A connection may subscribe only to workspaces in which its session has an active membership.
+
+**Rationale:** WebSockets support future chat and bidirectional ephemeral signals without moving ordinary validated mutations away from the HTTP and OpenAPI contract.
+
+**Alternatives considered:**
+
+- **Server-sent events:** Deferred because future chat presence and subscription control benefit from a bidirectional connection.
+- **Perform all mutations over WebSockets:** Rejected because it would duplicate request validation, error, observability, and generated-client behavior already defined for HTTP.
+- **One installation-wide event stream:** Rejected because workspace subscriptions and authorization should remain explicit.
+
+**Consequences:**
+
+- The WebSocket handshake uses the existing secure session cookie and validates `Origin` before upgrade.
+- Subscription and resubscription requests verify current workspace membership.
+- Membership removal or global suspension closes affected subscriptions immediately rather than waiting for the next client request.
+- Ping and pong heartbeats detect dead connections and release their in-memory presence state.
+- Socket messages use versioned envelopes even while event payloads remain domain-specific.
+- SSE can be added later for a client that cannot use WebSockets; it is not part of the initial platform.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
