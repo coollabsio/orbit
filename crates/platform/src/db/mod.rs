@@ -77,15 +77,14 @@ impl Database {
             })?;
         }
 
-        let lock_path = ownership_lock_path(&config.path);
         let ownership_lock = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .truncate(false)
-            .open(&lock_path)
+            .open(&config.path)
             .map_err(|source| DatabaseError::OpenOwnershipLock {
-                path: lock_path.clone(),
+                path: config.path.clone(),
                 source,
             })?;
         ownership_lock
@@ -144,10 +143,4 @@ impl Database {
     pub(crate) fn pool(&self) -> &SqlitePool {
         &self.inner.pool
     }
-}
-
-fn ownership_lock_path(database_path: &Path) -> PathBuf {
-    let mut path = database_path.as_os_str().to_owned();
-    path.push(".lock");
-    PathBuf::from(path)
 }

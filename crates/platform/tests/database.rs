@@ -4,6 +4,10 @@ use orbit_platform::{
     Database, DatabaseConfig, DatabaseError, Migration, MigrationError, MigrationRunner,
     TestDatabase,
 };
+
+const OWNERSHIP_CHILD_PATH: &str = "ORBIT_TEST_OWNERSHIP_CHILD_PATH";
+static PROCESS_OWNERSHIP_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn opens_sqlite_with_required_pragmas() {
     let db = TestDatabase::new().await.unwrap();
@@ -276,6 +280,7 @@ async fn one_process_owns_a_database_path() {
 
 #[tokio::test]
 async fn cloned_database_handles_keep_the_ownership_lock() {
+    let _process_guard = PROCESS_OWNERSHIP_TEST_LOCK.lock().await;
     let directory = tempfile::tempdir().unwrap();
     let config = DatabaseConfig::new(directory.path().join("db.sqlite"));
     let database = Database::open(&config).await.unwrap();
@@ -287,6 +292,72 @@ async fn cloned_database_handles_keep_the_ownership_lock() {
     assert!(matches!(error, DatabaseError::AlreadyOwned { .. }));
     drop(remaining_handle);
     Database::open(&config).await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn symlink_alias_cannot_bypass_database_ownership() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("db.sqlite");
+    let alias = directory.path().join("alias.sqlite");
+    let _database = Database::open(&DatabaseConfig::new(&path)).await.unwrap();
+    std::os::unix::fs::symlink(&path, &alias).unwrap();
+
+    let error = Database::open(&DatabaseConfig::new(alias))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, DatabaseError::AlreadyOwned { .. }));
+}
+
+#[tokio::test]
+async fn hard_link_alias_cannot_bypass_database_ownership() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("db.sqlite");
+    let alias = directory.path().join("alias.sqlite");
+    let _database = Database::open(&DatabaseConfig::new(&path)).await.unwrap();
+    std::fs::hard_link(&path, &alias).unwrap();
+
+    let error = Database::open(&DatabaseConfig::new(alias))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, DatabaseError::AlreadyOwned { .. }));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn another_process_cannot_own_the_database_through_an_alias() {
+    if let Some(path) = std::env::var_os(OWNERSHIP_CHILD_PATH) {
+        let error = Database::open(&DatabaseConfig::new(path))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, DatabaseError::AlreadyOwned { .. }));
+        return;
+    }
+
+    let _process_guard = PROCESS_OWNERSHIP_TEST_LOCK.lock().await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("db.sqlite");
+    let alias = directory.path().join("alias.sqlite");
+    let _database = Database::open(&DatabaseConfig::new(&path)).await.unwrap();
+    std::os::unix::fs::symlink(&path, &alias).unwrap();
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "another_process_cannot_own_the_database_through_an_alias",
+            "--nocapture",
+        ])
+        .env(OWNERSHIP_CHILD_PATH, alias)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "child process failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[tokio::test]
