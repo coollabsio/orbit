@@ -530,6 +530,25 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Optimistic updates define snapshots, rollback, and post-success reconciliation.
 - The existing mock store remains responsible only for unmigrated domains.
 
+### D-029: Expire, revoke, and replace workspace invitations
+
+**Decision:** Workspace invitations expire seven days after creation. Owners and Admins may revoke a pending invitation. Sending a replacement invitation invalidates every previous pending token for the same email address and workspace.
+
+**Rationale:** A seven-day lifetime gives recipients enough time to act without leaving enrollment credentials valid indefinitely. Replacement rather than parallel active tokens keeps the invitation state easy to explain and audit.
+
+**Alternatives considered:**
+
+- **Long-lived invitations:** Rejected because forgotten links would remain usable for too long.
+- **Multiple active invitations for one recipient and workspace:** Rejected because revocation and audit behavior become ambiguous.
+
+**Consequences:**
+
+- Invitation tokens are cryptographically random, single-use, and stored only as non-reversible hashes.
+- Expiry, revocation, replacement, and successful acceptance make a token unusable.
+- Replacement happens atomically with invalidation so two tokens do not remain active after a resend.
+- Owners and Admins can list pending invitations and see their status without seeing token values.
+- Acceptance behavior for new and existing global accounts remains to be decided.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -543,7 +562,7 @@ These choices require explicit evaluation before implementation.
 
 The accepted decisions above settle the first milestone, tenancy model, initial roles, core identifiers and timestamps, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. Workspace invitation lifecycle
+1. Complete workspace invitation acceptance semantics
 2. Detailed session, login-throttling, and account-security behavior
 3. Soft-delete retention and restoration behavior
 4. SQLite migrations, backup, restore, and integrity checks
@@ -560,4 +579,4 @@ The accepted decisions above settle the first milestone, tenancy model, initial 
 
 ## Next open decision: Workspace invitation lifecycle
 
-The invitation design must still define expiry, resend and revocation behavior, acceptance by new and existing global users, and whether successful acceptance establishes verified ownership of the invited email address.
+The invitation design must still define acceptance by new and existing global users and whether successful acceptance establishes verified ownership of the invited email address.
