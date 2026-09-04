@@ -702,6 +702,29 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Migration records include version, checksum, applied timestamp, and application version. A checksum mismatch fails startup.
 - Migrations are transactional where SQLite permits it and contain explicit recovery instructions when they cannot be fully transactional.
 
+
+### D-037: Keep verified daily and weekly backups
+
+**Decision:** Orbit creates an automatic backup every 24 hours and retains 7 daily and 4 weekly backups. Each backup contains the SQLite database, attachments, and a manifest with checksums and schema and application versions.
+
+**Rationale:** Built-in backups match the self-hosted single-instance model and cover both parts of Orbit's durable state. Daily and weekly retention provides recent restore points without unbounded local growth.
+
+**Alternatives considered:**
+
+- **Database-only backups:** Rejected because restored attachment metadata could point to missing or mismatched files.
+- **Operator-managed backups only:** Rejected because safe defaults should not depend on every operator building automation before using Orbit.
+- **Built-in off-site upload:** Deferred because destinations, credentials, encryption, and provider policy need a separate design.
+
+**Consequences:**
+
+- Orbit briefly blocks attachment mutations while it captures a consistent database and file snapshot. Reads and unrelated writes may continue when SQLite's online backup mechanism permits them.
+- The configured backup directory must sit outside the live data directory so snapshots do not recursively include themselves.
+- Orbit provides `orbit backup create`, `orbit backup list`, `orbit backup verify`, and `orbit backup restore` commands.
+- Restore refuses to modify a database used by a running server and verifies checksums and supported schema versions first.
+- Orbit verifies a new backup before counting it toward retention or deleting an older verified backup.
+- Pre-migration backups use the same format but have a distinct reason and retention class.
+- Operators remain responsible for copying backups off the host and protecting access to them.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
