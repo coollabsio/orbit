@@ -1,0 +1,101 @@
+# Task 11 report: projects, statuses, labels, tasks, comments, and trash APIs
+
+## Approach
+
+I implemented the task slice from the API contract inward with focused red-green cycles:
+
+1. Added an integration test target describing project/default-status creation, Member task-area mutations, task list filters/sorts/cursors, optimistic conflicts, assignee validity, atomic bulk/reorder behavior, soft-delete visibility, trash/restore, comments, and cross-workspace rejection.
+2. Added the next additive schema migration and embedded it in the platform migration catalog without editing migrations 1 through 6.
+3. Added explicit-SQL repository operations with immediate transactions for mutations, audit writes in the mutation transaction, database-backed scope validation, and version compare-and-write behavior.
+4. Added strict Axum DTOs and a focused router for all task-area resources. Collection responses use the shared `items`/`next_cursor` shape with opaque, versioned, query-bound cursors.
+5. Extended the existing durable retention job to purge expired standalone tasks/projects in dependency order and queue deletion of newly unreferenced attachment blobs.
+6. Ran focused and full verification and performed a final contract/diff review.
+
+The brief's stale filename `0004_tasks.sql` could not be used because migrations 1 through 6 are already released. The implementation deliberately uses `0007_tasks.sql` and keeps all prior migration bytes unchanged.
+
+## Files
+
+Created:
+
+- `apps/server/migrations/0007_tasks.sql`
+- `apps/server/src/repositories/tasks.rs`
+- `apps/server/src/task_routes.rs`
+- `apps/server/tests/tasks_api.rs`
+
+Updated:
+
+- `apps/server/src/lib.rs`: exports the focused task router.
+- `apps/server/src/repositories/mod.rs`: exports the task repository.
+- `apps/server/src/repositories/workspaces.rs`: extends the existing durable retention transaction to purge expired standalone projects/tasks and their attachment references/blobs.
+- `crates/platform/src/db/migrate.rs`: embeds additive migration 7.
+- `crates/platform/src/backup.rs`: accepts the new current schema version.
+- `crates/platform/tests/backup.rs` and `crates/platform/tests/database.rs`: update schema-version expectations to 7.
+
+## Schema and integrity
+
+- Added workspace labels, tasks, task assignees, task labels, and threaded task comments.
+- Added task/project/status/list indexes for the scoped queries and stable orderings used by the API.
+- Added `projects.restore_project_key`, allowing a deleted project's unique key to be reused while retaining the exact key needed for conflict-aware restore. Deletion replaces the live unique key with an unreachable tombstone inside the same transaction.
+- Task assignees retain both the user and membership identity. The membership foreign key cascades assignment removal when a membership is removed.
+- Database triggers reject cross-workspace status/project, task/project/status, assignee/membership, task/label, and comment/task/parent relationships, including direct inserts and scope-changing updates.
+- Existing migration files `0001` through `0006` were not modified.
+
+## API behavior
+
+The focused router provides authenticated workspace-scoped endpoints for:
+
+- Projects: list/create/update/soft-delete, trash list, and restore.
+- Project statuses: list/create/update/delete and transactional reorder.
+- Labels: list/create/update/delete.
+- Tasks: filtered/sorted list, create/detail/update/soft-delete, trash list/restore, atomic bulk update, and transactional reorder.
+- Comments: list/create/update/hard-delete, including task-scoped replies.
+
+All content operations require a current membership in the workspace from the URL. Owner, Admin, and Member memberships receive the domain's task-area CRUD capabilities. Inaccessible existing IDs and unknown IDs use the same not-found response. Assignment accepts only unique users with a current membership and non-suspended account in that workspace; membership removal cascades existing assignments.
+
+Mutation DTOs reject unknown fields. Names, keys, colors, categories, priorities, IDs, and bounded content fields are validated before repository entry. Updates and deletes require an observed version. Every successful mutation increments its record version and records a scoped audit event before the transaction commits.
+
+Stale writes return `409 conflict` with `conflict.current_version`, the current safe serialized record, and a refresh path. Project restore key collisions return `409 restore_conflict` with `conflict.field = "key"` and do not rename either record.
+
+## Pagination and ordering
+
+- Every task-area collection accepts an opaque cursor, defaults to 50 items, caps pages at 100, and returns `next_cursor: null` on the last page.
+- Cursors carry a format version, the effective workspace/filter/sort fingerprint, the last sort value, and the UUIDv7 tie-breaker. Malformed cursors and reuse with a different workspace, filters, or sort return `400 invalid_cursor`.
+- Task lists support project, status, assignee, label, priority, and text filters plus position, title, creation-time, and update-time sorts in either direction.
+- Task keyset continuation executes in SQL with the effective sort column and UUIDv7 tie-breaker rather than loading the full task collection.
+- Status/task reorder and task bulk update run under one immediate transaction. A missing, foreign, or stale item rolls back every earlier item in that request.
+
+## Deletion and retention
+
+- Project and task deletes are soft deletes. Normal task reads require both an active task and an active project, so deleting a project hides its descendants without rewriting each child.
+- Project/task trash is workspace-scoped and includes only records still inside the 30-day recovery window.
+- Restore rejects expired records. Restoring a project reveals children that were not separately deleted, while separately deleted tasks remain deleted.
+- The existing durable `workspace.retention` worker now removes expired standalone tasks first, then expired projects. It deletes related attachment references, deletes unreferenced blob metadata, and records file deletion work in the durable file-deletion table before committing.
+- Comment deletion is a hard delete performed only after current task/workspace authorization and version validation.
+
+## Red-green evidence
+
+1. The initial `tasks_api` target failed to compile because `orbit_server::task_routes` did not exist. The additive migration, repository, and focused router made the initial nine API contracts green.
+2. A descending-title cursor regression using `AA` followed by `A` failed against the first cursor-key encoding (`items[0]` was absent on page two). The corrected continuation encoding/SQL keyset path made the exact regression green.
+3. The durable-retention regression initially retained both an expired project and its child task. Extending the existing queued retention transaction made the exact regression green and retained successful workspace-level cascade coverage.
+4. The first full workspace run failed backup restore with `UnsupportedSchema { found: 7, maximum_supported: 6 }`. Updating the single supported-schema boundary and its expectations made the existing backup regression green.
+5. The next full run exposed the database migration test's old `binary_version: 6` expectation. Updating it to the newly embedded version 7 made the exact regression green.
+
+## Verification
+
+- `cargo test -p orbit-server --test tasks_api`: 14 passed, 0 failed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `git diff --check`: passed.
+- `cargo test --workspace`: passed across all domain, platform, server, integration, and doc-test targets.
+
+## Commit
+
+Commit subject: `feat(tasks): add persistent task APIs`
+
+Base commit: `af8dff8`
+
+## Concerns
+
+- `task_router` is intentionally a focused composition unit. The plan reserves final production router composition for Task 15, so this task does not edit the shared CLI/server assembly point.
+- Task/comment attachment upload, metadata, download, and attachment-only comment behavior remain Task 12. Retention already handles attachment-reference/blob cleanup for task/project purges so that later slice has a safe lifecycle boundary.
+- OpenAPI contract generation and drift checks remain Task 13. Runtime DTOs and Problem responses are implemented here without adding parallel handwritten contract artifacts.

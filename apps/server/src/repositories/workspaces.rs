@@ -1555,6 +1555,78 @@ impl WorkspaceRepository {
         let mut attachment_references_purged = 0_u64;
         let mut attachment_blobs_purged = 0_u64;
         let mut pending_uploads_purged = 0_u64;
+        let task_ids = sqlx::query_scalar::<_, String>(
+            "SELECT tasks.id FROM tasks LEFT JOIN projects ON projects.id = tasks.project_id \
+             JOIN workspaces ON workspaces.id = tasks.workspace_id \
+             WHERE workspaces.deleted_at IS NULL AND (tasks.deleted_at <= ? OR projects.deleted_at <= ?) \
+             ORDER BY tasks.id",
+        )
+        .bind(
+            now.as_millis()
+                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+        )
+        .bind(
+            now.as_millis()
+                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        for task_id in task_ids {
+            let blobs = sqlx::query(
+                "SELECT DISTINCT attachment_blobs.id, attachment_blobs.storage_key \
+                 FROM attachment_references JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
+                 WHERE attachment_references.task_id = ?",
+            )
+            .bind(&task_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+            attachment_references_purged +=
+                sqlx::query("DELETE FROM attachment_references WHERE task_id = ?")
+                    .bind(&task_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
+            sqlx::query("DELETE FROM tasks WHERE id = ?")
+                .bind(&task_id)
+                .execute(&mut *transaction)
+                .await?;
+            for blob in blobs {
+                let blob_id: String = blob.get("id");
+                let references: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?",
+                )
+                .bind(&blob_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+                if references == 0 {
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO attachment_file_deletions \
+                         (id, path_kind, path, created_at) VALUES (?, 'blob', ?, ?)",
+                    )
+                    .bind(Id::new_v7().to_string())
+                    .bind(blob.get::<String, _>("storage_key"))
+                    .bind(now.as_millis())
+                    .execute(&mut *transaction)
+                    .await?;
+                    attachment_blobs_purged +=
+                        sqlx::query("DELETE FROM attachment_blobs WHERE id = ?")
+                            .bind(blob_id)
+                            .execute(&mut *transaction)
+                            .await?
+                            .rows_affected();
+                }
+            }
+        }
+        sqlx::query(
+            "DELETE FROM projects WHERE deleted_at <= ? AND workspace_id IN \
+             (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
+        )
+        .bind(
+            now.as_millis()
+                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+        )
+        .execute(&mut *transaction)
+        .await?;
         for workspace_id in expired {
             let blob_rows =
                 sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE workspace_id = ?")
