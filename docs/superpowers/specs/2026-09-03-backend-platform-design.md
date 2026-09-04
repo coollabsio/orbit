@@ -725,6 +725,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Pre-migration backups use the same format but have a distinct reason and retention class.
 - Operators remain responsible for copying backups off the host and protecting access to them.
 
+
+### D-038: Fail closed when SQLite integrity checks fail
+
+**Decision:** Run SQLite `quick_check` at every startup before serving traffic. Run full `integrity_check` and foreign-key verification weekly through the durable scheduler and after migrations where applicable. A failed check stops normal web traffic and write operations. Orbit never attempts automatic database repair.
+
+**Rationale:** Early detection limits further writes to a damaged database. Automatic repair could destroy recoverable evidence or make corruption worse, so recovery remains an explicit operator action against verified backups.
+
+**Alternatives considered:**
+
+- **Check only when an error occurs:** Rejected because latent corruption may remain unnoticed while backups continue rotating.
+- **Continue serving after a failed check:** Rejected because new writes could compound damage and users could observe inconsistent state.
+- **Automatic repair:** Rejected because SQLite repair choices require operator review and a known-good backup.
+
+**Consequences:**
+
+- Startup does not bind the public listener when `quick_check` or required post-migration verification fails.
+- A failed scheduled check marks health as failed and drains or stops normal HTTP handling before further application writes.
+- Recovery remains available through local CLI commands, including backup listing, verification, and restore. The web application does not offer degraded read-only access.
+- Operator-facing errors identify the database path and newest verified backup without exposing application records.
+- Integrity results and failure transitions are logged and included in health diagnostics.
+- Backup retention must never treat a corrupt snapshot as verified.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -740,18 +762,17 @@ The accepted decisions above settle the first milestone, tenancy model, initial 
 
 1. Detailed session, login-throttling, and account-security behavior
 2. Soft-delete retention and restoration behavior
-3. SQLite migrations, backup, restore, and integrity checks
-4. Durable job scheduling, retry, and dead-letter semantics
-5. API validation, errors, pagination, and compatibility policy
-6. File limits, validation, cleanup, and download behavior
-7. Realtime delivery and reconnection
-8. Mail responsibilities beyond transactional SMTP
-9. Platform and Orbit module boundaries
-10. Configuration, secrets, deployment, and observability
-11. Security controls and audit records
-12. Testing and local developer experience
-13. Detailed incremental frontend migration
+3. Durable job scheduling, retry, and dead-letter semantics
+4. API validation, errors, pagination, and compatibility policy
+5. File limits, validation, cleanup, and download behavior
+6. Realtime delivery and reconnection
+7. Mail responsibilities beyond transactional SMTP
+8. Platform and Orbit module boundaries
+9. Configuration, secrets, deployment, and observability
+10. Security controls and audit records
+11. Testing and local developer experience
+12. Detailed incremental frontend migration
 
-## Next open decision: Account security
+## Next open decision: Durable job semantics
 
-The authentication design must still define password policy, login throttling, session-cookie deployment behavior, and account lockout or suspension semantics.
+The job system must still define retry timing, attempt limits, dead-letter handling, recurring scheduling, priorities, concurrency, and graceful shutdown.
