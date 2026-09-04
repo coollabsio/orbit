@@ -1309,6 +1309,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Security regression tests cover workspace boundary violations, CSRF and origin checks, token redaction, malicious filenames, and stored-XSS payloads.
 - The minimum CI gate runs Rust format and lint checks, all Rust tests, frontend lint and tests, contract drift checks, production builds, and a focused Playwright smoke suite.
 
+
+### D-065: Provide a root Just command surface for local development
+
+**Decision:** A root `justfile` provides the standard local commands: `setup`, `dev`, `test`, `check`, `api`, `db-reset`, `seed`, `e2e`, and `build`. The underlying Cargo, frontend package-manager, and `orbit` commands remain documented and usable directly. `just dev` runs Rust watch mode and Vite together on fixed documented ports and stops both children cleanly.
+
+**Rationale:** Short, discoverable commands provide framework-like DX without hiding standard tools or building a custom task runner into the product binary.
+
+**Alternatives considered:**
+
+- **Require developers to remember every underlying command:** Rejected because routine full-stack and contract workflows span Rust and TypeScript.
+- **Build a custom development orchestrator into Orbit:** Rejected because process supervision and asset tooling do not belong in the production application.
+
+**Consequences:**
+
+- `just setup` checks required tool versions and installs project dependencies without changing global tools silently.
+- `just check` matches the required CI gate: formatting, linting, tests, contract drift, and production builds.
+- `just api` deterministically regenerates OpenAPI and the TypeScript client.
+- `just db-reset` affects only the configured development database and requires explicit development mode.
+- `just seed` is idempotent and loads representative development fixtures.
+- `just e2e` creates an isolated database and storage directory rather than using a developer's normal data.
+- Documentation lists the exact underlying commands for environments where Just is unavailable.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
