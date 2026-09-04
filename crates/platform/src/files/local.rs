@@ -153,6 +153,26 @@ impl BlobStore for LocalBlobStore {
         })
     }
 
+    fn blob_modified_at<'a>(&'a self, storage_key: &'a str) -> BlobFuture<'a, Option<i64>> {
+        Box::pin(async move {
+            let path = self.path(storage_key)?;
+            let metadata = match fs::metadata(&path).await {
+                Ok(metadata) => metadata,
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(source) => return Err(io_error(&path, source)),
+            };
+            let modified_at_millis = metadata
+                .modified()
+                .unwrap_or(UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                .try_into()
+                .unwrap_or(i64::MAX);
+            Ok(Some(modified_at_millis))
+        })
+    }
+
     fn blobs(&self) -> BlobFuture<'_, Vec<BlobObject>> {
         Box::pin(LocalBlobStore::blobs(self))
     }

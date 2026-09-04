@@ -1,6 +1,7 @@
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use orbit_platform::{
@@ -740,6 +741,152 @@ async fn reconciliation_rechecks_an_orphan_that_is_finalized_after_the_file_scan
 }
 
 #[tokio::test]
+async fn reconciliation_inventories_blobs_once_without_holding_the_database_writer_lock() {
+    let fixture = Fixture::new().await;
+    for bytes in [&b"first"[..], &b"second"[..]] {
+        let staged = fixture
+            .service
+            .stage(Id::new_v7(), Id::new_v7(), "orphan.bin", bytes)
+            .await
+            .unwrap();
+        fixture
+            .service
+            .finalize(&staged, attachment())
+            .await
+            .unwrap();
+    }
+    fixture
+        .database
+        .execute(
+            "DELETE FROM attachment_references; \
+             UPDATE attachment_blobs SET quarantine_until = 0",
+        )
+        .await
+        .unwrap();
+    for blob in fixture.store.blobs().await.unwrap() {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(blob.path)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH)
+            .unwrap();
+    }
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let inventory_started = Arc::new(tokio::sync::Notify::new());
+    let inventory_resume = Arc::new(tokio::sync::Semaphore::new(0));
+    let store = InventoryProbeStore {
+        inner: fixture.store.clone(),
+        calls: calls.clone(),
+        inventory_started: inventory_started.clone(),
+        inventory_resume: inventory_resume.clone(),
+    };
+    let reconciler = UploadService::new(
+        (*fixture.database).clone(),
+        Arc::new(store),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    let now = fixture.database.database_now().await.unwrap().as_millis();
+    let reconcile =
+        tokio::spawn(async move { reconciler.reconcile(now + 25 * 60 * 60 * 1000).await });
+    inventory_started.notified().await;
+
+    let write = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        fixture
+            .database
+            .execute("UPDATE pending_uploads SET state = state WHERE 0"),
+    )
+    .await;
+    inventory_resume.add_permits(1);
+    reconcile.await.unwrap().unwrap();
+
+    assert!(matches!(write, Ok(Ok(_))), "database write was blocked");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn reconciliation_rechecks_quarantine_after_a_concurrent_failed_deduplication() {
+    let fixture = Fixture::new().await;
+    let workspace = Id::new_v7();
+    let orphan = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "orphan.bin", &b"same bytes"[..])
+        .await
+        .unwrap();
+    let orphan_blob = fixture
+        .service
+        .finalize(&orphan, attachment())
+        .await
+        .unwrap();
+    fixture
+        .database
+        .execute(&format!(
+            "DELETE FROM attachment_references WHERE blob_id = '{}'; \
+             UPDATE attachment_blobs SET quarantine_until = 0 WHERE id = '{}'",
+            orphan_blob.id, orphan_blob.id
+        ))
+        .await
+        .unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(fixture.store.path(&orphan_blob.storage_key).unwrap())
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH)
+        .unwrap();
+
+    let conflict = attachment();
+    let other = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "other.bin", &b"other bytes"[..])
+        .await
+        .unwrap();
+    fixture
+        .service
+        .finalize(&other, conflict.clone())
+        .await
+        .unwrap();
+    let duplicate = fixture
+        .service
+        .stage(workspace, Id::new_v7(), "duplicate.bin", &b"same bytes"[..])
+        .await
+        .unwrap();
+
+    let inventory_started = Arc::new(tokio::sync::Notify::new());
+    let inventory_resume = Arc::new(tokio::sync::Semaphore::new(0));
+    let reconciler = UploadService::new(
+        (*fixture.database).clone(),
+        Arc::new(InventoryProbeStore {
+            inner: fixture.store.clone(),
+            calls: Arc::new(AtomicUsize::new(0)),
+            inventory_started: inventory_started.clone(),
+            inventory_resume: inventory_resume.clone(),
+        }),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    let now = fixture.database.database_now().await.unwrap().as_millis();
+    let reconcile = tokio::spawn(async move { reconciler.reconcile(now + 60 * 60 * 1000).await });
+    inventory_started.notified().await;
+    assert!(matches!(
+        fixture.service.finalize(&duplicate, conflict).await,
+        Err(UploadError::Database(_))
+    ));
+    inventory_resume.add_permits(1);
+    let result = reconcile.await.unwrap().unwrap();
+
+    assert_eq!(result.deleted_blobs, 0);
+    assert!(
+        fixture
+            .store
+            .path(&orphan_blob.storage_key)
+            .unwrap()
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn download_resolves_authorization_before_trying_to_open_a_blob() {
     let fixture = Fixture::new().await;
     let error = fixture
@@ -880,6 +1027,10 @@ impl BlobStore for PausingBlobStore {
         BlobStore::delete_temporary(&self.inner, path)
     }
 
+    fn blob_modified_at<'a>(&'a self, storage_key: &'a str) -> BlobFuture<'a, Option<i64>> {
+        BlobStore::blob_modified_at(&self.inner, storage_key)
+    }
+
     fn blobs(&self) -> BlobFuture<'_, Vec<BlobObject>> {
         Box::pin(async move {
             let blobs = self.inner.blobs().await?;
@@ -899,6 +1050,60 @@ struct PausingDeleteStore {
     inner: LocalBlobStore,
     delete_started: Arc<tokio::sync::Notify>,
     delete_resume: Arc<tokio::sync::Semaphore>,
+}
+
+#[derive(Clone)]
+struct InventoryProbeStore {
+    inner: LocalBlobStore,
+    calls: Arc<AtomicUsize>,
+    inventory_started: Arc<tokio::sync::Notify>,
+    inventory_resume: Arc<tokio::sync::Semaphore>,
+}
+
+impl BlobStore for InventoryProbeStore {
+    fn create_temporary(&self) -> Result<std::path::PathBuf, orbit_platform::BlobStoreError> {
+        BlobStore::create_temporary(&self.inner)
+    }
+
+    fn install<'a>(&'a self, upload: &'a StagedUpload) -> BlobFuture<'a, StoredObject> {
+        BlobStore::install(&self.inner, upload)
+    }
+
+    fn open<'a>(&'a self, storage_key: &'a str) -> BlobFuture<'a, BlobReader> {
+        BlobStore::open(&self.inner, storage_key)
+    }
+
+    fn delete<'a>(&'a self, storage_key: &'a str) -> BlobFuture<'a, ()> {
+        BlobStore::delete(&self.inner, storage_key)
+    }
+
+    fn delete_temporary<'a>(&'a self, path: &'a std::path::Path) -> BlobFuture<'a, ()> {
+        BlobStore::delete_temporary(&self.inner, path)
+    }
+
+    fn blob_modified_at<'a>(&'a self, storage_key: &'a str) -> BlobFuture<'a, Option<i64>> {
+        BlobStore::blob_modified_at(&self.inner, storage_key)
+    }
+
+    fn blobs(&self) -> BlobFuture<'_, Vec<BlobObject>> {
+        Box::pin(async move {
+            let blobs = self.inner.blobs().await?;
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.inventory_started.notify_one();
+                let permit = self
+                    .inventory_resume
+                    .acquire()
+                    .await
+                    .expect("semaphore open");
+                permit.forget();
+            }
+            Ok(blobs)
+        })
+    }
+
+    fn temporary_files(&self) -> BlobFuture<'_, Vec<BlobObject>> {
+        BlobStore::temporary_files(&self.inner)
+    }
 }
 
 impl BlobStore for PausingDeleteStore {
@@ -925,6 +1130,10 @@ impl BlobStore for PausingDeleteStore {
             permit.forget();
             BlobStore::delete_temporary(&self.inner, path).await
         })
+    }
+
+    fn blob_modified_at<'a>(&'a self, storage_key: &'a str) -> BlobFuture<'a, Option<i64>> {
+        BlobStore::blob_modified_at(&self.inner, storage_key)
     }
 
     fn blobs(&self) -> BlobFuture<'_, Vec<BlobObject>> {

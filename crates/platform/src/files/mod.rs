@@ -58,6 +58,8 @@ pub trait BlobStore: Send + Sync {
 
     fn delete_temporary<'a>(&'a self, path: &'a Path) -> BlobFuture<'a, ()>;
 
+    fn blob_modified_at<'a>(&'a self, storage_key: &'a str) -> BlobFuture<'a, Option<i64>>;
+
     fn blobs(&self) -> BlobFuture<'_, Vec<BlobObject>>;
 
     fn temporary_files(&self) -> BlobFuture<'_, Vec<BlobObject>>;

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -471,6 +472,13 @@ impl UploadService {
         }
 
         let quarantine_cutoff = now_millis.saturating_sub(QUARANTINE_MILLIS);
+        let mut blob_inventory: HashMap<String, _> = self
+            .store
+            .blobs()
+            .await?
+            .into_iter()
+            .map(|object| (object.storage_key.clone(), object))
+            .collect();
         let quarantined =
             sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE quarantine_until <= ?")
                 .bind(now_millis)
@@ -479,6 +487,7 @@ impl UploadService {
         for row in quarantined {
             let id: String = row.try_get("id")?;
             let storage_key: String = row.try_get("storage_key")?;
+            blob_inventory.remove(&storage_key);
             let mut transaction = self.database.immediate_transaction().await?;
             let references: i64 =
                 sqlx::query_scalar("SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?")
@@ -488,11 +497,9 @@ impl UploadService {
             if references == 0 {
                 let recently_published = self
                     .store
-                    .blobs()
+                    .blob_modified_at(&storage_key)
                     .await?
-                    .into_iter()
-                    .find(|object| object.storage_key == storage_key)
-                    .is_some_and(|object| object.modified_at_millis > quarantine_cutoff);
+                    .is_some_and(|modified_at| modified_at > quarantine_cutoff);
                 if recently_published {
                     transaction.commit().await?;
                     continue;
@@ -510,7 +517,7 @@ impl UploadService {
             transaction.commit().await?;
         }
 
-        for object in self.store.blobs().await? {
+        for object in blob_inventory.into_values() {
             if object.modified_at_millis > quarantine_cutoff {
                 continue;
             }
