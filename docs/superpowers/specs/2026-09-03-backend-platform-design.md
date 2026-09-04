@@ -899,6 +899,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - OpenAPI uses one shared pagination pattern while each endpoint retains its typed item schema.
 - Cursor format may include a version so the server can reject obsolete encodings cleanly.
 
+
+### D-046: Version the API while shipping frontend and backend together
+
+**Decision:** HTTP endpoints live under `/api/v1`. Before Orbit's first stable release, backend, OpenAPI contract, generated client, and bundled frontend may make breaking v1 changes only in the same commit and release. After the first stable release, breaking changes require a new API version or a documented migration window. Orbit does not maintain multiple active versions before a real external client needs them.
+
+**Rationale:** Lockstep releases keep early internal development fast without pretending the API is already stable. A path version and explicit breaking-change rules leave a clear boundary when external clients or independent upgrades appear.
+
+**Alternatives considered:**
+
+- **Promise v1 stability immediately:** Rejected because the first real vertical slice will expose design mistakes that should be corrected before a stable release.
+- **Unversioned endpoints:** Rejected because later compatibility and diagnostics would lack an explicit contract boundary.
+- **Maintain every historical version:** Rejected because no external client currently requires that cost.
+
+**Consequences:**
+
+- Additive response fields and new endpoints are compatible within v1. Field removal, renaming, meaning changes, and stricter accepted input are breaking.
+- CI regenerates the client and fails when committed generated output or the frontend no longer matches the OpenAPI contract.
+- The generated client sends its expected contract identifier; incompatible combinations fail with a clear version problem rather than unpredictable parsing errors.
+- Release notes call out contract changes even while pre-stable lockstep breaking changes are allowed.
+- API stability is reassessed before declaring the first stable Orbit release.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -910,18 +931,17 @@ These choices require explicit evaluation before implementation.
 
 ## Remaining decision queue
 
-The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
+The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. API validation, errors, pagination, and compatibility policy
-2. File limits, validation, cleanup, and download behavior
-3. Realtime delivery and reconnection
-4. Mail responsibilities beyond transactional SMTP
-5. Platform and Orbit module boundaries
-6. Configuration, secrets, deployment, and observability
-7. Remaining security controls and audit records
-8. Testing and local developer experience
-9. Detailed incremental frontend migration
+1. File limits, validation, cleanup, and download behavior
+2. Realtime delivery and reconnection
+3. Mail responsibilities beyond transactional SMTP
+4. Platform and Orbit module boundaries
+5. Configuration, secrets, deployment, and observability
+6. Remaining security controls and audit records
+7. Testing and local developer experience
+8. Detailed incremental frontend migration
 
-## Next open decision: API errors and validation
+## Next open decision: Attachment handling
 
-The API design must still define its error document, validation details, pagination contract, and compatibility policy.
+The file design must still define upload limits, content validation, deduplication, cleanup after partial failure, and authorized download behavior.
