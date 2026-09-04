@@ -570,6 +570,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Accepting an invitation for an existing membership returns an idempotent success without creating a duplicate membership.
 - Email normalization rules must be deterministic and must not apply provider-specific transformations such as removing dots or plus tags.
 
+### D-031: Use a length-based password policy with Argon2id
+
+**Decision:** Passwords must contain between 12 and 128 characters. Orbit allows spaces, Unicode, and paste; imposes no character-class rules or scheduled rotation; rejects known-common passwords; and hashes accepted passwords with Argon2id.
+
+**Rationale:** Length and common-password screening improve resistance to guessing without encouraging predictable substitutions. Paste support and a generous maximum work well with password managers.
+
+**Alternatives considered:**
+
+- **Uppercase, number, and symbol requirements:** Rejected because they encourage predictable transformations and reject otherwise strong passphrases.
+- **Scheduled password rotation:** Rejected because forced changes without evidence of compromise encourage weaker password choices.
+- **Shorter minimum:** Rejected because password authentication is the only initial login factor.
+
+**Consequences:**
+
+- Length is measured consistently as user-perceived characters rather than UTF-8 bytes.
+- Passwords are never silently truncated or normalized before hashing.
+- Common-password screening uses a versioned local data set and does not send candidate passwords to an external service.
+- Hash records include algorithm and parameters so a successful login can transparently rehash when the configured Argon2id policy increases.
+- Password values must not appear in logs, validation telemetry, panic output, or generated API examples.
+- Reset and initial-setup forms enforce the same policy as password changes.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
