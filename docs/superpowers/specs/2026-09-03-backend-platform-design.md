@@ -964,6 +964,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Newly finalized but unreferenced blobs remain quarantined for 24 hours before cleanup so interrupted transactions can be diagnosed or recovered.
 - Backup manifests include blob checksums and verification checks referenced content against them.
 
+
+### D-049: Finalize uploads through staged files and pending metadata
+
+**Decision:** Stream an upload to a random temporary file while hashing and validating it, then create a pending upload record tied to the authenticated user and workspace. Atomically rename or deduplicate the bytes into the final blob path. In one database transaction, create the attachment reference and mark the upload complete. Return success only after both final bytes and metadata are available.
+
+**Rationale:** SQLite and the filesystem cannot share one atomic transaction. Explicit pending state and reconciliation make each partial-failure case recoverable without claiming success too early.
+
+**Alternatives considered:**
+
+- **Write final bytes after committing attachment metadata:** Rejected because successful metadata could point to a file that never finalized.
+- **Delete every unreferenced blob immediately after database failure:** Rejected because concurrent deduplication and crash recovery need a safe quarantine window.
+- **Permanent public URLs:** Rejected because task attachments require current workspace and resource authorization.
+
+**Consequences:**
+
+- A database failure after file finalization leaves an unreferenced blob for the 24-hour quarantine and cleanup process.
+- A file-finalization failure rolls back pending metadata and returns a retryable storage problem.
+- Startup and scheduled reconciliation remove stale temporary files and expire incomplete pending uploads.
+- Downloads require current access to the owning task or comment. Possession of an attachment or blob identifier grants no access.
+- Download responses resolve attachment metadata first and never expose internal filesystem paths or blob keys.
+- Milestone one has no permanent public or bearer-token attachment URLs.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -975,17 +997,16 @@ These choices require explicit evaluation before implementation.
 
 ## Remaining decision queue
 
-The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
+The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment handling, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. File limits, validation, cleanup, and download behavior
-2. Realtime delivery and reconnection
-3. Mail responsibilities beyond transactional SMTP
-4. Platform and Orbit module boundaries
-5. Configuration, secrets, deployment, and observability
-6. Remaining security controls and audit records
-7. Testing and local developer experience
-8. Detailed incremental frontend migration
+1. Realtime delivery and reconnection
+2. Mail responsibilities beyond transactional SMTP
+3. Platform and Orbit module boundaries
+4. Configuration, secrets, deployment, and observability
+5. Remaining security controls and audit records
+6. Testing and local developer experience
+7. Detailed incremental frontend migration
 
-## Next open decision: Attachment handling
+## Next open decision: Realtime delivery
 
-The file design must still define upload limits, content validation, deduplication, cleanup after partial failure, and authorized download behavior.
+The realtime design must still define transport, event durability and ordering, reconnection, workspace subscriptions, and ephemeral presence behavior.
