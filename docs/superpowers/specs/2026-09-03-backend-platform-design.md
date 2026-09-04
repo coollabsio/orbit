@@ -769,6 +769,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Manual retry creates a new queued execution linked to the original dead job. The original attempts and error history remain unchanged.
 - Expired dead jobs are purged by a maintenance job unless an explicit incident hold protects them.
 
+
+### D-040: Persist recurring schedules and materialize normal jobs
+
+**Decision:** Persist recurring schedules in SQLite. Support fixed intervals and five-field cron expressions evaluated in UTC. Each due occurrence creates a normal durable job. After downtime, enqueue only the latest missed occurrence unless that schedule explicitly opts into full catch-up.
+
+**Rationale:** Persisted schedules survive restarts, while materializing ordinary jobs keeps retries, leases, observability, and dead-letter handling on one execution path. Coalescing missed runs prevents a long outage from flooding the queue.
+
+**Alternatives considered:**
+
+- **In-memory timers only:** Rejected because restart timing and missed work would be lost.
+- **Replay every missed occurrence:** Rejected as the default because maintenance and notification schedules could create an unbounded backlog.
+- **Local-time cron expressions:** Rejected because daylight-saving transitions make execution ambiguous.
+
+**Consequences:**
+
+- A unique schedule identifier and scheduled timestamp prevent duplicate materialization.
+- Fixed intervals use stored schedule timestamps rather than process uptime.
+- Full catch-up is an explicit per-schedule option for work where every occurrence matters.
+- Repeated permanent schedule-configuration failures disable the schedule and notify the appropriate administrator.
+- Ordinary handler failures affect the materialized job and its retries, not the schedule definition.
+- Schedule edits and enable or disable actions are audited.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
