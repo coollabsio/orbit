@@ -214,3 +214,42 @@ Addressed only the three remaining Important findings. Added regressions for a r
 
 - A CSV failure after headers are sent is surfaced as a response-stream error because HTTP status can no longer be changed; it is not silently presented as a complete export.
 - The open Utoipa error-schema Minor remains intentionally out of this remediation scope.
+
+## Re-review round 3 remediation (2026-09-05)
+
+### Approach
+
+Addressed only the remaining Important retention lifecycle finding. Added a deterministic worker-claim failure regression first, then placed the retention scheduler and worker under one supervisor so either side's completion coordinates shutdown.
+
+### Files changed
+
+- `apps/server/src/repositories/workspaces.rs`: supervises worker completion alongside scheduler work, cancels the shared shutdown token on either failure, drains the worker after scheduler exit, and rejects an unexpected successful worker exit.
+- `apps/server/tests/workspaces_api.rs`: inserts a malformed durable job ID that makes the worker claim fail while the scheduler remains usable, then asserts the service returns the worker error promptly and cancels shutdown.
+
+### Result
+
+- A retention `JobStore` or claim failure now propagates through `run_production_retention_service` instead of leaving the scheduler and HTTP server running without purge processing.
+- The shared cancellation token starts Axum's graceful shutdown in `orbit serve`; the CLI then awaits and returns the maintenance error.
+- Scheduler failure also cancels and drains the worker. Intentional cancellation still completes without an error.
+
+### Red / green evidence
+
+- Before the fix, `retention_service_surfaces_worker_claim_failures` timed out after one second because the completed worker task was not observed until scheduler shutdown.
+- After the fix, the same regression returns `RetentionServiceError::Worker(WorkerError::Store(JobStoreError::Id(_)))` and observes the shared shutdown token as cancelled.
+
+### Verification
+
+- `cargo test -p orbit-server --test workspaces_api`: passed, 18 tests.
+- `cargo clippy -p orbit-server --all-targets -- -D warnings`: passed.
+- `cargo test --workspace`: passed across all crates and doc tests on the fresh final run. An earlier run hit the existing timing-sensitive `cancelling_while_cleanup_is_waiting_still_removes_the_temporary_file` test once; its isolated rerun and the full rerun both passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `git diff --check`: passed.
+
+### Commit
+
+Commit subject: `fix(server): supervise retention worker lifecycle`
+
+### Concerns
+
+- The open Utoipa error-schema Minor remains intentionally out of this remediation scope.

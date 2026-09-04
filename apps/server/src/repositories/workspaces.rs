@@ -145,6 +145,8 @@ pub enum RetentionServiceError {
     Kind(#[from] JobKindRegistrationError),
     #[error(transparent)]
     Join(#[from] tokio::task::JoinError),
+    #[error("retention worker stopped unexpectedly")]
+    WorkerStopped,
 }
 
 #[derive(Clone)]
@@ -1480,24 +1482,46 @@ impl WorkspaceRepository {
         }
         let worker = self.retention_worker(worker_config)?;
         let worker_shutdown = shutdown.clone();
-        let worker_task = tokio::spawn(async move { worker.run(worker_shutdown).await });
-        loop {
-            if shutdown.is_cancelled() {
-                break;
+        let mut worker_task = tokio::spawn(async move { worker.run(worker_shutdown).await });
+        let scheduler_shutdown = shutdown.clone();
+        let scheduler_task = async {
+            loop {
+                if scheduler_shutdown.is_cancelled() {
+                    break Ok::<(), RetentionServiceError>(());
+                }
+                let now = self
+                    .database
+                    .database_now()
+                    .await
+                    .map_err(WorkspaceError::from)?;
+                scheduler.materialize_due(now).await?;
+                tokio::select! {
+                    () = scheduler_shutdown.cancelled() => break Ok(()),
+                    () = tokio::time::sleep(cadence.min(Duration::from_secs(60))) => {}
+                }
             }
-            let now = self
-                .database
-                .database_now()
-                .await
-                .map_err(WorkspaceError::from)?;
-            scheduler.materialize_due(now).await?;
-            tokio::select! {
-                () = shutdown.cancelled() => break,
-                () = tokio::time::sleep(cadence.min(Duration::from_secs(60))) => {}
+        };
+        tokio::pin!(scheduler_task);
+
+        tokio::select! {
+            worker_result = &mut worker_task => {
+                let shutdown_was_requested = shutdown.is_cancelled();
+                shutdown.cancel();
+                worker_result??;
+                if shutdown_was_requested {
+                    Ok(())
+                } else {
+                    Err(RetentionServiceError::WorkerStopped)
+                }
+            }
+            scheduler_result = &mut scheduler_task => {
+                shutdown.cancel();
+                let worker_result = worker_task.await;
+                scheduler_result?;
+                worker_result??;
+                Ok(())
             }
         }
-        worker_task.await??;
-        Ok(())
     }
 
     pub async fn run_production_retention_service(

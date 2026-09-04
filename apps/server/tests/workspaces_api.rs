@@ -3,12 +3,12 @@ use std::sync::Arc;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    AuthenticatedUser, HttpPlatformLayer, Id, LocalBlobStore, OriginPolicy, PasswordService,
-    TestDatabase, TimestampMillis,
+    AuthenticatedUser, HttpPlatformLayer, Id, JobStoreError, LocalBlobStore, OriginPolicy,
+    PasswordService, TestDatabase, TimestampMillis, WorkerConfig, WorkerError,
 };
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::workspaces::WorkspaceRepository;
+use orbit_server::repositories::workspaces::{RetentionServiceError, WorkspaceRepository};
 use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -1610,6 +1610,43 @@ async fn retention_service_installs_a_recurring_schedule_and_runs_it() {
     );
     shutdown.cancel();
     task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn retention_service_surfaces_worker_claim_failures() {
+    let database = TestDatabase::new().await.unwrap();
+    sqlx::query(
+        "INSERT INTO jobs (id, kind, payload_json, state, priority, attempt_count, max_attempts, \
+         available_at, created_at, updated_at) \
+         VALUES ('invalid-job-id', 'workspace.retention', '{}', 'queued', 'normal', 0, 1, ?, ?, ?)",
+    )
+    .bind(i64::MIN)
+    .bind(i64::MIN)
+    .bind(i64::MIN)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        WorkspaceRepository::new((*database).clone()).run_retention_service(
+            shutdown.clone(),
+            std::time::Duration::from_secs(60),
+            WorkerConfig::new(1)
+                .unwrap()
+                .with_poll_interval(std::time::Duration::from_millis(1)),
+        ),
+    )
+    .await
+    .expect("the retention service must stop when its worker fails")
+    .unwrap_err();
+
+    assert!(matches!(
+        result,
+        RetentionServiceError::Worker(WorkerError::Store(JobStoreError::Id(_)))
+    ));
+    assert!(shutdown.is_cancelled());
 }
 
 async fn setup_owner(repository: &IdentityRepository) -> (String, String) {
