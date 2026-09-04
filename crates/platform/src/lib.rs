@@ -2,7 +2,10 @@
 
 mod config;
 mod db;
+mod health;
+mod http;
 mod id;
+mod observability;
 mod problem;
 mod time;
 
@@ -11,6 +14,9 @@ pub use db::{
     Database, DatabaseConfig, DatabaseError, Migration, MigrationError, MigrationRunner,
     PendingMigration, TestDatabase, TestDatabaseError,
 };
+pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
+pub use http::{ClientIp, HttpLimits, HttpPlatformLayer, OriginPolicy, RequestId};
 pub use id::{Id, ParseIdError};
+pub use observability::{TracingFormat, init_tracing};
 pub use problem::{ConflictMetadata, Problem};
 pub use time::TimestampMillis;
