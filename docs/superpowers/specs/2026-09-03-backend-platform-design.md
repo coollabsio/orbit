@@ -1265,6 +1265,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Header count and size, URL length, nesting depth, and body limits are enforced before expensive parsing or authentication work where possible.
 - Each sensitive endpoint class has an explicit rate-limit policy and stable `429` problem response. Limits are configurable within safe bounds.
 
+
+### D-063: Store source text and render it through one safe pipeline
+
+**Decision:** Store original Markdown or plain text rather than rendered HTML. Raw HTML in Markdown is disabled. One shared frontend pipeline escapes text by default, permits only `http`, `https`, `mailto`, and approved internal application links, and treats all names, filenames, headers, and imported text as untrusted. Provider embeds are stored as typed data rather than arbitrary HTML.
+
+**Rationale:** Keeping source text avoids persisting renderer-specific output, while one constrained renderer prevents each feature from inventing different sanitization and link behavior.
+
+**Alternatives considered:**
+
+- **Store rendered HTML:** Rejected because sanitizer and renderer changes would require rewriting persistent content.
+- **Allow raw user HTML:** Rejected because same-origin active markup creates a stored-XSS path.
+- **Let every feature render independently:** Rejected because security fixes and supported syntax would drift.
+
+**Consequences:**
+
+- External links receive `rel="noopener noreferrer"` and open separately. Approved internal links use React Router navigation.
+- Unsupported or malformed URL schemes render as inert text rather than clickable links.
+- Typed embeds validate provider, identifier, URL, and safe display fields on the server; clients never inject provider HTML directly.
+- Titles, descriptions, comments, task activity data, names, filenames, and future mail headers receive explicit byte and character limits in their DTO schemas.
+- Shared renderer tests include stored-XSS payloads, malformed Markdown, deceptive links, Unicode edge cases, and imported untrusted headers.
+- CSP remains a second defense rather than a substitute for escaping and sanitization.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -1274,14 +1296,11 @@ These choices require explicit evaluation before implementation.
 
 ## Remaining decision queue
 
-The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment handling, realtime behavior, mail boundaries, and frontend server-state library. The remaining decisions will be resolved in this order:
+The accepted decisions above settle the backend architecture, first milestone, tenancy, authentication and authorization, data conventions, SQLite operations, durable jobs, API contracts, attachments, realtime behavior, mail boundaries, crate layout, deployment, observability, and initial security controls. The remaining decisions are:
 
-1. Platform and Orbit module boundaries
-2. Configuration, secrets, deployment, and observability
-3. Remaining security controls and audit records
-4. Testing and local developer experience
-5. Detailed incremental frontend migration
+1. Testing and local developer experience
+2. Detailed incremental frontend migration
 
-## Next open decision: Code and module boundaries
+## Next open decision: Testing and developer experience
 
-The design must define the initial Cargo workspace, dependency direction, and the threshold for extracting platform modules into separate reusable crates.
+The design must define test layers, isolated databases and storage, local commands, fixtures, contract checks, and the minimum CI gate.
