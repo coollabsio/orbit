@@ -1030,6 +1030,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Outbox pruning never removes events inside the seven-day retention window.
 - Authorization is rechecked before replay, so old cursor possession does not grant workspace access.
 
+
+### D-052: Keep presence and typing state ephemeral
+
+**Decision:** Presence and typing indicators live only in process memory and are never written to SQLite or replayed. Presence expires after 60 seconds without a heartbeat; clients refresh it every 20 seconds. Typing expires after 5 seconds and a client sends at most one typing refresh every 2 seconds per conversation.
+
+**Rationale:** These signals describe current connection activity and have no recovery value. TTLs produce correct eventual behavior after abrupt disconnects without durable writes on every keystroke or heartbeat.
+
+**Alternatives considered:**
+
+- **Persist ephemeral state:** Rejected because it would add frequent SQLite writes and restore stale information after restart.
+- **Replay typing and presence events:** Rejected because historical ephemeral signals are meaningless.
+
+**Consequences:**
+
+- A clean disconnect clears state owned by that connection immediately. A crash leaves state only until its TTL expires.
+- Broadcasts go only to subscribers currently authorized for the relevant workspace and conversation.
+- Presence remains workspace-scoped even when one global user belongs to several workspaces.
+- The server rate-limits client typing messages and may drop them without affecting durable chat behavior.
+- Clients treat missing or delayed ephemeral events as normal and never derive authorization or durable unread state from them.
+- Application restart begins with no users present or typing until connected clients refresh their state.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -1041,16 +1062,15 @@ These choices require explicit evaluation before implementation.
 
 ## Remaining decision queue
 
-The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment handling, and frontend server-state library. The remaining decisions will be resolved in this order:
+The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, API contracts, persistence style, attachment handling, realtime behavior, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. Realtime delivery and reconnection
-2. Mail responsibilities beyond transactional SMTP
-3. Platform and Orbit module boundaries
-4. Configuration, secrets, deployment, and observability
-5. Remaining security controls and audit records
-6. Testing and local developer experience
-7. Detailed incremental frontend migration
+1. Mail responsibilities beyond transactional SMTP
+2. Platform and Orbit module boundaries
+3. Configuration, secrets, deployment, and observability
+4. Remaining security controls and audit records
+5. Testing and local developer experience
+6. Detailed incremental frontend migration
 
-## Next open decision: Realtime delivery
+## Next open decision: Mail responsibilities
 
-The realtime design must still define transport, event durability and ordering, reconnection, workspace subscriptions, and ephemeral presence behavior.
+The design must distinguish platform-owned transactional email from Orbit's future inbox and mail-client synchronization feature.
