@@ -878,6 +878,27 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Validation paths use JSON notation such as `assignees[2].user_id`.
 - Domain failures still use Problem Details and stable codes but are not forced into field errors when no single input field caused them.
 
+
+### D-045: Use opaque cursor pagination
+
+**Decision:** Paginated lists use opaque cursors, a default page size of 50, and a maximum of 100. Stable sorting ends with the UUIDv7 identifier as a tie-breaker. Responses contain `items` and `next_cursor`; the final page returns a null cursor. Total counts are omitted unless a product view needs one.
+
+**Rationale:** Cursor pagination remains stable while records are inserted or removed and avoids the growing scan cost of deep offsets. Omitting automatic counts keeps ordinary list requests focused on the rows they display.
+
+**Alternatives considered:**
+
+- **Offset and page-number pagination:** Rejected as the platform default because concurrent writes can shift records between pages and deep offsets become expensive.
+- **Return a total with every list:** Rejected because exact counts add work and may not affect the UI.
+
+**Consequences:**
+
+- The cursor encodes the effective filters, sort, last sort values, and tie-breaker in a server-owned format.
+- Reusing a cursor with different filters or sorting returns the stable `invalid_cursor` problem code.
+- Clients treat cursors as opaque and never construct or modify them.
+- Endpoints expose explicit count queries only when an accepted UI requirement displays the result.
+- OpenAPI uses one shared pagination pattern while each endpoint retains its typed item schema.
+- Cursor format may include a version so the server can reject obsolete encodings cleanly.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
