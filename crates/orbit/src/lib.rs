@@ -1,3 +1,21 @@
 //! Orbit domain models and policies.
 
+mod identity;
+mod policy;
+mod ports;
+mod tasks;
+mod workspace;
+
+pub use identity::{Membership, User, WorkspaceRole};
 pub use orbit_platform as platform;
+pub use policy::{Action, Policy, PolicyError, Role, TargetRole};
+pub use ports::{
+    AttachmentRepository, AttachmentStorageService, CommentRepository, PortFuture,
+    ProjectRepository, RepositoryError, TaskRepository, TaskStatusRepository, UserRepository,
+    WorkspaceRepository,
+};
+pub use tasks::{AttachmentRef, Comment, Task, TaskPriority};
+pub use workspace::{
+    DomainError, ExpectedVersion, Project, RestoreAvailability, StatusCategory, TaskStatus,
+    Workspace, WorkspaceDefaults,
+};
