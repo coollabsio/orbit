@@ -6,6 +6,7 @@ use super::Database;
 use crate::TimestampMillis;
 
 const PLATFORM_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0001_platform.sql");
+const IDENTITY_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0002_identity.sql");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Migration {
@@ -84,7 +85,13 @@ impl MigrationRunner {
 
     #[must_use]
     pub fn embedded(app_version: impl Into<String>) -> Self {
-        Self::new(app_version, vec![Migration::new(1, PLATFORM_SCHEMA, false)])
+        Self::new(
+            app_version,
+            vec![
+                Migration::new(1, PLATFORM_SCHEMA, false),
+                Migration::new(2, IDENTITY_SCHEMA, false),
+            ],
+        )
     }
 
     pub async fn pending(

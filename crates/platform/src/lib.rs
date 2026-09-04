@@ -1,5 +1,6 @@
 //! Reusable platform interfaces for Orbit.
 
+mod auth;
 mod backup;
 mod config;
 mod db;
@@ -13,6 +14,12 @@ mod observability;
 mod problem;
 mod time;
 
+pub use auth::{
+    AuthenticatedUser, InMemorySessionStore, IssuedSession, IssuedToken, LoginThrottler,
+    OneTimeTokenStore, PasswordError, PasswordService, PasswordVerification, SessionError,
+    SessionRecord, SessionStore, ThrottleDecision, TokenError, TokenKind, generate_opaque_token,
+    normalize_email,
+};
 pub use backup::{
     AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,
     BackupManifest, BackupService, BackupSnapshot,

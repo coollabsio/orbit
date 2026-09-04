@@ -142,9 +142,7 @@ impl Database {
         self.inner.pool.begin().await
     }
 
-    pub(crate) async fn immediate_transaction(
-        &self,
-    ) -> Result<Transaction<'_, Sqlite>, sqlx::Error> {
+    pub async fn immediate_transaction(&self) -> Result<Transaction<'_, Sqlite>, sqlx::Error> {
         self.inner.pool.begin_with("BEGIN IMMEDIATE").await
     }
 
@@ -159,7 +157,7 @@ impl Database {
         Ok(TimestampMillis::from_millis(milliseconds))
     }
 
-    pub(crate) fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &SqlitePool {
         &self.inner.pool
     }
 }
