@@ -1008,6 +1008,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Socket messages use versioned envelopes even while event payloads remain domain-specific.
 - SSE can be added later for a client that cannot use WebSockets; it is not part of the initial platform.
 
+
+### D-051: Replay ordered workspace events from a transactional outbox
+
+**Decision:** Domain mutations write their durable realtime event to an outbox in the same SQLite transaction. Each workspace has a monotonically increasing event sequence; installation-global events use a separate sequence and authorization path. Retain events for seven days. Reconnecting clients send their last applied sequence and receive ordered replay or `resync_required` when replay is impossible.
+
+**Rationale:** A transactional outbox prevents committed data from losing its notification. Per-workspace ordering makes reconnect behavior deterministic without creating one cross-tenant stream.
+
+**Alternatives considered:**
+
+- **Publish only from process memory after commit:** Rejected because a crash between commit and publish would lose the event.
+- **One global sequence for every workspace:** Rejected because it couples tenant traffic and leaks ordering gaps.
+- **Retain every event forever:** Rejected because realtime recovery is not an audit-log replacement.
+
+**Consequences:**
+
+- Delivery is at least once. Clients deduplicate by stable event ID and apply sequences monotonically.
+- Events identify changed resources and may carry safe summary data; HTTP remains authoritative for complete records.
+- A missing, invalid, or older-than-retention cursor receives `resync_required` rather than a partial replay.
+- On resync, the frontend invalidates affected workspace query keys and refetches through HTTP before accepting later sequences.
+- Outbox pruning never removes events inside the seven-day retention window.
+- Authorization is rechecked before replay, so old cursor possession does not grant workspace access.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
