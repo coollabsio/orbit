@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::{Arc, Mutex};
 
 use axum::extract::{Extension, FromRequest, FromRequestParts, Path, Query, Request, State};
-use axum::http::header::{CONTENT_TYPE, COOKIE};
+use axum::http::header::{CONTENT_TYPE, COOKIE, RETRY_AFTER};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -9,7 +10,8 @@ use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use orbit_domain::WorkspaceRole;
 use orbit_platform::{
-    Id, PasswordError, PasswordExecutor, PasswordService, RequestId, TimestampMillis,
+    ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor, PasswordService, RequestId,
+    ThrottleDecision, TimestampMillis,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,7 @@ pub struct WorkspaceState {
     public_origin: String,
     cookie_mode: CookieMode,
     passwords: PasswordExecutor,
+    registration_throttler: Arc<Mutex<LoginThrottler>>,
 }
 
 impl WorkspaceState {
@@ -42,6 +45,7 @@ impl WorkspaceState {
             cookie_mode,
             passwords: PasswordExecutor::new(PasswordService::default(), 2)
                 .expect("password executor concurrency is non-zero"),
+            registration_throttler: Arc::new(Mutex::new(LoginThrottler::new())),
         }
     }
 
@@ -59,6 +63,7 @@ impl WorkspaceState {
             cookie_mode,
             passwords: PasswordExecutor::new(PasswordService::default(), 2)
                 .expect("password executor concurrency is non-zero"),
+            registration_throttler: Arc::new(Mutex::new(LoginThrottler::new())),
         }
     }
 }
@@ -569,6 +574,7 @@ struct AcceptBody {
 async fn accept_invitation(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
+    client_ip: Option<Extension<ClientIp>>,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<AcceptBody>,
 ) -> Result<Response, ApiError> {
@@ -604,12 +610,49 @@ async fn accept_invitation(
             request_id.as_ref(),
         ));
     }
-    let password_hash = state
-        .passwords
-        .hash(password)
+    let ip = client_ip
+        .map(|Extension(value)| value.0)
+        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let reservation = state
+        .registration_throttler
+        .lock()
+        .expect("registration throttler mutex poisoned")
+        .reserve(&email, ip, TimestampMillis::now())
+        .map_err(|decision| match decision {
+            ThrottleDecision::RetryAfter(delay) => {
+                invitation_throttled_problem(delay, instance, request_id.as_ref())
+            }
+            ThrottleDecision::Allowed => unreachable!("allowed admission returns a reservation"),
+        })?;
+    if let Err(error) = state
+        .workspaces
+        .validate_invited_registration(
+            &body.token,
+            &email,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
         .await
-        .map_err(|error| password_problem(error, instance, request_id.as_ref()))?;
-    let registered = state
+    {
+        state
+            .registration_throttler
+            .lock()
+            .expect("registration throttler mutex poisoned")
+            .finish_failure(reservation, TimestampMillis::now());
+        return Err(workspace_problem(error, instance, request_id.as_ref()));
+    }
+    let password_hash = match state.passwords.hash(password).await {
+        Ok(hash) => hash,
+        Err(error) => {
+            state
+                .registration_throttler
+                .lock()
+                .expect("registration throttler mutex poisoned")
+                .finish_failure(reservation, TimestampMillis::now());
+            return Err(password_problem(error, instance, request_id.as_ref()));
+        }
+    };
+    let registered = match state
         .workspaces
         .register_invited_account(
             &body.token,
@@ -620,7 +663,22 @@ async fn accept_invitation(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    {
+        Ok(registered) => registered,
+        Err(error) => {
+            state
+                .registration_throttler
+                .lock()
+                .expect("registration throttler mutex poisoned")
+                .finish_failure(reservation, TimestampMillis::now());
+            return Err(workspace_problem(error, instance, request_id.as_ref()));
+        }
+    };
+    state
+        .registration_throttler
+        .lock()
+        .expect("registration throttler mutex poisoned")
+        .finish_success(reservation);
     let cookie = issued_session_cookie(state.cookie_mode, &registered.session.token);
     let mut response = (StatusCode::CREATED, Json(registered.acceptance)).into_response();
     response.headers_mut().insert(
@@ -820,11 +878,18 @@ async fn export_global_audit(
     require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
     let workspace_id = optional_id(query.workspace_id, instance, request_id.as_ref())?;
     let cursor = optional_id(query.cursor, instance, request_id.as_ref())?;
-    let (events, _) = state
-        .workspaces
-        .global_audit(workspace_id, query.action.as_deref(), cursor, query.limit)
-        .await
-        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    let mut events = Vec::new();
+    let mut cursor = cursor;
+    loop {
+        let (page, next_cursor) = state
+            .workspaces
+            .global_audit(workspace_id, query.action.as_deref(), cursor, query.limit)
+            .await
+            .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+        events.extend(page);
+        let Some(next) = next_cursor else { break };
+        cursor = Some(next);
+    }
     let mut csv = "id,workspace_id,actor_id,action,outcome,resource_type,resource_id,request_id,occurred_at\n".to_owned();
     for event in events {
         let fields = [
@@ -1070,7 +1135,7 @@ fn workspace_problem(
         WorkspaceError::VersionConflict { current_version } => {
             ApiError::conflict(current_version, instance.clone(), instance, request_id)
         }
-        WorkspaceError::Unavailable(_) => ApiError::new(
+        WorkspaceError::Unavailable(_) | WorkspaceError::Storage(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
@@ -1094,6 +1159,23 @@ fn registration_field_problem(
         instance,
         request_id,
     )
+}
+
+fn invitation_throttled_problem(
+    retry_after: std::time::Duration,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    let mut error = ApiError::new(
+        StatusCode::TOO_MANY_REQUESTS,
+        "invitation_registration_throttled",
+        "Too many attempts",
+        "Too many invitation registration attempts were made. Try again later.",
+        instance,
+        request_id,
+    );
+    error.retry_after = Some(retry_after);
+    error
 }
 
 fn password_problem(
@@ -1189,6 +1271,7 @@ struct ConflictBody {
 struct ApiError {
     status: StatusCode,
     body: Box<ProblemBody>,
+    retry_after: Option<std::time::Duration>,
 }
 
 impl ApiError {
@@ -1214,6 +1297,7 @@ impl ApiError {
                     .unwrap_or_else(|| "unknown".to_owned()),
                 conflict: None,
             }),
+            retry_after: None,
         }
     }
 
@@ -1240,6 +1324,7 @@ impl ApiError {
                     refresh,
                 }),
             }),
+            retry_after: None,
         }
     }
 }
@@ -1251,6 +1336,12 @@ impl IntoResponse for ApiError {
             CONTENT_TYPE,
             HeaderValue::from_static("application/problem+json"),
         );
+        if let Some(retry_after) = self.retry_after {
+            response.headers_mut().insert(
+                RETRY_AFTER,
+                HeaderValue::from_str(&retry_after.as_secs().max(1).to_string()).unwrap(),
+            );
+        }
         response
     }
 }

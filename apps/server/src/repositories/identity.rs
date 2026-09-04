@@ -91,6 +91,35 @@ impl IdentityRepository {
         &self.database
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_security_event(
+        &self,
+        actor_id: Option<Id>,
+        action: &str,
+        outcome: AuditOutcome,
+        resource_type: &str,
+        resource_id: Option<Id>,
+        request_id: &str,
+        metadata: serde_json::Value,
+        now: TimestampMillis,
+    ) -> Result<(), IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        audit::record_global(
+            &mut transaction,
+            actor_id,
+            action,
+            outcome,
+            resource_type,
+            resource_id,
+            request_id,
+            metadata,
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn initialize_setup_token(
         &self,
         now: TimestampMillis,

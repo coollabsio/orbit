@@ -3,8 +3,8 @@ use std::sync::Arc;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    AuthenticatedUser, HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase,
-    TimestampMillis,
+    AuthenticatedUser, HttpPlatformLayer, Id, LocalBlobStore, OriginPolicy, PasswordService,
+    TestDatabase, TimestampMillis,
 };
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -911,7 +911,7 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
         .unwrap();
     assert!(
         sqlx::query("DELETE FROM users WHERE id = ?")
-            .bind(owner_user)
+            .bind(&owner_user)
             .execute(database.pool())
             .await
             .is_err()
@@ -934,6 +934,52 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
         .execute(database.pool())
         .await
         .unwrap();
+    let blob_id = Id::new_v7();
+    let attachment_root = std::env::temp_dir().join(format!("orbit-retention-{}", Id::new_v7()));
+    let blob_path = attachment_root.join(format!("blobs/{}/purge", setup.0));
+    let temporary_path = attachment_root.join("temporary/upload-purge");
+    std::fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(temporary_path.parent().unwrap()).unwrap();
+    std::fs::write(&blob_path, b"x").unwrap();
+    std::fs::write(&temporary_path, b"x").unwrap();
+    sqlx::query(
+        "INSERT INTO attachment_blobs (id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until) \
+         VALUES (?, ?, 'purge-sha', 1, ?, ?, ?)",
+    )
+    .bind(blob_id.to_string())
+    .bind(&setup.0)
+    .bind(format!("blobs/{}/purge", setup.0))
+    .bind(old)
+    .bind(old)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO attachment_references (id, workspace_id, task_id, owner_id, blob_id, display_name, media_type, byte_size, created_at) \
+         VALUES (?, ?, ?, ?, ?, 'purge.txt', 'text/plain', 1, ?)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&setup.0)
+    .bind(Id::new_v7().to_string())
+    .bind(owner_membership.clone())
+    .bind(blob_id.to_string())
+    .bind(old)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pending_uploads (id, workspace_id, user_id, temporary_path, original_name, media_type, byte_size, state, created_at, expires_at) \
+         VALUES (?, ?, ?, ?, 'pending.txt', 'text/plain', 1, 'staged', ?, ?)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&setup.0)
+    .bind(owner_user.clone())
+    .bind(temporary_path.to_string_lossy().as_ref())
+    .bind(old)
+    .bind(old)
+    .execute(database.pool())
+    .await
+    .unwrap();
     let trash = app
         .clone()
         .oneshot(cookie_request(
@@ -955,7 +1001,10 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
         .unwrap();
     assert_eq!(restore.status(), StatusCode::NOT_FOUND);
 
-    let repository = WorkspaceRepository::new((*database).clone());
+    let repository = WorkspaceRepository::with_blob_store(
+        (*database).clone(),
+        Arc::new(LocalBlobStore::new(&attachment_root)),
+    );
     sqlx::query(
         "INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, \
          request_id, metadata_json, occurred_at) VALUES (?, NULL, NULL, 'old.event', 'success', \
@@ -1002,6 +1051,27 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
     shutdown.cancel();
     worker_task.await.unwrap().unwrap();
     assert_eq!(durable_summary, (1, 1));
+    for table in [
+        "attachment_references",
+        "attachment_blobs",
+        "pending_uploads",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "{table} was not purged");
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM attachment_file_deletions")
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(!blob_path.exists());
+    assert!(!temporary_path.exists());
+    let _ = std::fs::remove_dir_all(attachment_root);
 }
 
 #[tokio::test]
@@ -1268,6 +1338,198 @@ async fn failed_security_actions_are_audited_and_global_audit_is_admin_only() {
         export.headers()[header::CONTENT_TYPE],
         "text/csv; charset=utf-8"
     );
+}
+
+#[tokio::test]
+async fn owner_pointer_cannot_reference_another_workspaces_membership_on_insert() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let setup = setup_owner(&identity).await;
+    let member = create_user(&database, &identity, "pointer-member@example.com", "Member").await;
+    let membership_id = Id::new_v7();
+    let now = TimestampMillis::now().as_millis();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES (?, ?, ?, 'admin', 0, ?, ?)",
+    )
+    .bind(membership_id.to_string())
+    .bind(&setup.0)
+    .bind(member.0.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let result = sqlx::query(
+        "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
+         VALUES (?, 'Bypass', 0, ?, ?, ?)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(membership_id.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(database.pool())
+    .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn invalid_invitation_is_rejected_before_password_validation_and_is_summarized() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    setup_owner(&identity).await;
+    let app = workspace_router(WorkspaceState::new(
+        identity,
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ));
+
+    let response = app
+        .clone()
+        .oneshot(json_request_without_cookie(
+            "POST",
+            "/api/v1/workspaces/invitations/accept",
+            json!({
+                "token": "unknown-token",
+                "email": "probe@example.com",
+                "display_name": "Probe",
+                "password": "short"
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let mut throttled = None;
+    for _ in 0..60 {
+        let response = app
+            .clone()
+            .oneshot(json_request_without_cookie(
+                "POST",
+                "/api/v1/workspaces/invitations/accept",
+                json!({
+                    "token": "another-unknown-token",
+                    "email": "probe@example.com",
+                    "display_name": "Probe",
+                    "password": "correct horse battery"
+                }),
+            ))
+            .await
+            .unwrap();
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            throttled = Some(response);
+            break;
+        }
+    }
+    assert_eq!(
+        response_json(throttled.expect("registration attempts are throttled")).await["code"],
+        "invitation_registration_throttled"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM audit_events WHERE action = 'invitation.registration_failed'"
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT SUM(attempt_count) FROM security_probe_summaries WHERE kind = 'invitation.registration_invalid'"
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        5
+    );
+}
+
+#[tokio::test]
+async fn global_audit_export_follows_every_cursor_page() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let setup = setup_owner(&identity).await;
+    let owner_cookie = format!("__Host-orbit_session={}", setup.1);
+    let now = TimestampMillis::now().as_millis();
+    for index in 0..125 {
+        sqlx::query(
+            "INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, \
+             request_id, metadata_json, occurred_at) VALUES (?, NULL, NULL, 'export.test', 'success', \
+             'installation', ?, '{}', ?)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(format!("export-{index}"))
+        .bind(now + index)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    }
+    let app = workspace_router(WorkspaceState::new(
+        identity,
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ));
+
+    let response = app
+        .oneshot(cookie_request(
+            "GET",
+            "/api/v1/admin/audit/export?action=export.test&limit=17",
+            &owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let csv = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(csv.lines().skip(1).count(), 125);
+}
+
+#[tokio::test]
+async fn retention_service_installs_a_recurring_schedule_and_runs_it() {
+    let database = TestDatabase::new().await.unwrap();
+    let repository = WorkspaceRepository::new((*database).clone());
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let service_shutdown = shutdown.clone();
+    let task = tokio::spawn(async move {
+        repository
+            .run_retention_service(
+                service_shutdown,
+                std::time::Duration::from_millis(5),
+                orbit_platform::WorkerConfig::new(1)
+                    .unwrap()
+                    .with_poll_interval(std::time::Duration::from_millis(1)),
+            )
+            .await
+    });
+    loop {
+        let summaries: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM maintenance_summaries")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+        if summaries != 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM schedules WHERE job_kind = 'workspace.retention' AND enabled = 1"
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1
+    );
+    shutdown.cancel();
+    task.await.unwrap().unwrap();
 }
 
 async fn setup_owner(repository: &IdentityRepository) -> (String, String) {

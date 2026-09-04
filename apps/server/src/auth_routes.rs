@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::ToSchema;
 
+use crate::audit::AuditOutcome;
 use crate::repositories::identity::{IdentityRepository, SetupError, SetupRequest};
 
 const SESSION_COOKIE: &str = "__Host-orbit_session";
@@ -295,6 +296,19 @@ async fn setup_complete(
         .await
         .map_err(|_| ApiError::internal("/api/v1/setup/complete", request_id.as_ref()))?;
     if !token_valid {
+        let _ = state
+            .repository
+            .record_security_event(
+                None,
+                "setup.complete",
+                AuditOutcome::Failure,
+                "installation",
+                None,
+                request_id_value(request_id.as_ref()),
+                json!({"reason":"invalid_token"}),
+                TimestampMillis::now(),
+            )
+            .await;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_setup_token",
@@ -343,6 +357,19 @@ async fn setup_complete(
                 ApiError::internal("/api/v1/setup/complete", request_id.as_ref())
             }
         })?;
+    let _ = state
+        .repository
+        .record_security_event(
+            Some(result.user_id),
+            "setup.complete",
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id_value(request_id.as_ref()),
+            json!({}),
+            TimestampMillis::now(),
+        )
+        .await;
     let session = result.session;
     let mut response = (
         StatusCode::CREATED,
@@ -392,17 +419,35 @@ async fn login(
     let ip = client_ip
         .map(|Extension(client_ip)| client_ip.0)
         .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let reservation = state
+    let admission = state
         .throttler
         .lock()
         .expect("throttler mutex poisoned")
-        .reserve(&body.email, ip, TimestampMillis::now())
-        .map_err(|decision| match decision {
-            ThrottleDecision::RetryAfter(delay) => {
-                ApiError::throttled(delay, "/api/v1/auth/login", request_id.as_ref())
-            }
-            ThrottleDecision::Allowed => unreachable!("allowed admission returns a reservation"),
-        })?;
+        .reserve(&body.email, ip, TimestampMillis::now());
+    let reservation = match admission {
+        Ok(reservation) => reservation,
+        Err(ThrottleDecision::RetryAfter(delay)) => {
+            let _ = state
+                .repository
+                .record_security_event(
+                    None,
+                    "authentication.throttled",
+                    AuditOutcome::Failure,
+                    "authentication",
+                    None,
+                    request_id_value(request_id.as_ref()),
+                    json!({}),
+                    TimestampMillis::now(),
+                )
+                .await;
+            return Err(ApiError::throttled(
+                delay,
+                "/api/v1/auth/login",
+                request_id.as_ref(),
+            ));
+        }
+        Err(ThrottleDecision::Allowed) => unreachable!("allowed admission returns a reservation"),
+    };
 
     let identity = state
         .repository
@@ -430,6 +475,20 @@ async fn login(
             .lock()
             .expect("throttler mutex poisoned")
             .finish_failure(reservation, TimestampMillis::now());
+        let actor_id = identity.as_ref().map(|identity| identity.id);
+        let _ = state
+            .repository
+            .record_security_event(
+                actor_id,
+                "authentication.login",
+                AuditOutcome::Failure,
+                "authentication",
+                actor_id,
+                request_id_value(request_id.as_ref()),
+                json!({}),
+                TimestampMillis::now(),
+            )
+            .await;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
@@ -462,6 +521,19 @@ async fn login(
         .create_session(&user, TimestampMillis::now())
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
+    let _ = state
+        .repository
+        .record_security_event(
+            Some(user.id),
+            "authentication.login",
+            AuditOutcome::Success,
+            "session",
+            Some(session.id),
+            request_id_value(request_id.as_ref()),
+            json!({}),
+            TimestampMillis::now(),
+        )
+        .await;
     let mut response = Json(LoginResponse {
         user: AuthUserResponse {
             id: user.id.to_string(),
@@ -498,6 +570,19 @@ async fn logout(
             request_id.as_ref(),
         ));
     }
+    let _ = state
+        .repository
+        .record_security_event(
+            Some(session.user.id),
+            "session.logout",
+            AuditOutcome::Success,
+            "session",
+            Some(session.id),
+            request_id_value(request_id.as_ref()),
+            json!({}),
+            TimestampMillis::now(),
+        )
+        .await;
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(
         SET_COOKIE,
@@ -531,6 +616,7 @@ struct RecoveryRequestBody {
 #[utoipa::path(post, path = "/api/v1/auth/recovery/request", request_body = RecoveryRequestBody, responses((status = 202)))]
 async fn recovery_request(
     State(state): State<AuthState>,
+    request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<RecoveryRequestBody>,
 ) -> Response {
     if let Ok(Some(identity)) = state.repository.find_by_email(&body.email).await
@@ -551,6 +637,19 @@ async fn recovery_request(
                 url: format!("{}/recovery?token={token}", state.public_origin),
             };
             let _ = state.recovery_delivery.deliver(message).await;
+            let _ = state
+                .repository
+                .record_security_event(
+                    Some(identity.id),
+                    "recovery.requested",
+                    AuditOutcome::Success,
+                    "user",
+                    Some(identity.id),
+                    request_id_value(request_id.as_ref()),
+                    json!({}),
+                    TimestampMillis::now(),
+                )
+                .await;
         }
     }
     (
@@ -579,6 +678,19 @@ async fn recovery_complete(
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
     if !valid {
+        let _ = state
+            .repository
+            .record_security_event(
+                None,
+                "recovery.completed",
+                AuditOutcome::Failure,
+                "user",
+                None,
+                request_id_value(request_id.as_ref()),
+                json!({"reason":"invalid_token"}),
+                TimestampMillis::now(),
+            )
+            .await;
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_recovery_token",
@@ -591,11 +703,24 @@ async fn recovery_complete(
     let password_hash = state.passwords.hash(body.password).await.map_err(|error| {
         password_problem(error, "/api/v1/auth/recovery/complete", request_id.as_ref())
     })?;
-    state
+    let user_id = state
         .repository
         .complete_recovery(&body.token, &password_hash, TimestampMillis::now())
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
+    let _ = state
+        .repository
+        .record_security_event(
+            Some(user_id),
+            "recovery.completed",
+            AuditOutcome::Success,
+            "user",
+            Some(user_id),
+            request_id_value(request_id.as_ref()),
+            json!({"sessions_revoked":true}),
+            TimestampMillis::now(),
+        )
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -652,6 +777,19 @@ async fn revoke_session(
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/sessions/{id}", request_id.as_ref()))?;
     if !revoked {
+        let _ = state
+            .repository
+            .record_security_event(
+                Some(user.id),
+                "session.revoked",
+                AuditOutcome::Failure,
+                "session",
+                Some(id),
+                request_id_value(request_id.as_ref()),
+                json!({"reason":"not_found"}),
+                TimestampMillis::now(),
+            )
+            .await;
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "session_not_found",
@@ -661,7 +799,24 @@ async fn revoke_session(
             request_id.as_ref(),
         ));
     }
+    let _ = state
+        .repository
+        .record_security_event(
+            Some(user.id),
+            "session.revoked",
+            AuditOutcome::Success,
+            "session",
+            Some(id),
+            request_id_value(request_id.as_ref()),
+            json!({}),
+            TimestampMillis::now(),
+        )
+        .await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
+    request_id.map_or("unknown", |Extension(value)| value.as_str())
 }
 
 async fn authenticate(
@@ -1260,6 +1415,64 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(me.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_security_outcomes_are_recorded_in_the_durable_audit() {
+        let (app, _, database) = application(CookieMode::secure()).await;
+        let failed = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password":"wrong password value"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(failed.status(), StatusCode::UNAUTHORIZED);
+        let login = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password":"correct horse battery"}),
+            ))
+            .await
+            .unwrap();
+        let cookie = login
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let logout = app
+            .clone()
+            .oneshot(cookie_request("POST", "/api/v1/auth/logout", &cookie))
+            .await
+            .unwrap();
+        assert_eq!(logout.status(), StatusCode::NO_CONTENT);
+        let recovery = app
+            .oneshot(json_request(
+                "/api/v1/auth/recovery/request",
+                json!({"email":"owner@example.com"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(recovery.status(), StatusCode::ACCEPTED);
+
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT action, outcome FROM audit_events WHERE action LIKE 'authentication.%' \
+             OR action IN ('session.logout', 'recovery.requested') ORDER BY occurred_at, id",
+        )
+        .fetch_all(database.pool())
+        .await
+        .unwrap();
+        assert!(rows.contains(&("authentication.login".to_owned(), "failure".to_owned())));
+        assert!(rows.contains(&("authentication.login".to_owned(), "success".to_owned())));
+        assert!(rows.contains(&("session.logout".to_owned(), "success".to_owned())));
+        assert!(rows.contains(&("recovery.requested".to_owned(), "success".to_owned())));
     }
 
     async fn application(

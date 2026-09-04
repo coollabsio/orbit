@@ -133,3 +133,43 @@ I verified the nine Important findings against the implementation and treated ea
 - SMTP transport remains a later composition task. The invitation repository preserves SMTP/manual provenance and hands the secret only to the authorized delivery boundary; acceptance semantics no longer depend on transport-specific DTOs.
 - The retention worker is implemented and integration-tested through the durable job queue. Production startup still needs to schedule the recurring enqueue cadence when the serving-process composition is introduced.
 - OpenAPI error-response enumeration remains a Minor review item; success paths retain their existing Utoipa annotations, while runtime errors follow the shared stable problem contract.
+
+## Re-review round 1 remediation (2026-09-04)
+
+### Approach
+
+Verified each Important finding against the repository and platform job/file primitives, then added focused regressions before changing behavior. Kept migrations 1-5 byte-for-byte unchanged and introduced additive migration 6 for owner-insert enforcement and durable retention/security state.
+
+### Files changed
+
+- `apps/server/migrations/0006_workspace_retention_security.sql`: owner insert triggers, durable attachment deletion outbox, bounded invitation probe summaries, and attachment purge summary counts.
+- `crates/platform/src/db/migrate.rs`, `crates/platform/src/backup.rs`, platform migration/backup tests: embedded schema v6 and backup compatibility.
+- `apps/server/src/repositories/workspaces.rs`: pre-hash invitation preflight with transactional final revalidation, ordered attachment metadata purge and durable file deletion, recurring retention scheduler/worker service, denial audits, and probe summary retention.
+- `apps/server/src/workspace_routes.rs`: separate invitation-registration throttle, preflight ordering, and complete cursor-walking CSV export.
+- `apps/server/src/repositories/identity.rs`, `apps/server/src/auth_routes.rs`: durable setup, login/throttle, logout, recovery, and session-revocation outcome events.
+- `apps/server/tests/workspaces_api.rs`: regressions for owner-pointer insert bypass, pre-Argon2 invitation rejection/throttling/summarization, attachment metadata/file purge, recurring retention, and exports beyond 100 rows.
+
+### Red / green evidence
+
+- Owner-pointer, invitation preflight, and multi-page export regressions initially failed respectively because the cross-workspace insert succeeded, invalid tokens reached password validation (`422`), and export returned only 17/125 rows.
+- Attachment purge regression initially retained `attachment_references`.
+- Recurring retention regression initially failed to compile because `run_retention_service` did not exist.
+- Authentication audit regression initially found no `authentication.login` failure event.
+- Each focused regression passed after its minimal implementation; invitation throttling was additionally exercised until the stable `429 invitation_registration_throttled` response.
+
+### Verification
+
+- `cargo test -p orbit-server`: passed (23 library, 5 binary, 16 workspace integration tests).
+- `cargo test --workspace`: passed across all crates and doc tests.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed after formatting.
+- `git diff --check`: passed.
+
+### Commit
+
+`fix(workspaces): close retention and security gaps` (final hash in agent handoff).
+
+### Concerns
+
+- The current binary still exposes operational CLI commands rather than an HTTP `serve` command. `run_production_retention_service` is the production lifecycle entry point for the future server composition and pairs the durable daily schedule with its worker; the configurable variant is covered end-to-end.
+- `WorkspaceRepository::new` uses the documented default `attachments` root; deployments with a configured attachment root must construct it with `with_blob_store` when composing the server.

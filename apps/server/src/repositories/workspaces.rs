@@ -1,15 +1,20 @@
 use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
 
 use orbit_domain::{StatusCategory, WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
-    Database, Id, IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore,
-    TimestampMillis, Worker, WorkerConfig, generate_opaque_token, normalize_email,
+    BlobStore, BlobStoreError, Database, Id, IssuedSession, Job, JobError, JobKind,
+    JobKindRegistrationError, JobStore, LocalBlobStore, RecurringSchedule, ScheduleError,
+    Scheduler, TimestampMillis, Worker, WorkerConfig, WorkerError, generate_opaque_token,
+    normalize_email,
 };
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 
 use crate::audit::{self, AuditEvent, AuditOutcome};
 
@@ -97,6 +102,10 @@ pub struct RegisteredAcceptance {
 pub struct MaintenanceSummary {
     pub workspaces_purged: u64,
     pub audit_events_purged: u64,
+    pub attachment_references_purged: u64,
+    pub attachment_blobs_purged: u64,
+    pub pending_uploads_purged: u64,
+    pub files_purged: u64,
     pub occurred_at: TimestampMillis,
 }
 
@@ -120,17 +129,45 @@ pub enum WorkspaceError {
     VersionConflict { current_version: u64 },
     #[error("workspace repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
+    #[error("workspace attachment storage is unavailable")]
+    Storage(#[from] BlobStoreError),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Error)]
+pub enum RetentionServiceError {
+    #[error(transparent)]
+    Workspace(#[from] WorkspaceError),
+    #[error(transparent)]
+    Schedule(#[from] ScheduleError),
+    #[error(transparent)]
+    Worker(#[from] WorkerError),
+    #[error(transparent)]
+    Kind(#[from] JobKindRegistrationError),
+    #[error(transparent)]
+    Join(#[from] tokio::task::JoinError),
+}
+
+#[derive(Clone)]
 pub struct WorkspaceRepository {
     database: Database,
+    blob_store: Arc<dyn BlobStore>,
 }
 
 impl WorkspaceRepository {
     #[must_use]
     pub fn new(database: Database) -> Self {
-        Self { database }
+        Self {
+            database,
+            blob_store: Arc::new(LocalBlobStore::new("attachments")),
+        }
+    }
+
+    #[must_use]
+    pub fn with_blob_store(database: Database, blob_store: Arc<dyn BlobStore>) -> Self {
+        Self {
+            database,
+            blob_store,
+        }
     }
 
     pub async fn list_for_user(&self, user_id: Id) -> Result<Vec<WorkspaceRecord>, WorkspaceError> {
@@ -377,7 +414,27 @@ impl WorkspaceRepository {
             now.as_millis().saturating_add(INVITATION_LIFETIME_MILLIS),
         );
         let mut transaction = self.database.immediate_transaction().await?;
-        require_manager(&mut transaction, workspace_id, actor_id, false).await?;
+        match require_manager(&mut transaction, workspace_id, actor_id, false).await {
+            Ok(_) => {}
+            Err(WorkspaceError::Forbidden) => {
+                audit::record(
+                    &mut transaction,
+                    workspace_id,
+                    Some(actor_id),
+                    "invitation.create_denied",
+                    AuditOutcome::Failure,
+                    "workspace",
+                    Some(workspace_id),
+                    request_id,
+                    json!({"reason":"role_forbidden"}),
+                    now,
+                )
+                .await?;
+                transaction.commit().await?;
+                return Err(WorkspaceError::Forbidden);
+            }
+            Err(error) => return Err(error),
+        }
         let already_member = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
              WHERE memberships.workspace_id = ? AND users.normalized_email = ?",
@@ -453,7 +510,27 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        require_manager(&mut transaction, workspace_id, actor_id, false).await?;
+        match require_manager(&mut transaction, workspace_id, actor_id, false).await {
+            Ok(_) => {}
+            Err(WorkspaceError::Forbidden) => {
+                audit::record(
+                    &mut transaction,
+                    workspace_id,
+                    Some(actor_id),
+                    "invitation.revoke_denied",
+                    AuditOutcome::Failure,
+                    "workspace_invitation",
+                    Some(invitation_id),
+                    request_id,
+                    json!({"reason":"role_forbidden"}),
+                    now,
+                )
+                .await?;
+                transaction.commit().await?;
+                return Err(WorkspaceError::Forbidden);
+            }
+            Err(error) => return Err(error),
+        }
         let changed = sqlx::query(
             "UPDATE workspace_invitations SET revoked_at = ? WHERE id = ? AND workspace_id = ? \
              AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL AND expires_at > ?",
@@ -796,6 +873,109 @@ impl WorkspaceRepository {
         })
     }
 
+    pub async fn validate_invited_registration(
+        &self,
+        token: &str,
+        email: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        let row = sqlx::query(
+            "SELECT id, workspace_id, normalized_email, expires_at, accepted_at, revoked_at, replaced_at \
+             FROM workspace_invitations WHERE token_hash = ?",
+        )
+        .bind(token_hash(token).to_vec())
+        .fetch_optional(self.database.pool())
+        .await?;
+        let Some(row) = row else {
+            self.summarize_invalid_invitation_probe(now).await?;
+            return Err(WorkspaceError::InvalidInvitation);
+        };
+        let invitation_id = parse_id(row.get("id"))?;
+        let workspace_id = parse_id(row.get("workspace_id"))?;
+        if row.get::<i64, _>("expires_at") <= now.as_millis()
+            || row.get::<Option<i64>, _>("accepted_at").is_some()
+            || row.get::<Option<i64>, _>("revoked_at").is_some()
+            || row.get::<Option<i64>, _>("replaced_at").is_some()
+        {
+            self.record_registration_failure(
+                workspace_id,
+                invitation_id,
+                "inactive",
+                request_id,
+                now,
+            )
+            .await?;
+            return Err(WorkspaceError::InvalidInvitation);
+        }
+        let normalized_email = normalize_email(email);
+        if row.get::<String, _>("normalized_email") != normalized_email {
+            self.record_registration_failure(
+                workspace_id,
+                invitation_id,
+                "email_mismatch",
+                request_id,
+                now,
+            )
+            .await?;
+            return Err(WorkspaceError::EmailMismatch);
+        }
+        let existing =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = ?")
+                .bind(normalized_email)
+                .fetch_one(self.database.pool())
+                .await?;
+        if existing != 0 {
+            return Err(WorkspaceError::RegistrationRequiresSignIn);
+        }
+        Ok(())
+    }
+
+    async fn record_registration_failure(
+        &self,
+        workspace_id: Id,
+        invitation_id: Id,
+        reason: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        audit::record(
+            &mut transaction,
+            workspace_id,
+            None,
+            "invitation.registration_failed",
+            AuditOutcome::Failure,
+            "workspace_invitation",
+            Some(invitation_id),
+            request_id,
+            json!({"reason": reason}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn summarize_invalid_invitation_probe(
+        &self,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        const BUCKET_MILLIS: i64 = 5 * 60 * 1_000;
+        let bucket = now.as_millis() - now.as_millis().rem_euclid(BUCKET_MILLIS);
+        sqlx::query(
+            "INSERT INTO security_probe_summaries (kind, bucket_started_at, attempt_count, last_attempt_at) \
+             VALUES ('invitation.registration_invalid', ?, 1, ?) \
+             ON CONFLICT(kind, bucket_started_at) DO UPDATE SET \
+             attempt_count = attempt_count + 1, last_attempt_at = excluded.last_attempt_at",
+        )
+        .bind(bucket)
+        .bind(now.as_millis())
+        .execute(self.database.pool())
+        .await?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn change_role(
         &self,
@@ -807,11 +987,25 @@ impl WorkspaceRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
-        if role == WorkspaceRole::Owner {
-            return Err(WorkspaceError::TransferRequired);
-        }
         let mut transaction = self.database.immediate_transaction().await?;
         let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
+        if role == WorkspaceRole::Owner {
+            audit::record(
+                &mut transaction,
+                workspace_id,
+                Some(actor_id),
+                "membership.change_denied",
+                AuditOutcome::Failure,
+                "membership",
+                Some(membership_id),
+                request_id,
+                json!({"reason":"ownership_transfer_required"}),
+                now,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(WorkspaceError::TransferRequired);
+        }
         if actor_role == WorkspaceRole::Member {
             audit::record(
                 &mut transaction,
@@ -1213,10 +1407,77 @@ impl WorkspaceRepository {
                     repository.purge_retention(now).await.map_err(|_| {
                         JobError::Retryable("retention maintenance failed".to_owned())
                     })?;
+                    repository
+                        .purge_attachment_files()
+                        .await
+                        .map_err(|_| JobError::Retryable("attachment cleanup failed".to_owned()))?;
                     Ok(())
                 }
             },
         )
+    }
+
+    pub async fn run_retention_service(
+        &self,
+        shutdown: CancellationToken,
+        cadence: Duration,
+        worker_config: WorkerConfig,
+    ) -> Result<(), RetentionServiceError> {
+        let store = JobStore::new(self.database.clone());
+        let scheduler = Scheduler::new(store);
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM schedules WHERE job_kind = 'workspace.retention'",
+        )
+        .fetch_one(self.database.pool())
+        .await
+        .map_err(WorkspaceError::from)?;
+        if exists == 0 {
+            let now = self
+                .database
+                .database_now()
+                .await
+                .map_err(WorkspaceError::from)?;
+            scheduler
+                .upsert(&RecurringSchedule::interval(
+                    JobKind::new("workspace.retention").with_concurrency_limit(1),
+                    json!({}),
+                    cadence,
+                    now,
+                ))
+                .await?;
+        }
+        let worker = self.retention_worker(worker_config)?;
+        let worker_shutdown = shutdown.clone();
+        let worker_task = tokio::spawn(async move { worker.run(worker_shutdown).await });
+        loop {
+            if shutdown.is_cancelled() {
+                break;
+            }
+            let now = self
+                .database
+                .database_now()
+                .await
+                .map_err(WorkspaceError::from)?;
+            scheduler.materialize_due(now).await?;
+            tokio::select! {
+                () = shutdown.cancelled() => break,
+                () = tokio::time::sleep(cadence.min(Duration::from_secs(60))) => {}
+            }
+        }
+        worker_task.await??;
+        Ok(())
+    }
+
+    pub async fn run_production_retention_service(
+        &self,
+        shutdown: CancellationToken,
+    ) -> Result<(), RetentionServiceError> {
+        self.run_retention_service(
+            shutdown,
+            Duration::from_secs(24 * 60 * 60),
+            WorkerConfig::default(),
+        )
+        .await
     }
 
     pub async fn purge_retention(
@@ -1235,7 +1496,70 @@ impl WorkspaceRepository {
         .fetch_all(&mut *transaction)
         .await?;
         let mut workspaces_purged = 0_u64;
+        let mut attachment_references_purged = 0_u64;
+        let mut attachment_blobs_purged = 0_u64;
+        let mut pending_uploads_purged = 0_u64;
         for workspace_id in expired {
+            let blob_rows =
+                sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE workspace_id = ?")
+                    .bind(&workspace_id)
+                    .fetch_all(&mut *transaction)
+                    .await?;
+            let pending_paths = sqlx::query_scalar::<_, String>(
+                "SELECT temporary_path FROM pending_uploads WHERE workspace_id = ?",
+            )
+            .bind(&workspace_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+            attachment_references_purged +=
+                sqlx::query("DELETE FROM attachment_references WHERE workspace_id = ?")
+                    .bind(&workspace_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
+            for row in blob_rows {
+                let blob_id: String = row.get("id");
+                let references: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?",
+                )
+                .bind(&blob_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+                if references == 0 {
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO attachment_file_deletions \
+                         (id, path_kind, path, created_at) VALUES (?, 'blob', ?, ?)",
+                    )
+                    .bind(Id::new_v7().to_string())
+                    .bind(row.get::<String, _>("storage_key"))
+                    .bind(now.as_millis())
+                    .execute(&mut *transaction)
+                    .await?;
+                    attachment_blobs_purged +=
+                        sqlx::query("DELETE FROM attachment_blobs WHERE id = ?")
+                            .bind(blob_id)
+                            .execute(&mut *transaction)
+                            .await?
+                            .rows_affected();
+                }
+            }
+            for path in pending_paths {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO attachment_file_deletions \
+                     (id, path_kind, path, created_at) VALUES (?, 'temporary', ?, ?)",
+                )
+                .bind(Id::new_v7().to_string())
+                .bind(path)
+                .bind(now.as_millis())
+                .execute(&mut *transaction)
+                .await?;
+            }
+            pending_uploads_purged +=
+                sqlx::query("DELETE FROM pending_uploads WHERE workspace_id = ?")
+                    .bind(&workspace_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
             workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = ?")
                 .bind(workspace_id)
                 .execute(&mut *transaction)
@@ -1247,13 +1571,21 @@ impl WorkspaceRepository {
             .execute(&mut *transaction)
             .await?
             .rows_affected();
+        sqlx::query("DELETE FROM security_probe_summaries WHERE last_attempt_at < ?")
+            .bind(now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS))
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query(
-            "INSERT INTO maintenance_summaries (id, kind, workspaces_purged, audit_events_purged, occurred_at) \
-             VALUES (?, 'workspace.retention', ?, ?, ?)",
+            "INSERT INTO maintenance_summaries (id, kind, workspaces_purged, audit_events_purged, \
+             attachment_references_purged, attachment_blobs_purged, pending_uploads_purged, files_purged, occurred_at) \
+             VALUES (?, 'workspace.retention', ?, ?, ?, ?, ?, 0, ?)",
         )
         .bind(Id::new_v7().to_string())
         .bind(workspaces_purged as i64)
         .bind(audit_events_purged as i64)
+        .bind(attachment_references_purged as i64)
+        .bind(attachment_blobs_purged as i64)
+        .bind(pending_uploads_purged as i64)
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
@@ -1261,8 +1593,47 @@ impl WorkspaceRepository {
         Ok(MaintenanceSummary {
             workspaces_purged,
             audit_events_purged,
+            attachment_references_purged,
+            attachment_blobs_purged,
+            pending_uploads_purged,
+            files_purged: 0,
             occurred_at: now,
         })
+    }
+
+    async fn purge_attachment_files(&self) -> Result<u64, WorkspaceError> {
+        let store = &self.blob_store;
+        let rows = sqlx::query(
+            "SELECT id, path_kind, path FROM attachment_file_deletions ORDER BY created_at, id",
+        )
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut purged = 0_u64;
+        for row in rows {
+            let id: String = row.get("id");
+            let path: String = row.get("path");
+            match row.get::<String, _>("path_kind").as_str() {
+                "blob" => store.delete(&path).await?,
+                "temporary" => store.delete_temporary(std::path::Path::new(&path)).await?,
+                _ => continue,
+            }
+            purged += sqlx::query("DELETE FROM attachment_file_deletions WHERE id = ?")
+                .bind(id)
+                .execute(self.database.pool())
+                .await?
+                .rows_affected();
+        }
+        if purged != 0 {
+            sqlx::query(
+                "UPDATE maintenance_summaries SET files_purged = files_purged + ? \
+                 WHERE id = (SELECT id FROM maintenance_summaries WHERE kind = 'workspace.retention' \
+                 ORDER BY occurred_at DESC, id DESC LIMIT 1)",
+            )
+            .bind(purged as i64)
+            .execute(self.database.pool())
+            .await?;
+        }
+        Ok(purged)
     }
 }
 
