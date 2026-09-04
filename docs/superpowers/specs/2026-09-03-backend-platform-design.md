@@ -813,6 +813,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Configuration validation rejects zero concurrency and reserves critical capacity without exceeding the configured global limit.
 - Metrics expose queued and active jobs by priority and type, plus shutdown drain outcomes.
 
+
+### D-042: Protect job leases with heartbeats and claim tokens
+
+**Decision:** A claimed job receives a five-minute lease and a random claim token. While the handler runs, the worker heartbeats every 30 seconds and extends expiry to five minutes from the heartbeat. A job type may request a longer lease but cannot disable leasing. Expired jobs re-enter the normal attempt and retry flow.
+
+**Rationale:** Heartbeats support long-running work without making crash recovery wait for a worst-case static timeout. A claim token prevents a stalled worker from completing or extending a job after another claim has taken ownership.
+
+**Alternatives considered:**
+
+- **One fixed lease with no heartbeat:** Rejected because handlers would need either short timeouts that duplicate valid work or long timeouts that delay recovery.
+- **Process ownership without durable leases:** Rejected because crashes would leave running jobs stranded.
+- **Unlimited leases:** Rejected because abandoned jobs would never recover.
+
+**Consequences:**
+
+- All lease deadlines use the same database-derived UTC time convention.
+- Heartbeat, completion, retry, and failure updates include the current claim token and affect the row only when it still matches.
+- A stale claimant that loses ownership must discard its result and stop further side effects where possible.
+- Lease expiry consumes the current attempt and records an interruption before retry policy is applied.
+- Job types with longer leases retain the 30-second heartbeat unless they explicitly choose a shorter safe interval.
+- Metrics distinguish handler failures, lease expirations, stale claimant updates, and shutdown cancellations.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
@@ -824,19 +846,18 @@ These choices require explicit evaluation before implementation.
 
 ## Remaining decision queue
 
-The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
+The accepted decisions above settle the first milestone, tenancy, authentication and initial authorization, core data conventions, SQLite operations, durable jobs, persistence style, HTTP stack, API client generation, attachment backend, and frontend server-state library. The remaining decisions will be resolved in this order:
 
-1. Complete durable job scheduling, priority, concurrency, and shutdown semantics
-2. API validation, errors, pagination, and compatibility policy
-3. File limits, validation, cleanup, and download behavior
-4. Realtime delivery and reconnection
-5. Mail responsibilities beyond transactional SMTP
-6. Platform and Orbit module boundaries
-7. Configuration, secrets, deployment, and observability
-8. Remaining security controls and audit records
-9. Testing and local developer experience
-10. Detailed incremental frontend migration
+1. API validation, errors, pagination, and compatibility policy
+2. File limits, validation, cleanup, and download behavior
+3. Realtime delivery and reconnection
+4. Mail responsibilities beyond transactional SMTP
+5. Platform and Orbit module boundaries
+6. Configuration, secrets, deployment, and observability
+7. Remaining security controls and audit records
+8. Testing and local developer experience
+9. Detailed incremental frontend migration
 
-## Next open decision: Durable job semantics
+## Next open decision: API errors and validation
 
-The job system must still define retry timing, attempt limits, dead-letter handling, recurring scheduling, priorities, concurrency, and graceful shutdown.
+The API design must still define its error document, validation details, pagination contract, and compatibility policy.
