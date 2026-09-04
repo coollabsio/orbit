@@ -59,6 +59,10 @@ pub enum Command {
         yes: bool,
     },
     Seed,
+    Openapi {
+        #[arg(long)]
+        output: PathBuf,
+    },
     SetupToken {
         #[command(subcommand)]
         command: SetupTokenCommand,
@@ -121,8 +125,19 @@ pub async fn run(cli: Cli) -> Result<String, CliError> {
         Command::Backup { command } => backup(&cli, command).await,
         Command::DbReset { yes } => reset(&cli, *yes).await,
         Command::Seed => seed(&cli).await,
+        Command::Openapi { output } => write_openapi(output),
         Command::SetupToken { command } => setup_token(&cli, command).await,
     }
+}
+
+fn write_openapi(output: &Path) -> Result<String, CliError> {
+    fs::create_dir_all(parent_directory(output)).map_err(operation)?;
+    fs::write(
+        output,
+        orbit_server::openapi::openapi_json().map_err(operation)?,
+    )
+    .map_err(operation)?;
+    Ok(format!("wrote {}", output.display()))
 }
 
 async fn serve(cli: &Cli, listen: std::net::SocketAddr, origin: &str) -> Result<String, CliError> {
@@ -457,6 +472,12 @@ mod tests {
         assert!(matches!(
             Cli::try_parse_from(["orbit", "seed"]).unwrap().command,
             Command::Seed
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["orbit", "openapi", "--output", "openapi.json"])
+                .unwrap()
+                .command,
+            Command::Openapi { .. }
         ));
         assert!(matches!(
             Cli::try_parse_from([

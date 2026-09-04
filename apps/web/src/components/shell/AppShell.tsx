@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router'
 import { Home2, Message, Messages2, Note2, SidebarLeft, Sms, TaskSquare } from 'reicon-react'
 import { useAppState } from '../../mock/store'
 import { CommandPalette } from './CommandPalette'
+import { MockFeatureBadge } from './MockFeatureBadge'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
@@ -55,6 +56,7 @@ export function AppShell() {
           <span className="app-sidebar-wordmark">
             <span className="app-sidebar-title">{sidebarCollapsed ? 'O' : 'Orbit'}</span>
             {!sidebarCollapsed ? <span className="app-sidebar-version">v0.1.0</span> : null}
+            {!sidebarCollapsed ? <MockFeatureBadge /> : null}
           </span>
         </div>
         <SidebarNav collapsed={sidebarCollapsed} />

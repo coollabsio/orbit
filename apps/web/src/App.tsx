@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router'
+import { Navigate, Route, Routes, useNavigate } from 'react-router'
 import { setAppNavigate } from './lib/navigateBridge'
-import { ThemeProvider } from './lib/theme'
 import { AppShell } from './components/shell/AppShell'
 import { HomePage } from './features/home/HomePage'
 import { ProjectSettingsPage } from './features/tasks/ProjectSettingsPage'
@@ -17,6 +16,8 @@ import { MembersPage } from './features/settings/MembersPage'
 import { SessionsPage } from './features/settings/SessionsPage'
 import { ProfilePage } from './features/profile/ProfilePage'
 import { ServerSettingsPage } from './features/chat/ServerSettingsPage'
+import { AuthGate, LoginPage, RecoveryPage, SetupPage } from './features/auth/AuthGate'
+import './features/auth/auth.css'
 
 /** Hands the router's navigate function to non-component code (markdown links). */
 function NavigateBridge() {
@@ -29,10 +30,13 @@ function NavigateBridge() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <BrowserRouter>
-        <NavigateBridge />
-        <Routes>
+    <>
+      <NavigateBridge />
+      <Routes>
+        <Route path="setup" element={<SetupPage />} />
+        <Route path="login" element={<LoginPage />} />
+        <Route path="recovery" element={<RecoveryPage />} />
+        <Route element={<AuthGate />}>
           <Route element={<AppShell />}>
             <Route index element={<HomePage />} />
             <Route path="tasks" element={<TasksPage />} />
@@ -57,8 +61,8 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
-        </Routes>
-      </BrowserRouter>
-    </ThemeProvider>
+        </Route>
+      </Routes>
+    </>
   )
 }

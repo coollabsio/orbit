@@ -562,7 +562,7 @@ async fn logout(
     Ok(response)
 }
 
-#[utoipa::path(get, path = "/api/v1/auth/me", responses((status = 200), (status = 401)))]
+#[utoipa::path(get, path = "/api/v1/auth/me", responses((status = 200, body = AuthUserResponse), (status = 401, body = ProblemBody)))]
 async fn me(
     State(state): State<AuthState>,
     headers: HeaderMap,

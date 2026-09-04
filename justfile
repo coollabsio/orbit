@@ -43,10 +43,23 @@ check:
 
 api:
     cargo run -p orbit-server -- openapi --output apps/web/src/api/generated/openapi.json
+    cd apps/web && bun run api:generate
 
 api-check:
-    just api
-    git diff --exit-code -- apps/web/src/api/generated
+    #!/usr/bin/env bash
+    set -euo pipefail
+    first=$(mktemp -d)
+    second=$(mktemp -d)
+    trap 'rm -rf "$first" "$second"' EXIT
+    generate() {
+        local output=$1
+        cargo run -q -p orbit-server -- openapi --output "$output/openapi.json" >/dev/null
+        (cd apps/web && bun run scripts/generate-api.ts "$output/openapi.json" "$output")
+    }
+    generate "$first"
+    generate "$second"
+    diff -ru "$first" "$second"
+    diff -ru apps/web/src/api/generated "$first"
 
 db-reset:
     ORBIT_ENV=development cargo run -p orbit-server -- db-reset

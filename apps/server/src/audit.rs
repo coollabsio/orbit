@@ -2,6 +2,7 @@ use orbit_platform::{Database, Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{Row, Sqlite, Transaction};
+use utoipa::ToSchema;
 
 const MAX_METADATA_BYTES: usize = 2_048;
 
@@ -20,17 +21,22 @@ impl AuditOutcome {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct AuditEvent {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = Option<String>)]
     pub workspace_id: Option<Id>,
+    #[schema(value_type = Option<String>)]
     pub actor_id: Option<Id>,
     pub action: String,
     pub outcome: String,
     pub resource_type: String,
+    #[schema(value_type = Option<String>)]
     pub resource_id: Option<Id>,
     pub request_id: String,
     pub metadata: Value,
+    #[schema(value_type = String, format = DateTime)]
     pub occurred_at: TimestampMillis,
 }
 

@@ -692,3 +692,14 @@ a.topbar-crumb:hover {
   font-size: 13px;
   color: var(--text-muted);
 }
+.mock-feature-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}

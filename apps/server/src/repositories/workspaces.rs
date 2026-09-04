@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+use utoipa::ToSchema;
 
 use crate::audit::{self, AuditEvent, AuditOutcome};
 
@@ -22,23 +23,28 @@ const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const WORKSPACE_TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const AUDIT_RETENTION_MILLIS: i64 = 365 * 24 * 60 * 60 * 1_000;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WorkspaceRecord {
+    #[schema(value_type = String)]
     pub id: Id,
     pub name: String,
     pub role: String,
     pub version: u64,
+    #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct MemberRecord {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub user_id: Id,
     pub email: String,
     pub display_name: String,
     pub role: String,
     pub version: u64,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
 }
 
@@ -57,15 +63,19 @@ impl InvitationDelivery {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct InvitationRecord {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub workspace_id: Id,
     pub email: String,
     pub role: String,
     pub delivery: String,
     pub status: String,
+    #[schema(value_type = String, format = DateTime)]
     pub expires_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
 }
 
@@ -85,9 +95,11 @@ impl fmt::Debug for IssuedInvitation {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct AcceptanceRecord {
+    #[schema(value_type = String)]
     pub workspace_id: Id,
+    #[schema(value_type = String)]
     pub membership_id: Id,
     pub created: bool,
     pub email_verified: bool,
@@ -98,7 +110,7 @@ pub struct RegisteredAcceptance {
     pub session: IssuedSession,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct MaintenanceSummary {
     pub workspaces_purged: u64,
     pub audit_events_purged: u64,
@@ -106,6 +118,7 @@ pub struct MaintenanceSummary {
     pub attachment_blobs_purged: u64,
     pub pending_uploads_purged: u64,
     pub files_purged: u64,
+    #[schema(value_type = String, format = DateTime)]
     pub occurred_at: TimestampMillis,
 }
 

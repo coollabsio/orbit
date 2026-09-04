@@ -1041,6 +1041,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-segmentation",
+ "utoipa",
  "uuid",
 ]
 

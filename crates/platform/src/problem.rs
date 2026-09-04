@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
+use utoipa::ToSchema;
 
 const VALIDATION_TYPE: &str = "https://docs.orbit.dev/problems/validation-failed";
 const INTERNAL_TYPE: &str = "https://docs.orbit.dev/problems/internal-error";
 const CONFLICT_TYPE: &str = "https://docs.orbit.dev/problems/conflict";
 
 /// An RFC 9457 response body with Orbit's stable machine-readable extensions.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct Problem {
     #[serde(rename = "type")]
     pub type_uri: String,
@@ -23,7 +24,7 @@ pub struct Problem {
     pub conflict: Option<ConflictMetadata>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct ConflictMetadata {
     pub current_version: i64,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -11,6 +11,7 @@ use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::ToSchema;
 
 use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
@@ -180,7 +181,7 @@ where
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
     cursor: Option<String>,
@@ -188,13 +189,13 @@ struct PageQuery {
     limit: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct MutationQuery {
     expected_version: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectBody {
     name: String,
@@ -202,7 +203,7 @@ struct ProjectBody {
     color: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectUpdateBody {
     name: String,
@@ -211,12 +212,13 @@ struct ProjectUpdateBody {
     expected_version: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct RestoreBody {
     expected_version: u64,
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::ProjectRecord>)))]
 async fn list_projects(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -235,6 +237,7 @@ async fn list_projects(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects", params(("workspace_id" = String, Path)), request_body = ProjectBody, responses((status = 201, body = crate::repositories::tasks::ProjectRecord)))]
 async fn create_project(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -264,6 +267,7 @@ async fn create_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = ProjectUpdateBody, responses((status = 200, body = crate::repositories::tasks::ProjectRecord)))]
 async fn update_project(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -296,6 +300,7 @@ async fn update_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 204)))]
 async fn delete_project(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -322,6 +327,7 @@ async fn delete_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/restore", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = RestoreBody, responses((status = 204)))]
 async fn restore_project(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -348,6 +354,7 @@ async fn restore_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/trash", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::ProjectRecord>)))]
 async fn list_project_trash(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -372,7 +379,7 @@ async fn list_project_trash(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct StatusBody {
     name: String,
@@ -383,7 +390,7 @@ struct StatusBody {
     position: Option<i64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct StatusUpdateBody {
     name: String,
@@ -397,7 +404,7 @@ struct StatusUpdateBody {
 
 /// Status descriptions are non-nullable: omission preserves, a string replaces, and JSON null is
 /// rejected. An empty string is a valid replacement that clears the description.
-#[derive(Default)]
+#[derive(Default, ToSchema)]
 enum StatusDescriptionPatch {
     #[default]
     Omitted,
@@ -417,13 +424,13 @@ impl<'de> Deserialize<'de> for StatusDescriptionPatch {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct ReorderBody {
     items: Vec<ReorderItem>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct ReorderItem {
     id: String,
@@ -431,6 +438,7 @@ struct ReorderItem {
     position: i64,
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Vec<crate::repositories::tasks::StatusRecord>)))]
 async fn list_statuses(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -456,6 +464,7 @@ async fn list_statuses(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = StatusBody, responses((status = 201, body = crate::repositories::tasks::StatusRecord)))]
 async fn create_status(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -497,6 +506,7 @@ async fn create_status(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("status_id" = String, Path)), request_body = StatusUpdateBody, responses((status = 200, body = crate::repositories::tasks::StatusRecord)))]
 async fn update_status(
     State(state): State<TaskState>,
     Path((workspace, project, status)): Path<(String, String, String)>,
@@ -547,6 +557,7 @@ async fn update_status(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("status_id" = String, Path)), responses((status = 204)))]
 async fn delete_status(
     State(state): State<TaskState>,
     Path((workspace, project, status)): Path<(String, String, String)>,
@@ -575,6 +586,7 @@ async fn delete_status(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/reorder", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = ReorderBody, responses((status = 200, body = Vec<crate::repositories::tasks::StatusRecord>)))]
 async fn reorder_statuses(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -607,14 +619,14 @@ async fn reorder_statuses(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct LabelBody {
     name: String,
     color: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct LabelUpdateBody {
     name: String,
@@ -622,6 +634,7 @@ struct LabelUpdateBody {
     expected_version: u64,
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/labels", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<crate::repositories::tasks::LabelRecord>)))]
 async fn list_labels(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -640,6 +653,7 @@ async fn list_labels(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/labels", params(("workspace_id" = String, Path)), request_body = LabelBody, responses((status = 201, body = crate::repositories::tasks::LabelRecord)))]
 async fn create_label(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -667,6 +681,7 @@ async fn create_label(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/labels/{label_id}", params(("workspace_id" = String, Path), ("label_id" = String, Path)), request_body = LabelUpdateBody, responses((status = 200, body = crate::repositories::tasks::LabelRecord)))]
 async fn update_label(
     State(state): State<TaskState>,
     Path((workspace, label)): Path<(String, String)>,
@@ -697,6 +712,7 @@ async fn update_label(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/labels/{label_id}", params(("workspace_id" = String, Path), ("label_id" = String, Path)), responses((status = 204)))]
 async fn delete_label(
     State(state): State<TaskState>,
     Path((workspace, label)): Path<(String, String)>,
@@ -723,7 +739,7 @@ async fn delete_label(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct TaskQuery {
     project_id: Option<String>,
@@ -741,7 +757,7 @@ struct TaskQuery {
     limit: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateTaskBody {
     project_id: String,
@@ -758,7 +774,7 @@ struct CreateTaskBody {
     label_ids: Vec<String>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct TaskUpdateBody {
     expected_version: u64,
@@ -772,13 +788,13 @@ struct TaskUpdateBody {
     label_ids: Option<Vec<String>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct BulkBody {
     updates: Vec<BulkItem>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct BulkItem {
     id: String,
@@ -793,6 +809,7 @@ struct BulkItem {
     label_ids: Option<Vec<String>>,
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
 async fn list_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -843,6 +860,7 @@ async fn list_tasks(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
 async fn get_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -861,6 +879,7 @@ async fn get_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks", params(("workspace_id" = String, Path)), request_body = CreateTaskBody, responses((status = 201, body = crate::repositories::tasks::TaskRecord)))]
 async fn create_task(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -909,6 +928,7 @@ async fn create_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = TaskUpdateBody, responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
 async fn update_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -934,6 +954,7 @@ async fn update_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/bulk", params(("workspace_id" = String, Path)), request_body = BulkBody, responses((status = 200, body = Vec<crate::repositories::tasks::TaskRecord>)))]
 async fn bulk_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -994,6 +1015,7 @@ async fn bulk_tasks(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/reorder", params(("workspace_id" = String, Path)), request_body = ReorderBody, responses((status = 200, body = Vec<crate::repositories::tasks::TaskRecord>)))]
 async fn reorder_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -1024,6 +1046,7 @@ async fn reorder_tasks(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 204)))]
 async fn delete_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1050,6 +1073,7 @@ async fn delete_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/restore", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = RestoreBody, responses((status = 204)))]
 async fn restore_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1076,6 +1100,7 @@ async fn restore_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/trash", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
 async fn list_task_trash(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -1100,20 +1125,21 @@ async fn list_task_trash(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
     body: String,
     parent_id: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentUpdateBody {
     body: String,
     expected_version: u64,
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::CommentRecord>)))]
 async fn list_comments(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1139,6 +1165,7 @@ async fn list_comments(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = CommentBody, responses((status = 201, body = crate::repositories::tasks::CommentRecord)))]
 async fn create_comment(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1175,6 +1202,7 @@ async fn create_comment(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), request_body = CommentUpdateBody, responses((status = 200, body = crate::repositories::tasks::CommentRecord)))]
 async fn update_comment(
     State(state): State<TaskState>,
     Path((workspace, task, comment)): Path<(String, String, String)>,
@@ -1212,6 +1240,7 @@ async fn update_comment(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), responses((status = 204)))]
 async fn delete_comment(
     State(state): State<TaskState>,
     Path((workspace, task, comment)): Path<(String, String, String)>,

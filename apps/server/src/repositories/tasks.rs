@@ -4,28 +4,37 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::audit::{self, AuditOutcome};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ProjectRecord {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub workspace_id: Id,
     pub name: String,
     pub key: String,
     pub color: String,
     pub version: u64,
+    #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct StatusRecord {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub workspace_id: Id,
+    #[schema(value_type = String)]
     pub project_id: Id,
     pub name: String,
     pub description: String,
@@ -35,44 +44,63 @@ pub struct StatusRecord {
     pub version: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct LabelRecord {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub workspace_id: Id,
     pub name: String,
     pub color: String,
     pub version: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct TaskRecord {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub workspace_id: Id,
+    #[schema(value_type = String)]
     pub project_id: Id,
+    #[schema(value_type = String)]
     pub status_id: Id,
     pub title: String,
     pub description: String,
     pub priority: String,
     pub position: i64,
+    #[schema(value_type = String)]
     pub creator_id: Id,
+    #[schema(value_type = Vec<String>)]
     pub assignee_ids: Vec<Id>,
+    #[schema(value_type = Vec<String>)]
     pub label_ids: Vec<Id>,
     pub version: u64,
+    #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct CommentRecord {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub workspace_id: Id,
+    #[schema(value_type = String)]
     pub task_id: Id,
+    #[schema(value_type = String)]
     pub author_id: Id,
+    #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
     pub body: String,
     pub version: u64,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
 }
 
@@ -133,7 +161,7 @@ pub struct TaskFilter {
     pub order: SortOrder,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct Page<T> {
     pub items: Vec<T>,
     pub next_cursor: Option<String>,

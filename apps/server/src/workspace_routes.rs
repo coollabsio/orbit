@@ -194,7 +194,7 @@ struct RenameWorkspaceBody {
     expected_version: u64,
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces", request_body = CreateWorkspaceBody, responses((status = 201)))]
+#[utoipa::path(post, path = "/api/v1/workspaces", request_body = CreateWorkspaceBody, responses((status = 201, body = crate::repositories::workspaces::WorkspaceRecord)))]
 async fn create_workspace(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
@@ -216,7 +216,7 @@ async fn create_workspace(
     Ok((StatusCode::CREATED, Json(workspace)).into_response())
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces", responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces", responses((status = 200, body = Vec<crate::repositories::workspaces::WorkspaceRecord>)))]
 async fn list_workspaces(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
@@ -231,7 +231,7 @@ async fn list_workspaces(
     Ok(Json(workspaces))
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}", responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}", params(("workspace_id" = String, Path)), responses((status = 200, body = crate::repositories::workspaces::WorkspaceRecord)))]
 async fn get_workspace(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -249,7 +249,7 @@ async fn get_workspace(
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}", request_body = RenameWorkspaceBody, responses((status = 200)))]
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}", params(("workspace_id" = String, Path)), request_body = RenameWorkspaceBody, responses((status = 200, body = crate::repositories::workspaces::WorkspaceRecord)))]
 async fn rename_workspace(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -276,7 +276,7 @@ async fn rename_workspace(
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
     cursor: Option<String>,
@@ -284,19 +284,20 @@ struct PageQuery {
     limit: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct MutationQuery {
     expected_version: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct Page<T> {
     items: Vec<T>,
+    #[schema(value_type = Option<String>)]
     next_cursor: Option<Id>,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/members", responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/members", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::workspaces::MemberRecord>)))]
 async fn list_members(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -341,7 +342,7 @@ struct RoleChangeBody {
     expected_version: u64,
 }
 
-#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}", request_body = RoleChangeBody, responses((status = 204)))]
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}", params(("workspace_id" = String, Path), ("membership_id" = String, Path)), request_body = RoleChangeBody, responses((status = 204)))]
 async fn change_member_role(
     State(state): State<WorkspaceState>,
     Path((workspace_id, membership_id)): Path<(String, String)>,
@@ -369,7 +370,7 @@ async fn change_member_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}", responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}", params(("workspace_id" = String, Path), ("membership_id" = String, Path)), responses((status = 204)))]
 async fn remove_member(
     State(state): State<WorkspaceState>,
     Path((workspace_id, membership_id)): Path<(String, String)>,
@@ -404,7 +405,7 @@ struct TransferBody {
     membership_version: u64,
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/transfer-ownership", request_body = TransferBody, responses((status = 204)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/transfer-ownership", params(("workspace_id" = String, Path)), request_body = TransferBody, responses((status = 204)))]
 async fn transfer_ownership(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -448,14 +449,14 @@ struct InvitationBody {
     delivery: DeliveryBody,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct InvitationResponse {
     invitation: crate::repositories::workspaces::InvitationRecord,
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/invitations", request_body = InvitationBody, responses((status = 201)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/invitations", params(("workspace_id" = String, Path)), request_body = InvitationBody, responses((status = 201, body = InvitationResponse)))]
 async fn create_invitation(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -509,7 +510,7 @@ async fn create_invitation(
         .into_response())
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/invitations", responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/invitations", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::workspaces::InvitationRecord>)))]
 async fn list_invitations(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -535,7 +536,7 @@ async fn list_invitations(
     Ok(Json(Page { items, next_cursor }))
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/invitations/{invitation_id}", responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/invitations/{invitation_id}", params(("workspace_id" = String, Path), ("invitation_id" = String, Path)), responses((status = 204)))]
 async fn revoke_invitation(
     State(state): State<WorkspaceState>,
     Path((workspace_id, invitation_id)): Path<(String, String)>,
@@ -572,7 +573,7 @@ struct AcceptBody {
     password: Option<String>,
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/invitations/accept", request_body = AcceptBody, responses((status = 200)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/invitations/accept", request_body = AcceptBody, responses((status = 200, body = crate::repositories::workspaces::AcceptanceRecord)))]
 async fn accept_invitation(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
@@ -699,7 +700,7 @@ async fn accept_invitation(
     Ok(response)
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}", responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}", params(("workspace_id" = String, Path)), responses((status = 204)))]
 async fn delete_workspace(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -724,7 +725,7 @@ struct RestoreBody {
     expected_version: u64,
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/restore", responses((status = 204)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/restore", params(("workspace_id" = String, Path)), request_body = RestoreBody, responses((status = 204)))]
 async fn restore_workspace(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -773,7 +774,7 @@ async fn set_deleted(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/trash", responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/trash", responses((status = 200, body = Vec<crate::repositories::workspaces::WorkspaceRecord>)))]
 async fn list_trash(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
@@ -789,7 +790,7 @@ async fn list_trash(
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/audit", responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/audit", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
 async fn list_audit(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -815,7 +816,7 @@ struct SuspensionBody {
     suspended: bool,
 }
 
-#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/suspension", request_body = SuspensionBody, responses((status = 204)))]
+#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/suspension", params(("user_id" = String, Path)), request_body = SuspensionBody, responses((status = 204)))]
 async fn set_account_suspension(
     State(state): State<WorkspaceState>,
     Path(user_id): Path<String>,
@@ -840,7 +841,7 @@ async fn set_account_suspension(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct AdminAuditQuery {
     workspace_id: Option<String>,
@@ -850,6 +851,7 @@ struct AdminAuditQuery {
     limit: usize,
 }
 
+#[utoipa::path(get, path = "/api/v1/admin/audit", responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
 async fn list_global_audit(
     State(state): State<WorkspaceState>,
     ApiQuery(query): ApiQuery<AdminAuditQuery>,
@@ -869,6 +871,7 @@ async fn list_global_audit(
     Ok(Json(Page { items, next_cursor }))
 }
 
+#[utoipa::path(get, path = "/api/v1/admin/audit/export", responses((status = 200, content_type = "text/csv")))]
 async fn export_global_audit(
     State(state): State<WorkspaceState>,
     ApiQuery(query): ApiQuery<AdminAuditQuery>,
