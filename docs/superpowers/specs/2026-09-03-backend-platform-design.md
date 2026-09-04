@@ -680,6 +680,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Restore detects uniqueness conflicts. It returns a conflict response rather than silently renaming restored records.
 - Trash queries remain workspace-scoped and require the same authorization as the corresponding deletion action.
 
+
+### D-036: Run guarded forward migrations at startup
+
+**Decision:** Embed ordered forward migrations in the Orbit binary and apply pending migrations automatically before the server accepts traffic. Provide `orbit migrate status` and `orbit migrate run` for inspection and manual execution. Never run down migrations automatically.
+
+**Rationale:** Automatic forward migration keeps appliance-style upgrades simple. Startup locking, backups, and strict failure behavior prevent the convenience from hiding schema errors.
+
+**Alternatives considered:**
+
+- **Require a separate migration command for every upgrade:** Rejected because it adds an avoidable operational step to the single-instance deployment.
+- **Automatically roll back failed upgrades with down migrations:** Rejected because down migrations can destroy data and cannot reliably reverse application behavior.
+
+**Consequences:**
+
+- Startup acquires an exclusive application migration lock before inspecting or changing the schema.
+- Orbit creates and verifies a pre-migration backup before any migration that rebuilds a table, removes data, or otherwise declares itself destructive.
+- The server does not bind its public listener until migrations and post-migration checks succeed.
+- A database schema newer than the binary causes startup to fail with a clear version error.
+- A failed migration leaves the service unavailable and preserves the backup location in operator-facing output.
+- Migration records include version, checksum, applied timestamp, and application version. A checksum mismatch fails startup.
+- Migrations are transactional where SQLite permits it and contain explicit recovery instructions when they cannot be fully transactional.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
