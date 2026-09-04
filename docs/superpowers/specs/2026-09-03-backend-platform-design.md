@@ -1287,6 +1287,28 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Shared renderer tests include stored-XSS payloads, malformed Markdown, deceptive links, Unicode edge cases, and imported untrusted headers.
 - CSP remains a second defense rather than a substitute for escaping and sanitization.
 
+
+### D-064: Test domain, persistence, HTTP, contracts, frontend, and browser flows
+
+**Decision:** Use layered automated tests: Rust unit tests for domain rules; SQLx repository tests against fresh migrated temporary SQLite databases; Axum integration tests with real repositories and temporary storage; deterministic OpenAPI and generated-client drift checks; Vitest and Testing Library frontend tests; Playwright browser tests for critical flows; and focused property tests for cursors, job leases, retry schedules, and workspace isolation. Every test receives isolated database and storage paths.
+
+**Rationale:** The architecture deliberately separates domain, adapter, and transport behavior. Tests should exercise each boundary directly while a small browser suite proves the assembled system works.
+
+**Alternatives considered:**
+
+- **Rely mainly on browser tests:** Rejected because failures would be slow and difficult to localize.
+- **Mock persistence in every HTTP test:** Rejected because migrations, SQLite constraints, transactions, and workspace filters are central correctness requirements.
+- **Use one shared test database:** Rejected because parallel tests would leak state and ordering assumptions.
+
+**Consequences:**
+
+- Domain tests run without Axum, SQLx, filesystem state, or network listeners.
+- Repository and HTTP tests create a fresh database, run real migrations, and clean temporary files after completion.
+- Contract generation is deterministic. CI fails when OpenAPI or generated TypeScript output differs from committed files.
+- Playwright covers first-run setup, login, workspace switching, invitations, task CRUD, stale-version conflicts, attachments, trash restoration, and session revocation.
+- Security regression tests cover workspace boundary violations, CSRF and origin checks, token redaction, malicious filenames, and stored-XSS payloads.
+- The minimum CI gate runs Rust format and lint checks, all Rust tests, frontend lint and tests, contract drift checks, production builds, and a focused Playwright smoke suite.
+
 ## Current architectural direction, not yet accepted
 
 The following ideas have been discussed but are not decisions:
