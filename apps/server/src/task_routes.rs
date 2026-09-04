@@ -387,11 +387,34 @@ struct StatusBody {
 #[serde(deny_unknown_fields)]
 struct StatusUpdateBody {
     name: String,
-    description: Option<String>,
+    #[serde(default)]
+    description: StatusDescriptionPatch,
     color: String,
     category: String,
     position: i64,
     expected_version: u64,
+}
+
+/// Status descriptions are non-nullable: omission preserves, a string replaces, and JSON null is
+/// rejected. An empty string is a valid replacement that clears the description.
+#[derive(Default)]
+enum StatusDescriptionPatch {
+    #[default]
+    Omitted,
+    Null,
+    Value(String),
+}
+
+impl<'de> Deserialize<'de> for StatusDescriptionPatch {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match Option::<String>::deserialize(deserializer)? {
+            Some(value) => Self::Value(value),
+            None => Self::Null,
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -487,19 +510,20 @@ async fn update_status(
     let project_id = parse_id(&project, &instance, request_id.as_ref())?;
     let status_id = parse_id(&status, &instance, request_id.as_ref())?;
     let name = text(body.name, 200, 200, "name", &instance, request_id.as_ref())?;
-    let description = body
-        .description
-        .map(|value| {
-            bounded(
-                value,
-                20_000,
-                20_000,
-                "description",
-                &instance,
-                request_id.as_ref(),
-            )
-        })
-        .transpose()?;
+    let description = match body.description {
+        StatusDescriptionPatch::Omitted => None,
+        StatusDescriptionPatch::Null => {
+            return Err(validation("description", &instance, request_id.as_ref()));
+        }
+        StatusDescriptionPatch::Value(value) => Some(bounded(
+            value,
+            20_000,
+            20_000,
+            "description",
+            &instance,
+            request_id.as_ref(),
+        )?),
+    };
     let color = color(body.color, &instance, request_id.as_ref())?;
     let category = category(body.category, &instance, request_id.as_ref())?;
     state

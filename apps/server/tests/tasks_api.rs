@@ -1305,10 +1305,28 @@ async fn patch_preserves_status_description_and_text_limits_preserve_source() {
         .await
         .unwrap();
     assert_eq!(updated.status(), StatusCode::OK);
-    assert_eq!(
-        response_json(updated).await["description"],
-        "  keep status source  "
-    );
+    let updated = response_json(updated).await;
+    assert_eq!(updated["description"], "  keep status source  ");
+    let cleared = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("{status_uri}/{}", status["id"].as_str().unwrap()),
+            &fixture.owner_cookie,
+            json!({
+                "name":"Reviewing",
+                "description":"",
+                "color":"#445566",
+                "category":"started",
+                "position":status["position"],
+                "expected_version":1
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cleared.status(), StatusCode::OK);
+    assert_eq!(response_json(cleared).await["description"], "");
 
     let task = fixture.create_task("Text source").await;
     let comment = fixture
@@ -1349,6 +1367,83 @@ async fn patch_preserves_status_description_and_text_limits_preserve_source() {
         .await
         .unwrap();
     assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn status_patch_rejects_null_description_without_mutation_or_audit() {
+    let fixture = Fixture::new().await;
+    let statuses_uri = format!(
+        "/api/v1/workspaces/{}/projects/{}/statuses",
+        fixture.workspace_id, fixture.project_id
+    );
+    let status = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &statuses_uri,
+                &fixture.owner_cookie,
+                json!({
+                    "name":"Null contract",
+                    "description":"retained",
+                    "color":"#445566",
+                    "category":"started"
+                }),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let status_id = status["id"].as_str().unwrap();
+
+    let rejected = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("{statuses_uri}/{status_id}"),
+            &fixture.owner_cookie,
+            json!({
+                "name":"Changed despite null",
+                "description":null,
+                "color":"#445566",
+                "category":"started",
+                "position":status["position"],
+                "expected_version":0
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(response_json(rejected).await["code"], "validation_failed");
+
+    let statuses = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request("GET", &statuses_uri, &fixture.owner_cookie))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let unchanged = statuses["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == status_id)
+        .unwrap();
+    assert_eq!(unchanged["name"], "Null contract");
+    assert_eq!(unchanged["description"], "retained");
+    assert_eq!(unchanged["version"], 0);
+    let updates: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'status.updated' AND resource_id = ?",
+    )
+    .bind(status_id)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(updates, 0);
 }
 
 #[tokio::test]

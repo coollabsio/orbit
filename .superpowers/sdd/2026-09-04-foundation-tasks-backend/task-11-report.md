@@ -130,3 +130,11 @@ Five high-risk integration regressions cover parent-side database corruption att
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
 - `cargo test --workspace`: passed after updating the schema-version expectation to 8.
 - `git diff --check`: passed.
+
+## Re-review remediation: status description nullability
+
+The first re-review found that Serde's ordinary `Option<String>` represented both an omitted status description and explicit JSON `null` as `None`. The repository therefore preserved the description but still incremented the status version and recorded `status.updated` for a value the API did not honor.
+
+`StatusDescriptionPatch` now represents the three input states separately. Omission preserves the current description. A string replaces it, including the empty string used to clear it. Explicit `null` is invalid because status descriptions are non-nullable in create responses, stored records, and the database schema.
+
+The new regression first observed `200 OK` for a null description. It now expects `422 validation_failed`, reloads the status to prove its name, description, and version remain unchanged, and verifies that no `status.updated` audit event exists for the rejected request. The existing omission regression still passes, and it now also proves that an explicit empty string clears the description. The focused Task 11 suite contains 20 tests.
