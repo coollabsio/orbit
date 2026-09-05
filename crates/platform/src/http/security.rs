@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use axum::http::header::{
     CONTENT_SECURITY_POLICY, HeaderName, HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
 };
-use axum::http::{HeaderMap, Method, Uri};
+use axum::http::{HeaderMap, Method};
 use ipnet::IpNet;
 
 use super::RequestId;
@@ -102,18 +102,15 @@ pub(crate) struct RequestSecurity {
 
 pub(crate) fn inspect_request(
     headers: &HeaderMap,
-    uri: &Uri,
     peer: Option<IpAddr>,
     policy: &OriginPolicy,
 ) -> Result<RequestSecurity, ()> {
     let trusted = policy.is_trusted_proxy(peer);
     let mut client_ip = peer.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     let mut request_id = RequestId::new();
-    let mut transport = if uri.scheme_str() == Some("https") {
-        RequestTransport::Https
-    } else {
-        RequestTransport::Http
-    };
+    // The composed listener is plain TCP. Request-target text is not connection metadata and an
+    // absolute-form `https://` URI must never be accepted as proof of TLS.
+    let mut transport = RequestTransport::Http;
 
     if trusted {
         if let Some(value) = single_header(headers, X_FORWARDED_FOR)? {

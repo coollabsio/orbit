@@ -175,8 +175,7 @@ where
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
                 .map(|connect| connect.0.ip());
-            let directly_secure = request.uri().scheme_str() == Some("https");
-            let inspected = inspect_request(request.headers(), request.uri(), peer, &policy);
+            let inspected = inspect_request(request.headers(), peer, &policy);
             let (request_id, client_ip, transport) = match inspected {
                 Ok(values) => (values.request_id, values.client_ip, values.transport),
                 Err(()) => {
@@ -191,7 +190,7 @@ where
                             request.uri().path(),
                         ),
                         &request_id,
-                        directly_secure,
+                        false,
                         csp_script_hash.as_deref(),
                     ));
                 }

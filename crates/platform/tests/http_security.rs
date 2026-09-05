@@ -603,3 +603,43 @@ async fn production_boundary_rejects_requests_without_verified_https_transport()
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(problem["code"], "https_required");
 }
+
+#[tokio::test]
+async fn production_transport_ignores_absolute_https_targets_from_cleartext_peers() {
+    let app = Router::new()
+        .route("/api/v1/probe", post(|| async { StatusCode::NO_CONTENT }))
+        .layer(
+            HttpPlatformLayer::new(
+                OriginPolicy::new("https://orbit.test")
+                    .trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap()),
+            )
+            .require_secure_transport(),
+        );
+    let direct = Request::post("https://orbit.test/api/v1/probe")
+        .header("origin", "https://orbit.test")
+        .extension(ConnectInfo(SocketAddr::from((
+            Ipv4Addr::new(192, 0, 2, 10),
+            4567,
+        ))))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.clone().oneshot(direct).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body_json(response).await["code"], "https_required");
+
+    let proxied = Request::post("https://orbit.test/api/v1/probe")
+        .header("origin", "https://orbit.test")
+        .header("x-forwarded-proto", "https")
+        .extension(ConnectInfo(SocketAddr::from((
+            Ipv4Addr::new(10, 1, 2, 3),
+            4567,
+        ))))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.oneshot(proxied).await.unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+}
