@@ -11,6 +11,7 @@ dev:
     set -euo pipefail
     api_port="${ORBIT_DEV_API_PORT:-8080}"
     web_port="${ORBIT_DEV_WEB_PORT:-8888}"
+    public_origin="${ORBIT_DEV_PUBLIC_ORIGIN:-http://127.0.0.1:${web_port}}"
     server_pid=""
     web_pid=""
     cleanup() {
@@ -23,7 +24,7 @@ dev:
     }
     trap cleanup EXIT
     trap 'exit 0' INT TERM
-    ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- serve --listen "127.0.0.1:${api_port}" --origin "http://127.0.0.1:${web_port}" &
+    ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- serve --listen "127.0.0.1:${api_port}" --origin "${public_origin}" &
     server_pid=$!
     (cd apps/web && VITE_API_PROXY="http://127.0.0.1:${api_port}" bun run dev -- --host 127.0.0.1 --port "${web_port}" --strictPort) &
     web_pid=$!

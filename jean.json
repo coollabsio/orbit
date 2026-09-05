@@ -2,7 +2,7 @@
   "scripts": {
     "setup": "just setup",
     "teardown": null,
-    "run": "ORBIT_DEV_API_PORT=18080 ORBIT_DEV_WEB_PORT=18888 just dev"
+    "run": "ORBIT_DEV_API_PORT=18080 ORBIT_DEV_WEB_PORT=18888 ORBIT_DEV_PUBLIC_ORIGIN=https://jean-server.tail661ee3.ts.net:8888 just dev"
   },
   "ports": [
     {
