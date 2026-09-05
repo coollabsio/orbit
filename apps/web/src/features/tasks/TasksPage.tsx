@@ -7,7 +7,7 @@ import { useCurrentUser } from '../auth/api'
 import { useMembers } from '../workspaces/api'
 import { useWorkspace } from '../workspaces/workspaceContext'
 import { useAllStatuses, useCreateProject, useProjects } from './api/projects'
-import { projectDraft, projectSettingsPath } from './api/projectDraft'
+import { projectDraft, projectSettingsLabel, projectSettingsPath } from './api/projectDraft'
 import { useLabels } from './api/labels'
 import { taskFromRecord } from './api/models'
 import {
@@ -166,7 +166,7 @@ export function TasksPage() {
                   const path = projectSettingsPath(activeProject.id)
                   close()
                   if (path) navigate(path)
-                }}><Setting2 size={15} />Manage {activeProject.name}</button> : null}
+                }}><Setting2 size={15} />{projectSettingsLabel()}</button> : null}
                 <button className="popover-option" disabled={createProject.isPending} onClick={() => startNewProject(close)}><Add size={15} />New project</button></>}
             </Dropdown>
             <div className="spacer" />

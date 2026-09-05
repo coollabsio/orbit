@@ -11,3 +11,7 @@ export function projectDraft(name: string): ProjectBody {
 export function projectSettingsPath(projectId: string | null): string | null {
   return projectId ? `/tasks/projects/${projectId}/settings` : null
 }
+
+export function projectSettingsLabel(): string {
+  return 'Project settings'
+}
