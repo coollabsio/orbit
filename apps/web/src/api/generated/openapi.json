@@ -72,7 +72,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -92,7 +92,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -102,7 +102,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -112,7 +112,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -123,16 +123,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -231,7 +221,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -251,7 +241,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -261,7 +251,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -271,7 +261,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -282,16 +272,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -368,7 +348,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -388,7 +368,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -398,7 +378,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found, user_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -408,7 +388,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -419,16 +399,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -504,7 +474,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -611,7 +581,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -717,7 +687,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -728,16 +698,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -826,7 +786,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_recovery_token",
+            "description": "invalid_proxy_headers, invalid_request, invalid_recovery_token",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -940,7 +900,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1037,7 +997,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1048,16 +1008,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1144,7 +1094,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1270,7 +1220,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1300,7 +1250,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch or setup_unavailable",
+            "description": "contract_mismatch, setup_unavailable",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1384,17 +1334,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1481,7 +1421,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1500,28 +1440,8 @@
               }
             }
           },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1532,16 +1452,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1615,7 +1525,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1635,17 +1545,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1655,7 +1555,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1675,7 +1575,7 @@
             }
           },
           "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
+            "description": "invalid_workspace_name",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1750,8 +1650,18 @@
               }
             }
           },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptanceRecord"
+                }
+              }
+            }
+          },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1771,7 +1681,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, invitation_email_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1781,7 +1691,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "invitation_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1791,7 +1701,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1811,7 +1721,7 @@
             }
           },
           "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
+            "description": "invalid_registration, invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1891,7 +1801,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1910,28 +1820,8 @@
               }
             }
           },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1942,16 +1832,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2025,7 +1905,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2044,18 +1924,8 @@
               }
             }
           },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2065,7 +1935,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2076,16 +1946,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2160,7 +2020,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2180,7 +2040,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2190,7 +2050,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2200,7 +2060,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2211,16 +2071,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2302,7 +2152,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2322,7 +2172,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2332,7 +2182,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2342,7 +2192,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2362,7 +2212,7 @@
             }
           },
           "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
+            "description": "invalid_workspace_name",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2453,7 +2303,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2473,7 +2323,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2483,7 +2333,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2493,7 +2343,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2504,16 +2354,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2604,7 +2444,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2624,7 +2464,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2634,7 +2474,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2644,7 +2484,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2655,16 +2495,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2746,7 +2576,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2766,7 +2596,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2776,7 +2606,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2786,7 +2616,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2806,7 +2636,7 @@
             }
           },
           "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
+            "description": "invalid_email",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2881,7 +2711,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2901,7 +2731,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2911,7 +2741,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2921,7 +2751,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2932,16 +2762,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3032,7 +2852,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3043,16 +2863,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3072,7 +2882,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3083,16 +2893,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3174,7 +2974,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3194,7 +2994,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3214,7 +3014,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3319,7 +3119,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3339,7 +3139,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3359,7 +3159,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3370,16 +3170,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3469,7 +3259,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3489,7 +3279,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3509,7 +3299,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3620,7 +3410,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3639,18 +3429,8 @@
               }
             }
           },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3660,7 +3440,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3671,16 +3451,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3765,7 +3535,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3785,7 +3555,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3795,7 +3565,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3805,7 +3575,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict, ownership_transfer_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3816,16 +3586,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3908,7 +3668,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3928,7 +3688,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3938,7 +3698,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3948,7 +3708,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict, ownership_transfer_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3959,16 +3719,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4059,7 +3809,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4070,16 +3820,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4099,7 +3839,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4110,16 +3850,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4201,7 +3931,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4221,7 +3951,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4241,7 +3971,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4352,7 +4082,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4363,16 +4093,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4392,7 +4112,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4403,16 +4123,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4497,7 +4207,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4517,7 +4227,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4537,7 +4247,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4548,16 +4258,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4647,7 +4347,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4667,7 +4367,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4687,7 +4387,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4799,7 +4499,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4819,7 +4519,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4839,7 +4539,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict, restore_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4850,16 +4550,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4958,7 +4648,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4969,16 +4659,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4998,7 +4678,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5009,16 +4689,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5108,7 +4778,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5128,7 +4798,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5148,7 +4818,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5260,7 +4930,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5280,7 +4950,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5300,7 +4970,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5413,7 +5083,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5433,7 +5103,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5453,7 +5123,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5464,16 +5134,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5571,7 +5231,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5591,7 +5251,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5611,7 +5271,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5708,7 +5368,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5728,7 +5388,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5738,7 +5398,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5748,7 +5408,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5759,16 +5419,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5923,7 +5573,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5934,16 +5584,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5963,7 +5603,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6065,7 +5705,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6085,7 +5725,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6105,7 +5745,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6209,7 +5849,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6229,7 +5869,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6249,7 +5889,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6353,7 +5993,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6373,7 +6013,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6393,7 +6033,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6504,7 +6144,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6515,16 +6155,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6544,7 +6174,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6555,16 +6185,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6646,7 +6266,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6657,16 +6277,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6686,7 +6296,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6697,16 +6307,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6789,7 +6389,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6809,7 +6409,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6829,7 +6429,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6840,16 +6440,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6939,7 +6529,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6959,7 +6549,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6979,7 +6569,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7098,7 +6688,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7109,16 +6699,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7148,17 +6728,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7248,7 +6818,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers, invalid_multipart",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7268,7 +6838,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7298,7 +6868,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
+            "description": "request_too_large, upload_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7391,7 +6961,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7411,7 +6981,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7441,17 +7011,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7537,11 +7097,46 @@
                 "schema": {
                   "$ref": "#/components/schemas/AttachmentDownload"
                 }
+              },
+              "application/pdf": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/svg+xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
               }
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7552,16 +7147,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7591,17 +7176,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7700,7 +7275,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7711,16 +7286,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7740,7 +7305,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7751,16 +7316,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7850,7 +7405,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7870,7 +7425,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7890,7 +7445,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8002,7 +7557,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers, invalid_multipart",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8022,7 +7577,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8052,7 +7607,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
+            "description": "request_too_large, upload_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8155,7 +7710,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8175,7 +7730,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8195,7 +7750,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8206,16 +7761,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8313,7 +7858,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8333,7 +7878,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8353,7 +7898,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8480,7 +8025,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8491,16 +8036,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8530,17 +8065,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8638,7 +8163,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers, invalid_multipart",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8658,7 +8183,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8688,7 +8213,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
+            "description": "request_too_large, upload_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8789,7 +8314,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8809,7 +8334,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8839,17 +8364,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8943,11 +8458,46 @@
                 "schema": {
                   "$ref": "#/components/schemas/AttachmentDownload"
                 }
+              },
+              "application/pdf": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/svg+xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentDownload"
+                }
               }
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart",
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8958,16 +8508,6 @@
           },
           "401": {
             "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8997,17 +8537,7 @@
             }
           },
           "413": {
-            "description": "request_too_large or upload_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AttachmentProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9099,7 +8629,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_request, or invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9119,7 +8649,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9139,7 +8669,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict, or restore_conflict",
+            "description": "contract_mismatch, task_conflict, conflict, restore_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9150,16 +8680,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9236,7 +8756,7 @@
             "description": ""
           },
           "400": {
-            "description": "invalid_proxy_headers or invalid_request",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9256,7 +8776,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9266,7 +8786,7 @@
             }
           },
           "404": {
-            "description": "workspace_resource_not_found, invitation_not_found, or user_not_found",
+            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9276,7 +8796,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, or conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9287,16 +8807,6 @@
           },
           "413": {
             "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_workspace_name, invalid_email, invalid_registration, or invalid_password",
             "content": {
               "application/problem+json": {
                 "schema": {

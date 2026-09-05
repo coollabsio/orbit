@@ -1242,6 +1242,11 @@ impl From<sqlx::Error> for AttachmentApiError {
 
 impl IntoResponse for AttachmentApiError {
     fn into_response(self) -> Response {
-        (self.status, Json(self.body)).into_response()
+        let mut response = (self.status, Json(self.body)).into_response();
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/problem+json"),
+        );
+        response
     }
 }

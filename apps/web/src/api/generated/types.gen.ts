@@ -574,7 +574,7 @@ export type ListGlobalAuditData = {
 
 export type ListGlobalAuditErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -582,25 +582,21 @@ export type ListGlobalAuditErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * installation_admin_required
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -639,7 +635,7 @@ export type ExportGlobalAuditData = {
 
 export type ExportGlobalAuditErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -647,25 +643,21 @@ export type ExportGlobalAuditErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, installation_admin_required
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -701,7 +693,7 @@ export type SetAccountSuspensionData = {
 
 export type SetAccountSuspensionErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -709,25 +701,21 @@ export type SetAccountSuspensionErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, installation_admin_required
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found, user_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -761,7 +749,7 @@ export type LoginData = {
 
 export type LoginErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: AuthProblem;
     /**
@@ -817,7 +805,7 @@ export type LogoutData = {
 
 export type LogoutErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: AuthProblem;
     /**
@@ -869,17 +857,13 @@ export type MeData = {
 
 export type MeErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: AuthProblem;
     /**
      * authentication_required
      */
     401: AuthProblem;
-    /**
-     * origin_forbidden
-     */
-    403: AuthProblem;
     /**
      * contract_mismatch
      */
@@ -921,7 +905,7 @@ export type RecoveryCompleteData = {
 
 export type RecoveryCompleteErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_recovery_token
+     * invalid_proxy_headers, invalid_request, invalid_recovery_token
      */
     400: AuthProblem;
     /**
@@ -973,7 +957,7 @@ export type RecoveryRequestData = {
 
 export type RecoveryRequestErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: AuthProblem;
     /**
@@ -1021,17 +1005,13 @@ export type ListSessionsData = {
 
 export type ListSessionsErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: AuthProblem;
     /**
      * authentication_required
      */
     401: AuthProblem;
-    /**
-     * origin_forbidden
-     */
-    403: AuthProblem;
     /**
      * contract_mismatch
      */
@@ -1075,7 +1055,7 @@ export type RevokeSessionData = {
 
 export type RevokeSessionErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: AuthProblem;
     /**
@@ -1131,7 +1111,7 @@ export type SetupCompleteData = {
 
 export type SetupCompleteErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: AuthProblem;
     /**
@@ -1143,7 +1123,7 @@ export type SetupCompleteErrors = {
      */
     403: AuthProblem;
     /**
-     * contract_mismatch or setup_unavailable
+     * contract_mismatch, setup_unavailable
      */
     409: AuthProblem;
     /**
@@ -1187,13 +1167,9 @@ export type SetupStatusData = {
 
 export type SetupStatusErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: AuthProblem;
-    /**
-     * origin_forbidden
-     */
-    403: AuthProblem;
     /**
      * contract_mismatch
      */
@@ -1235,7 +1211,7 @@ export type ListWorkspacesData = {
 
 export type ListWorkspacesErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: WorkspaceProblem;
     /**
@@ -1243,25 +1219,13 @@ export type ListWorkspacesErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: WorkspaceProblem;
-    /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
-     */
-    404: WorkspaceProblem;
-    /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -1295,7 +1259,7 @@ export type CreateWorkspaceData = {
 
 export type CreateWorkspaceErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -1303,15 +1267,11 @@ export type CreateWorkspaceErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
-     */
-    404: WorkspaceProblem;
-    /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
@@ -1319,7 +1279,7 @@ export type CreateWorkspaceErrors = {
      */
     413: WorkspaceProblem;
     /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     * invalid_workspace_name
      */
     422: WorkspaceProblem;
     /**
@@ -1355,7 +1315,7 @@ export type AcceptInvitationData = {
 
 export type AcceptInvitationErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -1363,15 +1323,15 @@ export type AcceptInvitationErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, invitation_email_mismatch
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * invitation_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict
      */
     409: WorkspaceProblem;
     /**
@@ -1379,7 +1339,7 @@ export type AcceptInvitationErrors = {
      */
     413: WorkspaceProblem;
     /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     * invalid_registration, invalid_password
      */
     422: WorkspaceProblem;
     /**
@@ -1400,6 +1360,7 @@ export type AcceptInvitationError = AcceptInvitationErrors[keyof AcceptInvitatio
 
 export type AcceptInvitationResponses = {
     200: AcceptanceRecord;
+    201: AcceptanceRecord;
 };
 
 export type AcceptInvitationResponse = AcceptInvitationResponses[keyof AcceptInvitationResponses];
@@ -1419,7 +1380,7 @@ export type ListTrashData = {
 
 export type ListTrashErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: WorkspaceProblem;
     /**
@@ -1427,25 +1388,13 @@ export type ListTrashErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: WorkspaceProblem;
-    /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
-     */
-    404: WorkspaceProblem;
-    /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -1483,7 +1432,7 @@ export type DeleteWorkspaceData = {
 
 export type DeleteWorkspaceErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -1491,25 +1440,21 @@ export type DeleteWorkspaceErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict, conflict
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -1545,7 +1490,7 @@ export type GetWorkspaceData = {
 
 export type GetWorkspaceErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: WorkspaceProblem;
     /**
@@ -1553,25 +1498,17 @@ export type GetWorkspaceErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: WorkspaceProblem;
-    /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -1607,7 +1544,7 @@ export type RenameWorkspaceData = {
 
 export type RenameWorkspaceErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -1615,15 +1552,15 @@ export type RenameWorkspaceErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict, conflict
      */
     409: WorkspaceProblem;
     /**
@@ -1631,7 +1568,7 @@ export type RenameWorkspaceErrors = {
      */
     413: WorkspaceProblem;
     /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     * invalid_workspace_name
      */
     422: WorkspaceProblem;
     /**
@@ -1672,7 +1609,7 @@ export type ListAuditData = {
 
 export type ListAuditErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -1680,25 +1617,21 @@ export type ListAuditErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -1737,7 +1670,7 @@ export type ListInvitationsData = {
 
 export type ListInvitationsErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -1745,25 +1678,21 @@ export type ListInvitationsErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -1799,7 +1728,7 @@ export type CreateInvitationData = {
 
 export type CreateInvitationErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -1807,15 +1736,15 @@ export type CreateInvitationErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict
      */
     409: WorkspaceProblem;
     /**
@@ -1823,7 +1752,7 @@ export type CreateInvitationErrors = {
      */
     413: WorkspaceProblem;
     /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     * invalid_email
      */
     422: WorkspaceProblem;
     /**
@@ -1862,7 +1791,7 @@ export type RevokeInvitationData = {
 
 export type RevokeInvitationErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers
      */
     400: WorkspaceProblem;
     /**
@@ -1870,25 +1799,21 @@ export type RevokeInvitationErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -1927,7 +1852,7 @@ export type ListLabelsData = {
 
 export type ListLabelsErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: TaskProblem;
     /**
@@ -1935,25 +1860,17 @@ export type ListLabelsErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -1989,7 +1906,7 @@ export type CreateLabelData = {
 
 export type CreateLabelErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -1997,7 +1914,7 @@ export type CreateLabelErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2005,7 +1922,7 @@ export type CreateLabelErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict
      */
     409: TaskProblem;
     /**
@@ -2054,7 +1971,7 @@ export type DeleteLabelData = {
 
 export type DeleteLabelErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2062,7 +1979,7 @@ export type DeleteLabelErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2070,17 +1987,13 @@ export type DeleteLabelErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -2117,7 +2030,7 @@ export type UpdateLabelData = {
 
 export type UpdateLabelErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2125,7 +2038,7 @@ export type UpdateLabelErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2133,7 +2046,7 @@ export type UpdateLabelErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -2182,7 +2095,7 @@ export type ListMembersData = {
 
 export type ListMembersErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -2190,25 +2103,17 @@ export type ListMembersErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: WorkspaceProblem;
-    /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -2247,7 +2152,7 @@ export type RemoveMemberData = {
 
 export type RemoveMemberErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -2255,25 +2160,21 @@ export type RemoveMemberErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict, conflict, ownership_transfer_required
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -2310,7 +2211,7 @@ export type ChangeMemberRoleData = {
 
 export type ChangeMemberRoleErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -2318,25 +2219,21 @@ export type ChangeMemberRoleErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict, conflict, ownership_transfer_required
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -2375,7 +2272,7 @@ export type ListProjectsData = {
 
 export type ListProjectsErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: TaskProblem;
     /**
@@ -2383,25 +2280,17 @@ export type ListProjectsErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -2437,7 +2326,7 @@ export type CreateProjectData = {
 
 export type CreateProjectErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2445,7 +2334,7 @@ export type CreateProjectErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2453,7 +2342,7 @@ export type CreateProjectErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict
      */
     409: TaskProblem;
     /**
@@ -2502,7 +2391,7 @@ export type ListProjectTrashData = {
 
 export type ListProjectTrashErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: TaskProblem;
     /**
@@ -2510,25 +2399,17 @@ export type ListProjectTrashErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -2567,7 +2448,7 @@ export type DeleteProjectData = {
 
 export type DeleteProjectErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2575,7 +2456,7 @@ export type DeleteProjectErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2583,17 +2464,13 @@ export type DeleteProjectErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -2630,7 +2507,7 @@ export type UpdateProjectData = {
 
 export type UpdateProjectErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2638,7 +2515,7 @@ export type UpdateProjectErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2646,7 +2523,7 @@ export type UpdateProjectErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -2693,7 +2570,7 @@ export type RestoreProjectData = {
 
 export type RestoreProjectErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2701,7 +2578,7 @@ export type RestoreProjectErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2709,17 +2586,13 @@ export type RestoreProjectErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict, restore_conflict
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -2759,7 +2632,7 @@ export type ListStatusesData = {
 
 export type ListStatusesErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: TaskProblem;
     /**
@@ -2767,25 +2640,17 @@ export type ListStatusesErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -2822,7 +2687,7 @@ export type CreateStatusData = {
 
 export type CreateStatusErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2830,7 +2695,7 @@ export type CreateStatusErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2838,7 +2703,7 @@ export type CreateStatusErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict
      */
     409: TaskProblem;
     /**
@@ -2885,7 +2750,7 @@ export type ReorderStatusesData = {
 
 export type ReorderStatusesErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2893,7 +2758,7 @@ export type ReorderStatusesErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2901,7 +2766,7 @@ export type ReorderStatusesErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -2951,7 +2816,7 @@ export type DeleteStatusData = {
 
 export type DeleteStatusErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -2959,7 +2824,7 @@ export type DeleteStatusErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -2967,17 +2832,13 @@ export type DeleteStatusErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -3015,7 +2876,7 @@ export type UpdateStatusData = {
 
 export type UpdateStatusErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -3023,7 +2884,7 @@ export type UpdateStatusErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -3031,7 +2892,7 @@ export type UpdateStatusErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -3077,7 +2938,7 @@ export type RestoreWorkspaceData = {
 
 export type RestoreWorkspaceErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -3085,25 +2946,21 @@ export type RestoreWorkspaceErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict, conflict
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */
@@ -3150,7 +3007,7 @@ export type ListTasksData = {
 
 export type ListTasksErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: TaskProblem;
     /**
@@ -3158,15 +3015,11 @@ export type ListTasksErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
@@ -3212,7 +3065,7 @@ export type CreateTaskData = {
 
 export type CreateTaskErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -3220,7 +3073,7 @@ export type CreateTaskErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -3228,7 +3081,7 @@ export type CreateTaskErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict
      */
     409: TaskProblem;
     /**
@@ -3274,7 +3127,7 @@ export type BulkTasksData = {
 
 export type BulkTasksErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -3282,7 +3135,7 @@ export type BulkTasksErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -3290,7 +3143,7 @@ export type BulkTasksErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -3336,7 +3189,7 @@ export type ReorderTasksData = {
 
 export type ReorderTasksErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -3344,7 +3197,7 @@ export type ReorderTasksErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -3352,7 +3205,7 @@ export type ReorderTasksErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -3401,7 +3254,7 @@ export type ListTaskTrashData = {
 
 export type ListTaskTrashErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: TaskProblem;
     /**
@@ -3409,25 +3262,17 @@ export type ListTaskTrashErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -3466,7 +3311,7 @@ export type DeleteTaskData = {
 
 export type DeleteTaskErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -3474,7 +3319,7 @@ export type DeleteTaskErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -3482,17 +3327,13 @@ export type DeleteTaskErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -3529,7 +3370,7 @@ export type GetTaskData = {
 
 export type GetTaskErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers
      */
     400: TaskProblem;
     /**
@@ -3537,25 +3378,17 @@ export type GetTaskErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -3592,7 +3425,7 @@ export type UpdateTaskData = {
 
 export type UpdateTaskErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -3600,7 +3433,7 @@ export type UpdateTaskErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -3608,7 +3441,7 @@ export type UpdateTaskErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -3658,17 +3491,13 @@ export type ListTaskAttachmentsData = {
 
 export type ListTaskAttachmentsErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers, invalid_cursor
      */
     400: AttachmentProblem;
     /**
      * authentication_required
      */
     401: AttachmentProblem;
-    /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: AttachmentProblem;
     /**
      * attachment_not_found
      */
@@ -3678,13 +3507,9 @@ export type ListTaskAttachmentsErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large
      */
     413: AttachmentProblem;
-    /**
-     * validation_failed
-     */
-    422: AttachmentProblem;
     /**
      * internal_error
      */
@@ -3721,7 +3546,7 @@ export type UploadTaskAttachmentsData = {
 
 export type UploadTaskAttachmentsErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers, invalid_multipart
      */
     400: AttachmentProblem;
     /**
@@ -3729,7 +3554,7 @@ export type UploadTaskAttachmentsErrors = {
      */
     401: AttachmentProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: AttachmentProblem;
     /**
@@ -3741,7 +3566,7 @@ export type UploadTaskAttachmentsErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large, upload_too_large
      */
     413: AttachmentProblem;
     /**
@@ -3785,7 +3610,7 @@ export type DeleteTaskAttachmentData = {
 
 export type DeleteTaskAttachmentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers
      */
     400: AttachmentProblem;
     /**
@@ -3793,7 +3618,7 @@ export type DeleteTaskAttachmentErrors = {
      */
     401: AttachmentProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: AttachmentProblem;
     /**
@@ -3805,13 +3630,9 @@ export type DeleteTaskAttachmentErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large
      */
     413: AttachmentProblem;
-    /**
-     * validation_failed
-     */
-    422: AttachmentProblem;
     /**
      * internal_error
      */
@@ -3849,17 +3670,13 @@ export type DownloadTaskAttachmentData = {
 
 export type DownloadTaskAttachmentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers
      */
     400: AttachmentProblem;
     /**
      * authentication_required
      */
     401: AttachmentProblem;
-    /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: AttachmentProblem;
     /**
      * attachment_not_found
      */
@@ -3869,13 +3686,9 @@ export type DownloadTaskAttachmentErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large
      */
     413: AttachmentProblem;
-    /**
-     * validation_failed
-     */
-    422: AttachmentProblem;
     /**
      * internal_error
      */
@@ -3915,7 +3728,7 @@ export type ListCommentsData = {
 
 export type ListCommentsErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: TaskProblem;
     /**
@@ -3923,25 +3736,17 @@ export type ListCommentsErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: TaskProblem;
-    /**
      * task_resource_not_found
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -3978,7 +3783,7 @@ export type CreateCommentData = {
 
 export type CreateCommentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -3986,7 +3791,7 @@ export type CreateCommentErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -3994,7 +3799,7 @@ export type CreateCommentErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict
      */
     409: TaskProblem;
     /**
@@ -4041,7 +3846,7 @@ export type CreateAttachmentCommentData = {
 
 export type CreateAttachmentCommentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers, invalid_multipart
      */
     400: AttachmentProblem;
     /**
@@ -4049,7 +3854,7 @@ export type CreateAttachmentCommentErrors = {
      */
     401: AttachmentProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: AttachmentProblem;
     /**
@@ -4061,7 +3866,7 @@ export type CreateAttachmentCommentErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large, upload_too_large
      */
     413: AttachmentProblem;
     /**
@@ -4107,7 +3912,7 @@ export type DeleteCommentData = {
 
 export type DeleteCommentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -4115,7 +3920,7 @@ export type DeleteCommentErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -4123,17 +3928,13 @@ export type DeleteCommentErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -4171,7 +3972,7 @@ export type UpdateCommentData = {
 
 export type UpdateCommentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -4179,7 +3980,7 @@ export type UpdateCommentErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -4187,7 +3988,7 @@ export type UpdateCommentErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict
      */
     409: TaskProblem;
     /**
@@ -4238,17 +4039,13 @@ export type ListCommentAttachmentsData = {
 
 export type ListCommentAttachmentsErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers, invalid_cursor
      */
     400: AttachmentProblem;
     /**
      * authentication_required
      */
     401: AttachmentProblem;
-    /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: AttachmentProblem;
     /**
      * attachment_not_found
      */
@@ -4258,13 +4055,9 @@ export type ListCommentAttachmentsErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large
      */
     413: AttachmentProblem;
-    /**
-     * validation_failed
-     */
-    422: AttachmentProblem;
     /**
      * internal_error
      */
@@ -4302,7 +4095,7 @@ export type UploadCommentAttachmentsData = {
 
 export type UploadCommentAttachmentsErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers, invalid_multipart
      */
     400: AttachmentProblem;
     /**
@@ -4310,7 +4103,7 @@ export type UploadCommentAttachmentsErrors = {
      */
     401: AttachmentProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: AttachmentProblem;
     /**
@@ -4322,7 +4115,7 @@ export type UploadCommentAttachmentsErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large, upload_too_large
      */
     413: AttachmentProblem;
     /**
@@ -4367,7 +4160,7 @@ export type DeleteCommentAttachmentData = {
 
 export type DeleteCommentAttachmentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers
      */
     400: AttachmentProblem;
     /**
@@ -4375,7 +4168,7 @@ export type DeleteCommentAttachmentErrors = {
      */
     401: AttachmentProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: AttachmentProblem;
     /**
@@ -4387,13 +4180,9 @@ export type DeleteCommentAttachmentErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large
      */
     413: AttachmentProblem;
-    /**
-     * validation_failed
-     */
-    422: AttachmentProblem;
     /**
      * internal_error
      */
@@ -4432,17 +4221,13 @@ export type DownloadCommentAttachmentData = {
 
 export type DownloadCommentAttachmentErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
+     * invalid_proxy_headers
      */
     400: AttachmentProblem;
     /**
      * authentication_required
      */
     401: AttachmentProblem;
-    /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
-     */
-    403: AttachmentProblem;
     /**
      * attachment_not_found
      */
@@ -4452,13 +4237,9 @@ export type DownloadCommentAttachmentErrors = {
      */
     409: AttachmentProblem;
     /**
-     * request_too_large or upload_too_large
+     * request_too_large
      */
     413: AttachmentProblem;
-    /**
-     * validation_failed
-     */
-    422: AttachmentProblem;
     /**
      * internal_error
      */
@@ -4495,7 +4276,7 @@ export type RestoreTaskData = {
 
 export type RestoreTaskErrors = {
     /**
-     * invalid_proxy_headers, invalid_request, or invalid_cursor
+     * invalid_proxy_headers, invalid_request
      */
     400: TaskProblem;
     /**
@@ -4503,7 +4284,7 @@ export type RestoreTaskErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden
      */
     403: TaskProblem;
     /**
@@ -4511,17 +4292,13 @@ export type RestoreTaskErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     * contract_mismatch, task_conflict, conflict, restore_conflict
      */
     409: TaskProblem;
     /**
      * request_too_large
      */
     413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
     /**
      * internal_error
      */
@@ -4557,7 +4334,7 @@ export type TransferOwnershipData = {
 
 export type TransferOwnershipErrors = {
     /**
-     * invalid_proxy_headers or invalid_request
+     * invalid_proxy_headers, invalid_request
      */
     400: WorkspaceProblem;
     /**
@@ -4565,25 +4342,21 @@ export type TransferOwnershipErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     * origin_forbidden, workspace_action_forbidden
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     * workspace_resource_not_found
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, or conflict
+     * contract_mismatch, workspace_conflict, conflict
      */
     409: WorkspaceProblem;
     /**
      * request_too_large
      */
     413: WorkspaceProblem;
-    /**
-     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
-     */
-    422: WorkspaceProblem;
     /**
      * internal_error
      */

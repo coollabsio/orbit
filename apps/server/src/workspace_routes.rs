@@ -576,7 +576,7 @@ struct AcceptBody {
     password: Option<String>,
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/invitations/accept", request_body = AcceptBody, responses((status = 200, body = crate::repositories::workspaces::AcceptanceRecord)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/invitations/accept", request_body = AcceptBody, responses((status = 200, body = crate::repositories::workspaces::AcceptanceRecord), (status = 201, body = crate::repositories::workspaces::AcceptanceRecord)))]
 async fn accept_invitation(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,

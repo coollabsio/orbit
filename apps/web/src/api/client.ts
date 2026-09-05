@@ -21,7 +21,9 @@ export function createApiClient(options: ApiClientOptions = {}) {
   client.interceptors.response.use(async (response) => {
     if (response.ok) return response
     const problem = await parseProblem(response)
-    if (problem.status === 401) options.onUnauthorized?.()
+    if (problem.status === 401 && problem.code === 'authentication_required') {
+      options.onUnauthorized?.()
+    }
     throw problem
   })
   return client

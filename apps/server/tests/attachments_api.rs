@@ -190,6 +190,10 @@ async fn authorization_precedes_multipart_consumption_and_cross_workspace_access
         .await
         .unwrap();
     assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        unauthorized.headers()[header::CONTENT_TYPE],
+        "application/problem+json"
+    );
     assert!(fixture.store.temporary_files().await.unwrap().is_empty());
 
     let wrong_workspace = orbit_platform::Id::new_v7();

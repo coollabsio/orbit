@@ -221,6 +221,25 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         document["components"]["schemas"]["AttachmentDownload"]["format"],
         "binary"
     );
+    let download_media_types: Vec<_> = download["responses"]["200"]["content"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        download_media_types,
+        [
+            "application/octet-stream",
+            "application/pdf",
+            "image/gif",
+            "image/jpeg",
+            "image/png",
+            "image/svg+xml",
+            "image/webp",
+            "text/html",
+        ]
+    );
 
     assert_eq!(
         operation(&document, "/api/v1/setup/complete", "post")["responses"]["201"]["content"]["application/json"]
@@ -285,8 +304,16 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
             .unwrap()
             .contains("task_resource_not_found")
     );
+    assert_eq!(
+        tasks["responses"]["409"]["description"],
+        "contract_mismatch"
+    );
     assert!(
-        tasks["responses"]["409"]["description"]
+        operation(
+            &document,
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}",
+            "patch",
+        )["responses"]["409"]["description"]
             .as_str()
             .unwrap()
             .contains("task_conflict")
@@ -303,6 +330,51 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
             .as_str()
             .unwrap()
             .contains("invalid_recovery_token")
+    );
+    assert_eq!(
+        operation(&document, "/api/v1/setup/status", "get")["responses"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["200", "400", "409", "413", "500", "default"]
+    );
+    let accept = operation(&document, "/api/v1/workspaces/invitations/accept", "post");
+    for status in ["200", "201"] {
+        assert_eq!(
+            accept["responses"][status]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/AcceptanceRecord"
+        );
+    }
+    assert!(
+        accept["responses"]["403"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("invitation_email_mismatch")
+    );
+    assert!(
+        !accept["responses"]["403"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("workspace_action_forbidden")
+    );
+    let membership_change = operation(
+        &document,
+        "/api/v1/workspaces/{workspace_id}/members/{membership_id}",
+        "patch",
+    );
+    assert!(
+        membership_change["responses"]["409"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("ownership_transfer_required")
+    );
+    assert!(
+        !membership_change["responses"]["403"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("ownership_transfer_required")
     );
 
     let schemes = &document["components"]["securitySchemes"]["cookieAuth"];
