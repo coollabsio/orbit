@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -12,6 +13,7 @@ use orbit_platform::{
 use orbit_server::app::App;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
+use orbit_server::repositories::workspaces::WorkspaceRepository;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
@@ -346,6 +348,7 @@ async fn reset(cli: &Cli, yes: bool) -> Result<String, CliError> {
 }
 
 fn reset_data(config: &Config) -> Result<(), CliError> {
+    validate_reset_paths(config)?;
     let path = &config.data.database;
     fs::create_dir_all(parent_directory(path)).map_err(operation)?;
     let database_file = OpenOptions::new()
@@ -470,27 +473,54 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
 
     let user_id = match setup.as_ref() {
         Some(setup) => setup.user_id,
-        None => {
-            existing_developer
-                .ok_or_else(|| {
-                    CliError::Operation(
-                        "seed refused to modify an initialized non-development dataset".to_owned(),
-                    )
-                })?
-                .id
-        }
+        None => match existing_developer {
+            Some(developer) => developer.id,
+            None => {
+                let user_id = orbit_platform::Id::new_v7();
+                sqlx::query(
+                    "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+                     installation_admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                )
+                .bind(user_id.to_string())
+                .bind(EMAIL)
+                .bind(EMAIL)
+                .bind("Orbit Developer")
+                .bind(PASSWORD_HASH)
+                .bind(now.as_millis())
+                .bind(now.as_millis())
+                .execute(database.pool())
+                .await
+                .map_err(operation)?;
+                user_id
+            }
+        },
     };
     let workspace_id = match setup.as_ref() {
         Some(setup) => setup.workspace_id,
-        None => sqlx::query_scalar::<_, String>(
-            "SELECT workspace_id FROM memberships WHERE user_id = ? ORDER BY created_at LIMIT 1",
-        )
-        .bind(user_id.to_string())
-        .fetch_one(database.pool())
-        .await
-        .map_err(operation)?
-        .parse()
-        .map_err(operation)?,
+        None => {
+            let workspace = sqlx::query_scalar::<_, String>(
+                "SELECT workspace_id FROM memberships WHERE user_id = ? ORDER BY created_at LIMIT 1",
+            )
+            .bind(user_id.to_string())
+            .fetch_optional(database.pool())
+            .await
+            .map_err(operation)?;
+            match workspace {
+                Some(workspace) => workspace.parse().map_err(operation)?,
+                None => {
+                    WorkspaceRepository::new(database.clone())
+                        .create(
+                            user_id,
+                            "Orbit Development".to_owned(),
+                            "development-seed",
+                            now,
+                        )
+                        .await
+                        .map_err(operation)?
+                        .id
+                }
+            }
+        }
     };
     let project_id = match setup.as_ref() {
         Some(setup) => setup.project_id,
@@ -504,13 +534,16 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
         .parse()
         .map_err(operation)?,
     };
-    let already_seeded: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND description = ?")
-            .bind(workspace_id.to_string())
-            .bind(TASK_DESCRIPTION)
-            .fetch_one(database.pool())
-            .await
-            .map_err(operation)?;
+    let already_seeded: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tasks \
+         JOIN audit_events ON audit_events.resource_id = tasks.id \
+         WHERE tasks.workspace_id = ? AND audit_events.action = 'task.created' \
+         AND audit_events.resource_type = 'task' AND audit_events.request_id = 'development-seed'",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .map_err(operation)?;
     if already_seeded == 0 {
         let status_id: String = sqlx::query_scalar(
             "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
@@ -589,7 +622,7 @@ async fn open_database(path: &Path) -> Result<Database, CliError> {
 }
 
 fn remove_sidecars(path: &Path) -> Result<(), CliError> {
-    for suffix in ["-wal", "-shm"] {
+    for suffix in ["-wal", "-shm", "-journal"] {
         let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
         match fs::remove_file(sidecar) {
             Ok(()) => {}
@@ -598,6 +631,69 @@ fn remove_sidecars(path: &Path) -> Result<(), CliError> {
         }
     }
     Ok(())
+}
+
+fn validate_reset_paths(config: &Config) -> Result<(), CliError> {
+    let database = canonicalize_future_path(&config.data.database)?;
+    let attachments = canonicalize_future_path(&config.data.attachments)?;
+    let backups = canonicalize_future_path(&config.data.backups)?;
+    let current_directory =
+        fs::canonicalize(std::env::current_dir().map_err(operation)?).map_err(operation)?;
+    let unsafe_layout = attachments.parent().is_none()
+        || current_directory.starts_with(&attachments)
+        || database.starts_with(&attachments)
+        || attachments == backups
+        || attachments.starts_with(&backups)
+        || backups.starts_with(&attachments);
+    if unsafe_layout {
+        return Err(CliError::Operation(format!(
+            "unsafe attachment path for reset: {}",
+            config.data.attachments.display()
+        )));
+    }
+    Ok(())
+}
+
+fn canonicalize_future_path(path: &Path) -> Result<PathBuf, CliError> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir().map_err(operation)?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(CliError::Operation(format!(
+                        "unsafe attachment path for reset: {}",
+                        path.display()
+                    )));
+                }
+            }
+        }
+    }
+    let mut existing = normalized.clone();
+    let mut missing = Vec::<OsString>::new();
+    while !existing.exists() {
+        let name = existing.file_name().ok_or_else(|| {
+            CliError::Operation(format!(
+                "unsafe attachment path for reset: {}",
+                path.display()
+            ))
+        })?;
+        missing.push(name.to_owned());
+        existing.pop();
+    }
+    let mut resolved = fs::canonicalize(&existing).map_err(operation)?;
+    for component in missing.into_iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
 }
 
 fn parent_directory(path: &Path) -> &Path {
@@ -662,7 +758,7 @@ fn operation(error: impl std::fmt::Display) -> CliError {
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use clap::Parser;
     use orbit_platform::{
@@ -673,7 +769,8 @@ mod tests {
 
     use super::{
         BackupCommand, Cli, Command, ConfigCommand, MigrateCommand, SetupTokenCommand,
-        failure_message, parent_directory, redacted_config, run,
+        failure_message, parent_directory, redacted_config, remove_sidecars, run,
+        validate_reset_paths,
     };
 
     #[test]
@@ -952,6 +1049,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reset_sidecar_cleanup_removes_wal_shm_and_rollback_journal_files() {
+        let root = tempfile::TempDir::new().unwrap();
+        let database = root.path().join("orbit.sqlite");
+        for suffix in ["-wal", "-shm", "-journal"] {
+            fs::write(format!("{}{suffix}", database.display()), b"stale").unwrap();
+        }
+
+        remove_sidecars(&database).unwrap();
+
+        for suffix in ["-wal", "-shm", "-journal"] {
+            assert!(!Path::new(&format!("{}{suffix}", database.display())).exists());
+        }
+    }
+
+    #[test]
+    fn reset_path_validation_rejects_filesystem_root_and_current_directory() {
+        let root = tempfile::TempDir::new().unwrap();
+        let mut config = Config {
+            environment: EnvironmentMode::Development,
+            ..Config::default()
+        };
+        config.data.database = root.path().join("data/orbit.sqlite");
+        config.data.backups = root.path().join("backups");
+
+        for attachments in [PathBuf::from("."), PathBuf::from("/")] {
+            config.data.attachments = attachments;
+            assert!(
+                validate_reset_paths(&config)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unsafe attachment path")
+            );
+        }
+    }
+
     #[tokio::test]
     async fn destructive_implicit_migration_creates_a_verified_guard_backup() {
         let root = tempfile::TempDir::new().unwrap();
@@ -1035,10 +1168,19 @@ mod tests {
             .execute(prepared.pool())
             .await
             .unwrap();
-        sqlx::query("UPDATE tasks SET title = 'Edited task title'")
-            .execute(prepared.pool())
-            .await
-            .unwrap();
+        let edited_status: String =
+            sqlx::query_scalar("SELECT id FROM task_statuses ORDER BY position DESC LIMIT 1")
+                .fetch_one(prepared.pool())
+                .await
+                .unwrap();
+        sqlx::query(
+            "UPDATE tasks SET title = 'Edited task title', description = 'Edited description', \
+             priority = 'urgent', position = 47, status_id = ?",
+        )
+        .bind(edited_status)
+        .execute(prepared.pool())
+        .await
+        .unwrap();
         drop(prepared);
 
         let second = run(args()).await.unwrap();
@@ -1068,6 +1210,16 @@ mod tests {
                 .unwrap(),
             1
         );
+        assert_eq!(
+            database
+                .scalar::<i64>(
+                    "SELECT COUNT(*) FROM audit_events WHERE action = 'task.created' \
+                     AND resource_type = 'task' AND request_id = 'development-seed'",
+                )
+                .await
+                .unwrap(),
+            1
+        );
         let developer = IdentityRepository::new(database.clone())
             .find_by_email("test@example.com")
             .await
@@ -1082,10 +1234,106 @@ mod tests {
         );
         assert_eq!(
             database
-                .scalar::<String>("SELECT title FROM tasks")
+                .scalar::<String>(
+                    "SELECT title || '|' || description || '|' || priority || '|' || position \
+                     FROM tasks",
+                )
                 .await
                 .unwrap(),
-            "Edited task title"
+            "Edited task title|Edited description|urgent|47"
+        );
+    }
+
+    #[tokio::test]
+    async fn migrate_run_seed_adds_development_data_without_changing_initialized_data() {
+        let root = tempfile::TempDir::new().unwrap();
+        let database_path = root.path().join("orbit.sqlite");
+        let database = Database::open(&DatabaseConfig::new(&database_path))
+            .await
+            .unwrap();
+        MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+            .run(&database)
+            .await
+            .unwrap();
+        let identity = IdentityRepository::new(database.clone());
+        let now = TimestampMillis::now();
+        let setup_token = identity.initialize_setup_token(now).await.unwrap().unwrap();
+        let original_hash = orbit_platform::PasswordService::default()
+            .hash("an existing secure password")
+            .unwrap();
+        let original = identity
+            .complete_setup(
+                SetupRequest {
+                    token: setup_token.token,
+                    email: "owner@example.com".to_owned(),
+                    display_name: "Existing Owner".to_owned(),
+                    password_hash: original_hash.clone(),
+                    workspace_name: "Existing Workspace".to_owned(),
+                    project_name: "Existing Project".to_owned(),
+                },
+                now,
+            )
+            .await
+            .unwrap();
+        drop(identity);
+        drop(database);
+
+        let config_path = root.path().join("orbit.toml");
+        fs::write(&config_path, "environment = \"development\"\n").unwrap();
+        let cli = Cli::try_parse_from([
+            "orbit",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--database",
+            database_path.to_str().unwrap(),
+            "migrate",
+            "run",
+            "--seed",
+        ])
+        .unwrap();
+
+        run(cli).await.unwrap();
+
+        let database = Database::open(&DatabaseConfig::new(database_path))
+            .await
+            .unwrap();
+        let identity = IdentityRepository::new(database.clone());
+        let owner = identity
+            .find_by_email("owner@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(owner.id, original.user_id);
+        assert_eq!(owner.display_name, "Existing Owner");
+        assert_eq!(owner.password_hash, original_hash);
+        assert!(
+            identity
+                .find_by_email("test@example.com")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM users")
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM workspaces")
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT name FROM workspaces WHERE id = ?")
+                .bind(original.workspace_id.to_string())
+                .fetch_one(database.pool())
+                .await
+                .unwrap(),
+            "Existing Workspace"
         );
     }
 
@@ -1147,6 +1395,7 @@ mod tests {
         fs::write(&database, b"old database").unwrap();
         fs::write(format!("{}-wal", database.display()), b"old wal").unwrap();
         fs::write(format!("{}-shm", database.display()), b"old shm").unwrap();
+        fs::write(format!("{}-journal", database.display()), b"old journal").unwrap();
         let config_path = root.path().join("orbit.toml");
         fs::write(&config_path, "environment = \"development\"\n").unwrap();
         let cli = Cli::try_parse_from([
@@ -1170,7 +1419,11 @@ mod tests {
         assert!(output.contains("applied"));
         assert!(output.contains("test@example.com"));
         assert!(!attachments.join("old.txt").exists());
-        for (suffix, old_contents) in [("-wal", b"old wal"), ("-shm", b"old shm")] {
+        for (suffix, old_contents) in [
+            ("-wal", b"old wal".as_slice()),
+            ("-shm", b"old shm".as_slice()),
+            ("-journal", b"old journal".as_slice()),
+        ] {
             let sidecar = format!("{}{suffix}", database.display());
             if Path::new(&sidecar).exists() {
                 assert_ne!(fs::read(sidecar).unwrap(), old_contents);
@@ -1195,6 +1448,53 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn migrate_run_reset_rejects_unsafe_attachment_layout_before_changing_data() {
+        for overlap in ["database", "backups"] {
+            let root = tempfile::TempDir::new().unwrap();
+            let database = root.path().join("live/orbit.sqlite");
+            let backups = root.path().join("backups");
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            fs::create_dir_all(&backups).unwrap();
+            fs::write(&database, b"keep database").unwrap();
+            fs::write(backups.join("keep backup"), b"keep backup").unwrap();
+            let attachments = if overlap == "database" {
+                database.parent().unwrap().to_owned()
+            } else {
+                let alias_parent = root.path().join("alias");
+                fs::create_dir_all(&alias_parent).unwrap();
+                alias_parent.join("../backups")
+            };
+            let config_path = root.path().join("orbit.toml");
+            fs::write(&config_path, "environment = \"development\"\n").unwrap();
+            let cli = Cli::try_parse_from([
+                "orbit",
+                "--config",
+                config_path.to_str().unwrap(),
+                "--database",
+                database.to_str().unwrap(),
+                "--attachments",
+                attachments.to_str().unwrap(),
+                "--backups",
+                backups.to_str().unwrap(),
+                "migrate",
+                "run",
+                "--reset",
+                "--yes",
+            ])
+            .unwrap();
+
+            let error = run(cli).await.unwrap_err();
+
+            assert!(error.to_string().contains("unsafe attachment path"));
+            assert_eq!(fs::read(&database).unwrap(), b"keep database");
+            assert_eq!(
+                fs::read(backups.join("keep backup")).unwrap(),
+                b"keep backup"
+            );
+        }
     }
 
     #[tokio::test]

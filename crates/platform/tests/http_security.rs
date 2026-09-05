@@ -195,6 +195,9 @@ async fn development_policy_rejects_missing_malformed_and_non_http_origins() {
         None,
         Some("not-an-origin"),
         Some("ftp://localhost:18888"),
+        Some("http://:18888"),
+        Some("http://localhost:notaport"),
+        Some("http://localhost:65536"),
         Some("http://127.0.0.1:8888////"),
     ] {
         let mut request = Request::post("/probe").body(Body::empty()).unwrap();
@@ -212,17 +215,35 @@ async fn development_policy_rejects_missing_malformed_and_non_http_origins() {
 #[tokio::test]
 async fn production_policy_still_requires_the_configured_exact_origin() {
     let app = test_app(OriginPolicy::new("https://orbit.example"));
-    let response = app
+
+    for origin in [
+        "https://other.example",
+        "https://orbit.example/",
+        "https://orbit.example////",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/probe")
+                    .header("origin", origin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{origin}");
+    }
+
+    let exact = app
         .oneshot(
             Request::post("/probe")
-                .header("origin", "https://other.example")
+                .header("origin", "https://orbit.example")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(exact.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]

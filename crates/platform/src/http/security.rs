@@ -44,7 +44,7 @@ impl OriginPolicy {
     pub fn new(application_origin: impl Into<String>) -> Self {
         let mut allowed_origins = BTreeSet::new();
         let application_origin = application_origin.into();
-        allowed_origins.insert(normalize_origin(&application_origin));
+        allowed_origins.insert(application_origin);
         Self {
             allowed_origins,
             allow_any_http_origin: false,
@@ -60,8 +60,7 @@ impl OriginPolicy {
 
     #[must_use]
     pub fn allow_origin(mut self, origin: impl Into<String>) -> Self {
-        let origin = origin.into();
-        self.allowed_origins.insert(normalize_origin(&origin));
+        self.allowed_origins.insert(origin.into());
         self
     }
 
@@ -98,7 +97,7 @@ impl OriginPolicy {
                 if self.allow_any_http_origin {
                     is_valid_http_origin(origin)
                 } else {
-                    self.allowed_origins.contains(&normalize_origin(origin))
+                    is_valid_http_origin(origin) && self.allowed_origins.contains(origin)
                 }
             })
     }
@@ -206,18 +205,21 @@ pub(crate) fn add_security_headers(
     }
 }
 
-fn normalize_origin(origin: &str) -> String {
-    origin.trim_end_matches('/').to_ascii_lowercase()
-}
-
 fn is_valid_http_origin(origin: &str) -> bool {
     let Ok(uri) = origin.parse::<Uri>() else {
         return false;
     };
     matches!(uri.scheme_str(), Some("http" | "https"))
-        && uri
-            .authority()
-            .is_some_and(|authority| !authority.as_str().contains('@'))
+        && uri.authority().is_some_and(|authority| {
+            let host = authority.host();
+            let port = &authority.as_str()[host.len()..];
+            !host.is_empty()
+                && !authority.as_str().contains('@')
+                && (port.is_empty()
+                    || port
+                        .strip_prefix(':')
+                        .is_some_and(|port| !port.is_empty() && port.parse::<u16>().is_ok()))
+        })
         && uri.path() == "/"
         && uri.query().is_none()
 }
