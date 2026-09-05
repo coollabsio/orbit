@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
-import { ChevronDown, SidebarLeft, TaskSquare } from 'reicon-react'
+import { ChevronDown, Setting2, SidebarLeft, TaskSquare } from 'reicon-react'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { Dropdown } from '../ui/Dropdown'
 import { CommandPalette } from './CommandPalette'
@@ -8,10 +8,11 @@ import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import './shell.css'
+import { mobileDockPaths } from './productNavigation'
 
-const DOCK_LINKS = [
-  { to: '/tasks', label: 'Tasks', icon: TaskSquare },
-]
+const DOCK_LINKS = mobileDockPaths.map((to) => to === '/tasks'
+  ? { to, label: 'Tasks', icon: TaskSquare }
+  : { to, label: 'Settings', icon: Setting2 })
 
 export function AppShell() {
   const { workspace, workspaces, selectWorkspace } = useWorkspace()
