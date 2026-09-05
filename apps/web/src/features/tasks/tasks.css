@@ -830,9 +830,6 @@
 
   .tasks-list-pane > .pane-header {
     flex-wrap: wrap;
-    gap: 2px;
-    min-height: 44px;
-    padding: 6px 8px;
   }
 
   .tasks-search {

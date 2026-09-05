@@ -33,7 +33,8 @@ export function SettingsLayout() {
   return (
     <div className="page">
       <div className="pane" style={{ flex: 1 }}>
-        <div className="pane-header">
+        <div className="pane-header product-pane-header">
+          <Setting2 className="product-pane-header-icon" size={15} />
           <span className="pane-title">Settings</span>
         </div>
         <div className="settings-scroll">

@@ -152,7 +152,7 @@ export function TasksPage() {
         <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} />
       ) : (
         <section className="pane tasks-list-pane">
-          <div className="pane-header">
+          <div className="pane-header product-pane-header">
             <Dropdown className="tasks-project-picker" trigger={(open) => (
               <button type="button" className="tasks-project-trigger" data-open={open || undefined}>
                 {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : <TaskSquare size={15} />}

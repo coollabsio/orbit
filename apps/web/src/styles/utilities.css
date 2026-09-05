@@ -805,6 +805,30 @@ textarea.input {
   flex-shrink: 0;
 }
 
+.product-pane-header {
+  color: var(--text-heading);
+  background: var(--canvas);
+}
+
+.product-pane-header-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 899px) {
+  .product-pane-header {
+    gap: 8px;
+    min-height: 44px;
+    padding: 6px 8px;
+  }
+
+  .product-pane-header .pane-title {
+    color: var(--text-heading);
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
 .pane-title {
   font-size: 13px;
   font-weight: 600;
