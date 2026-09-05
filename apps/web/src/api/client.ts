@@ -8,6 +8,8 @@ interface ApiClientOptions {
   onUnauthorized?: () => void
 }
 
+export const UNAUTHORIZED_EVENT = 'orbit:unauthorized'
+
 export function createApiClient(options: ApiClientOptions = {}) {
   const client = createClient({
     baseUrl: globalThis.location?.origin ?? 'http://localhost',
@@ -26,5 +28,5 @@ export function createApiClient(options: ApiClientOptions = {}) {
 }
 
 export const apiClient = createApiClient({
-  onUnauthorized: () => window.dispatchEvent(new Event('orbit:unauthorized')),
+  onUnauthorized: () => window.dispatchEvent(new Event(UNAUTHORIZED_EVENT)),
 })

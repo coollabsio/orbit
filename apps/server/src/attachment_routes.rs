@@ -22,7 +22,7 @@ use serde_json::json;
 use sqlx::Row;
 use tokio_util::io::{ReaderStream, StreamReader};
 use tokio_util::sync::CancellationToken;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::audit::{self, AuditOutcome};
 use crate::auth_routes::CookieMode;
@@ -168,7 +168,8 @@ struct AttachmentPage {
     next_cursor: Option<String>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct PageQuery {
     cursor: Option<String>,
     limit: Option<usize>,
@@ -189,7 +190,19 @@ struct AttachmentComment {
     attachments: Vec<AttachmentRecord>,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = AttachmentPage)))]
+#[derive(ToSchema)]
+#[allow(dead_code)]
+struct AttachmentUploadBody {
+    #[schema(value_type = String, format = Binary)]
+    file: Vec<u8>,
+}
+
+#[derive(ToSchema)]
+#[schema(value_type = String, format = Binary)]
+#[allow(dead_code)]
+struct AttachmentDownload(Vec<u8>);
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments", params(PageQuery, ("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = AttachmentPage)))]
 async fn list_task_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -221,7 +234,7 @@ async fn list_task_attachments(
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), responses((status = 200, body = AttachmentPage)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/attachments", params(PageQuery, ("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), responses((status = 200, body = AttachmentPage)))]
 async fn list_comment_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task, comment)): Path<(String, String, String)>,
@@ -264,7 +277,7 @@ async fn list_comment_attachments(
     ))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 201, body = AttachmentPage)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body(content = AttachmentUploadBody, content_type = "multipart/form-data"), responses((status = 201, body = AttachmentRecord)))]
 async fn upload_task_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -299,7 +312,7 @@ async fn upload_task_attachments(
     Ok((StatusCode::CREATED, Json(records[0].clone())).into_response())
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), responses((status = 201, body = AttachmentPage)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), request_body(content = AttachmentUploadBody, content_type = "multipart/form-data"), responses((status = 201, body = AttachmentRecord)))]
 async fn upload_comment_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task, comment)): Path<(String, String, String)>,
@@ -345,7 +358,7 @@ async fn upload_comment_attachments(
     Ok((StatusCode::CREATED, Json(records[0].clone())).into_response())
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 201, body = AttachmentComment)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/attachments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body(content = AttachmentUploadBody, content_type = "multipart/form-data"), responses((status = 201, body = AttachmentComment)))]
 async fn create_attachment_comment(
     State(state): State<AttachmentState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -710,7 +723,7 @@ async fn delete_attachment(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments/{attachment_id}/download", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("attachment_id" = String, Path)), responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments/{attachment_id}/download", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("attachment_id" = String, Path)), responses((status = 200, body = AttachmentDownload, content_type = "application/octet-stream")))]
 async fn download_task_attachment(
     State(state): State<AttachmentState>,
     Path((workspace, task, attachment)): Path<(String, String, String)>,
@@ -729,7 +742,7 @@ async fn download_task_attachment(
     .await
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/attachments/{attachment_id}/download", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path), ("attachment_id" = String, Path)), responses((status = 200)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/attachments/{attachment_id}/download", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path), ("attachment_id" = String, Path)), responses((status = 200, body = AttachmentDownload, content_type = "application/octet-stream")))]
 async fn download_comment_attachment(
     State(state): State<AttachmentState>,
     Path((workspace, task, comment, attachment)): Path<(String, String, String, String)>,
@@ -1053,8 +1066,9 @@ fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
     request_id.map_or("unknown", |Extension(value)| value.as_str())
 }
 
-#[derive(Serialize)]
-struct AttachmentProblem {
+#[derive(Serialize, ToSchema)]
+#[schema(as = AttachmentProblem)]
+pub(crate) struct AttachmentProblem {
     #[serde(rename = "type")]
     type_uri: String,
     title: &'static str,

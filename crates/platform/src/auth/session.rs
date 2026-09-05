@@ -8,6 +8,7 @@ use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::Serialize;
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use super::token::hash_token;
 use crate::{Id, TimestampMillis};
@@ -17,20 +18,26 @@ const IDLE_LIFETIME: i64 = 30 * DAY_MILLIS;
 const ABSOLUTE_LIFETIME: i64 = 90 * DAY_MILLIS;
 const ACTIVITY_WRITE_INTERVAL: i64 = 5 * 60 * 1_000;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct AuthenticatedUser {
+    #[schema(value_type = String)]
     pub id: Id,
     pub email: String,
     pub display_name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct SessionRecord {
+    #[schema(value_type = String)]
     pub id: Id,
     pub user: AuthenticatedUser,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub last_activity_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub idle_expires_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub absolute_expires_at: TimestampMillis,
 }
 

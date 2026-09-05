@@ -11,7 +11,7 @@ use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
@@ -181,15 +181,18 @@ where
     }
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
     cursor: Option<String>,
     #[serde(default = "default_limit")]
+    #[param(required = false)]
     limit: usize,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct MutationQuery {
     expected_version: u64,
@@ -218,7 +221,7 @@ struct RestoreBody {
     expected_version: u64,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::ProjectRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::ProjectRecord>)))]
 async fn list_projects(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -300,7 +303,7 @@ async fn update_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}", params(MutationQuery, ("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 204)))]
 async fn delete_project(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -327,7 +330,7 @@ async fn delete_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/restore", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = RestoreBody, responses((status = 204)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/restore", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = RestoreBody, responses((status = 200, body = crate::repositories::tasks::ProjectRecord)))]
 async fn restore_project(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -354,7 +357,7 @@ async fn restore_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/trash", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::ProjectRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/trash", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::ProjectRecord>)))]
 async fn list_project_trash(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -395,6 +398,7 @@ struct StatusBody {
 struct StatusUpdateBody {
     name: String,
     #[serde(default)]
+    #[schema(value_type = String, required = false)]
     description: StatusDescriptionPatch,
     color: String,
     category: String,
@@ -404,7 +408,7 @@ struct StatusUpdateBody {
 
 /// Status descriptions are non-nullable: omission preserves, a string replaces, and JSON null is
 /// rejected. An empty string is a valid replacement that clears the description.
-#[derive(Default, ToSchema)]
+#[derive(Default)]
 enum StatusDescriptionPatch {
     #[default]
     Omitted,
@@ -438,7 +442,7 @@ struct ReorderItem {
     position: i64,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Vec<crate::repositories::tasks::StatusRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses", params(PageQuery, ("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::StatusRecord>)))]
 async fn list_statuses(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -557,7 +561,7 @@ async fn update_status(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("status_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}", params(MutationQuery, ("workspace_id" = String, Path), ("project_id" = String, Path), ("status_id" = String, Path)), responses((status = 204)))]
 async fn delete_status(
     State(state): State<TaskState>,
     Path((workspace, project, status)): Path<(String, String, String)>,
@@ -586,7 +590,7 @@ async fn delete_status(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/reorder", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = ReorderBody, responses((status = 200, body = Vec<crate::repositories::tasks::StatusRecord>)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/reorder", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = ReorderBody, responses((status = 200, body = Page<crate::repositories::tasks::StatusRecord>)))]
 async fn reorder_statuses(
     State(state): State<TaskState>,
     Path((workspace, project)): Path<(String, String)>,
@@ -634,7 +638,7 @@ struct LabelUpdateBody {
     expected_version: u64,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/labels", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<crate::repositories::tasks::LabelRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/labels", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::LabelRecord>)))]
 async fn list_labels(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -712,7 +716,7 @@ async fn update_label(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/labels/{label_id}", params(("workspace_id" = String, Path), ("label_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/labels/{label_id}", params(MutationQuery, ("workspace_id" = String, Path), ("label_id" = String, Path)), responses((status = 204)))]
 async fn delete_label(
     State(state): State<TaskState>,
     Path((workspace, label)): Path<(String, String)>,
@@ -739,7 +743,8 @@ async fn delete_label(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct TaskQuery {
     project_id: Option<String>,
@@ -749,11 +754,14 @@ struct TaskQuery {
     priority: Option<String>,
     search: Option<String>,
     #[serde(default = "default_task_sort")]
+    #[param(required = false)]
     sort: String,
     #[serde(default = "default_order")]
+    #[param(required = false)]
     order: String,
     cursor: Option<String>,
     #[serde(default = "default_limit")]
+    #[param(required = false)]
     limit: usize,
 }
 
@@ -809,7 +817,7 @@ struct BulkItem {
     label_ids: Option<Vec<String>>,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(TaskQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
 async fn list_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -954,7 +962,7 @@ async fn update_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/bulk", params(("workspace_id" = String, Path)), request_body = BulkBody, responses((status = 200, body = Vec<crate::repositories::tasks::TaskRecord>)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/bulk", params(("workspace_id" = String, Path)), request_body = BulkBody, responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
 async fn bulk_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -1015,7 +1023,7 @@ async fn bulk_tasks(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/reorder", params(("workspace_id" = String, Path)), request_body = ReorderBody, responses((status = 200, body = Vec<crate::repositories::tasks::TaskRecord>)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/reorder", params(("workspace_id" = String, Path)), request_body = ReorderBody, responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
 async fn reorder_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -1046,7 +1054,7 @@ async fn reorder_tasks(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(MutationQuery, ("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 204)))]
 async fn delete_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1073,7 +1081,7 @@ async fn delete_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/restore", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = RestoreBody, responses((status = 204)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/restore", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = RestoreBody, responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
 async fn restore_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1100,7 +1108,7 @@ async fn restore_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/trash", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/trash", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
 async fn list_task_trash(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -1139,7 +1147,7 @@ struct CommentUpdateBody {
     expected_version: u64,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::CommentRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments", params(PageQuery, ("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::CommentRecord>)))]
 async fn list_comments(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1240,7 +1248,7 @@ async fn update_comment(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}", params(MutationQuery, ("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path)), responses((status = 204)))]
 async fn delete_comment(
     State(state): State<TaskState>,
     Path((workspace, task, comment)): Path<(String, String, String)>,
@@ -1629,8 +1637,9 @@ fn default_order() -> String {
     "asc".to_owned()
 }
 
-#[derive(Debug, Serialize)]
-struct ProblemBody {
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = TaskProblem)]
+pub(crate) struct ProblemBody {
     #[serde(rename = "type")]
     type_uri: String,
     title: &'static str,
@@ -1643,8 +1652,9 @@ struct ProblemBody {
     conflict: Option<ConflictBody>,
 }
 
-#[derive(Debug, Serialize)]
-struct ConflictBody {
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = TaskConflict)]
+pub(crate) struct ConflictBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     current_version: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

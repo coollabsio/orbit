@@ -23,9 +23,21 @@ export type AttachmentComment = {
     comment: CommentRecord;
 };
 
+export type AttachmentDownload = Blob | File;
+
 export type AttachmentPage = {
     items: Array<AttachmentRecord>;
     next_cursor?: string | null;
+};
+
+export type AttachmentProblem = {
+    code: string;
+    detail: string;
+    instance: string;
+    request_id: string;
+    status: number;
+    title: string;
+    type: string;
 };
 
 export type AttachmentRecord = {
@@ -38,6 +50,10 @@ export type AttachmentRecord = {
     owner_id: string;
     task_id: string;
     workspace_id: string;
+};
+
+export type AttachmentUploadBody = {
+    file: Blob | File;
 };
 
 export type AuditEvent = {
@@ -53,7 +69,23 @@ export type AuditEvent = {
     workspace_id?: string | null;
 };
 
+export type AuthProblem = {
+    code: string;
+    detail: string;
+    instance: string;
+    request_id: string;
+    status: number;
+    title: string;
+    type: string;
+};
+
 export type AuthUserResponse = {
+    display_name: string;
+    email: string;
+    id: string;
+};
+
+export type AuthenticatedUser = {
     display_name: string;
     email: string;
     id: string;
@@ -226,6 +258,17 @@ export type PageInvitationRecord = {
     next_cursor?: string | null;
 };
 
+export type PageLabelRecord = {
+    items: Array<{
+        color: string;
+        id: string;
+        name: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
 export type PageMemberRecord = {
     items: Array<{
         created_at: string;
@@ -248,6 +291,21 @@ export type PageProjectRecord = {
         key: string;
         name: string;
         updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageStatusRecord = {
+    items: Array<{
+        category: string;
+        color: string;
+        description: string;
+        id: string;
+        name: string;
+        position: number;
+        project_id: string;
         version: number;
         workspace_id: string;
     }>;
@@ -292,16 +350,6 @@ export type Problem = {
     type: string;
 };
 
-export type ProblemBody = {
-    code: string;
-    detail: string;
-    instance: string;
-    request_id: string;
-    status: number;
-    title: string;
-    type: string;
-};
-
 export type ProjectBody = {
     color: string;
     key: string;
@@ -336,6 +384,10 @@ export type RecoveryRequestBody = {
     email: string;
 };
 
+export type RecoveryRequestResponse = {
+    detail: string;
+};
+
 export type RenameWorkspaceBody = {
     expected_version: number;
     name: string;
@@ -362,6 +414,15 @@ export type RoleChangeBody = {
     role: RoleBody;
 };
 
+export type SessionRecord = {
+    absolute_expires_at: string;
+    created_at: string;
+    id: string;
+    idle_expires_at: string;
+    last_activity_at: string;
+    user: AuthenticatedUser;
+};
+
 export type SetupBody = {
     display_name: string;
     email: string;
@@ -369,6 +430,13 @@ export type SetupBody = {
     project_name: string;
     token: string;
     workspace_name: string;
+};
+
+export type SetupResponse = {
+    project_id: string;
+    session_id: string;
+    user_id: string;
+    workspace_id: string;
 };
 
 export type SetupStatus = {
@@ -381,14 +449,6 @@ export type StatusBody = {
     description?: string;
     name: string;
     position?: number | null;
-};
-
-/**
- * Status descriptions are non-nullable: omission preserves, a string replaces, and JSON null is
- * rejected. An empty string is a valid replacement that clears the description.
- */
-export type StatusDescriptionPatch = 'Omitted' | 'Null' | {
-    Value: string;
 };
 
 export type StatusRecord = {
@@ -406,7 +466,7 @@ export type StatusRecord = {
 export type StatusUpdateBody = {
     category: string;
     color: string;
-    description?: StatusDescriptionPatch;
+    description?: string;
     expected_version: number;
     name: string;
     position: number;
@@ -414,6 +474,24 @@ export type StatusUpdateBody = {
 
 export type SuspensionBody = {
     suspended: boolean;
+};
+
+export type TaskConflict = {
+    current?: unknown;
+    current_version?: number | null;
+    field?: string | null;
+    refresh?: string | null;
+};
+
+export type TaskProblem = {
+    code: string;
+    conflict?: null | TaskConflict;
+    detail: string;
+    instance: string;
+    request_id: string;
+    status: number;
+    title: string;
+    type: string;
 };
 
 export type TaskRecord = {
@@ -452,6 +530,22 @@ export type TransferBody = {
     membership_version: number;
 };
 
+export type WorkspaceConflict = {
+    current_version: number;
+    refresh: string;
+};
+
+export type WorkspaceProblem = {
+    code: string;
+    conflict?: null | WorkspaceConflict;
+    detail: string;
+    instance: string;
+    request_id: string;
+    status: number;
+    title: string;
+    type: string;
+};
+
 export type WorkspaceRecord = {
     deleted_at?: string | null;
     id: string;
@@ -462,16 +556,59 @@ export type WorkspaceRecord = {
 
 export type ListGlobalAuditData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
-    query?: never;
+    query?: {
+        workspace_id?: string;
+        action?: string;
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/admin/audit';
 };
 
 export type ListGlobalAuditErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ListGlobalAuditError = ListGlobalAuditErrors[keyof ListGlobalAuditErrors];
@@ -484,26 +621,77 @@ export type ListGlobalAuditResponse = ListGlobalAuditResponses[keyof ListGlobalA
 
 export type ExportGlobalAuditData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
-    query?: never;
+    query?: {
+        workspace_id?: string;
+        action?: string;
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/admin/audit/export';
 };
 
 export type ExportGlobalAuditErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ExportGlobalAuditError = ExportGlobalAuditErrors[keyof ExportGlobalAuditErrors];
 
 export type ExportGlobalAuditResponses = {
-    200: unknown;
+    200: string;
 };
+
+export type ExportGlobalAuditResponse = ExportGlobalAuditResponses[keyof ExportGlobalAuditResponses];
 
 export type SetAccountSuspensionData = {
     body: SuspensionBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         user_id: string;
     };
@@ -513,9 +701,41 @@ export type SetAccountSuspensionData = {
 
 export type SetAccountSuspensionErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type SetAccountSuspensionError = SetAccountSuspensionErrors[keyof SetAccountSuspensionErrors];
@@ -528,18 +748,50 @@ export type SetAccountSuspensionResponse = SetAccountSuspensionResponses[keyof S
 
 export type LoginData = {
     body: LoginBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/auth/login';
 };
 
 export type LoginErrors = {
-    401: unknown;
-    429: unknown;
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * invalid_credentials
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type LoginError = LoginErrors[keyof LoginErrors];
@@ -552,17 +804,46 @@ export type LoginResponse2 = LoginResponses[keyof LoginResponses];
 
 export type LogoutData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/auth/logout';
 };
 
 export type LogoutErrors = {
-    401: unknown;
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type LogoutError = LogoutErrors[keyof LogoutErrors];
@@ -575,17 +856,46 @@ export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
 
 export type MeData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/auth/me';
 };
 
 export type MeErrors = {
-    401: ProblemBody;
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type MeError = MeErrors[keyof MeErrors];
@@ -598,18 +908,46 @@ export type MeResponse = MeResponses[keyof MeResponses];
 
 export type RecoveryCompleteData = {
     body: RecoveryCompleteBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/auth/recovery/complete';
 };
 
 export type RecoveryCompleteErrors = {
-    400: unknown;
-    422: unknown;
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_recovery_token
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_password
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type RecoveryCompleteError = RecoveryCompleteErrors[keyof RecoveryCompleteErrors];
@@ -622,6 +960,12 @@ export type RecoveryCompleteResponse = RecoveryCompleteResponses[keyof RecoveryC
 
 export type RecoveryRequestData = {
     body: RecoveryRequestBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/auth/recovery/request';
@@ -629,40 +973,99 @@ export type RecoveryRequestData = {
 
 export type RecoveryRequestErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type RecoveryRequestError = RecoveryRequestErrors[keyof RecoveryRequestErrors];
 
 export type RecoveryRequestResponses = {
-    202: unknown;
+    202: RecoveryRequestResponse;
 };
+
+export type RecoveryRequestResponse2 = RecoveryRequestResponses[keyof RecoveryRequestResponses];
 
 export type ListSessionsData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/auth/sessions';
 };
 
 export type ListSessionsErrors = {
-    401: unknown;
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type ListSessionsError = ListSessionsErrors[keyof ListSessionsErrors];
 
 export type ListSessionsResponses = {
-    200: unknown;
+    200: Array<SessionRecord>;
 };
+
+export type ListSessionsResponse = ListSessionsResponses[keyof ListSessionsResponses];
 
 export type RevokeSessionData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         id: string;
     };
@@ -671,12 +1074,38 @@ export type RevokeSessionData = {
 };
 
 export type RevokeSessionErrors = {
-    401: unknown;
-    404: unknown;
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * session_not_found
+     */
+    404: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type RevokeSessionError = RevokeSessionErrors[keyof RevokeSessionErrors];
@@ -689,6 +1118,12 @@ export type RevokeSessionResponse = RevokeSessionResponses[keyof RevokeSessionRe
 
 export type SetupCompleteData = {
     body: SetupBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/setup/complete';
@@ -696,19 +1131,55 @@ export type SetupCompleteData = {
 
 export type SetupCompleteErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * invalid_setup_token
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch or setup_unavailable
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_password
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type SetupCompleteError = SetupCompleteErrors[keyof SetupCompleteErrors];
 
 export type SetupCompleteResponses = {
-    201: unknown;
+    201: SetupResponse;
 };
+
+export type SetupCompleteResponse = SetupCompleteResponses[keyof SetupCompleteResponses];
 
 export type SetupStatusData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/setup/status';
@@ -716,9 +1187,29 @@ export type SetupStatusData = {
 
 export type SetupStatusErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
 };
 
 export type SetupStatusError = SetupStatusErrors[keyof SetupStatusErrors];
@@ -731,6 +1222,12 @@ export type SetupStatusResponse = SetupStatusResponses[keyof SetupStatusResponse
 
 export type ListWorkspacesData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/workspaces';
@@ -738,9 +1235,41 @@ export type ListWorkspacesData = {
 
 export type ListWorkspacesErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ListWorkspacesError = ListWorkspacesErrors[keyof ListWorkspacesErrors];
@@ -753,6 +1282,12 @@ export type ListWorkspacesResponse = ListWorkspacesResponses[keyof ListWorkspace
 
 export type CreateWorkspaceData = {
     body: CreateWorkspaceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/workspaces';
@@ -760,9 +1295,41 @@ export type CreateWorkspaceData = {
 
 export type CreateWorkspaceErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type CreateWorkspaceError = CreateWorkspaceErrors[keyof CreateWorkspaceErrors];
@@ -775,6 +1342,12 @@ export type CreateWorkspaceResponse = CreateWorkspaceResponses[keyof CreateWorks
 
 export type AcceptInvitationData = {
     body: AcceptBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/workspaces/invitations/accept';
@@ -782,9 +1355,45 @@ export type AcceptInvitationData = {
 
 export type AcceptInvitationErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * invitation_registration_throttled
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type AcceptInvitationError = AcceptInvitationErrors[keyof AcceptInvitationErrors];
@@ -797,6 +1406,12 @@ export type AcceptInvitationResponse = AcceptInvitationResponses[keyof AcceptInv
 
 export type ListTrashData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v1/workspaces/trash';
@@ -804,9 +1419,41 @@ export type ListTrashData = {
 
 export type ListTrashErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ListTrashError = ListTrashErrors[keyof ListTrashErrors];
@@ -819,18 +1466,58 @@ export type ListTrashResponse = ListTrashResponses[keyof ListTrashResponses];
 
 export type DeleteWorkspaceData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query: {
+        expected_version: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}';
 };
 
 export type DeleteWorkspaceErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type DeleteWorkspaceError = DeleteWorkspaceErrors[keyof DeleteWorkspaceErrors];
@@ -843,6 +1530,12 @@ export type DeleteWorkspaceResponse = DeleteWorkspaceResponses[keyof DeleteWorks
 
 export type GetWorkspaceData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -852,9 +1545,41 @@ export type GetWorkspaceData = {
 
 export type GetWorkspaceErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type GetWorkspaceError = GetWorkspaceErrors[keyof GetWorkspaceErrors];
@@ -867,6 +1592,12 @@ export type GetWorkspaceResponse = GetWorkspaceResponses[keyof GetWorkspaceRespo
 
 export type RenameWorkspaceData = {
     body: RenameWorkspaceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -876,9 +1607,41 @@ export type RenameWorkspaceData = {
 
 export type RenameWorkspaceErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type RenameWorkspaceError = RenameWorkspaceErrors[keyof RenameWorkspaceErrors];
@@ -891,18 +1654,59 @@ export type RenameWorkspaceResponse = RenameWorkspaceResponses[keyof RenameWorks
 
 export type ListAuditData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/audit';
 };
 
 export type ListAuditErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ListAuditError = ListAuditErrors[keyof ListAuditErrors];
@@ -915,18 +1719,59 @@ export type ListAuditResponse = ListAuditResponses[keyof ListAuditResponses];
 
 export type ListInvitationsData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/invitations';
 };
 
 export type ListInvitationsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ListInvitationsError = ListInvitationsErrors[keyof ListInvitationsErrors];
@@ -939,6 +1784,12 @@ export type ListInvitationsResponse = ListInvitationsResponses[keyof ListInvitat
 
 export type CreateInvitationData = {
     body: InvitationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -948,9 +1799,41 @@ export type CreateInvitationData = {
 
 export type CreateInvitationErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type CreateInvitationError = CreateInvitationErrors[keyof CreateInvitationErrors];
@@ -963,6 +1846,12 @@ export type CreateInvitationResponse = CreateInvitationResponses[keyof CreateInv
 
 export type RevokeInvitationData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         invitation_id: string;
@@ -973,9 +1862,41 @@ export type RevokeInvitationData = {
 
 export type RevokeInvitationErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type RevokeInvitationError = RevokeInvitationErrors[keyof RevokeInvitationErrors];
@@ -988,30 +1909,77 @@ export type RevokeInvitationResponse = RevokeInvitationResponses[keyof RevokeInv
 
 export type ListLabelsData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/labels';
 };
 
 export type ListLabelsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ListLabelsError = ListLabelsErrors[keyof ListLabelsErrors];
 
 export type ListLabelsResponses = {
-    200: Array<LabelRecord>;
+    200: PageLabelRecord;
 };
 
 export type ListLabelsResponse = ListLabelsResponses[keyof ListLabelsResponses];
 
 export type CreateLabelData = {
     body: LabelBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -1021,9 +1989,41 @@ export type CreateLabelData = {
 
 export type CreateLabelErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type CreateLabelError = CreateLabelErrors[keyof CreateLabelErrors];
@@ -1036,19 +2036,59 @@ export type CreateLabelResponse = CreateLabelResponses[keyof CreateLabelResponse
 
 export type DeleteLabelData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         label_id: string;
     };
-    query?: never;
+    query: {
+        expected_version: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/labels/{label_id}';
 };
 
 export type DeleteLabelErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type DeleteLabelError = DeleteLabelErrors[keyof DeleteLabelErrors];
@@ -1061,6 +2101,12 @@ export type DeleteLabelResponse = DeleteLabelResponses[keyof DeleteLabelResponse
 
 export type UpdateLabelData = {
     body: LabelUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         label_id: string;
@@ -1071,9 +2117,41 @@ export type UpdateLabelData = {
 
 export type UpdateLabelErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type UpdateLabelError = UpdateLabelErrors[keyof UpdateLabelErrors];
@@ -1086,18 +2164,59 @@ export type UpdateLabelResponse = UpdateLabelResponses[keyof UpdateLabelResponse
 
 export type ListMembersData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/members';
 };
 
 export type ListMembersErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ListMembersError = ListMembersErrors[keyof ListMembersErrors];
@@ -1110,19 +2229,59 @@ export type ListMembersResponse = ListMembersResponses[keyof ListMembersResponse
 
 export type RemoveMemberData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         membership_id: string;
     };
-    query?: never;
+    query: {
+        expected_version: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/members/{membership_id}';
 };
 
 export type RemoveMemberErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type RemoveMemberError = RemoveMemberErrors[keyof RemoveMemberErrors];
@@ -1135,6 +2294,12 @@ export type RemoveMemberResponse = RemoveMemberResponses[keyof RemoveMemberRespo
 
 export type ChangeMemberRoleData = {
     body: RoleChangeBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         membership_id: string;
@@ -1145,9 +2310,41 @@ export type ChangeMemberRoleData = {
 
 export type ChangeMemberRoleErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type ChangeMemberRoleError = ChangeMemberRoleErrors[keyof ChangeMemberRoleErrors];
@@ -1160,18 +2357,59 @@ export type ChangeMemberRoleResponse = ChangeMemberRoleResponses[keyof ChangeMem
 
 export type ListProjectsData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/projects';
 };
 
 export type ListProjectsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ListProjectsError = ListProjectsErrors[keyof ListProjectsErrors];
@@ -1184,6 +2422,12 @@ export type ListProjectsResponse = ListProjectsResponses[keyof ListProjectsRespo
 
 export type CreateProjectData = {
     body: ProjectBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -1193,9 +2437,41 @@ export type CreateProjectData = {
 
 export type CreateProjectErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type CreateProjectError = CreateProjectErrors[keyof CreateProjectErrors];
@@ -1208,18 +2484,59 @@ export type CreateProjectResponse = CreateProjectResponses[keyof CreateProjectRe
 
 export type ListProjectTrashData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/projects/trash';
 };
 
 export type ListProjectTrashErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ListProjectTrashError = ListProjectTrashErrors[keyof ListProjectTrashErrors];
@@ -1232,19 +2549,59 @@ export type ListProjectTrashResponse = ListProjectTrashResponses[keyof ListProje
 
 export type DeleteProjectData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
     };
-    query?: never;
+    query: {
+        expected_version: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}';
 };
 
 export type DeleteProjectErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type DeleteProjectError = DeleteProjectErrors[keyof DeleteProjectErrors];
@@ -1257,6 +2614,12 @@ export type DeleteProjectResponse = DeleteProjectResponses[keyof DeleteProjectRe
 
 export type UpdateProjectData = {
     body: ProjectUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
@@ -1267,9 +2630,41 @@ export type UpdateProjectData = {
 
 export type UpdateProjectErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type UpdateProjectError = UpdateProjectErrors[keyof UpdateProjectErrors];
@@ -1282,6 +2677,12 @@ export type UpdateProjectResponse = UpdateProjectResponses[keyof UpdateProjectRe
 
 export type RestoreProjectData = {
     body: RestoreBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
@@ -1292,46 +2693,125 @@ export type RestoreProjectData = {
 
 export type RestoreProjectErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type RestoreProjectError = RestoreProjectErrors[keyof RestoreProjectErrors];
 
 export type RestoreProjectResponses = {
-    204: void;
+    200: ProjectRecord;
 };
 
 export type RestoreProjectResponse = RestoreProjectResponses[keyof RestoreProjectResponses];
 
 export type ListStatusesData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses';
 };
 
 export type ListStatusesErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ListStatusesError = ListStatusesErrors[keyof ListStatusesErrors];
 
 export type ListStatusesResponses = {
-    200: Array<StatusRecord>;
+    200: PageStatusRecord;
 };
 
 export type ListStatusesResponse = ListStatusesResponses[keyof ListStatusesResponses];
 
 export type CreateStatusData = {
     body: StatusBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
@@ -1342,9 +2822,41 @@ export type CreateStatusData = {
 
 export type CreateStatusErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type CreateStatusError = CreateStatusErrors[keyof CreateStatusErrors];
@@ -1357,6 +2869,12 @@ export type CreateStatusResponse = CreateStatusResponses[keyof CreateStatusRespo
 
 export type ReorderStatusesData = {
     body: ReorderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
@@ -1367,35 +2885,107 @@ export type ReorderStatusesData = {
 
 export type ReorderStatusesErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ReorderStatusesError = ReorderStatusesErrors[keyof ReorderStatusesErrors];
 
 export type ReorderStatusesResponses = {
-    200: Array<StatusRecord>;
+    200: PageStatusRecord;
 };
 
 export type ReorderStatusesResponse = ReorderStatusesResponses[keyof ReorderStatusesResponses];
 
 export type DeleteStatusData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
         status_id: string;
     };
-    query?: never;
+    query: {
+        expected_version: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}';
 };
 
 export type DeleteStatusErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type DeleteStatusError = DeleteStatusErrors[keyof DeleteStatusErrors];
@@ -1408,6 +2998,12 @@ export type DeleteStatusResponse = DeleteStatusResponses[keyof DeleteStatusRespo
 
 export type UpdateStatusData = {
     body: StatusUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         project_id: string;
@@ -1419,9 +3015,41 @@ export type UpdateStatusData = {
 
 export type UpdateStatusErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type UpdateStatusError = UpdateStatusErrors[keyof UpdateStatusErrors];
@@ -1434,6 +3062,12 @@ export type UpdateStatusResponse = UpdateStatusResponses[keyof UpdateStatusRespo
 
 export type RestoreWorkspaceData = {
     body: RestoreBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -1443,9 +3077,41 @@ export type RestoreWorkspaceData = {
 
 export type RestoreWorkspaceErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type RestoreWorkspaceError = RestoreWorkspaceErrors[keyof RestoreWorkspaceErrors];
@@ -1458,18 +3124,67 @@ export type RestoreWorkspaceResponse = RestoreWorkspaceResponses[keyof RestoreWo
 
 export type ListTasksData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        project_id?: string;
+        status_id?: string;
+        assignee_id?: string;
+        label_id?: string;
+        priority?: string;
+        search?: string;
+        sort?: string;
+        order?: string;
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks';
 };
 
 export type ListTasksErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ListTasksError = ListTasksErrors[keyof ListTasksErrors];
@@ -1482,6 +3197,12 @@ export type ListTasksResponse = ListTasksResponses[keyof ListTasksResponses];
 
 export type CreateTaskData = {
     body: CreateTaskBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -1491,9 +3212,41 @@ export type CreateTaskData = {
 
 export type CreateTaskErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type CreateTaskError = CreateTaskErrors[keyof CreateTaskErrors];
@@ -1506,6 +3259,12 @@ export type CreateTaskResponse = CreateTaskResponses[keyof CreateTaskResponses];
 
 export type BulkTasksData = {
     body: BulkBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -1515,21 +3274,59 @@ export type BulkTasksData = {
 
 export type BulkTasksErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type BulkTasksError = BulkTasksErrors[keyof BulkTasksErrors];
 
 export type BulkTasksResponses = {
-    200: Array<TaskRecord>;
+    200: PageTaskRecord;
 };
 
 export type BulkTasksResponse = BulkTasksResponses[keyof BulkTasksResponses];
 
 export type ReorderTasksData = {
     body: ReorderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -1539,33 +3336,106 @@ export type ReorderTasksData = {
 
 export type ReorderTasksErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ReorderTasksError = ReorderTasksErrors[keyof ReorderTasksErrors];
 
 export type ReorderTasksResponses = {
-    200: Array<TaskRecord>;
+    200: PageTaskRecord;
 };
 
 export type ReorderTasksResponse = ReorderTasksResponses[keyof ReorderTasksResponses];
 
 export type ListTaskTrashData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/trash';
 };
 
 export type ListTaskTrashErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ListTaskTrashError = ListTaskTrashErrors[keyof ListTaskTrashErrors];
@@ -1578,19 +3448,59 @@ export type ListTaskTrashResponse = ListTaskTrashResponses[keyof ListTaskTrashRe
 
 export type DeleteTaskData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
     };
-    query?: never;
+    query: {
+        expected_version: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}';
 };
 
 export type DeleteTaskErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type DeleteTaskError = DeleteTaskErrors[keyof DeleteTaskErrors];
@@ -1603,6 +3513,12 @@ export type DeleteTaskResponse = DeleteTaskResponses[keyof DeleteTaskResponses];
 
 export type GetTaskData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1613,9 +3529,41 @@ export type GetTaskData = {
 
 export type GetTaskErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type GetTaskError = GetTaskErrors[keyof GetTaskErrors];
@@ -1628,6 +3576,12 @@ export type GetTaskResponse = GetTaskResponses[keyof GetTaskResponses];
 
 export type UpdateTaskData = {
     body: TaskUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1638,9 +3592,41 @@ export type UpdateTaskData = {
 
 export type UpdateTaskErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type UpdateTaskError = UpdateTaskErrors[keyof UpdateTaskErrors];
@@ -1653,19 +3639,60 @@ export type UpdateTaskResponse = UpdateTaskResponses[keyof UpdateTaskResponses];
 
 export type ListTaskAttachmentsData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments';
 };
 
 export type ListTaskAttachmentsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type ListTaskAttachmentsError = ListTaskAttachmentsErrors[keyof ListTaskAttachmentsErrors];
@@ -1677,7 +3704,13 @@ export type ListTaskAttachmentsResponses = {
 export type ListTaskAttachmentsResponse = ListTaskAttachmentsResponses[keyof ListTaskAttachmentsResponses];
 
 export type UploadTaskAttachmentsData = {
-    body?: never;
+    body: AttachmentUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1688,21 +3721,59 @@ export type UploadTaskAttachmentsData = {
 
 export type UploadTaskAttachmentsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type UploadTaskAttachmentsError = UploadTaskAttachmentsErrors[keyof UploadTaskAttachmentsErrors];
 
 export type UploadTaskAttachmentsResponses = {
-    201: AttachmentPage;
+    201: AttachmentRecord;
 };
 
 export type UploadTaskAttachmentsResponse = UploadTaskAttachmentsResponses[keyof UploadTaskAttachmentsResponses];
 
 export type DeleteTaskAttachmentData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1714,9 +3785,41 @@ export type DeleteTaskAttachmentData = {
 
 export type DeleteTaskAttachmentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type DeleteTaskAttachmentError = DeleteTaskAttachmentErrors[keyof DeleteTaskAttachmentErrors];
@@ -1729,6 +3832,12 @@ export type DeleteTaskAttachmentResponse = DeleteTaskAttachmentResponses[keyof D
 
 export type DownloadTaskAttachmentData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1740,32 +3849,107 @@ export type DownloadTaskAttachmentData = {
 
 export type DownloadTaskAttachmentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type DownloadTaskAttachmentError = DownloadTaskAttachmentErrors[keyof DownloadTaskAttachmentErrors];
 
 export type DownloadTaskAttachmentResponses = {
-    200: unknown;
+    200: AttachmentDownload;
 };
+
+export type DownloadTaskAttachmentResponse = DownloadTaskAttachmentResponses[keyof DownloadTaskAttachmentResponses];
 
 export type ListCommentsData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments';
 };
 
 export type ListCommentsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type ListCommentsError = ListCommentsErrors[keyof ListCommentsErrors];
@@ -1778,6 +3962,12 @@ export type ListCommentsResponse = ListCommentsResponses[keyof ListCommentsRespo
 
 export type CreateCommentData = {
     body: CommentBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1788,9 +3978,41 @@ export type CreateCommentData = {
 
 export type CreateCommentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type CreateCommentError = CreateCommentErrors[keyof CreateCommentErrors];
@@ -1802,7 +4024,13 @@ export type CreateCommentResponses = {
 export type CreateCommentResponse = CreateCommentResponses[keyof CreateCommentResponses];
 
 export type CreateAttachmentCommentData = {
-    body?: never;
+    body: AttachmentUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1813,9 +4041,41 @@ export type CreateAttachmentCommentData = {
 
 export type CreateAttachmentCommentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type CreateAttachmentCommentError = CreateAttachmentCommentErrors[keyof CreateAttachmentCommentErrors];
@@ -1828,20 +4088,60 @@ export type CreateAttachmentCommentResponse = CreateAttachmentCommentResponses[k
 
 export type DeleteCommentData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
         comment_id: string;
     };
-    query?: never;
+    query: {
+        expected_version: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}';
 };
 
 export type DeleteCommentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type DeleteCommentError = DeleteCommentErrors[keyof DeleteCommentErrors];
@@ -1854,6 +4154,12 @@ export type DeleteCommentResponse = DeleteCommentResponses[keyof DeleteCommentRe
 
 export type UpdateCommentData = {
     body: CommentUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1865,9 +4171,41 @@ export type UpdateCommentData = {
 
 export type UpdateCommentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type UpdateCommentError = UpdateCommentErrors[keyof UpdateCommentErrors];
@@ -1880,20 +4218,61 @@ export type UpdateCommentResponse = UpdateCommentResponses[keyof UpdateCommentRe
 
 export type ListCommentAttachmentsData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
         comment_id: string;
     };
-    query?: never;
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/attachments';
 };
 
 export type ListCommentAttachmentsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type ListCommentAttachmentsError = ListCommentAttachmentsErrors[keyof ListCommentAttachmentsErrors];
@@ -1905,7 +4284,13 @@ export type ListCommentAttachmentsResponses = {
 export type ListCommentAttachmentsResponse = ListCommentAttachmentsResponses[keyof ListCommentAttachmentsResponses];
 
 export type UploadCommentAttachmentsData = {
-    body?: never;
+    body: AttachmentUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1917,21 +4302,59 @@ export type UploadCommentAttachmentsData = {
 
 export type UploadCommentAttachmentsErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type UploadCommentAttachmentsError = UploadCommentAttachmentsErrors[keyof UploadCommentAttachmentsErrors];
 
 export type UploadCommentAttachmentsResponses = {
-    201: AttachmentPage;
+    201: AttachmentRecord;
 };
 
 export type UploadCommentAttachmentsResponse = UploadCommentAttachmentsResponses[keyof UploadCommentAttachmentsResponses];
 
 export type DeleteCommentAttachmentData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1944,9 +4367,41 @@ export type DeleteCommentAttachmentData = {
 
 export type DeleteCommentAttachmentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type DeleteCommentAttachmentError = DeleteCommentAttachmentErrors[keyof DeleteCommentAttachmentErrors];
@@ -1959,6 +4414,12 @@ export type DeleteCommentAttachmentResponse = DeleteCommentAttachmentResponses[k
 
 export type DownloadCommentAttachmentData = {
     body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1971,19 +4432,59 @@ export type DownloadCommentAttachmentData = {
 
 export type DownloadCommentAttachmentErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, invalid_cursor, or invalid_multipart
      */
-    default: Problem;
+    400: AttachmentProblem;
+    /**
+     * authentication_required
+     */
+    401: AttachmentProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: AttachmentProblem;
+    /**
+     * attachment_not_found
+     */
+    404: AttachmentProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AttachmentProblem;
+    /**
+     * request_too_large or upload_too_large
+     */
+    413: AttachmentProblem;
+    /**
+     * validation_failed
+     */
+    422: AttachmentProblem;
+    /**
+     * internal_error
+     */
+    500: AttachmentProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AttachmentProblem;
 };
 
 export type DownloadCommentAttachmentError = DownloadCommentAttachmentErrors[keyof DownloadCommentAttachmentErrors];
 
 export type DownloadCommentAttachmentResponses = {
-    200: unknown;
+    200: AttachmentDownload;
 };
+
+export type DownloadCommentAttachmentResponse = DownloadCommentAttachmentResponses[keyof DownloadCommentAttachmentResponses];
 
 export type RestoreTaskData = {
     body: RestoreBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
         task_id: string;
@@ -1994,21 +4495,59 @@ export type RestoreTaskData = {
 
 export type RestoreTaskErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers, invalid_request, or invalid_cursor
      */
-    default: Problem;
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, or restore_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
 };
 
 export type RestoreTaskError = RestoreTaskErrors[keyof RestoreTaskErrors];
 
 export type RestoreTaskResponses = {
-    204: void;
+    200: TaskRecord;
 };
 
 export type RestoreTaskResponse = RestoreTaskResponses[keyof RestoreTaskResponses];
 
 export type TransferOwnershipData = {
     body: TransferBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
     path: {
         workspace_id: string;
     };
@@ -2018,9 +4557,41 @@ export type TransferOwnershipData = {
 
 export type TransferOwnershipErrors = {
     /**
-     * RFC 9457 Problem Details response
+     * invalid_proxy_headers or invalid_request
      */
-    default: Problem;
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden, ownership_transfer_required, or installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, invitation_not_found, or user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, workspace_conflict, or conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_workspace_name, invalid_email, invalid_registration, or invalid_password
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
 };
 
 export type TransferOwnershipError = TransferOwnershipErrors[keyof TransferOwnershipErrors];

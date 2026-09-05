@@ -263,6 +263,14 @@ struct SetupStatus {
     complete: bool,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+struct SetupResponse {
+    user_id: String,
+    workspace_id: String,
+    project_id: String,
+    session_id: String,
+}
+
 #[utoipa::path(get, path = "/api/v1/setup/status", responses((status = 200, body = SetupStatus)))]
 async fn setup_status(State(state): State<AuthState>) -> Result<Json<SetupStatus>, ApiError> {
     let complete = state
@@ -284,7 +292,7 @@ struct SetupBody {
     project_name: String,
 }
 
-#[utoipa::path(post, path = "/api/v1/setup/complete", request_body = SetupBody, responses((status = 201)))]
+#[utoipa::path(post, path = "/api/v1/setup/complete", request_body = SetupBody, responses((status = 201, body = SetupResponse), (status = 401, description = "invalid_setup_token", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "setup_unavailable", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_password", body = ProblemBody, content_type = "application/problem+json")))]
 async fn setup_complete(
     State(state): State<AuthState>,
     request_id: Option<Extension<RequestId>>,
@@ -362,12 +370,12 @@ async fn setup_complete(
     let session = result.session;
     let mut response = (
         StatusCode::CREATED,
-        Json(json!({
-            "user_id": result.user_id,
-            "workspace_id": result.workspace_id,
-            "project_id": result.project_id,
-            "session_id": session.id,
-        })),
+        Json(SetupResponse {
+            user_id: result.user_id.to_string(),
+            workspace_id: result.workspace_id.to_string(),
+            project_id: result.project_id.to_string(),
+            session_id: session.id.to_string(),
+        }),
     )
         .into_response();
     response.headers_mut().insert(
@@ -398,7 +406,7 @@ struct AuthUserResponse {
     display_name: String,
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/login", request_body = LoginBody, responses((status = 200, body = LoginResponse), (status = 401), (status = 429)))]
+#[utoipa::path(post, path = "/api/v1/auth/login", request_body = LoginBody, responses((status = 200, body = LoginResponse), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
 async fn login(
     State(state): State<AuthState>,
     client_ip: Option<Extension<ClientIp>>,
@@ -529,7 +537,7 @@ async fn login(
     Ok(response)
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/logout", responses((status = 204), (status = 401)))]
+#[utoipa::path(post, path = "/api/v1/auth/logout", responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn logout(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -562,7 +570,7 @@ async fn logout(
     Ok(response)
 }
 
-#[utoipa::path(get, path = "/api/v1/auth/me", responses((status = 200, body = AuthUserResponse), (status = 401, body = ProblemBody)))]
+#[utoipa::path(get, path = "/api/v1/auth/me", responses((status = 200, body = AuthUserResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn me(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -584,7 +592,12 @@ struct RecoveryRequestBody {
     email: String,
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/recovery/request", request_body = RecoveryRequestBody, responses((status = 202)))]
+#[derive(Serialize, ToSchema)]
+struct RecoveryRequestResponse {
+    detail: &'static str,
+}
+
+#[utoipa::path(post, path = "/api/v1/auth/recovery/request", request_body = RecoveryRequestBody, responses((status = 202, body = RecoveryRequestResponse)))]
 async fn recovery_request(
     State(state): State<AuthState>,
     request_id: Option<Extension<RequestId>>,
@@ -621,7 +634,9 @@ async fn recovery_request(
     }
     (
         StatusCode::ACCEPTED,
-        Json(json!({ "detail": GENERIC_RECOVERY_DETAIL })),
+        Json(RecoveryRequestResponse {
+            detail: GENERIC_RECOVERY_DETAIL,
+        }),
     )
         .into_response()
 }
@@ -633,7 +648,7 @@ struct RecoveryCompleteBody {
     password: String,
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/recovery/complete", request_body = RecoveryCompleteBody, responses((status = 204), (status = 400), (status = 422)))]
+#[utoipa::path(post, path = "/api/v1/auth/recovery/complete", request_body = RecoveryCompleteBody, responses((status = 204), (status = 400, description = "invalid_recovery_token", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_password", body = ProblemBody, content_type = "application/problem+json")))]
 async fn recovery_complete(
     State(state): State<AuthState>,
     request_id: Option<Extension<RequestId>>,
@@ -686,7 +701,7 @@ async fn recovery_complete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/api/v1/auth/sessions", responses((status = 200), (status = 401)))]
+#[utoipa::path(get, path = "/api/v1/auth/sessions", responses((status = 200, body = Vec<orbit_platform::SessionRecord>), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn list_sessions(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -708,7 +723,7 @@ async fn list_sessions(
     Ok(Json(sessions))
 }
 
-#[utoipa::path(delete, path = "/api/v1/auth/sessions/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401), (status = 404)))]
+#[utoipa::path(delete, path = "/api/v1/auth/sessions/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 404, description = "session_not_found", body = ProblemBody, content_type = "application/problem+json")))]
 async fn revoke_session(
     State(state): State<AuthState>,
     Path(id): Path<String>,
@@ -846,6 +861,7 @@ fn password_problem(
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+#[schema(as = AuthProblem)]
 struct ProblemBody {
     #[serde(rename = "type")]
     type_uri: String,

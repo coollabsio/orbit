@@ -17,7 +17,7 @@ use orbit_platform::{
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::ReceiverStream;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::{CookieMode, issued_session_cookie};
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository, SuspensionError};
@@ -276,15 +276,18 @@ async fn rename_workspace(
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
     cursor: Option<String>,
     #[serde(default = "default_limit")]
+    #[param(required = false)]
     limit: usize,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct MutationQuery {
     expected_version: u64,
@@ -297,7 +300,7 @@ struct Page<T> {
     next_cursor: Option<Id>,
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/members", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::workspaces::MemberRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/members", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::workspaces::MemberRecord>)))]
 async fn list_members(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -370,7 +373,7 @@ async fn change_member_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}", params(("workspace_id" = String, Path), ("membership_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}", params(MutationQuery, ("workspace_id" = String, Path), ("membership_id" = String, Path)), responses((status = 204)))]
 async fn remove_member(
     State(state): State<WorkspaceState>,
     Path((workspace_id, membership_id)): Path<(String, String)>,
@@ -510,7 +513,7 @@ async fn create_invitation(
         .into_response())
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/invitations", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::workspaces::InvitationRecord>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/invitations", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::workspaces::InvitationRecord>)))]
 async fn list_invitations(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -700,7 +703,7 @@ async fn accept_invitation(
     Ok(response)
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}", params(("workspace_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}", params(MutationQuery, ("workspace_id" = String, Path)), responses((status = 204)))]
 async fn delete_workspace(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -790,7 +793,7 @@ async fn list_trash(
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/audit", params(("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/audit", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
 async fn list_audit(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -841,17 +844,19 @@ async fn set_account_suspension(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct AdminAuditQuery {
     workspace_id: Option<String>,
     action: Option<String>,
     cursor: Option<String>,
     #[serde(default = "default_limit")]
+    #[param(required = false)]
     limit: usize,
 }
 
-#[utoipa::path(get, path = "/api/v1/admin/audit", responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
+#[utoipa::path(get, path = "/api/v1/admin/audit", params(AdminAuditQuery), responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
 async fn list_global_audit(
     State(state): State<WorkspaceState>,
     ApiQuery(query): ApiQuery<AdminAuditQuery>,
@@ -871,7 +876,7 @@ async fn list_global_audit(
     Ok(Json(Page { items, next_cursor }))
 }
 
-#[utoipa::path(get, path = "/api/v1/admin/audit/export", responses((status = 200, content_type = "text/csv")))]
+#[utoipa::path(get, path = "/api/v1/admin/audit/export", params(AdminAuditQuery), responses((status = 200, body = String, content_type = "text/csv")))]
 async fn export_global_audit(
     State(state): State<WorkspaceState>,
     ApiQuery(query): ApiQuery<AdminAuditQuery>,
@@ -1287,8 +1292,9 @@ const fn default_limit() -> usize {
     50
 }
 
-#[derive(Debug, Serialize)]
-struct ProblemBody {
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = WorkspaceProblem)]
+pub(crate) struct ProblemBody {
     #[serde(rename = "type")]
     type_uri: String,
     title: &'static str,
@@ -1301,8 +1307,9 @@ struct ProblemBody {
     conflict: Option<ConflictBody>,
 }
 
-#[derive(Debug, Serialize)]
-struct ConflictBody {
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = WorkspaceConflict)]
+pub(crate) struct ConflictBody {
     current_version: u64,
     refresh: String,
 }

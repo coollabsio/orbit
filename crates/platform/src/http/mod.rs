@@ -27,6 +27,7 @@ use security::{add_security_headers, inspect_request, strip_forwarding_headers};
 pub struct HttpPlatformLayer {
     origin_policy: OriginPolicy,
     limits: HttpLimits,
+    contract_id: Option<String>,
 }
 
 impl HttpPlatformLayer {
@@ -35,12 +36,19 @@ impl HttpPlatformLayer {
         Self {
             origin_policy,
             limits: HttpLimits::default(),
+            contract_id: None,
         }
     }
 
     #[must_use]
     pub fn with_limits(mut self, limits: HttpLimits) -> Self {
         self.limits = limits;
+        self
+    }
+
+    #[must_use]
+    pub fn with_contract_id(mut self, contract_id: impl Into<String>) -> Self {
+        self.contract_id = Some(contract_id.into());
         self
     }
 }
@@ -53,6 +61,7 @@ impl<S> Layer<S> for HttpPlatformLayer {
             inner,
             origin_policy: self.origin_policy.clone(),
             limits: self.limits,
+            contract_id: self.contract_id.clone(),
             readiness: InnerReadiness::Checking,
         }
     }
@@ -70,6 +79,7 @@ pub struct HttpPlatformService<S> {
     inner: S,
     origin_policy: OriginPolicy,
     limits: HttpLimits,
+    contract_id: Option<String>,
     readiness: InnerReadiness,
 }
 
@@ -79,6 +89,7 @@ impl<S: Clone> Clone for HttpPlatformService<S> {
             inner: self.inner.clone(),
             origin_policy: self.origin_policy.clone(),
             limits: self.limits,
+            contract_id: self.contract_id.clone(),
             readiness: InnerReadiness::Checking,
         }
     }
@@ -117,6 +128,7 @@ where
         let mut inner = std::mem::replace(&mut self.inner, clone);
         let policy = self.origin_policy.clone();
         let limits = self.limits;
+        let contract_id = self.contract_id.clone();
 
         Box::pin(async move {
             let peer = request
@@ -151,6 +163,26 @@ where
                         "origin_forbidden",
                         "Forbidden origin",
                         "The request origin is not allowed.",
+                        &request_id,
+                        request.uri().path(),
+                    ),
+                    &request_id,
+                    transport.is_secure(),
+                ));
+            }
+
+            if contract_id.as_deref().is_some_and(|expected| {
+                request
+                    .headers()
+                    .get("x-orbit-contract")
+                    .is_some_and(|actual| actual.as_bytes() != expected.as_bytes())
+            }) {
+                return Ok(finish_response(
+                    problem_response(
+                        StatusCode::CONFLICT,
+                        "contract_mismatch",
+                        "API contract mismatch",
+                        "The client contract is not supported by this server. Refresh or update the client.",
                         &request_id,
                         request.uri().path(),
                     ),

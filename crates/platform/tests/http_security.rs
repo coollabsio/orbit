@@ -418,6 +418,27 @@ async fn expected_operational_unavailability_keeps_its_status() {
 }
 
 #[tokio::test]
+async fn incompatible_contract_header_is_rejected_as_problem_details() {
+    let app = Router::new()
+        .route("/api/v1/probe", get(|| async { StatusCode::NO_CONTENT }))
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test"))
+                .with_contract_id("orbit-api-v1"),
+        );
+    let request = Request::builder()
+        .uri("/api/v1/probe")
+        .header("x-orbit-contract", "orbit-api-v0")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
+    assert_eq!(body_json(response).await["code"], "contract_mismatch");
+}
+
+#[tokio::test]
 async fn oversized_request_is_rejected_before_the_handler() {
     let layer =
         HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(HttpLimits {

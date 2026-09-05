@@ -189,11 +189,13 @@ async fn serve(cli: &Cli, listen: std::net::SocketAddr, origin: &str) -> Result<
         .merge(task_router(TaskState::new(identity, CookieMode::secure())))
         .merge(attachment_router(attachment_state.clone()))
         .layer(
-            HttpPlatformLayer::new(OriginPolicy::new(origin)).with_limits(HttpLimits {
-                max_body_bytes: usize::try_from(upload_limits.max_request_bytes())
-                    .unwrap_or(usize::MAX),
-                ..HttpLimits::default()
-            }),
+            HttpPlatformLayer::new(OriginPolicy::new(origin))
+                .with_contract_id(orbit_server::openapi::CONTRACT_ID)
+                .with_limits(HttpLimits {
+                    max_body_bytes: usize::try_from(upload_limits.max_request_bytes())
+                        .unwrap_or(usize::MAX),
+                    ..HttpLimits::default()
+                }),
         );
     let listener = tokio::net::TcpListener::bind(listen)
         .await
