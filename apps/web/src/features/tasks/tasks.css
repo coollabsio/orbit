@@ -162,9 +162,17 @@
   gap: 6px;
   min-width: 180px;
   padding: 0 9px;
-  border: 1px solid var(--border);
+  height: 32px;
+  border: 1px solid var(--control-border);
   border-radius: 8px;
-  background: var(--bg-input);
+  background: var(--recessed);
+  color: var(--text-primary);
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.tasks-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .tasks-search input {
@@ -172,7 +180,16 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: inherit;
+  color: var(--text-primary);
+}
+
+.tasks-search input::placeholder {
+  color: var(--control-placeholder);
+}
+
+.tasks-search input:focus,
+.tasks-search input:focus-visible {
+  box-shadow: none;
 }
 
 .tasks-filter-count {
