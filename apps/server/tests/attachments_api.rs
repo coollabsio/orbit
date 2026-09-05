@@ -214,6 +214,30 @@ async fn authorization_precedes_multipart_consumption_and_cross_workspace_access
 }
 
 #[tokio::test]
+async fn malformed_attachment_pagination_uses_problem_details() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let uri = format!("{}?limit=abc", fixture.task_attachments());
+
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("GET", &uri, &fixture.owner_cookie))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "application/problem+json"
+    );
+    let problem = response_json(response).await;
+    assert_eq!(problem["status"], 400);
+    assert_eq!(problem["code"], "invalid_request");
+    assert_eq!(problem["instance"], fixture.task_attachments());
+    assert!(problem["request_id"].is_string());
+}
+
+#[tokio::test]
 async fn target_is_revalidated_atomically_after_the_stream_finishes() {
     let fixture = Fixture::new(UploadLimits::default()).await;
     let boundary = "orbit-stream-boundary";

@@ -643,7 +643,7 @@ export type ExportGlobalAuditErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * origin_forbidden, installation_admin_required
+     * installation_admin_required
      */
     403: WorkspaceProblem;
     /**
@@ -3491,7 +3491,7 @@ export type ListTaskAttachmentsData = {
 
 export type ListTaskAttachmentsErrors = {
     /**
-     * invalid_proxy_headers, invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: AttachmentProblem;
     /**
@@ -4039,7 +4039,7 @@ export type ListCommentAttachmentsData = {
 
 export type ListCommentAttachmentsErrors = {
     /**
-     * invalid_proxy_headers, invalid_cursor
+     * invalid_proxy_headers, invalid_request, invalid_cursor
      */
     400: AttachmentProblem;
     /**

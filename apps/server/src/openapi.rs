@@ -290,7 +290,7 @@ fn unsafe_operation(operation_id: &str) -> bool {
     !(operation_id.starts_with("list_")
         || operation_id.starts_with("get_")
         || operation_id.starts_with("download_")
-        || matches!(operation_id, "me" | "setup_status"))
+        || matches!(operation_id, "me" | "setup_status" | "export_global_audit"))
 }
 
 fn invalid_request_operation(operation_id: &str) -> bool {
@@ -342,6 +342,8 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_comment"
             | "update_comment"
             | "delete_comment"
+            | "list_task_attachments"
+            | "list_comment_attachments"
     )
 }
 

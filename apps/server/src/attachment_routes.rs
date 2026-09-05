@@ -5,9 +5,11 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{
-    DefaultBodyLimit, Extension, FromRequest, Multipart, Path, Query, Request, State,
+    DefaultBodyLimit, Extension, FromRequest, FromRequestParts, Multipart, Path, Query, Request,
+    State,
 };
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -17,6 +19,7 @@ use orbit_platform::{
     AuthorizedAttachment, BlobStoreError, Id, RequestId, TimestampMillis, UploadError,
     UploadService,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
@@ -175,6 +178,25 @@ struct PageQuery {
     limit: Option<usize>,
 }
 
+struct AttachmentQuery<T>(T);
+
+impl<S, T> FromRequestParts<S> for AttachmentQuery<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned,
+{
+    type Rejection = AttachmentApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let instance = parts.uri.path().to_owned();
+        let request_id = parts.extensions.get::<RequestId>().cloned().map(Extension);
+        Query::<T>::from_request_parts(parts, state)
+            .await
+            .map(|Query(value)| Self(value))
+            .map_err(|_| AttachmentApiError::invalid_request(&instance, request_id.as_ref()))
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct AttachmentCursor {
@@ -206,7 +228,7 @@ struct AttachmentDownload(Vec<u8>);
 async fn list_task_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task)): Path<(String, String)>,
-    Query(page): Query<PageQuery>,
+    AttachmentQuery(page): AttachmentQuery<PageQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<AttachmentPage>, AttachmentApiError> {
@@ -238,7 +260,7 @@ async fn list_task_attachments(
 async fn list_comment_attachments(
     State(state): State<AttachmentState>,
     Path((workspace, task, comment)): Path<(String, String, String)>,
-    Query(page): Query<PageQuery>,
+    AttachmentQuery(page): AttachmentQuery<PageQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<AttachmentPage>, AttachmentApiError> {
@@ -1135,6 +1157,17 @@ impl AttachmentApiError {
             "invalid_multipart",
             "Invalid multipart upload",
             "The request must contain at least one valid file field.",
+            instance,
+            request_id,
+        )
+    }
+
+    fn invalid_request(instance: &str, request_id: Option<&Extension<RequestId>>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Invalid request",
+            "The query parameters are not valid for this endpoint.",
             instance,
             request_id,
         )

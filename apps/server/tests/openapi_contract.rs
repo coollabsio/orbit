@@ -196,6 +196,16 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments",
         "post",
     );
+    assert!(
+        operation(
+            &document,
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments",
+            "get",
+        )["responses"]["400"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("invalid_request")
+    );
     assert_eq!(
         upload["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"],
         "#/components/schemas/AttachmentUploadBody"
@@ -340,6 +350,11 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
             .collect::<Vec<_>>(),
         ["200", "400", "409", "413", "500", "default"]
     );
+    assert!(!operation(&document, "/api/v1/admin/audit/export", "get")["responses"]
+        ["403"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("origin_forbidden"));
     let accept = operation(&document, "/api/v1/workspaces/invitations/accept", "post");
     for status in ["200", "201"] {
         assert_eq!(

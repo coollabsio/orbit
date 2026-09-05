@@ -241,7 +241,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, installation_admin_required",
+            "description": "installation_admin_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6688,7 +6688,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8025,7 +8025,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers, invalid_cursor",
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
             "content": {
               "application/problem+json": {
                 "schema": {
