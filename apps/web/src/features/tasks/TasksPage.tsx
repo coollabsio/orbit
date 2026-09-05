@@ -6,7 +6,8 @@ import { EmptyState } from '../../components/ui/EmptyState'
 import { useCurrentUser } from '../auth/api'
 import { useMembers } from '../workspaces/api'
 import { useWorkspace } from '../workspaces/workspaceContext'
-import { useAllStatuses, useProjects } from './api/projects'
+import { useAllStatuses, useCreateProject, useProjects } from './api/projects'
+import { projectDraft } from './api/projectDraft'
 import { useLabels } from './api/labels'
 import { taskFromRecord } from './api/models'
 import {
@@ -40,6 +41,7 @@ export function TasksPage() {
   const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
   const createTask = useCreateTask(workspace.id)
+  const createProject = useCreateProject(workspace.id)
 
   const [layout, setLayout] = useState<'list' | 'board'>(() => searchParams.get('layout') === 'board' ? 'board' : 'list')
   const [sort, setSort] = useState<SortKey>('manual')
@@ -88,6 +90,16 @@ export function TasksPage() {
     next.delete('new')
     if (taskId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
     else setSearchParams(next, { replace: true })
+  }
+  const startNewProject = (close: () => void) => {
+    const name = window.prompt('Project name')?.trim()
+    if (!name) return
+    createProject.mutate(projectDraft(name), {
+      onSuccess: (project) => {
+        setProjectFilter(project.id)
+        close()
+      },
+    })
   }
   const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)
   const closeTask = () => navigate(`/tasks${searchSuffix}`)
@@ -148,12 +160,15 @@ export function TasksPage() {
               </button>
             )}>
               {(close) => <><button className="popover-option" data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><TaskSquare size={15} />All tasks</button>
-                {projects.map((project) => <button key={project.id} className="popover-option" data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="pill-dot" style={{ background: project.color }} />{project.name}</button>)}</>}
+                {projects.map((project) => <button key={project.id} className="popover-option" data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="pill-dot" style={{ background: project.color }} />{project.name}</button>)}
+                <div className="popover-separator" />
+                <button className="popover-option" disabled={createProject.isPending} onClick={() => startNewProject(close)}><Add size={15} />New project</button></>}
             </Dropdown>
             <div className="spacer" />
             <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
             {createTask.isError ? <span role="alert" className="text-danger text-xs">Task creation failed.</span> : null}
+            {createProject.isError ? <span role="alert" className="text-danger text-xs">Project creation failed.</span> : null}
           </div>
           <div className="pane-body">
             {layout === 'board'

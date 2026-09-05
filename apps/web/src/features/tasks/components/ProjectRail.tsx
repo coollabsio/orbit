@@ -4,6 +4,7 @@ import type { ProjectBody } from '../../../api/generated/types.gen'
 import type { Project } from '../api/models'
 import { useCreateProject } from '../api/projects'
 import { useWorkspace } from '../../workspaces/workspaceContext'
+import { projectDraft } from '../api/projectDraft'
 
 interface ProjectRailProps {
   projects: Project[]
@@ -53,8 +54,7 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
         <button className="menu-item" disabled={createProject.isPending} onClick={() => {
           const name = window.prompt('Project name')?.trim()
           if (!name) return
-          const key = name.replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase() || 'PROJ'
-          createAndSelectProject({ name, key, color: '#8b5cf6' })
+          createAndSelectProject(projectDraft(name))
         }}><Add size={16} /><span className="menu-item-label">New project</span></button>
         {createProject.isError ? <p role="alert" className="text-danger text-xs">Project creation failed. <button className="button button-ghost" onClick={() => createProject.variables && createAndSelectProject(createProject.variables)}>Retry</button></p> : null}
       </div>
