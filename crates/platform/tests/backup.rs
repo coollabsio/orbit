@@ -4,6 +4,7 @@ use orbit_platform::{
     BackupError, BackupKind, BackupService, Database, DatabaseConfig, MigrationRunner,
 };
 use sha2::{Digest, Sha256};
+use tokio_util::sync::CancellationToken;
 
 struct Fixture {
     _root: tempfile::TempDir,
@@ -305,6 +306,68 @@ async fn backup_pauses_attachment_mutations_at_the_coordination_guard() {
 
     drop(mutation);
     backup.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn a_cancelled_backup_stops_before_snapshot_io() {
+    let fixture = Fixture::new().await;
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+
+    let error = fixture
+        .service
+        .create_cancellable(&fixture.database, cancellation)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, BackupError::Cancelled));
+    assert!(fixture.service.list().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancellation_stops_active_attachment_copy_and_verification() {
+    let fixture = Fixture::new().await;
+    let attachments = fixture._root.path().join("attachments");
+    for index in 0..4_000 {
+        fs::write(attachments.join(format!("{index:04}.txt")), b"content").unwrap();
+    }
+    let cancellation = CancellationToken::new();
+    let service = fixture.service.clone();
+    let database = fixture.database.clone();
+    let backup_cancellation = cancellation.clone();
+    let backup = tokio::spawn(async move {
+        service
+            .create_cancellable(&database, backup_cancellation)
+            .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let snapshot_root = fixture._root.path().join("backups/snapshots");
+            let copying = fs::read_dir(snapshot_root).is_ok_and(|entries| {
+                entries.filter_map(Result::ok).any(|entry| {
+                    entry.file_name().to_string_lossy().starts_with('.')
+                        && fs::read_dir(entry.path().join("attachments"))
+                            .is_ok_and(|mut files| files.next().is_some())
+                })
+            });
+            if copying {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("backup entered cancellable attachment work");
+    cancellation.cancel();
+
+    let error = tokio::time::timeout(std::time::Duration::from_secs(2), backup)
+        .await
+        .expect("active backup observes cancellation")
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(error, BackupError::Cancelled));
+    assert!(fixture.service.list().await.unwrap().is_empty());
 }
 
 #[cfg(unix)]

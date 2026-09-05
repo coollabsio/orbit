@@ -3,7 +3,7 @@ use sqlx::Row;
 use thiserror::Error;
 
 use super::Database;
-use crate::TimestampMillis;
+use crate::{BackupError, BackupService, Config, TimestampMillis};
 
 const PLATFORM_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0001_platform.sql");
 const IDENTITY_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0002_identity.sql");
@@ -84,6 +84,30 @@ pub enum MigrationError {
     },
     #[error(transparent)]
     Database(#[from] sqlx::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum GuardedMigrationError {
+    #[error(transparent)]
+    Migration(#[from] MigrationError),
+    #[error("pre-migration backup failed: {0}")]
+    Backup(#[from] BackupError),
+}
+
+pub async fn run_guarded_migrations(
+    config: &Config,
+    database: &Database,
+    runner: &MigrationRunner,
+) -> Result<usize, GuardedMigrationError> {
+    let pending = runner.pending(database).await?;
+    if pending.iter().any(|migration| migration.destructive) {
+        let service = BackupService::new(&config.data.backups, &config.data.attachments);
+        let backup = service.create_pre_migration(database).await?;
+        service.verify(&backup.id).await?;
+    }
+    let count = pending.len();
+    runner.run(database).await?;
+    Ok(count)
 }
 
 impl MigrationRunner {

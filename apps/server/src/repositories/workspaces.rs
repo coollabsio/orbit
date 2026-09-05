@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use orbit_domain::{StatusCategory, WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
-    BlobStore, BlobStoreError, Database, Id, IssuedSession, Job, JobError, JobKind,
-    JobKindRegistrationError, JobStore, LocalBlobStore, RecurringSchedule, ScheduleError,
-    Scheduler, TimestampMillis, Worker, WorkerConfig, WorkerError, generate_opaque_token,
-    normalize_email,
+    AttachmentMutationCoordinator, BlobStore, BlobStoreError, Database, Id, IssuedSession, Job,
+    JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore, RecurringSchedule,
+    ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig, WorkerError,
+    generate_opaque_token, normalize_email,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -166,6 +166,7 @@ pub enum RetentionServiceError {
 pub struct WorkspaceRepository {
     database: Database,
     blob_store: Arc<dyn BlobStore>,
+    attachment_mutations: AttachmentMutationCoordinator,
 }
 
 impl WorkspaceRepository {
@@ -174,14 +175,29 @@ impl WorkspaceRepository {
         Self {
             database,
             blob_store: Arc::new(LocalBlobStore::new("attachments")),
+            attachment_mutations: AttachmentMutationCoordinator::default(),
         }
     }
 
     #[must_use]
     pub fn with_blob_store(database: Database, blob_store: Arc<dyn BlobStore>) -> Self {
+        Self::with_blob_store_and_mutations(
+            database,
+            blob_store,
+            AttachmentMutationCoordinator::default(),
+        )
+    }
+
+    #[must_use]
+    pub fn with_blob_store_and_mutations(
+        database: Database,
+        blob_store: Arc<dyn BlobStore>,
+        attachment_mutations: AttachmentMutationCoordinator,
+    ) -> Self {
         Self {
             database,
             blob_store,
+            attachment_mutations,
         }
     }
 
@@ -1448,20 +1464,21 @@ impl WorkspaceRepository {
             move |_| {
                 let repository = repository.clone();
                 async move {
-                    let now = repository.database.database_now().await.map_err(|_| {
-                        JobError::Retryable("retention database unavailable".to_owned())
-                    })?;
-                    repository.purge_retention(now).await.map_err(|_| {
-                        JobError::Retryable("retention maintenance failed".to_owned())
-                    })?;
                     repository
-                        .purge_attachment_files()
+                        .run_retention_maintenance()
                         .await
-                        .map_err(|_| JobError::Retryable("attachment cleanup failed".to_owned()))?;
-                    Ok(())
+                        .map_err(|_| JobError::Retryable("retention maintenance failed".to_owned()))
                 }
             },
         )
+    }
+
+    pub(crate) async fn run_retention_maintenance(&self) -> Result<(), WorkspaceError> {
+        let _mutation = self.attachment_mutations.begin().await;
+        let now = self.database.database_now().await?;
+        self.purge_retention(now).await?;
+        self.purge_attachment_files().await?;
+        Ok(())
     }
 
     pub async fn run_retention_service(

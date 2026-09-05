@@ -1055,7 +1055,6 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "ipnet",
- "libsqlite3-sys",
  "rand",
  "serde",
  "serde_json",
@@ -1079,6 +1078,7 @@ name = "orbit-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "clap",
  "fs2",
  "futures-util",

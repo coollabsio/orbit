@@ -167,12 +167,20 @@ fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a He
     Ok(value)
 }
 
-pub(crate) fn add_security_headers(headers: &mut HeaderMap, secure: bool) {
+pub(crate) fn add_security_headers(
+    headers: &mut HeaderMap,
+    secure: bool,
+    csp_script_hash: Option<&str>,
+) {
+    let script_source = csp_script_hash
+        .map(|hash| format!("script-src 'self' '{hash}'; "))
+        .unwrap_or_else(|| "script-src 'self'; ".to_owned());
+    let policy = format!(
+        "default-src 'self'; {script_source}style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'"
+    );
     headers.insert(
         CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'",
-        ),
+        HeaderValue::from_str(&policy).expect("validated CSP values form a valid header"),
     );
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(

@@ -3,16 +3,21 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode, header};
+use base64::Engine;
 use http_body_util::BodyExt;
-use orbit_platform::Config;
+use orbit_platform::{Config, EnvironmentMode};
 use orbit_server::app::App;
 use orbit_server::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
 fn app_config(root: &TempDir) -> Config {
-    let mut config = Config::default();
+    let mut config = Config {
+        environment: EnvironmentMode::Development,
+        ..Config::default()
+    };
     config.data.database = root.path().join("data/orbit.sqlite");
     config.data.attachments = root.path().join("data/attachments");
     config.data.backups = root.path().join("backups");
@@ -76,6 +81,52 @@ async fn embedded_spa_uses_safe_cache_policies_and_never_masks_api_404s() {
     let problem: serde_json::Value =
         serde_json::from_slice(&api.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert_eq!(problem["code"], "route_not_found");
+
+    let api_root = assets
+        .router()
+        .oneshot(Request::get("/api").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(api_root.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        api_root.headers()[header::CONTENT_TYPE],
+        "application/problem+json"
+    );
+}
+
+#[tokio::test]
+async fn production_csp_hashes_the_exact_embedded_bootstrap_text() {
+    let root = TempDir::new().unwrap();
+    let app = App::build(app_config(&root)).await.unwrap();
+    let response = app
+        .router()
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let csp = response.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let html = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+    let script_start = html.find("<script>").unwrap() + "<script>".len();
+    let script =
+        &html[script_start..script_start + html[script_start..].find("</script>").unwrap()];
+    let exact_hash = format!(
+        "sha256-{}",
+        base64::engine::general_purpose::STANDARD.encode(Sha256::digest(script.as_bytes()))
+    );
+
+    assert!(csp.contains(&format!("script-src 'self' '{exact_hash}'")));
+    assert!(csp.contains("style-src 'self'; style-src-attr 'unsafe-inline'"));
 }
 
 #[tokio::test]
@@ -209,6 +260,7 @@ async fn app_build_rejects_a_database_inside_live_attachment_storage() {
 async fn trusted_https_proxy_produces_a_secure_host_only_session_cookie() {
     let root = TempDir::new().unwrap();
     let mut config = app_config(&root);
+    config.environment = EnvironmentMode::Production;
     config.http.public_origin = "https://orbit.example".to_owned();
     config.http.trusted_proxies = vec!["127.0.0.1/32".parse().unwrap()];
     let app = App::build(config).await.unwrap();
@@ -241,6 +293,151 @@ async fn trusted_https_proxy_produces_a_secure_host_only_session_cookie() {
     assert!(cookie.starts_with("__Host-orbit_session="));
     assert!(cookie.contains("; Secure; HttpOnly; SameSite=Lax"));
     assert!(response.headers().contains_key("strict-transport-security"));
+}
+
+#[tokio::test]
+async fn api_method_mismatches_are_problem_details() {
+    let root = TempDir::new().unwrap();
+    let app = App::build(app_config(&root)).await.unwrap();
+
+    let response = app
+        .router()
+        .oneshot(
+            Request::put("/api/v1/auth/me")
+                .header(header::ORIGIN, "http://127.0.0.1:8080")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "application/problem+json"
+    );
+    let response_request_id = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let problem: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(problem["code"], "method_not_allowed");
+    assert_eq!(problem["request_id"], response_request_id);
+}
+
+#[tokio::test]
+async fn critical_durable_schedules_exist_before_serve() {
+    let root = TempDir::new().unwrap();
+    let app = App::build(app_config(&root)).await.unwrap();
+
+    let kinds: Vec<String> = sqlx::query_scalar("SELECT job_kind FROM schedules ORDER BY job_kind")
+        .fetch_all(app.database().pool())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        kinds,
+        ["backup.daily", "integrity.weekly", "workspace.retention"]
+    );
+    assert!(app.production_services_ready());
+}
+
+#[tokio::test]
+async fn malformed_critical_schedule_fails_before_serve() {
+    let root = TempDir::new().unwrap();
+    let config = app_config(&root);
+    let first = App::build(config.clone()).await.unwrap();
+    sqlx::query(
+        "UPDATE schedules SET schedule = 'not-a-schedule', next_run_at = 4102444800000 \
+         WHERE job_kind = 'backup.daily'",
+    )
+    .execute(first.database().pool())
+    .await
+    .unwrap();
+    drop(first);
+
+    let error = App::build(config).await.unwrap_err();
+    assert!(error.to_string().contains("invalid stored schedule"));
+}
+
+#[tokio::test]
+async fn overdue_daily_backup_survives_restart_and_runs_immediately() {
+    let root = TempDir::new().unwrap();
+    let first = App::build(app_config(&root)).await.unwrap();
+    first
+        .database()
+        .execute("UPDATE schedules SET next_run_at = 1 WHERE job_kind = 'backup.daily'")
+        .await
+        .unwrap();
+    drop(first);
+
+    let app = App::build(app_config(&root)).await.unwrap();
+    let next_run: i64 =
+        sqlx::query_scalar("SELECT next_run_at FROM schedules WHERE job_kind = 'backup.daily'")
+            .fetch_one(app.database().pool())
+            .await
+            .unwrap();
+    assert_eq!(next_run, 1, "restart must not reset an overdue clock");
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let shutdown = CancellationToken::new();
+    let stop = shutdown.clone();
+    let server = tokio::spawn(app.serve(listener, shutdown));
+    let backup = orbit_platform::BackupService::new(
+        root.path().join("backups"),
+        root.path().join("data/attachments"),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if !backup.list().await.unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the overdue backup runs after restart");
+    stop.cancel();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn weekly_foreign_key_failure_stops_serving() {
+    let root = TempDir::new().unwrap();
+    let config = app_config(&root);
+    let app = App::build(config.clone()).await.unwrap();
+    let mut connection = app.database().pool().acquire().await.unwrap();
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
+         idle_expires_at, absolute_expires_at) VALUES (?, zeroblob(32), ?, 1, 1, 2, 2)",
+    )
+    .bind(orbit_platform::Id::new_v7().to_string())
+    .bind(orbit_platform::Id::new_v7().to_string())
+    .execute(&mut *connection)
+    .await
+    .unwrap();
+    drop(connection);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        app.serve(listener, CancellationToken::new()),
+    )
+    .await
+    .expect("integrity failure stops the server")
+    .unwrap_err();
+
+    assert!(result.to_string().contains("integrity"));
+    let restart = App::build(config).await.unwrap_err();
+    assert!(
+        restart.to_string().contains("integrity"),
+        "a durable full-check failure must remain fail-closed across restart"
+    );
 }
 
 #[tokio::test]

@@ -7,10 +7,12 @@ use std::time::Duration;
 
 use axum::Router;
 use orbit_platform::{
-    AttachmentMutationCoordinator, BackupService, Config, Database, DatabaseConfig, HealthCheck,
-    HealthRegistry, HttpLimits, IntegrityService, LocalBlobStore, MigrationRunner, OriginPolicy,
-    UploadLimits, UploadService, WorkerConfig,
+    BackupService, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry, HttpLimits,
+    IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, MigrationRunner, OriginPolicy,
+    RecurringSchedule, Scheduler, TimestampMillis, UploadLimits, UploadService, Worker,
+    WorkerConfig, run_guarded_migrations,
 };
+use serde_json::json;
 use thiserror::Error;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -32,10 +34,18 @@ pub struct App {
     database: Database,
     router: Router,
     setup_url: Option<String>,
-    workspaces: Arc<WorkspaceRepository>,
     attachments: AttachmentState,
     recovery_delivery: Arc<AdminRecoveryDelivery>,
     metrics: Metrics,
+    backups: BackupService,
+    workspaces: Arc<WorkspaceRepository>,
+    production_services: Option<ProductionServices>,
+}
+
+struct ProductionServices {
+    worker: Worker,
+    scheduler: Scheduler,
+    integrity_failure: CancellationToken,
 }
 
 impl fmt::Debug for App {
@@ -84,6 +94,8 @@ pub enum AppError {
     Background(String),
     #[error("background services did not drain within 30 seconds")]
     DrainTimeout,
+    #[error("production service initialization failed before listener bind: {0}")]
+    ProductionServices(String),
 }
 
 impl App {
@@ -104,18 +116,7 @@ impl App {
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
         let migrations = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
-        let pending = migrations
-            .pending(&database)
-            .await
-            .map_err(|error| AppError::Migration(error.to_string()))?;
-        if pending.iter().any(|migration| migration.destructive) {
-            BackupService::new(&config.data.backups, &config.data.attachments)
-                .create_pre_migration(&database)
-                .await
-                .map_err(|error| AppError::PreMigrationBackup(error.to_string()))?;
-        }
-        migrations
-            .run(&database)
+        run_guarded_migrations(&config, &database, &migrations)
             .await
             .map_err(|error| AppError::Migration(error.to_string()))?;
 
@@ -124,6 +125,18 @@ impl App {
             .quick()
             .await
             .map_err(|error| AppError::Integrity(error.to_string()))?;
+        let unfinished_integrity_jobs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs WHERE kind = 'integrity.weekly' AND state != 'succeeded'",
+        )
+        .fetch_one(database.pool())
+        .await
+        .map_err(|error| AppError::Integrity(error.to_string()))?;
+        if unfinished_integrity_jobs > 0 {
+            integrity
+                .full()
+                .await
+                .map_err(|error| AppError::Integrity(error.to_string()))?;
+        }
 
         let identity = Arc::new(IdentityRepository::new(database.clone()));
         let recovery_delivery = Arc::new(AdminRecoveryDelivery::new(128));
@@ -137,11 +150,13 @@ impl App {
         .await
         .map_err(|error| AppError::Authentication(error.to_string()))?;
 
+        let backups = BackupService::new(&config.data.backups, &config.data.attachments);
         let store: Arc<dyn orbit_platform::BlobStore> =
             Arc::new(LocalBlobStore::new(&config.data.attachments));
-        let workspaces = Arc::new(WorkspaceRepository::with_blob_store(
+        let workspaces = Arc::new(WorkspaceRepository::with_blob_store_and_mutations(
             database.clone(),
             Arc::clone(&store),
+            backups.attachment_mutations(),
         ));
         let upload_limits = UploadLimits::new(
             config.uploads.max_file_bytes,
@@ -153,7 +168,7 @@ impl App {
             UploadService::new(
                 database.clone(),
                 store,
-                AttachmentMutationCoordinator::default(),
+                backups.attachment_mutations(),
                 upload_limits,
             ),
             cookie_mode,
@@ -162,6 +177,15 @@ impl App {
             .reconcile_at(orbit_platform::TimestampMillis::now().as_millis())
             .await
             .map_err(|error| AppError::WritableStorage(error.to_string()))?;
+
+        let production_services = initialize_production_services(
+            &database,
+            Arc::clone(&workspaces),
+            backups.clone(),
+            integrity.clone(),
+            config.jobs.concurrency,
+        )
+        .await?;
 
         let health = health_registry(&config, &database, &integrity);
         if !health.readiness().await.ready {
@@ -194,6 +218,8 @@ impl App {
                     .unwrap_or(usize::MAX),
                 ..HttpLimits::default()
             },
+            config.rate_limits,
+            config.environment == orbit_platform::EnvironmentMode::Production,
         ));
 
         Ok(Self {
@@ -201,10 +227,12 @@ impl App {
             database,
             router,
             setup_url: setup.map(|setup| setup.url),
-            workspaces,
             attachments: attachment_state,
             recovery_delivery,
             metrics,
+            backups,
+            workspaces,
+            production_services: Some(production_services),
         })
     }
 
@@ -236,6 +264,26 @@ impl App {
         self.config.http.listen_addr()
     }
 
+    #[must_use]
+    pub fn production_services_ready(&self) -> bool {
+        self.production_services.is_some()
+    }
+
+    pub async fn create_backup(&self) -> Result<String, AppError> {
+        self.backups
+            .create(&self.database)
+            .await
+            .map(|snapshot| snapshot.id)
+            .map_err(|error| AppError::Background(error.to_string()))
+    }
+
+    pub async fn run_retention_maintenance(&self) -> Result<(), AppError> {
+        self.workspaces
+            .run_retention_maintenance()
+            .await
+            .map_err(|error| AppError::Background(error.to_string()))
+    }
+
     pub async fn run(self, shutdown: CancellationToken) -> Result<(), AppError> {
         let address = self.listen_addr();
         let listener = tokio::net::TcpListener::bind(address)
@@ -245,7 +293,7 @@ impl App {
     }
 
     pub async fn serve(
-        self,
+        mut self,
         listener: tokio::net::TcpListener,
         shutdown: CancellationToken,
     ) -> Result<(), AppError> {
@@ -266,16 +314,22 @@ impl App {
             });
         }
 
-        let workspaces = Arc::clone(&self.workspaces);
+        let production = self.production_services.take().ok_or_else(|| {
+            AppError::ProductionServices("production services were already started".to_owned())
+        })?;
+        let integrity_failure = production.integrity_failure.clone();
         let token = service_shutdown.clone();
-        let worker_config = WorkerConfig::new(self.config.jobs.concurrency)
-            .map_err(|error| AppError::Config(error.to_string()))?;
         services.spawn(async move {
-            workspaces
-                .run_retention_service(token, Duration::from_secs(24 * 60 * 60), worker_config)
+            production
+                .worker
+                .run(token)
                 .await
                 .map_err(|error| error.to_string())
         });
+        let database = self.database.clone();
+        let scheduler = production.scheduler;
+        let token = service_shutdown.clone();
+        services.spawn(async move { run_scheduler_service(scheduler, database, token).await });
         let attachments = self.attachments.clone();
         let token = service_shutdown.clone();
         services.spawn(async move {
@@ -284,11 +338,6 @@ impl App {
                 .await
                 .map_err(|error| error.to_string())
         });
-        let backups = BackupService::new(&self.config.data.backups, &self.config.data.attachments);
-        let database = self.database.clone();
-        let token = service_shutdown.clone();
-        services.spawn(async move { run_backup_service(backups, database, token).await });
-
         let http_shutdown = CancellationToken::new();
         let server = axum::serve(
             listener,
@@ -300,21 +349,24 @@ impl App {
         tokio::pin!(server);
 
         let mut background_error = None;
+        let mut http_result = None;
         tokio::select! {
-            result = &mut server => result.map_err(AppError::Http)?,
-            () = shutdown.cancelled() => {
-                http_shutdown.cancel();
-                server.await.map_err(AppError::Http)?;
+            result = &mut server => http_result = Some(result),
+            () = shutdown.cancelled() => {}
+            () = integrity_failure.cancelled() => {
+                background_error = Some("weekly full database integrity check failed".to_owned());
             }
             result = services.join_next() => {
                 background_error = Some(joined_service_error(result));
-                http_shutdown.cancel();
-                server.await.map_err(AppError::Http)?;
             }
         }
 
+        http_shutdown.cancel();
         service_shutdown.cancel();
         let drain = async {
+            if http_result.is_none() {
+                http_result = Some(server.await);
+            }
             while let Some(result) = services.join_next().await {
                 if background_error.is_none() {
                     let error = joined_service_error(Some(result));
@@ -325,10 +377,12 @@ impl App {
             }
         };
         if tokio::time::timeout(BACKGROUND_DRAIN, drain).await.is_err() {
-            services.abort_all();
-            while services.join_next().await.is_some() {}
+            abort_services(&mut services);
             return Err(AppError::DrainTimeout);
         }
+        http_result
+            .expect("HTTP server result is recorded during drain")
+            .map_err(AppError::Http)?;
         match background_error {
             Some(error) => Err(AppError::Background(error)),
             None => Ok(()),
@@ -337,11 +391,16 @@ impl App {
 }
 
 fn cookie_mode(config: &Config) -> Result<CookieMode, AppError> {
-    if config.http.public_origin.starts_with("https://") {
-        return Ok(CookieMode::secure());
+    match config.environment {
+        orbit_platform::EnvironmentMode::Production => Ok(CookieMode::secure()),
+        orbit_platform::EnvironmentMode::Development => {
+            CookieMode::loopback_development(config.http.listen_addr())
+                .map_err(|error| AppError::Config(error.to_string()))
+        }
+        orbit_platform::EnvironmentMode::Unspecified => Err(AppError::Config(
+            "environment must be explicitly configured".to_owned(),
+        )),
     }
-    CookieMode::loopback_development(config.http.listen_addr())
-        .map_err(|error| AppError::Config(error.to_string()))
 }
 
 fn ensure_writable_directory(path: &Path) -> Result<(), AppError> {
@@ -441,11 +500,21 @@ fn health_registry(
     health.register(HealthCheck::Scheduler, move || {
         let database = scheduler_database.clone();
         async move {
-            database
-                .scalar::<i64>("SELECT COUNT(*) FROM schedules")
+            let count = database
+                .scalar::<i64>(
+                    "SELECT COUNT(DISTINCT job_kind) FROM schedules WHERE enabled = 1 \
+                     AND job_kind IN ('workspace.retention', 'backup.daily', 'integrity.weekly')",
+                )
                 .await
-                .map(|_| ())
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            if count == 3 {
+                Scheduler::new(JobStore::new(database))
+                    .validate_enabled()
+                    .await
+                    .map_err(|error| error.to_string())
+            } else {
+                Err("critical production schedules are not initialized".to_owned())
+            }
         }
     });
     let checked_config = config.clone();
@@ -456,19 +525,162 @@ fn health_registry(
     health
 }
 
-async fn run_backup_service(
+async fn initialize_production_services(
+    database: &Database,
+    workspaces: Arc<WorkspaceRepository>,
     backups: BackupService,
+    integrity: IntegrityService,
+    concurrency: usize,
+) -> Result<ProductionServices, AppError> {
+    let store = JobStore::new(database.clone());
+    let scheduler = Scheduler::new(store.clone());
+    let failure = CancellationToken::new();
+    let retention_repository = Arc::clone(&workspaces);
+    let backup_service = backups;
+    let backup_database = database.clone();
+    let integrity_service = integrity;
+    let integrity_failure = failure.clone();
+    let worker_config = WorkerConfig::new(concurrency)
+        .map_err(|error| AppError::ProductionServices(error.to_string()))?;
+    let worker = Worker::new(store, worker_config)
+        .with_handler(maintenance_kind("workspace.retention"), move |_| {
+            let repository = Arc::clone(&retention_repository);
+            async move {
+                repository
+                    .run_retention_maintenance()
+                    .await
+                    .map_err(|_| JobError::Retryable("retention maintenance failed".to_owned()))
+            }
+        })
+        .and_then(|worker| {
+            worker.with_handler(maintenance_kind("backup.daily"), move |context| {
+                let backups = backup_service.clone();
+                let database = backup_database.clone();
+                async move {
+                    backups
+                        .create_cancellable(&database, context.cancellation_token())
+                        .await
+                        .map(|_| ())
+                        .map_err(|_| JobError::Retryable("automatic backup failed".to_owned()))
+                }
+            })
+        })
+        .and_then(|worker| {
+            worker.with_handler(integrity_kind(), move |_| {
+                let integrity = integrity_service.clone();
+                let failure = integrity_failure.clone();
+                async move {
+                    integrity.full().await.map_err(|error| {
+                        failure.cancel();
+                        JobError::Permanent(error.to_string())
+                    })
+                }
+            })
+        })
+        .map_err(|error| AppError::ProductionServices(error.to_string()))?;
+
+    let now = database
+        .database_now()
+        .await
+        .map_err(|error| AppError::ProductionServices(error.to_string()))?;
+    ensure_schedule(
+        database,
+        &scheduler,
+        "workspace.retention",
+        Duration::from_secs(24 * 60 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        database,
+        &scheduler,
+        "backup.daily",
+        Duration::from_secs(24 * 60 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        database,
+        &scheduler,
+        "integrity.weekly",
+        Duration::from_secs(7 * 24 * 60 * 60),
+        now,
+    )
+    .await?;
+    scheduler
+        .validate_enabled()
+        .await
+        .map_err(|error| AppError::ProductionServices(error.to_string()))?;
+
+    Ok(ProductionServices {
+        worker,
+        scheduler,
+        integrity_failure: failure,
+    })
+}
+
+async fn ensure_schedule(
+    database: &Database,
+    scheduler: &Scheduler,
+    kind: &str,
+    cadence: Duration,
+    now: TimestampMillis,
+) -> Result<(), AppError> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM schedules WHERE job_kind = ?")
+        .bind(kind)
+        .fetch_one(database.pool())
+        .await
+        .map_err(|error| AppError::ProductionServices(error.to_string()))?;
+    if count > 1 {
+        return Err(AppError::ProductionServices(format!(
+            "multiple durable schedules exist for {kind}"
+        )));
+    }
+    if count == 0 {
+        scheduler
+            .upsert(&RecurringSchedule::interval(
+                if kind == "integrity.weekly" {
+                    integrity_kind()
+                } else {
+                    maintenance_kind(kind)
+                },
+                json!({}),
+                cadence,
+                now,
+            ))
+            .await
+            .map_err(|error| AppError::ProductionServices(error.to_string()))?;
+    }
+    Ok(())
+}
+
+fn maintenance_kind(name: &str) -> JobKind {
+    JobKind::new(name).with_concurrency_limit(1)
+}
+
+fn integrity_kind() -> JobKind {
+    JobKind::new("integrity.weekly")
+        .with_retry_policy(1, Vec::new())
+        .with_concurrency_limit(1)
+}
+
+async fn run_scheduler_service(
+    scheduler: Scheduler,
     database: Database,
     shutdown: CancellationToken,
 ) -> Result<(), String> {
-    let mut interval = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
-    interval.tick().await;
     loop {
+        let now = database
+            .database_now()
+            .await
+            .map_err(|error| error.to_string())?;
+        scheduler
+            .materialize_due(now)
+            .await
+            .map_err(|error| error.to_string())?;
         tokio::select! {
             () = shutdown.cancelled() => return Ok(()),
-            _ = interval.tick() => {
-                backups.create(&database).await.map_err(|error| error.to_string())?;
-            }
+            () = tokio::time::sleep(Duration::from_secs(60)) => {}
         }
     }
 }
@@ -481,5 +693,123 @@ fn joined_service_error(
         Some(Ok(Ok(()))) => "background service stopped after shutdown".to_owned(),
         Some(Ok(Err(error))) => error,
         Some(Err(error)) => error.to_string(),
+    }
+}
+
+fn abort_services(services: &mut JoinSet<Result<(), String>>) {
+    services.abort_all();
+}
+
+#[cfg(test)]
+async fn drain_services(services: &mut JoinSet<Result<(), String>>, deadline: Duration) -> bool {
+    let drain = async { while services.join_next().await.is_some() {} };
+    if tokio::time::timeout(deadline, drain).await.is_err() {
+        abort_services(services);
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orbit_platform::{EnvironmentMode, Id};
+    use tempfile::TempDir;
+    use tokio::io::AsyncWriteExt;
+
+    fn test_config(root: &TempDir) -> Config {
+        let mut config = Config {
+            environment: EnvironmentMode::Development,
+            ..Config::default()
+        };
+        config.data.database = root.path().join("data/orbit.sqlite");
+        config.data.attachments = root.path().join("data/attachments");
+        config.data.backups = root.path().join("backups");
+        config
+    }
+
+    #[tokio::test]
+    async fn composed_backup_waits_for_a_live_upload_mutation() {
+        let root = TempDir::new().unwrap();
+        let app = App::build(test_config(&root)).await.unwrap();
+        let uploads = app.attachments.uploads.clone();
+        let (mut writer, reader) = tokio::io::duplex(64);
+        writer.write_all(b"in progress").await.unwrap();
+        let upload = tokio::spawn(async move {
+            uploads
+                .stage(Id::new_v7(), Id::new_v7(), "progress.txt", reader)
+                .await
+        });
+        let temporary = root.path().join("data/attachments/temporary");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if std::fs::read_dir(&temporary).is_ok_and(|mut entries| entries.next().is_some()) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let backups = app.backups.clone();
+        let database = app.database.clone();
+        let mut backup = tokio::spawn(async move { backups.create(&database).await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut backup)
+                .await
+                .is_err(),
+            "backup must wait while the composed upload service holds the mutation guard"
+        );
+
+        drop(writer);
+        upload.await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), backup)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn composed_backup_waits_for_retention_attachment_mutation() {
+        let root = TempDir::new().unwrap();
+        let app = App::build(test_config(&root)).await.unwrap();
+        let transaction = app.database.immediate_transaction().await.unwrap();
+        let workspaces = Arc::clone(&app.workspaces);
+        let retention = tokio::spawn(async move { workspaces.run_retention_maintenance().await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let backups = app.backups.clone();
+        let database = app.database.clone();
+        let mut backup = tokio::spawn(async move { backups.create(&database).await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut backup)
+                .await
+                .is_err(),
+            "backup must wait while retention holds the shared mutation guard"
+        );
+
+        transaction.rollback().await.unwrap();
+        retention.await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), backup)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_deadline_does_not_join_a_non_yielding_service() {
+        let mut services = JoinSet::new();
+        services.spawn(async {
+            std::thread::sleep(Duration::from_millis(500));
+            Ok::<(), String>(())
+        });
+
+        let started = std::time::Instant::now();
+        assert!(drain_services(&mut services, Duration::from_millis(20)).await);
+        assert!(started.elapsed() < Duration::from_millis(250));
     }
 }

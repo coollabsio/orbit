@@ -25,12 +25,12 @@ pub use backup::{
     BackupManifest, BackupService, BackupSnapshot,
 };
 pub use config::{
-    Config, ConfigError, ConfigOverride, ConfigSources, DataConfig, HttpConfig, JobsConfig,
-    MetricsConfig, Secret, UploadConfig,
+    Config, ConfigError, ConfigOverride, ConfigSources, DataConfig, EnvironmentMode, HttpConfig,
+    JobsConfig, MetricsConfig, RateLimitConfig, Secret, UploadConfig,
 };
 pub use db::{
-    Database, DatabaseConfig, DatabaseError, Migration, MigrationError, MigrationRunner,
-    PendingMigration, TestDatabase, TestDatabaseError,
+    Database, DatabaseConfig, DatabaseError, GuardedMigrationError, Migration, MigrationError,
+    MigrationRunner, PendingMigration, TestDatabase, TestDatabaseError, run_guarded_migrations,
 };
 pub use files::{
     AuthorizedAttachment, BlobDownload, BlobFuture, BlobObject, BlobReader, BlobStore,

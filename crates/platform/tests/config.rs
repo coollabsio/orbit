@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orbit_platform::{Config, ConfigOverride, ConfigSources};
+use orbit_platform::{Config, ConfigOverride, ConfigSources, EnvironmentMode};
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
@@ -21,6 +21,11 @@ fn load_fixture<const N: usize>(
     cli_port: Option<u16>,
 ) -> Result<Config, orbit_platform::ConfigError> {
     let path = fixture_path("config.toml");
+    let toml = if toml.contains("environment =") {
+        toml.to_owned()
+    } else {
+        format!("environment = \"development\"\n{toml}")
+    };
     fs::write(&path, toml).unwrap();
     let result = Config::load(ConfigSources {
         path: path.clone(),
@@ -34,6 +39,21 @@ fn load_fixture<const N: usize>(
     });
     let _ = fs::remove_file(path);
     result
+}
+
+#[test]
+fn environment_mode_must_be_explicit() {
+    let path = fixture_path("missing-environment.toml");
+    fs::write(&path, "http.port = 8080").unwrap();
+    let error = Config::load(ConfigSources {
+        path: path.clone(),
+        env: BTreeMap::new(),
+        cli: ConfigOverride::default(),
+    })
+    .unwrap_err();
+    let _ = fs::remove_file(path);
+
+    assert!(error.to_string().contains("environment"));
 }
 
 #[test]
@@ -147,6 +167,8 @@ fn malformed_toml_error_does_not_echo_secret_contents() {
 fn deployment_config_parses_tailscale_friendly_bind_and_durable_paths() {
     let cfg = load_fixture(
         r#"
+        environment = "production"
+
         [http]
         bind = "0.0.0.0"
         port = 8080
@@ -203,8 +225,10 @@ fn deployment_environment_overrides_bind_origin_paths_and_worker_count() {
     let cfg = load_fixture(
         "http.port = 8080",
         [
+            ("ORBIT__ENVIRONMENT", "production"),
             ("ORBIT__HTTP__BIND", "100.64.0.12"),
             ("ORBIT__HTTP__PUBLIC_ORIGIN", "https://orbit.example"),
+            ("ORBIT__HTTP__TRUSTED_PROXIES", "100.64.0.0/10"),
             ("ORBIT__DATA__DATABASE", "/srv/orbit.sqlite"),
             ("ORBIT__DATA__ATTACHMENTS", "/srv/attachments"),
             ("ORBIT__DATA__BACKUPS", "/mnt/backups"),
@@ -226,6 +250,66 @@ fn deployment_environment_overrides_bind_origin_paths_and_worker_count() {
     assert_eq!(cfg.uploads.max_file_bytes, 8 * 1024 * 1024);
     assert_eq!(cfg.uploads.max_request_bytes, 32 * 1024 * 1024);
     assert_eq!(cfg.metrics.listen.unwrap().to_string(), "100.64.0.12:9100");
+}
+
+#[test]
+fn environment_mode_restricts_cookie_and_proxy_boundaries() {
+    let development = load_fixture("environment = \"development\"", [], None).unwrap();
+    assert_eq!(development.environment, EnvironmentMode::Development);
+
+    let insecure = load_fixture(
+        "environment = \"production\"\nhttp.public_origin = \"http://127.0.0.1:8080\"",
+        [],
+        None,
+    )
+    .unwrap_err();
+    assert!(insecure.to_string().contains("production"));
+
+    let missing_proxy = load_fixture(
+        "environment = \"production\"\nhttp.public_origin = \"https://orbit.example\"",
+        [],
+        None,
+    )
+    .unwrap_err();
+    assert!(missing_proxy.to_string().contains("trusted proxy"));
+
+    let exposed_development = load_fixture(
+        "environment = \"development\"\nhttp.bind = \"0.0.0.0\"",
+        [],
+        None,
+    )
+    .unwrap_err();
+    assert!(exposed_development.to_string().contains("loopback"));
+}
+
+#[test]
+fn endpoint_class_rate_limits_are_configurable() {
+    let cfg = load_fixture(
+        r#"
+        [rate_limits]
+        authentication_per_minute = 2
+        recovery_per_minute = 3
+        invitation_per_minute = 4
+        upload_per_minute = 5
+        general_per_minute = 6
+        "#,
+        [],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(cfg.rate_limits.authentication_per_minute, 2);
+    assert_eq!(cfg.rate_limits.recovery_per_minute, 3);
+    assert_eq!(cfg.rate_limits.invitation_per_minute, 4);
+    assert_eq!(cfg.rate_limits.upload_per_minute, 5);
+    assert_eq!(cfg.rate_limits.general_per_minute, 6);
+}
+
+#[test]
+fn endpoint_class_rate_limits_reject_unsafe_values() {
+    let error = load_fixture("[rate_limits]\ngeneral_per_minute = 1000001", [], None).unwrap_err();
+
+    assert!(error.to_string().contains("cannot exceed 1000000"));
 }
 
 #[test]

@@ -15,13 +15,13 @@ Orbit deliberately binds last. Read the first error and keep the process stopped
 
 ## Integrity or readiness fails
 
-`/health/ready` returns 503 when a required check fails. Remove the instance from proxy traffic, stop Orbit, and preserve the current data directory.
+`/health/ready` returns 503 when a required check fails. Orbit also runs a durable weekly full SQLite integrity and foreign-key check. A failed or interrupted full check stops normal HTTP traffic and exits the process; an unfinished integrity job forces another full check before a restart can bind. Remove the instance from proxy traffic and preserve the current data directory.
 
 Do not attempt automatic repair. Verify a known-good backup, restore it with the documented stopped-server procedure, and retain the damaged copy for investigation. `/health/live` may remain 200 because it reports process liveness, not data safety.
 
 ## A background service fails
 
-Retention, reconciliation, or automatic backup failure cancels normal serving. The process drains HTTP and exits with a non-zero error. Fix the reported database or storage condition, verify backups, and restart. Durable job leases recover after expiry; do not edit the jobs table.
+Retention, reconciliation, scheduler, or integrity supervision failure cancels normal serving. Daily backups, weekly integrity checks, and retention use durable schedules, so an overdue run is materialized immediately after restart. The process stops accepting HTTP and tells workers to stop claiming jobs immediately, then bounds the combined drain to 30 seconds. Fix the reported database or storage condition, verify backups, and restart. Durable job leases recover after expiry; do not edit the jobs table.
 
 ## Restore rollback or ownership error
 
@@ -42,4 +42,7 @@ Stop Orbit and use `orbit --config config/orbit.toml recovery-link --email <emai
 - Requests from untrusted peers cannot supply trusted request IDs or forwarded transport.
 - Unsafe API calls with a missing or different `Origin` must return `origin_forbidden`.
 - Unknown `/api/*` paths must return `application/problem+json`, never SPA HTML.
+- `/api` itself and wrong methods on known API routes must return Problem Details.
+- Production mode requires an HTTPS public origin and at least one explicitly trusted proxy. Requests without a verified HTTPS transport are rejected. Development mode is loopback-only.
+- Tune `[rate_limits]` only after observing the endpoint-class defaults. Values must be between 1 and 1,000,000 requests per minute. Limit responses are correlated `429` Problem Details; IPv6 clients are grouped by `/64` and the in-memory limiter has a hard entry cap.
 - If metrics are enabled, the configured private `/metrics` listener must be reachable only by the monitoring network and must not appear on the public listener.

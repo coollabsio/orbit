@@ -3,9 +3,11 @@ use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{Method, Response, StatusCode, header};
 use axum::routing::get;
+use base64::Engine;
 use include_dir::{Dir, include_dir};
 use orbit_platform::{Problem, RequestId};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 static FRONTEND: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../web/dist");
@@ -14,8 +16,10 @@ pub const FRONTEND_REVISION: &str = match option_env!("ORBIT_BUILD_REVISION") {
     None => "development",
 };
 
-#[derive(Clone, Copy)]
-pub struct StaticAssets;
+#[derive(Clone)]
+pub struct StaticAssets {
+    csp_script_hash: String,
+}
 
 #[derive(Debug, Error)]
 pub enum StaticAssetError {
@@ -29,12 +33,15 @@ pub enum StaticAssetError {
     RevisionMismatch { expected: String, actual: String },
     #[error("embedded frontend index is missing")]
     MissingIndex,
+    #[error("embedded frontend bootstrap CSP hash does not match index.html")]
+    CspHashMismatch,
 }
 
 #[derive(Deserialize)]
 struct BuildManifest {
     contract: String,
     revision: String,
+    csp_script_hash: String,
 }
 
 impl StaticAssets {
@@ -59,25 +66,50 @@ impl StaticAssets {
                 actual: manifest.revision,
             });
         }
-        if FRONTEND.get_file("index.html").is_none() {
-            return Err(StaticAssetError::MissingIndex);
+        let index = FRONTEND
+            .get_file("index.html")
+            .ok_or(StaticAssetError::MissingIndex)?;
+        let actual_hash =
+            inline_script_hash(index.contents()).ok_or(StaticAssetError::CspHashMismatch)?;
+        if manifest.csp_script_hash != actual_hash {
+            return Err(StaticAssetError::CspHashMismatch);
         }
-        Ok(Self)
+        Ok(Self {
+            csp_script_hash: actual_hash,
+        })
     }
 
-    pub fn router(self) -> Router {
+    pub fn router(&self) -> Router {
         Router::new()
             .route("/", get(serve_index))
             .fallback(serve_fallback)
     }
 
-    pub fn immutable_asset_path(self) -> Option<String> {
+    pub fn immutable_asset_path(&self) -> Option<String> {
         FRONTEND
             .get_dir("assets")?
             .files()
             .next()
             .map(|file| format!("/{}", file.path().to_string_lossy()))
     }
+
+    #[must_use]
+    pub fn csp_script_hash(&self) -> &str {
+        &self.csp_script_hash
+    }
+}
+
+fn inline_script_hash(index: &[u8]) -> Option<String> {
+    let index = std::str::from_utf8(index).ok()?;
+    let start = index.find("<script>")? + "<script>".len();
+    let remainder = &index[start..];
+    let end = remainder.find("</script>")?;
+    let script = &remainder[..end];
+    let digest = Sha256::digest(script.as_bytes());
+    Some(format!(
+        "sha256-{}",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    ))
 }
 
 async fn serve_index() -> Response<Body> {
@@ -87,7 +119,7 @@ async fn serve_index() -> Response<Body> {
 async fn serve_fallback(request: Request) -> Response<Body> {
     let path = request.uri().path().to_owned();
     let request_id = request.extensions().get::<RequestId>().cloned();
-    if path.starts_with("/api/") {
+    if path == "/api" || path.starts_with("/api/") {
         return not_found_problem(&path, request_id.as_ref());
     }
     if !matches!(*request.method(), Method::GET | Method::HEAD) {

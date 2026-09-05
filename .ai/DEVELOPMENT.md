@@ -16,6 +16,8 @@ just dev
 
 `just dev` starts Orbit at `http://127.0.0.1:8080` and Vite at `http://127.0.0.1:8888`. Vite proxies `/api` to the Rust server. The recipe records and stops only its own child processes.
 
+`just db-reset` is an explicit development-only destructive reset. `just seed` is idempotent and prints the local seed account credentials after creating a representative workspace, project, workflow, and task.
+
 The underlying commands are:
 
 ```bash
@@ -23,7 +25,7 @@ cd apps/web
 bun install --frozen-lockfile
 bun run dev -- --host 127.0.0.1 --port 8888 --strictPort
 
-ORBIT_ENV=development cargo run -p orbit-server -- \
+ORBIT_ENV=development ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- \
   --database data/development.sqlite \
   --attachments data/attachments \
   --backups backups \
@@ -133,7 +135,7 @@ Restore procedure:
 5. Run `orbit --config config/orbit.toml migrate status`.
 6. Start Orbit and check `/health/ready` before sending traffic.
 
-Automatic backups run every 24 hours. Orbit retains 7 daily and 4 weekly verified snapshots. Operators must copy backups off-host and protect their permissions.
+Daily backups and weekly full database integrity checks use durable schedules. An overdue run executes after restart instead of resetting its clock. Upload and retention file mutations share the backup pause, and scheduled backup file work is cancellable during shutdown. Orbit retains 7 daily and 4 weekly verified snapshots. Operators must copy backups off-host and protect their permissions.
 
 ## Invitations, recovery, and SMTP status
 
@@ -154,4 +156,4 @@ Share that URL through an authenticated channel. Do not put it in logs or ticket
 - `GET /health/live` proves the event loop responds.
 - `GET /health/ready` checks migrations, SQLite integrity, writable storage, scheduler tables, and critical config.
 - The optional private metrics listener exposes bounded, identifier-free Prometheus counters at `GET /metrics`.
-- Send SIGINT or SIGTERM through the container runtime. Orbit stops accepting HTTP, drains requests, then gives durable jobs 30 seconds to finish.
+- Send SIGINT or SIGTERM through the container runtime. Orbit stops accepting HTTP and stops new job claims immediately, then gives the combined HTTP and worker drain 30 seconds to finish.

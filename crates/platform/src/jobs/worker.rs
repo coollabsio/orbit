@@ -32,6 +32,11 @@ impl JobContext {
     pub fn is_cancelled(&self) -> bool {
         self.cancellation.is_cancelled()
     }
+
+    #[must_use]
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation.clone()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -241,7 +246,6 @@ impl Worker {
             .is_err()
         {
             tasks.abort_all();
-            while tasks.join_next().await.is_some() {}
         }
 
         match first_error {

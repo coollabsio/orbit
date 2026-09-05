@@ -21,7 +21,7 @@ dev:
     }
     trap cleanup EXIT
     trap 'exit 0' INT TERM
-    cargo run -p orbit-server -- serve --listen 127.0.0.1:8080 --origin http://127.0.0.1:8888 &
+    ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- serve --listen 127.0.0.1:8080 --origin http://127.0.0.1:8888 &
     server_pid=$!
     (cd apps/web && bun run dev -- --port 8888) &
     web_pid=$!
@@ -63,10 +63,10 @@ api-check:
     diff -ru apps/web/src/api/generated "$first"
 
 db-reset:
-    ORBIT_ENV=development cargo run -p orbit-server -- db-reset
+    ORBIT_ENV=development ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- db-reset --yes
 
 seed:
-    ORBIT_ENV=development cargo run -p orbit-server -- seed
+    ORBIT_ENV=development ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- seed
 
 e2e:
     #!/usr/bin/env bash
@@ -85,8 +85,8 @@ e2e:
     }
     trap cleanup EXIT
     trap 'exit 0' INT TERM
-    setup_url=$(cargo run -q -p orbit-server -- --database "$data_dir/orbit.sqlite" setup-token init --origin http://127.0.0.1:8888)
-    cargo run -p orbit-server -- --database "$data_dir/orbit.sqlite" --attachments "$data_dir/attachments" --backups "$data_dir/backups" serve --listen 127.0.0.1:18080 --origin http://127.0.0.1:8888 &
+    setup_url=$(ORBIT__ENVIRONMENT=development cargo run -q -p orbit-server -- --database "$data_dir/orbit.sqlite" setup-token init --origin http://127.0.0.1:8888)
+    ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- --database "$data_dir/orbit.sqlite" --attachments "$data_dir/attachments" --backups "$data_dir/backups" serve --listen 127.0.0.1:18080 --origin http://127.0.0.1:8888 &
     server_pid=$!
     (cd apps/web && ORBIT_SETUP_URL="$setup_url" bun x playwright test) &
     e2e_pid=$!

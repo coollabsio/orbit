@@ -43,7 +43,7 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 pub struct AttachmentState {
     identity: Arc<IdentityRepository>,
     tasks: Arc<TaskRepository>,
-    uploads: UploadService,
+    pub(crate) uploads: UploadService,
     attachments: Arc<AttachmentRepository>,
     cookie_mode: CookieMode,
 }

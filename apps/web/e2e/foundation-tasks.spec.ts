@@ -122,7 +122,7 @@ async function createTaskWithAttachment(page: Page) {
 
   await page.getByRole('button', { name: 'Add label' }).click()
   await page.getByRole('button', { name: 'Unused label' }).click()
-  await expect(page.getByText('Unused label')).toBeVisible()
+  await expect(page.locator('.tasks-label-pill').filter({ hasText: 'Unused label' })).toBeVisible()
 
   const status = page.locator('.tasks-side-group').first().getByRole('button').first()
   await status.click()

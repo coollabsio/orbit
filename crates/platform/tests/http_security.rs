@@ -15,7 +15,7 @@ use axum::{Extension, Json, Router};
 use ipnet::IpNet;
 use orbit_platform::{
     ClientIp, HealthCheck, HealthRegistry, HttpLimits, HttpPlatformLayer, Id, OriginPolicy,
-    RequestId, RequestTransport,
+    RateLimitConfig, RequestId, RequestTransport,
 };
 use serde_json::Value;
 use tower::{Layer, Service, ServiceExt, service_fn};
@@ -512,4 +512,94 @@ async fn readiness_requires_every_named_platform_check() {
     assert!(!readiness.ready);
     assert_eq!(readiness.checks.len(), 5);
     assert!(!readiness.checks["scheduler"].ready);
+}
+
+#[tokio::test]
+async fn endpoint_class_limits_return_correlated_problem_details() {
+    let app = Router::new()
+        .route(
+            "/api/v1/recovery/request",
+            post(|| async { StatusCode::OK }),
+        )
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("http://127.0.0.1")).with_rate_limits(
+                RateLimitConfig {
+                    recovery_per_minute: 1,
+                    ..RateLimitConfig::default()
+                },
+            ),
+        );
+    let request = || {
+        Request::post("/api/v1/recovery/request")
+            .header("origin", "http://127.0.0.1")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4567))))
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    assert_eq!(
+        app.clone().oneshot(request()).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let response = app.oneshot(request()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
+    let response_request_id = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let problem: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(problem["code"], "rate_limit_exceeded");
+    assert_eq!(problem["request_id"], response_request_id);
+}
+
+#[tokio::test]
+async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() {
+    let app = Router::new()
+        .route("/", get(|| async { StatusCode::OK }))
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("http://127.0.0.1"))
+                .with_csp_script_hash("sha256-YWJj"),
+        );
+
+    let response = app
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let csp = response.headers()[CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap();
+    assert!(csp.contains("script-src 'self' 'sha256-YWJj'"));
+    assert!(csp.contains("img-src 'self' data: blob:"));
+    assert!(csp.contains("style-src 'self'; style-src-attr 'unsafe-inline'"));
+    assert!(!csp.contains("img-src 'self' https:"));
+}
+
+#[tokio::test]
+async fn production_boundary_rejects_requests_without_verified_https_transport() {
+    let app = Router::new()
+        .route("/", get(|| async { StatusCode::OK }))
+        .layer(
+            HttpPlatformLayer::new(
+                OriginPolicy::new("https://orbit.test")
+                    .trust_proxy(IpNet::from_str("127.0.0.1/32").unwrap()),
+            )
+            .require_secure_transport(),
+        );
+
+    let response = app
+        .oneshot(
+            Request::get("/")
+                .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4567))))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let problem: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(problem["code"], "https_required");
 }

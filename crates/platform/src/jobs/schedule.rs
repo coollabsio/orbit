@@ -265,6 +265,21 @@ impl Scheduler {
         }
         Ok(created)
     }
+
+    /// Decodes every enabled durable schedule so corrupt definitions fail readiness before work
+    /// is accepted.
+    pub async fn validate_enabled(&self) -> Result<(), ScheduleError> {
+        let rows = sqlx::query(
+            "SELECT id, workspace_id, job_kind, payload_json, schedule, next_run_at, \
+             catch_up_mode FROM schedules WHERE enabled = 1 ORDER BY id",
+        )
+        .fetch_all(self.store.database().pool())
+        .await?;
+        for row in &rows {
+            decode_schedule(row, &self.store)?;
+        }
+        Ok(())
+    }
 }
 
 fn decode_schedule(

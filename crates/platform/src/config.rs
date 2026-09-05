@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use axum::http::Uri;
 use ipnet::IpNet;
@@ -15,6 +16,7 @@ const HTTP_PORT_ENV: &str = "ORBIT__HTTP__PORT";
 const HTTP_BIND_ENV: &str = "ORBIT__HTTP__BIND";
 const HTTP_PUBLIC_ORIGIN_ENV: &str = "ORBIT__HTTP__PUBLIC_ORIGIN";
 const HTTP_TRUSTED_PROXIES_ENV: &str = "ORBIT__HTTP__TRUSTED_PROXIES";
+const ENVIRONMENT_ENV: &str = "ORBIT__ENVIRONMENT";
 const DATA_DATABASE_ENV: &str = "ORBIT__DATA__DATABASE";
 const DATA_ATTACHMENTS_ENV: &str = "ORBIT__DATA__ATTACHMENTS";
 const DATA_BACKUPS_ENV: &str = "ORBIT__DATA__BACKUPS";
@@ -22,16 +24,54 @@ const JOBS_CONCURRENCY_ENV: &str = "ORBIT__JOBS__CONCURRENCY";
 const UPLOADS_MAX_FILE_BYTES_ENV: &str = "ORBIT__UPLOADS__MAX_FILE_BYTES";
 const UPLOADS_MAX_REQUEST_BYTES_ENV: &str = "ORBIT__UPLOADS__MAX_REQUEST_BYTES";
 const METRICS_LISTEN_ENV: &str = "ORBIT__METRICS__LISTEN";
+const RATE_AUTH_ENV: &str = "ORBIT__RATE_LIMITS__AUTHENTICATION_PER_MINUTE";
+const RATE_RECOVERY_ENV: &str = "ORBIT__RATE_LIMITS__RECOVERY_PER_MINUTE";
+const RATE_INVITATION_ENV: &str = "ORBIT__RATE_LIMITS__INVITATION_PER_MINUTE";
+const RATE_UPLOAD_ENV: &str = "ORBIT__RATE_LIMITS__UPLOAD_PER_MINUTE";
+const RATE_GENERAL_ENV: &str = "ORBIT__RATE_LIMITS__GENERAL_PER_MINUTE";
 const SECRETS_ENV_PREFIX: &str = "ORBIT__SECRETS__";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Config {
+    pub environment: EnvironmentMode,
     pub http: HttpConfig,
     pub data: DataConfig,
     pub jobs: JobsConfig,
     pub uploads: UploadConfig,
     pub metrics: MetricsConfig,
+    pub rate_limits: RateLimitConfig,
     pub secrets: BTreeMap<String, Secret>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EnvironmentMode {
+    #[default]
+    Unspecified,
+    Development,
+    Production,
+}
+
+impl FromStr for EnvironmentMode {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "development" => Ok(Self::Development),
+            "production" => Ok(Self::Production),
+            _ => Err(()),
+        }
+    }
+}
+
+impl EnvironmentMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::Development => "development",
+            Self::Production => "production",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,6 +146,27 @@ impl Default for UploadConfig {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MetricsConfig {
     pub listen: Option<SocketAddr>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RateLimitConfig {
+    pub authentication_per_minute: u32,
+    pub recovery_per_minute: u32,
+    pub invitation_per_minute: u32,
+    pub upload_per_minute: u32,
+    pub general_per_minute: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            authentication_per_minute: 30,
+            recovery_per_minute: 10,
+            invitation_per_minute: 60,
+            upload_per_minute: 120,
+            general_per_minute: 600,
+        }
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -222,6 +283,41 @@ impl Config {
                     .to_owned(),
             });
         }
+        match self.environment {
+            EnvironmentMode::Unspecified => {
+                return Err(ConfigError::InvalidSetting {
+                    key: "environment",
+                    detail: "must be explicitly set to development or production".to_owned(),
+                });
+            }
+            EnvironmentMode::Development if !self.http.bind.is_loopback() => {
+                return Err(ConfigError::InvalidSetting {
+                    key: "http.bind",
+                    detail: "development mode must bind to a loopback address".to_owned(),
+                });
+            }
+            EnvironmentMode::Development if !self.http.trusted_proxies.is_empty() => {
+                return Err(ConfigError::InvalidSetting {
+                    key: "http.trusted_proxies",
+                    detail: "development mode does not accept trusted proxies".to_owned(),
+                });
+            }
+            EnvironmentMode::Production if !self.http.public_origin.starts_with("https://") => {
+                return Err(ConfigError::InvalidSetting {
+                    key: "http.public_origin",
+                    detail: "production mode requires an https public origin".to_owned(),
+                });
+            }
+            EnvironmentMode::Production if self.http.trusted_proxies.is_empty() => {
+                return Err(ConfigError::InvalidSetting {
+                    key: "http.trusted_proxies",
+                    detail:
+                        "production mode requires at least one trusted proxy for the HTTPS boundary"
+                            .to_owned(),
+                });
+            }
+            _ => {}
+        }
         if self.jobs.concurrency == 0 {
             return Err(ConfigError::InvalidSetting {
                 key: "jobs.concurrency",
@@ -240,6 +336,25 @@ impl Config {
                 detail: "must be at least uploads.max_file_bytes".to_owned(),
             });
         }
+        let rate_limits = [
+            self.rate_limits.authentication_per_minute,
+            self.rate_limits.recovery_per_minute,
+            self.rate_limits.invitation_per_minute,
+            self.rate_limits.upload_per_minute,
+            self.rate_limits.general_per_minute,
+        ];
+        if rate_limits.contains(&0) {
+            return Err(ConfigError::InvalidSetting {
+                key: "rate_limits",
+                detail: "all endpoint-class limits must be positive".to_owned(),
+            });
+        }
+        if rate_limits.into_iter().any(|limit| limit > 1_000_000) {
+            return Err(ConfigError::InvalidSetting {
+                key: "rate_limits",
+                detail: "endpoint-class limits cannot exceed 1000000 per minute".to_owned(),
+            });
+        }
         Ok(())
     }
 }
@@ -247,11 +362,13 @@ impl Config {
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 struct RawConfig {
+    environment: String,
     http: RawHttpConfig,
     data: RawDataConfig,
     jobs: RawJobsConfig,
     uploads: RawUploadConfig,
     metrics: RawMetricsConfig,
+    rate_limits: RawRateLimitConfig,
     secrets: BTreeMap<String, String>,
 }
 
@@ -265,6 +382,7 @@ impl RawConfig {
             .map(|value| parse_setting("http.trusted_proxies", value))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Config {
+            environment: parse_setting("environment", &self.environment)?,
             http: HttpConfig {
                 bind,
                 port: self.http.port,
@@ -293,6 +411,13 @@ impl RawConfig {
                     .as_deref()
                     .map(|value| parse_setting("metrics.listen", value))
                     .transpose()?,
+            },
+            rate_limits: RateLimitConfig {
+                authentication_per_minute: self.rate_limits.authentication_per_minute,
+                recovery_per_minute: self.rate_limits.recovery_per_minute,
+                invitation_per_minute: self.rate_limits.invitation_per_minute,
+                upload_per_minute: self.rate_limits.upload_per_minute,
+                general_per_minute: self.rate_limits.general_per_minute,
             },
             secrets: self
                 .secrets
@@ -380,6 +505,29 @@ struct RawMetricsConfig {
     listen: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawRateLimitConfig {
+    authentication_per_minute: u32,
+    recovery_per_minute: u32,
+    invitation_per_minute: u32,
+    upload_per_minute: u32,
+    general_per_minute: u32,
+}
+
+impl Default for RawRateLimitConfig {
+    fn default() -> Self {
+        let defaults = RateLimitConfig::default();
+        Self {
+            authentication_per_minute: defaults.authentication_per_minute,
+            recovery_per_minute: defaults.recovery_per_minute,
+            invitation_per_minute: defaults.invitation_per_minute,
+            upload_per_minute: defaults.upload_per_minute,
+            general_per_minute: defaults.general_per_minute,
+        }
+    }
+}
+
 fn apply_environment(
     config: &mut Config,
     environment: &BTreeMap<String, String>,
@@ -397,7 +545,9 @@ fn apply_environment(
     }
 
     for (key, value) in environment {
-        if key == HTTP_PORT_ENV {
+        if key == ENVIRONMENT_ENV {
+            config.environment = parse_environment(key, value)?;
+        } else if key == HTTP_PORT_ENV {
             config.http.port = value.parse().map_err(|_| ConfigError::InvalidEnvironment {
                 key: key.clone(),
                 value: value.clone(),
@@ -427,6 +577,16 @@ fn apply_environment(
             config.uploads.max_request_bytes = parse_environment(key, value)?;
         } else if key == METRICS_LISTEN_ENV {
             config.metrics.listen = Some(parse_environment(key, value)?);
+        } else if key == RATE_AUTH_ENV {
+            config.rate_limits.authentication_per_minute = parse_environment(key, value)?;
+        } else if key == RATE_RECOVERY_ENV {
+            config.rate_limits.recovery_per_minute = parse_environment(key, value)?;
+        } else if key == RATE_INVITATION_ENV {
+            config.rate_limits.invitation_per_minute = parse_environment(key, value)?;
+        } else if key == RATE_UPLOAD_ENV {
+            config.rate_limits.upload_per_minute = parse_environment(key, value)?;
+        } else if key == RATE_GENERAL_ENV {
+            config.rate_limits.general_per_minute = parse_environment(key, value)?;
         } else if let Some(secret_name) = key.strip_prefix(SECRETS_ENV_PREFIX) {
             apply_secret(config, key, secret_name, value)?;
         } else if key.starts_with("ORBIT__") {

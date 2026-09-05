@@ -1,4 +1,5 @@
 {
   "contract": "orbit-api-v1",
-  "revision": "development"
+  "revision": "development",
+  "csp_script_hash": "sha256-LnLWS/wnBMrI+lhokdvEa1D37ldm9BrDlG0nZxSceOI="
 }

@@ -1,23 +1,17 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::ffi::{CStr, CString};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::ptr;
 use std::sync::Arc;
 
 use chrono::{Datelike, TimeZone, Utc};
 use fs2::FileExt;
-use libsqlite3_sys::{
-    SQLITE_BUSY, SQLITE_DONE, SQLITE_LOCKED, SQLITE_OK, SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE,
-    sqlite3_backup_finish, sqlite3_backup_init, sqlite3_backup_step, sqlite3_close, sqlite3_errmsg,
-    sqlite3_open_v2, sqlite3_sleep,
-};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::Database;
@@ -123,6 +117,10 @@ pub enum BackupError {
     SchemaVersion(#[source] sqlx::Error),
     #[error("SQLite online backup failed: {0}")]
     OnlineBackup(String),
+    #[error("backup was cancelled")]
+    Cancelled,
+    #[error("backup blocking task failed: {0}")]
+    BlockingTask(String),
     #[error("database is currently owned by a serving Orbit process: {path}")]
     RestoreTargetOwned { path: PathBuf },
     #[error(
@@ -152,8 +150,19 @@ impl BackupService {
     }
 
     pub async fn create(&self, database: &Database) -> Result<BackupSnapshot, BackupError> {
-        let snapshot = self.create_kind(database, BackupKind::Snapshot).await?;
-        self.apply_retention().await?;
+        self.create_cancellable(database, CancellationToken::new())
+            .await
+    }
+
+    pub async fn create_cancellable(
+        &self,
+        database: &Database,
+        cancellation: CancellationToken,
+    ) -> Result<BackupSnapshot, BackupError> {
+        let snapshot = self
+            .create_kind(database, BackupKind::Snapshot, cancellation.clone())
+            .await?;
+        self.apply_retention(cancellation).await?;
         Ok(snapshot)
     }
 
@@ -161,15 +170,22 @@ impl BackupService {
         &self,
         database: &Database,
     ) -> Result<BackupSnapshot, BackupError> {
-        self.create_kind(database, BackupKind::PreMigration).await
+        self.create_kind(database, BackupKind::PreMigration, CancellationToken::new())
+            .await
     }
 
     pub async fn list(&self) -> Result<Vec<BackupSnapshot>, BackupError> {
-        self.list_kind(BackupKind::Snapshot).await
+        let service = self.clone();
+        tokio::task::spawn_blocking(move || service.list_kind_blocking(BackupKind::Snapshot))
+            .await
+            .map_err(|error| BackupError::BlockingTask(error.to_string()))?
     }
 
     pub async fn list_pre_migration(&self) -> Result<Vec<BackupSnapshot>, BackupError> {
-        self.list_kind(BackupKind::PreMigration).await
+        let service = self.clone();
+        tokio::task::spawn_blocking(move || service.list_kind_blocking(BackupKind::PreMigration))
+            .await
+            .map_err(|error| BackupError::BlockingTask(error.to_string()))?
     }
 
     pub async fn verify(&self, id: &str) -> Result<BackupSnapshot, BackupError> {
@@ -341,13 +357,19 @@ impl BackupService {
         &self,
         database: &Database,
         kind: BackupKind,
+        cancellation: CancellationToken,
     ) -> Result<BackupSnapshot, BackupError> {
         self.validate_layout()?;
-        let _pause = self.attachment_mutations.lock.write().await;
-        let schema_version = database
-            .scalar::<i64>("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
-            .await
-            .map_err(BackupError::SchemaVersion)?;
+        let _pause = tokio::select! {
+            guard = self.attachment_mutations.lock.write() => guard,
+            () = cancellation.cancelled() => return Err(BackupError::Cancelled),
+        };
+        let schema_version = tokio::select! {
+            result = database.scalar::<i64>("SELECT COALESCE(MAX(version), 0) FROM schema_migrations") => {
+                result.map_err(BackupError::SchemaVersion)?
+            }
+            () = cancellation.cancelled() => return Err(BackupError::Cancelled),
+        };
         let id = Uuid::now_v7().to_string();
         let kind_root = self.kind_root(kind);
         create_dir_all(&kind_root)?;
@@ -355,44 +377,59 @@ impl BackupService {
         let final_path = kind_root.join(&id);
         create_dir_all(&temporary)?;
 
-        let result = async {
-            let database_path = temporary.join(DATABASE_FILE);
-            online_backup(database, &database_path).await?;
-            let mut files = vec![file_manifest(&database_path, &temporary)?];
-            copy_directory(
-                &self.attachment_root,
-                &temporary.join("attachments"),
-                &temporary,
-                Some(&mut files),
-            )?;
-            files.sort_by(|left, right| left.path.cmp(&right.path));
-            let manifest = BackupManifest {
-                id: id.clone(),
-                created_at: Utc::now().timestamp_millis(),
-                kind,
-                schema_version,
-                application_version: env!("CARGO_PKG_VERSION").to_owned(),
-                files,
-            };
-            write_manifest(&temporary, &manifest)?;
-            let unpublished = BackupSnapshot {
-                id: id.clone(),
-                path: temporary.clone(),
-                manifest: manifest.clone(),
-            };
-            verify_snapshot(&unpublished)?;
-            fs::rename(&temporary, &final_path).map_err(|source| io_error(&final_path, source))?;
-            Ok(BackupSnapshot {
-                id,
-                path: final_path,
-                manifest,
-            })
-        }
-        .await;
-        if result.is_err() {
+        let database_path = temporary.join(DATABASE_FILE);
+        if let Err(error) = online_backup(database, &database_path, &cancellation).await {
             let _ = fs::remove_dir_all(&temporary);
+            return Err(error);
         }
-        result
+        let attachment_root = self.attachment_root.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = (|| {
+                check_cancelled(&cancellation)?;
+                let mut files = vec![file_manifest_cancellable(
+                    &database_path,
+                    &temporary,
+                    &cancellation,
+                )?];
+                copy_directory_cancellable(
+                    &attachment_root,
+                    &temporary.join("attachments"),
+                    &temporary,
+                    &mut files,
+                    &cancellation,
+                )?;
+                files.sort_by(|left, right| left.path.cmp(&right.path));
+                let manifest = BackupManifest {
+                    id: id.clone(),
+                    created_at: Utc::now().timestamp_millis(),
+                    kind,
+                    schema_version,
+                    application_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    files,
+                };
+                write_manifest(&temporary, &manifest)?;
+                let unpublished = BackupSnapshot {
+                    id: id.clone(),
+                    path: temporary.clone(),
+                    manifest: manifest.clone(),
+                };
+                verify_snapshot_cancellable(&unpublished, &cancellation)?;
+                check_cancelled(&cancellation)?;
+                fs::rename(&temporary, &final_path)
+                    .map_err(|source| io_error(&final_path, source))?;
+                Ok(BackupSnapshot {
+                    id,
+                    path: final_path,
+                    manifest,
+                })
+            })();
+            if result.is_err() {
+                let _ = fs::remove_dir_all(&temporary);
+            }
+            result
+        })
+        .await
+        .map_err(|error| BackupError::BlockingTask(error.to_string()))?
     }
 
     async fn find(&self, id: &str) -> Result<BackupSnapshot, BackupError> {
@@ -408,7 +445,7 @@ impl BackupService {
         Err(BackupError::NotFound { id: id.to_owned() })
     }
 
-    async fn list_kind(&self, kind: BackupKind) -> Result<Vec<BackupSnapshot>, BackupError> {
+    fn list_kind_blocking(&self, kind: BackupKind) -> Result<Vec<BackupSnapshot>, BackupError> {
         let root = self.kind_root(kind);
         if !root.exists() {
             return Ok(Vec::new());
@@ -435,35 +472,42 @@ impl BackupService {
         Ok(snapshots)
     }
 
-    async fn apply_retention(&self) -> Result<(), BackupError> {
-        let snapshots = self.list().await?;
-        let mut daily = HashSet::new();
-        let mut weekly = HashSet::new();
-        let mut keep = HashSet::new();
-        for snapshot in &snapshots {
-            let Some(created) = Utc
-                .timestamp_millis_opt(snapshot.manifest.created_at)
-                .single()
-            else {
-                continue;
-            };
-            let daily_bucket = (created.year(), created.ordinal());
-            if daily.len() < 7 && daily.insert(daily_bucket) {
-                keep.insert(snapshot.id.clone());
+    async fn apply_retention(&self, cancellation: CancellationToken) -> Result<(), BackupError> {
+        let service = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let snapshots = service.list_kind_blocking(BackupKind::Snapshot)?;
+            let mut daily = HashSet::new();
+            let mut weekly = HashSet::new();
+            let mut keep = HashSet::new();
+            for snapshot in &snapshots {
+                check_cancelled(&cancellation)?;
+                let Some(created) = Utc
+                    .timestamp_millis_opt(snapshot.manifest.created_at)
+                    .single()
+                else {
+                    continue;
+                };
+                let daily_bucket = (created.year(), created.ordinal());
+                if daily.len() < 7 && daily.insert(daily_bucket) {
+                    keep.insert(snapshot.id.clone());
+                }
+                let week = created.iso_week();
+                let weekly_bucket = (week.year(), week.week());
+                if weekly.len() < 4 && weekly.insert(weekly_bucket) {
+                    keep.insert(snapshot.id.clone());
+                }
             }
-            let week = created.iso_week();
-            let weekly_bucket = (week.year(), week.week());
-            if weekly.len() < 4 && weekly.insert(weekly_bucket) {
-                keep.insert(snapshot.id.clone());
+            for snapshot in snapshots {
+                check_cancelled(&cancellation)?;
+                if !keep.contains(&snapshot.id) {
+                    fs::remove_dir_all(&snapshot.path)
+                        .map_err(|source| io_error(&snapshot.path, source))?;
+                }
             }
-        }
-        for snapshot in snapshots {
-            if !keep.contains(&snapshot.id) {
-                fs::remove_dir_all(&snapshot.path)
-                    .map_err(|source| io_error(&snapshot.path, source))?;
-            }
-        }
-        Ok(())
+            Ok(())
+        })
+        .await
+        .map_err(|error| BackupError::BlockingTask(error.to_string()))?
     }
 
     fn kind_root(&self, kind: BackupKind) -> PathBuf {
@@ -489,78 +533,21 @@ impl BackupService {
     }
 }
 
-async fn online_backup(database: &Database, destination: &Path) -> Result<(), BackupError> {
-    let filename = CString::new(destination.to_string_lossy().as_bytes())
-        .map_err(|_| BackupError::OnlineBackup("destination contains a NUL byte".to_owned()))?;
-    let main = c"main";
-    let mut connection = database
-        .pool()
-        .acquire()
-        .await
-        .map_err(|error| BackupError::OnlineBackup(error.to_string()))?;
-    let mut source = connection
-        .lock_handle()
-        .await
-        .map_err(|error| BackupError::OnlineBackup(error.to_string()))?;
-
-    let mut destination_handle = ptr::null_mut();
-    // SAFETY: SQLite owns the destination handle until it is closed below. The source handle is
-    // protected from SQLx's worker by `lock_handle` for the entire backup operation.
-    unsafe {
-        let opened = sqlite3_open_v2(
-            filename.as_ptr(),
-            &mut destination_handle,
-            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-            ptr::null(),
-        );
-        if opened != SQLITE_OK {
-            let message = sqlite_error(destination_handle);
-            if !destination_handle.is_null() {
-                sqlite3_close(destination_handle);
-            }
-            return Err(BackupError::OnlineBackup(message));
-        }
-        let backup = sqlite3_backup_init(
-            destination_handle,
-            main.as_ptr(),
-            source.as_raw_handle().as_ptr(),
-            main.as_ptr(),
-        );
-        if backup.is_null() {
-            let message = sqlite_error(destination_handle);
-            sqlite3_close(destination_handle);
-            return Err(BackupError::OnlineBackup(message));
-        }
-        let result = loop {
-            match sqlite3_backup_step(backup, 128) {
-                SQLITE_DONE => break Ok(()),
-                SQLITE_OK => {}
-                SQLITE_BUSY | SQLITE_LOCKED => {
-                    sqlite3_sleep(25);
-                }
-                _ => break Err(BackupError::OnlineBackup(sqlite_error(destination_handle))),
-            }
-        };
-        let finish = sqlite3_backup_finish(backup);
-        let close = sqlite3_close(destination_handle);
-        result?;
-        if finish != SQLITE_OK || close != SQLITE_OK {
-            return Err(BackupError::OnlineBackup(
-                "could not finalize the SQLite snapshot".to_owned(),
-            ));
+async fn online_backup(
+    database: &Database,
+    destination: &Path,
+    cancellation: &CancellationToken,
+) -> Result<(), BackupError> {
+    check_cancelled(cancellation)?;
+    let destination = destination.to_string_lossy().into_owned();
+    tokio::select! {
+        biased;
+        () = cancellation.cancelled() => return Err(BackupError::Cancelled),
+        result = sqlx::query("VACUUM INTO ?").bind(destination).execute(database.pool()) => {
+            result.map_err(|error| BackupError::OnlineBackup(error.to_string()))?;
         }
     }
-    Ok(())
-}
-
-unsafe fn sqlite_error(handle: *mut libsqlite3_sys::sqlite3) -> String {
-    if handle.is_null() {
-        return "could not allocate SQLite connection".to_owned();
-    }
-    // SAFETY: SQLite guarantees that errmsg returns a valid, connection-owned C string.
-    unsafe { CStr::from_ptr(sqlite3_errmsg(handle)) }
-        .to_string_lossy()
-        .into_owned()
+    check_cancelled(cancellation)
 }
 
 fn copy_directory(
@@ -602,6 +589,116 @@ fn copy_directory(
         }
     }
     Ok(())
+}
+
+fn check_cancelled(cancellation: &CancellationToken) -> Result<(), BackupError> {
+    if cancellation.is_cancelled() {
+        Err(BackupError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn copy_directory_cancellable(
+    source: &Path,
+    destination: &Path,
+    backup_root: &Path,
+    files: &mut Vec<BackupFile>,
+    cancellation: &CancellationToken,
+) -> Result<(), BackupError> {
+    check_cancelled(cancellation)?;
+    create_dir_all(destination)?;
+    if !source.exists() {
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(source)
+        .map_err(|error| io_error(source, error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| io_error(source, error))?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        check_cancelled(cancellation)?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .map_err(|error| io_error(&source_path, error))?;
+        if file_type.is_dir() {
+            copy_directory_cancellable(
+                &source_path,
+                &destination_path,
+                backup_root,
+                files,
+                cancellation,
+            )?;
+        } else if file_type.is_file() {
+            copy_file_cancellable(&source_path, &destination_path, cancellation)?;
+            files.push(file_manifest_cancellable(
+                &destination_path,
+                backup_root,
+                cancellation,
+            )?);
+        } else {
+            return Err(BackupError::UnsupportedAttachment { path: source_path });
+        }
+    }
+    Ok(())
+}
+
+fn copy_file_cancellable(
+    source: &Path,
+    destination: &Path,
+    cancellation: &CancellationToken,
+) -> Result<(), BackupError> {
+    let mut source_file = File::open(source).map_err(|error| io_error(source, error))?;
+    let mut destination_file =
+        File::create(destination).map_err(|error| io_error(destination, error))?;
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        check_cancelled(cancellation)?;
+        let read = source_file
+            .read(&mut buffer)
+            .map_err(|error| io_error(source, error))?;
+        if read == 0 {
+            break;
+        }
+        destination_file
+            .write_all(&buffer[..read])
+            .map_err(|error| io_error(destination, error))?;
+    }
+    Ok(())
+}
+
+fn file_manifest_cancellable(
+    path: &Path,
+    root: &Path,
+    cancellation: &CancellationToken,
+) -> Result<BackupFile, BackupError> {
+    let mut file = File::open(path).map_err(|source| io_error(path, source))?;
+    let mut digest = Sha256::new();
+    let mut byte_size = 0_u64;
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        check_cancelled(cancellation)?;
+        let read = file
+            .read(&mut buffer)
+            .map_err(|source| io_error(path, source))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+        byte_size = byte_size.saturating_add(read as u64);
+    }
+    let relative = path
+        .strip_prefix(root)
+        .expect("backup files are created below the backup root")
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    Ok(BackupFile {
+        path: relative,
+        sha256: format!("{:x}", digest.finalize()),
+        byte_size,
+    })
 }
 
 fn file_manifest(path: &Path, root: &Path) -> Result<BackupFile, BackupError> {
@@ -647,6 +744,14 @@ fn read_snapshot(path: PathBuf) -> Result<BackupSnapshot, BackupError> {
 }
 
 fn verify_snapshot(snapshot: &BackupSnapshot) -> Result<(), BackupError> {
+    verify_snapshot_cancellable(snapshot, &CancellationToken::new())
+}
+
+fn verify_snapshot_cancellable(
+    snapshot: &BackupSnapshot,
+    cancellation: &CancellationToken,
+) -> Result<(), BackupError> {
+    check_cancelled(cancellation)?;
     if snapshot.manifest.schema_version < 0
         || snapshot.manifest.schema_version > SUPPORTED_SCHEMA_VERSION
     {
@@ -656,7 +761,12 @@ fn verify_snapshot(snapshot: &BackupSnapshot) -> Result<(), BackupError> {
         });
     }
     let mut actual_files = Vec::new();
-    collect_snapshot_files(&snapshot.path, &snapshot.path, &mut actual_files)?;
+    collect_snapshot_files_cancellable(
+        &snapshot.path,
+        &snapshot.path,
+        &mut actual_files,
+        cancellation,
+    )?;
     actual_files.sort();
     let mut expected_files = snapshot
         .manifest
@@ -669,6 +779,7 @@ fn verify_snapshot(snapshot: &BackupSnapshot) -> Result<(), BackupError> {
         return Err(BackupError::InventoryMismatch);
     }
     for expected in &snapshot.manifest.files {
+        check_cancelled(cancellation)?;
         let relative = Path::new(&expected.path);
         if relative.as_os_str().is_empty()
             || relative
@@ -680,7 +791,7 @@ fn verify_snapshot(snapshot: &BackupSnapshot) -> Result<(), BackupError> {
             });
         }
         let path = snapshot.path.join(relative);
-        let actual = file_manifest(&path, &snapshot.path)?;
+        let actual = file_manifest_cancellable(&path, &snapshot.path, cancellation)?;
         if actual.sha256 != expected.sha256 || actual.byte_size != expected.byte_size {
             return Err(BackupError::ChecksumMismatch {
                 path: expected.path.clone(),
@@ -692,19 +803,21 @@ fn verify_snapshot(snapshot: &BackupSnapshot) -> Result<(), BackupError> {
     Ok(())
 }
 
-fn collect_snapshot_files(
+fn collect_snapshot_files_cancellable(
     root: &Path,
     directory: &Path,
     files: &mut Vec<String>,
+    cancellation: &CancellationToken,
 ) -> Result<(), BackupError> {
     for entry in fs::read_dir(directory).map_err(|source| io_error(directory, source))? {
+        check_cancelled(cancellation)?;
         let entry = entry.map_err(|source| io_error(directory, source))?;
         let path = entry.path();
         let file_type = entry
             .file_type()
             .map_err(|source| io_error(&path, source))?;
         if file_type.is_dir() {
-            collect_snapshot_files(root, &path, files)?;
+            collect_snapshot_files_cancellable(root, &path, files, cancellation)?;
         } else if file_type.is_file() {
             let relative = path
                 .strip_prefix(root)

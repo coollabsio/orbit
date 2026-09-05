@@ -1,4 +1,6 @@
 # Copy to config/orbit.toml and set the public HTTPS origin before first start.
+environment = "production"
+
 [http]
 # 0.0.0.0 works for containers and Tailscale interfaces. Firewall the port.
 bind = "0.0.0.0"
@@ -20,6 +22,14 @@ concurrency = 4
 [uploads]
 max_file_bytes = 26214400
 max_request_bytes = 104857600
+
+[rate_limits]
+# Each value must be in 1..=1000000. IPv6 clients are grouped by /64.
+authentication_per_minute = 30
+recovery_per_minute = 10
+invitation_per_minute = 60
+upload_per_minute = 120
+general_per_minute = 600
 
 # Metrics are disabled unless a private listener is configured.
 [metrics]
