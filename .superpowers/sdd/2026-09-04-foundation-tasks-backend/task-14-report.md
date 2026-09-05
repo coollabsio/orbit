@@ -60,7 +60,7 @@ Jean reported no configured or running environment for the base workspace. The i
 The ten important findings in `task-14-review.md` were resolved regression-first:
 
 - The server now supports stable, cursor-safe priority sorting. Every advertised task sort has a regression test.
-- Board drops reindex the destination column with integers and submit sequential generated-client batches of at most 100 updates; no fractional or oversized request reaches the API.
+- Board drops reuse only the affected integer position slots and submit at most one generated bulk request. Operations above the 100-update atomic limit are rejected locally with guidance before any server request.
 - Cross-project status filtering exhausts all task cursors before applying the merged status-group filter.
 - Title and description drafts are controlled by an authoritative task key, so a confirmed conflict refresh visibly replaces rejected text.
 - Multi-file task and comment uploads record the remaining queue, invalidate persisted attachment/comment reads after partial failure, and retry only unfinished files. Comment retries reuse the already-created comment, while changed drafts first clean up that partial comment. Progress and failures are announced in live regions.
@@ -92,3 +92,24 @@ Final verification after this round:
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/root/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome just e2e`: 1 passed in 54.0 seconds against `http://127.0.0.1:8888` and backend `127.0.0.1:18080`.
 
 Jean reported no configured or running environment for the base workspace before the live check, so verification used the repository's isolated E2E command and ports above.
+
+## Re-review follow-up, round 2
+
+Round 2 supersedes the round-1 client batching strategy. A logical bulk edit or board reorder is never split across server transactions:
+
+- Board moves now reuse the destination column's existing ordered integer position slots and update only the cards whose slots change. In a large column, moves near the destination edge therefore remain a small atomic request instead of reindexing every card.
+- `useBulkTasks` sends exactly one generated bulk request when an operation contains at most 100 updates. Larger operations raise a typed local limit error before optimistic cache changes or HTTP, so no prefix can commit and no client rollback can disagree with the server.
+- Board and bulk-selection surfaces explain how many tasks the rejected operation would affect and direct the user to drop within 100 affected cards or select 100 or fewer tasks. They do not offer a retry that must fail again.
+- Retriable server failures preserve and resend the original valid atomic payload unchanged. Both `TaskBoard` and `BulkBar` use this shared retry behavior.
+- Regression coverage proves that 101-item bulk edits and 102-item board moves issue zero requests and leave cached data unchanged. It also covers bounded large-column moves, in-column position-slot reuse, BulkBar's visible limit state, and exact-payload retry for valid failed requests.
+
+Final verification after this round:
+
+- `cd apps/web && bun run lint && bun run test && bun run build`: passed; 57 tests, 162 assertions, and the existing Vite large-chunk advisory only.
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`: passed.
+- `cargo test --workspace --all-targets --all-features`: passed across every Rust target.
+- `just api-check` and `git diff --check`: passed with no contract drift or whitespace errors.
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/root/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome just e2e`: 1 passed in 54.1 seconds against `http://127.0.0.1:8888` and backend `127.0.0.1:18080`.
+
+Jean again reported no configured or running environment for the base workspace before live verification.

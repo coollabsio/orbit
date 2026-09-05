@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, waitFor } from '@testing-library/react'
+import { createEvent, fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../api/generated/types.gen'
 import { WorkspaceContext } from '../../workspaces/workspaceContext'
@@ -19,15 +19,11 @@ function task(id: string, statusId: string, position: number): Task {
   }
 }
 
-test('mounted board keeps generated reorder writes bounded and exposes failure retry', async () => {
+test('mounted board rejects an oversized atomic reorder before any server commit', async () => {
   const requestBodies: Array<{ updates: Array<{ position?: number | null }> }> = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     requestBodies.push(await request.json())
-    if (requestBodies.length === 1) return Response.json({
-      type: 'about:blank', title: 'Failed', status: 500, detail: 'offline', code: 'failed',
-      instance: request.url, request_id: 'request-1',
-    }, { status: 500, headers: { 'content-type': 'application/problem+json' } })
     return Response.json({ items: [], next_cursor: null })
   }) as unknown as typeof fetch
   const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
@@ -57,15 +53,11 @@ test('mounted board keeps generated reorder writes bounded and exposes failure r
   const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => {} }
 
   fireEvent.dragStart(moving, { dataTransfer })
-  fireEvent.drop(doing, { clientY: 999, dataTransfer })
+  const dropEvent = createEvent.drop(doing, { dataTransfer })
+  Object.defineProperty(dropEvent, 'clientY', { value: -1 })
+  fireEvent(doing, dropEvent)
 
-  expect((await view.findByRole('alert')).textContent).toContain('Board reorder failed')
-  expect(requestBodies).toHaveLength(1)
-  expect(requestBodies[0]?.updates).toHaveLength(100)
-  expect(requestBodies[0]?.updates.every((update) => Number.isInteger(update.position))).toBeTrue()
-
-  fireEvent.click(view.getByRole('button', { name: 'Retry' }))
-  await waitFor(() => expect(requestBodies).toHaveLength(3))
-  expect(requestBodies.map((body) => body.updates.length)).toEqual([100, 100, 2])
-  expect(requestBodies.every((body) => body.updates.length <= 100)).toBeTrue()
+  expect((await view.findByRole('alert')).textContent).toContain('at most 100')
+  expect(requestBodies).toHaveLength(0)
+  expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
 })

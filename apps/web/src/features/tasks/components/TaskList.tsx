@@ -8,7 +8,7 @@ import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '../../../components/workspace/taskMeta'
 import type { Task, TaskStatusDef, User } from '../api/models'
 import type { LabelRecord } from '../../../api/generated/types.gen'
-import { useBulkTasks, useUpdateTask } from '../api/tasks'
+import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks, useUpdateTask } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { groupTasksByStatus, resolveStatusId, type SortKey, type StatusGroup } from '../tasksLib'
 import { TaskRow } from './TaskRow'
@@ -163,6 +163,7 @@ function BulkBar({
 }) {
   const { workspace } = useWorkspace()
   const bulkTasks = useBulkTasks(workspace.id)
+  const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
 
   const bulkStatus = (key: string) => {
     bulkTasks.mutate(tasks.flatMap((task) => {
@@ -269,7 +270,7 @@ function BulkBar({
       </Dropdown>
       <div className="spacer" />
       {bulkTasks.isPending ? <span role="status" className="text-faint text-xs">Updating selected tasks…</span> : null}
-      {bulkTasks.isError ? <span role="alert" className="text-danger text-xs">Bulk update failed. <button className="button button-ghost" onClick={() => bulkTasks.variables && bulkTasks.mutate(bulkTasks.variables)}>Retry</button></span> : null}
+      {bulkTasks.isError ? <span role="alert" className="text-danger text-xs">{limitError ? `This update includes ${limitError.count} tasks. Select ${MAX_BULK_TASK_UPDATES} or fewer and try again.` : <>Bulk update failed. <button className="button button-ghost" onClick={bulkTasks.retry}>Retry</button></>}</span> : null}
       <button type="button" className="icon-button" aria-label="Clear selection" title="Clear selection" onClick={onClear}>
         <Xmark size={16} />
       </button>

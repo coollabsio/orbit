@@ -38,10 +38,19 @@ import { isTaskVersionConflict } from './conflicts'
 import { commentUploadMode } from './commentUpload'
 import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, type WorkspaceTaskSnapshot } from './optimistic'
 import { PartialUploadError, uploadFiles } from './uploadQueue'
-import { chunkTaskUpdates } from '../tasksLib'
 
 type ApiClient = ReturnType<typeof createApiClient>
 export type TaskFilters = NonNullable<ListTasksData['query']>
+export const MAX_BULK_TASK_UPDATES = 100
+
+export class BulkTaskLimitError extends Error {
+  count: number
+
+  constructor(count: number) {
+    super(`Bulk task operations accept at most ${MAX_BULK_TASK_UPDATES} updates; received ${count}.`)
+    this.count = count
+  }
+}
 
 export async function taskListPage(
   client: ApiClient,
@@ -211,24 +220,14 @@ function snapshotBulk(queryClient: ReturnType<typeof useQueryClient>, workspaceI
 
 export function useBulkTasks(workspaceId: string) {
   const queryClient = useQueryClient()
-  const retryUpdates = useRef<BulkItem[]>([])
   const mutation = useMutation<PageTaskRecord, Error, BulkItem[], WorkspaceTaskSnapshot>({
     mutationFn: async (updates) => {
-      const items: TaskRecord[] = []
-      const batches = chunkTaskUpdates(updates)
-      for (let index = 0; index < batches.length; index += 1) {
-        try {
-          const { data } = await bulkTasks({ client: apiClient, path: { workspace_id: workspaceId }, body: { updates: batches[index]! }, throwOnError: true })
-          items.push(...required(data, 'Bulk task response was empty.').items)
-        } catch (error) {
-          retryUpdates.current = batches.slice(index).flat()
-          throw error
-        }
-      }
-      retryUpdates.current = []
-      return { items, next_cursor: null }
+      if (updates.length > MAX_BULK_TASK_UPDATES) throw new BulkTaskLimitError(updates.length)
+      const { data } = await bulkTasks({ client: apiClient, path: { workspace_id: workspaceId }, body: { updates }, throwOnError: true })
+      return required(data, 'Bulk task response was empty.')
     },
     onMutate: async (updates) => {
+      if (updates.length > MAX_BULK_TASK_UPDATES) return { entries: [] }
       await queryClient.cancelQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
       return snapshotBulk(queryClient, workspaceId, updates)
     },
@@ -242,7 +241,7 @@ export function useBulkTasks(workspaceId: string) {
   return {
     ...mutation,
     retry: () => {
-      if (retryUpdates.current.length > 0) mutation.mutate(retryUpdates.current)
+      if (mutation.variables && !(mutation.error instanceof BulkTaskLimitError)) mutation.mutate(mutation.variables)
     },
   }
 }

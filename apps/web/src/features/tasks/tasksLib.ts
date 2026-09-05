@@ -153,18 +153,27 @@ export function boardDropUpdates(
   statusId: string,
   index: number,
 ): BulkItem[] {
-  const ordered = destination.filter((item) => item.id !== task.id)
+  const current = [...destination]
+  const currentIndex = current.findIndex((item) => item.id === task.id)
+  const ordered = current.filter((item) => item.id !== task.id)
   ordered.splice(Math.max(0, Math.min(index, ordered.length)), 0, task)
-  return ordered.map((item, position) => ({
-    id: item.id,
-    expected_version: item.version,
-    position,
-    ...(item.id === task.id && task.statusId !== statusId ? { status_id: statusId } : {}),
-  }))
-}
+  const existingPositions = current.map((item) => item.position)
+  const positions = currentIndex === -1
+    ? [...existingPositions, (existingPositions.at(-1) ?? -1) + 1]
+    : existingPositions
+  const positionsAreOrdered = positions.every((position, itemIndex) =>
+    Number.isInteger(position) && (itemIndex === 0 || position > positions[itemIndex - 1]!))
+  const slots = positionsAreOrdered ? positions : ordered.map((_, itemIndex) => itemIndex)
 
-export function chunkTaskUpdates(updates: BulkItem[]): BulkItem[][] {
-  const batches: BulkItem[][] = []
-  for (let index = 0; index < updates.length; index += 100) batches.push(updates.slice(index, index + 100))
-  return batches
+  return ordered.flatMap((item, itemIndex) => {
+    const position = slots[itemIndex]!
+    const statusChanged = item.id === task.id && task.statusId !== statusId
+    if (current[itemIndex]?.id === item.id && item.position === position && !statusChanged) return []
+    return [{
+      id: item.id,
+      expected_version: item.version,
+      position,
+      ...(statusChanged ? { status_id: statusId } : {}),
+    }]
+  })
 }

@@ -3,7 +3,7 @@ import { AvatarStack } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { Task, TaskStatusDef, User } from '../api/models'
 import type { LabelRecord } from '../../../api/generated/types.gen'
-import { useBulkTasks } from '../api/tasks'
+import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { boardDropUpdates, resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '../tasksLib'
 import { PriorityPicker } from './PriorityPicker'
@@ -24,6 +24,7 @@ interface TaskBoardProps {
 export function TaskBoard({ tasks, users, labels, statuses, groups, sort, activeTaskId, onOpen }: TaskBoardProps) {
   const { workspace } = useWorkspace()
   const bulkTasks = useBulkTasks(workspace.id)
+  const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
   const [dragging, setDragging] = useState<{ id: string; height: number } | null>(null)
   const [drop, setDrop] = useState<{ key: string; index: number } | null>(null)
 
@@ -47,7 +48,8 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
     if (!task) return
     const statusId = resolveStatusId(statuses, task.projectId, group.key)
     if (!statusId) return
-    bulkTasks.mutate(boardDropUpdates(task, columnTasks, statusId, index))
+    const updates = boardDropUpdates(task, columnTasks, statusId, index)
+    if (updates.length > 0) bulkTasks.mutate(updates)
   }
 
   return (
@@ -144,7 +146,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
         )
       })}
       {bulkTasks.isPending ? <p role="status" className="text-faint text-xs">Saving board order…</p> : null}
-      {bulkTasks.isError ? <p role="alert" className="text-danger text-xs">Board reorder failed. <button className="button button-ghost" onClick={bulkTasks.retry}>Retry</button></p> : null}
+      {bulkTasks.isError ? <p role="alert" className="text-danger text-xs">{limitError ? `This move would update ${limitError.count} tasks. Move it in smaller steps so each drop affects at most ${MAX_BULK_TASK_UPDATES} tasks.` : <>Board reorder failed. <button className="button button-ghost" onClick={bulkTasks.retry}>Retry</button></>}</p> : null}
     </div>
   )
 }

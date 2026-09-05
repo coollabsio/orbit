@@ -78,28 +78,48 @@ test('comment attachment retry resumes the created comment instead of duplicatin
   expect(view.result.current.progress).toBe(100)
 })
 
-test('bulk hook retries only the failed and not-yet-sent board batches', async () => {
-  const requestIds: string[][] = []
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const request = input as Request
-    const body = await request.json() as { updates: Array<{ id: string }> }
-    requestIds.push(body.updates.map((update) => update.id))
-    if (requestIds.length === 2) return failure()
+test('oversized bulk operation makes zero requests and leaves every cache unchanged', async () => {
+  let requests = 0
+  globalThis.fetch = (async () => {
+    requests += 1
     return Response.json({ items: [], next_cursor: null })
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const records = Array.from({ length: 101 }, (_, index) => task(`task-${index}`, index))
+  const listKey = queryKeys.tasks.list('workspace-1')
+  const detailKey = queryKeys.tasks.detail('workspace-1', records[0]!.id)
+  client.setQueryData<PageTaskRecord>(listKey, { items: records, next_cursor: null })
+  client.setQueryData(detailKey, records[0])
   const view = renderHook(() => useBulkTasks('workspace-1'), { wrapper: withClient(client) })
-  const updates = Array.from({ length: 205 }, (_, index) => ({
-    id: `task-${index}`, expected_version: 1, position: index,
+  const updates = records.map((record) => ({
+    id: record.id, expected_version: record.version, priority: 'urgent',
   }))
+
+  await act(async () => { await view.result.current.mutateAsync(updates).catch(() => undefined) })
+  await waitFor(() => expect(view.result.current.isError).toBeTrue())
+
+  expect(requests).toBe(0)
+  expect(client.getQueryData<PageTaskRecord>(listKey)?.items).toEqual(records)
+  expect(client.getQueryData<TaskRecord>(detailKey)).toEqual(records[0])
+  expect(view.result.current.error?.message).toContain('at most 100')
+})
+
+test('retry repeats one valid atomic bulk payload unchanged', async () => {
+  const bodies: unknown[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    bodies.push(await (input as Request).json())
+    return bodies.length === 1 ? failure() : Response.json({ items: [], next_cursor: null })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const view = renderHook(() => useBulkTasks('workspace-1'), { wrapper: withClient(client) })
+  const updates = [{ id: 'task-1', expected_version: 1, priority: 'urgent' }]
 
   await act(async () => { await view.result.current.mutateAsync(updates).catch(() => undefined) })
   await waitFor(() => expect(view.result.current.isError).toBeTrue())
   await act(async () => { view.result.current.retry() })
   await waitFor(() => expect(view.result.current.isSuccess).toBeTrue())
 
-  expect(requestIds.map((ids) => ids.length)).toEqual([100, 100, 100, 5])
-  expect(requestIds[2]?.[0]).toBe('task-100')
+  expect(bodies).toEqual([{ updates }, { updates }])
 })
 
 test('rejected bulk hook request rolls back list and detail caches', async () => {
