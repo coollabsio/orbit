@@ -150,6 +150,17 @@
   transform: translateX(1px);
 }
 
+.menu-item-disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.coming-soon {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+
 .app-sidebar[data-collapsed='true'] .nav-section,
 .app-sidebar[data-collapsed='true'] .menu-item-label,
 .app-sidebar[data-collapsed='true'] .count-badge {

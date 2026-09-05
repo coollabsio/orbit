@@ -10,30 +10,16 @@ import {
   Sms,
   TaskSquare,
 } from 'reicon-react'
-import { useAppState } from '../../mock/store'
-
 const WORKSPACE_LINKS = [
-  { to: '/', label: 'Home', icon: Home2, end: true },
-  { to: '/tasks', label: 'Tasks', icon: TaskSquare },
-  { to: '/docs', label: 'Docs', icon: Note2 },
-  { to: '/mail', label: 'Mail', icon: Sms },
-  { to: '/chat', label: 'Chat', icon: Message },
+  { to: '/tasks', label: 'Tasks', icon: TaskSquare, enabled: true },
+  { to: '/', label: 'Home', icon: Home2, enabled: false },
+  { to: '/docs', label: 'Docs', icon: Note2, enabled: false },
+  { to: '/mail', label: 'Mail', icon: Sms, enabled: false },
+  { to: '/chat', label: 'Chat', icon: Message, enabled: false },
 ]
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
 export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
-  const state = useAppState()
-  const unreadNotifications = state.notifications.filter((n) => !n.readAt).length
-  const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
-  const unreadChat = state.channels.reduce((sum, c) => sum + c.unreadCount, 0)
-  const unreadDMs = state.directMessages.reduce((sum, dm) => sum + dm.unreadCount, 0)
-
-  const counts: Record<string, number> = {
-    '/mail': unreadMail,
-    '/chat': unreadChat,
-    '/dm': unreadDMs,
-  }
-
   return (
     <>
       <button
@@ -50,11 +36,10 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
       </button>
       <div className="app-sidebar-scroll">
         <div className="nav-section">Workspace</div>
-        {WORKSPACE_LINKS.map((link) => (
+        {WORKSPACE_LINKS.map((link) => link.enabled ? (
           <NavLink
             key={link.to}
             to={link.to}
-            end={link.end}
             className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
             aria-label={link.label}
             title={collapsed ? link.label : undefined}
@@ -62,32 +47,25 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           >
             <link.icon size={18} />
             <span className="menu-item-label">{link.label}</span>
-            {counts[link.to] ? <span className="count-badge">{counts[link.to]}</span> : null}
           </NavLink>
+        ) : (
+          <button key={link.to} type="button" className="menu-item menu-item-disabled" disabled title={`${link.label} — Coming soon`}>
+            <link.icon size={18} />
+            <span className="menu-item-label">{link.label}</span>
+            {!collapsed ? <span className="coming-soon">Coming soon</span> : null}
+          </button>
         ))}
         <div className="nav-section">Personal</div>
-        <NavLink
-          to="/inbox"
-          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
-          aria-label="Inbox"
-          title={collapsed ? 'Inbox' : undefined}
-          onClick={onNavigate}
-        >
+        <button type="button" className="menu-item menu-item-disabled" disabled title="Inbox — Coming soon">
           <DirectInbox size={18} />
           <span className="menu-item-label">Inbox</span>
-          {unreadNotifications ? <span className="count-badge">{unreadNotifications}</span> : null}
-        </NavLink>
-        <NavLink
-          to="/dm"
-          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
-          aria-label="Direct messages"
-          title={collapsed ? 'Direct messages' : undefined}
-          onClick={onNavigate}
-        >
+          {!collapsed ? <span className="coming-soon">Coming soon</span> : null}
+        </button>
+        <button type="button" className="menu-item menu-item-disabled" disabled title="Direct messages — Coming soon">
           <Messages2 size={18} />
           <span className="menu-item-label">Direct messages</span>
-          {unreadDMs ? <span className="count-badge">{unreadDMs}</span> : null}
-        </NavLink>
+          {!collapsed ? <span className="coming-soon">Coming soon</span> : null}
+        </button>
         <div className="nav-section">Manage</div>
         <NavLink
           to="/settings"

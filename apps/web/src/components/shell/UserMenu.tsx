@@ -88,17 +88,10 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             <div className="user-menu-header-email">{me?.email}</div>
           </div>
           <div className="listbox-separator" />
-          <button
-            type="button"
-            className="listbox-option"
-            onClick={() => {
-              setOpen(false)
-              navigate('/profile')
-            }}
-          >
+          <button type="button" className="listbox-option" disabled title="Profile — Coming soon">
             <span className="user-menu-option-label">
               <Profile size={16} style={{ opacity: 0.8 }} />
-              Profile
+              Profile · Coming soon
             </span>
           </button>
           <button
