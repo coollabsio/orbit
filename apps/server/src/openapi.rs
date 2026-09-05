@@ -64,6 +64,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::delete_label,
         crate::task_routes::list_tasks,
         crate::task_routes::get_task,
+        crate::task_routes::list_task_activity,
         crate::task_routes::create_task,
         crate::task_routes::update_task,
         crate::task_routes::bulk_tasks,

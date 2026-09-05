@@ -13,6 +13,7 @@ import {
   deleteTaskAttachment,
   getTask,
   listComments,
+  listTaskActivity,
   listCommentAttachments,
   listTaskAttachments,
   listTaskTrash,
@@ -123,6 +124,20 @@ export function useTaskComments(workspaceId: string, taskId: string | undefined)
       const page = await fetchAllPages(async (cursor) => {
         const { data } = await listComments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100, cursor }, throwOnError: true })
         return required(data, 'Comments response was empty.')
+      })
+      return page.items
+    },
+  })
+}
+
+export function useTaskActivity(workspaceId: string, taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.taskActivity(workspaceId, taskId ?? ''),
+    enabled: Boolean(taskId),
+    queryFn: async () => {
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listTaskActivity({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Task activity response was empty.')
       })
       return page.items
     },

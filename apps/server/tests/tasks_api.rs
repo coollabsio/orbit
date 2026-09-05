@@ -91,6 +91,91 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn task_due_date_can_be_created_changed_and_cleared_with_version_checks() {
+    let fixture = Fixture::new().await;
+    let due_at = "2030-01-02T12:30:00Z";
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({
+                "project_id": fixture.project_id,
+                "status_id": fixture.status_id,
+                "title": "Ship release",
+                "due_at": due_at
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let task = response_json(response).await;
+    assert_eq!(task["due_at"], "2030-01-02T12:30:00.000Z");
+
+    let uri = format!(
+        "/api/v1/workspaces/{}/tasks/{}",
+        fixture.workspace_id,
+        task["id"].as_str().unwrap()
+    );
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &uri,
+            &fixture.owner_cookie,
+            json!({"expected_version": 0, "due_at": null}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let cleared = response_json(response).await;
+    assert!(cleared["due_at"].is_null());
+    assert_eq!(cleared["version"], 1);
+
+    let stale = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &uri,
+            &fixture.owner_cookie,
+            json!({"expected_version": 0, "due_at": due_at}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn task_activity_is_task_scoped_and_paginated() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First task").await;
+    let second = fixture.create_task("Second task").await;
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}/activity?limit=1",
+                fixture.workspace_id,
+                first["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let page = response_json(response).await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["items"][0]["resource_id"], first["id"]);
+    assert_ne!(page["items"][0]["resource_id"], second["id"]);
+}
+
+#[tokio::test]
 async fn project_creation_is_atomic_and_statuses_are_project_scoped() {
     let fixture = Fixture::new().await;
     let response = fixture

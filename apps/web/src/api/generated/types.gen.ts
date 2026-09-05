@@ -98,6 +98,7 @@ export type BulkBody = {
 export type BulkItem = {
     assignee_ids?: Array<string> | null;
     description?: string | null;
+    due_at?: string | null;
     expected_version: number;
     id: string;
     label_ids?: Array<string> | null;
@@ -138,6 +139,7 @@ export type ConflictMetadata = {
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
     description?: string;
+    due_at?: string | null;
     label_ids?: Array<string>;
     position?: number | null;
     priority?: string;
@@ -319,6 +321,7 @@ export type PageTaskRecord = {
         creator_id: string;
         deleted_at?: string | null;
         description: string;
+        due_at?: string | null;
         id: string;
         label_ids: Array<string>;
         position: number;
@@ -501,6 +504,7 @@ export type TaskRecord = {
     creator_id: string;
     deleted_at?: string | null;
     description: string;
+    due_at?: string | null;
     id: string;
     label_ids: Array<string>;
     position: number;
@@ -516,6 +520,7 @@ export type TaskRecord = {
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
     description?: string | null;
+    due_at?: string | null;
     expected_version: number;
     label_ids?: Array<string> | null;
     position?: number | null;
@@ -3462,6 +3467,60 @@ export type UpdateTaskResponses = {
 };
 
 export type UpdateTaskResponse = UpdateTaskResponses[keyof UpdateTaskResponses];
+
+export type ListTaskActivityData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity';
+};
+
+export type ListTaskActivityErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTaskActivityError = ListTaskActivityErrors[keyof ListTaskActivityErrors];
+
+export type ListTaskActivityResponses = {
+    200: PageAuditEvent;
+};
+
+export type ListTaskActivityResponse = ListTaskActivityResponses[keyof ListTaskActivityResponses];
 
 export type ListTaskAttachmentsData = {
     body?: never;

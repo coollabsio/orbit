@@ -156,6 +156,25 @@
   box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
+.tasks-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 180px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+
+.tasks-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+}
+
 .tasks-filter-count {
   display: inline-flex;
   align-items: center;
@@ -377,6 +396,17 @@
   font-size: 12px;
   font-weight: 500;
   color: var(--text-faint);
+}
+
+.tasks-due-date {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tasks-due-date input {
+  min-width: 0;
+  width: 100%;
 }
 
 .tasks-side-prop {

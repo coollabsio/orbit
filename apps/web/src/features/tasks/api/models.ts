@@ -1,4 +1,4 @@
-import type { AttachmentRecord, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '../../../api/generated/types.gen'
+import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '../../../api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
@@ -91,6 +91,7 @@ export function taskFromRecord(
   project: ProjectRecord | undefined,
   comments: CommentRecord[] = [],
   attachments: AttachmentRecord[] = [],
+  activity: AuditEvent[] = [],
 ): Task {
   const attachmentView = (attachment: AttachmentRecord): Attachment => ({
     id: attachment.id,
@@ -117,7 +118,7 @@ export function taskFromRecord(
     projectId: record.project_id,
     labels: record.label_ids,
     attachments: attachments.filter((attachment) => !attachment.comment_id).map(attachmentView),
-    dueAt: null,
+    dueAt: record.due_at ?? null,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     comments: comments.map((comment) => ({
@@ -132,7 +133,12 @@ export function taskFromRecord(
         .map(attachmentView),
       version: comment.version,
     })),
-    activity: [],
+    activity: activity.map((event) => ({
+      id: event.id,
+      actorId: event.actor_id ?? '',
+      text: event.action.split('.').map((part, index) => index === 0 ? part : part).reverse().join(' ').replace(/^./, (letter) => letter.toUpperCase()),
+      createdAt: event.occurred_at,
+    })),
     version: record.version,
   }
 }

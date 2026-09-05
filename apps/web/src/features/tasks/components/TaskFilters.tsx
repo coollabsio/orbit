@@ -1,4 +1,4 @@
-import { Filter, Kanban, List, Setting4, Sort } from 'reicon-react'
+import { Filter, Kanban, List, SearchNormal, Setting4, Sort } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
@@ -12,10 +12,12 @@ interface TaskFiltersProps {
   assigneeId: string | null
   sort: SortKey
   layout: 'list' | 'board'
+  search: string
   onStatusChange: (key: string | null) => void
   onAssigneeChange: (assigneeId: string | null) => void
   onSortChange: (sort: SortKey) => void
   onLayoutChange: (layout: 'list' | 'board') => void
+  onSearchChange: (search: string) => void
 }
 
 /** Header dropdowns: "Filter" (status + assignee), "Sort" (order inside groups) and "Display" (layout). */
@@ -30,12 +32,18 @@ export function TaskFilters({
   onAssigneeChange,
   onSortChange,
   onLayoutChange,
+  search,
+  onSearchChange,
 }: TaskFiltersProps) {
   const activeCount = (statusKey ? 1 : 0) + (assigneeId ? 1 : 0)
   const sortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label ?? 'Sort'
 
   return (
     <>
+      <label className="tasks-search">
+        <SearchNormal size={15} aria-hidden="true" />
+        <input type="search" aria-label="Search tasks" placeholder="Search tasks" value={search} onChange={(event) => onSearchChange(event.target.value)} />
+      </label>
       <Dropdown
         align="right"
         trigger={() => (

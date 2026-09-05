@@ -20,6 +20,8 @@ const TASK_INTEGRITY_SCHEMA: &str =
     include_str!("../../../../apps/server/migrations/0008_task_integrity.sql");
 const ATTACHMENT_INTEGRITY_SCHEMA: &str =
     include_str!("../../../../apps/server/migrations/0009_attachment_integrity.sql");
+const TASK_DUE_DATE_SCHEMA: &str =
+    include_str!("../../../../apps/server/migrations/0010_task_due_dates.sql");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Migration {
@@ -134,6 +136,7 @@ impl MigrationRunner {
                 Migration::new(7, TASKS_SCHEMA, false),
                 Migration::new(8, TASK_INTEGRITY_SCHEMA, false),
                 Migration::new(9, ATTACHMENT_INTEGRITY_SCHEMA, false),
+                Migration::new(10, TASK_DUE_DATE_SCHEMA, false),
             ],
         )
     }

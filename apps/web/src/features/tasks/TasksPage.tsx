@@ -13,6 +13,7 @@ import {
   useCommentAttachments,
   useCreateTask,
   useTask,
+  useTaskActivity,
   useTaskAttachments,
   useTaskComments,
   useTasks,
@@ -44,6 +45,7 @@ export function TasksPage() {
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
+  const searchFilter = searchParams.get('q') ?? ''
   const projectFilter = searchParams.get('project')
   const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
   const exhaustiveStatusFilter = needsExhaustiveTaskList(projectFilter, statusFilter)
@@ -51,18 +53,20 @@ export function TasksPage() {
     project_id: projectFilter ?? undefined,
     status_id: statusFilter ? apiStatus : undefined,
     assignee_id: assigneeFilter ?? undefined,
+    search: searchFilter || undefined,
     ...taskApiSort(sort),
     limit: 50,
   }, exhaustiveStatusFilter)
   const detailQuery = useTask(workspace.id, taskId)
   const commentsQuery = useTaskComments(workspace.id, taskId)
+  const activityQuery = useTaskActivity(workspace.id, taskId)
   const attachmentsQuery = useTaskAttachments(workspace.id, taskId)
   const commentAttachments = useCommentAttachments(workspace.id, taskId, commentsQuery.data ?? [])
 
   const records = useMemo(() => tasksQuery.data?.pages.flatMap((page) => page.items) ?? [], [tasksQuery.data])
   const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
   const activeTask = detailQuery.data
-    ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data])
+    ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data)
     : undefined
   const users = membersQuery.data ?? []
   const state = {
@@ -89,6 +93,12 @@ export function TasksPage() {
   }
   const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)
   const closeTask = () => navigate(`/tasks${searchSuffix}`)
+  const setSearchFilter = (value: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (value) next.set('q', value)
+    else next.delete('q')
+    setSearchParams(next, { replace: true })
+  }
 
   const creating = useRef(false)
   const startNewTask = async (statusKey: string | null = null, replace = false) => {
@@ -123,10 +133,10 @@ export function TasksPage() {
     statuses: statusesQuery.data,
   })
 
-  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending || (taskId && detailQuery.isPending)) {
+  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
-  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.isError || detailQuery.isError || commentsQuery.isError || attachmentsQuery.isError || commentAttachments.isError) {
+  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.isError || detailQuery.isError || commentsQuery.isError || activityQuery.isError || attachmentsQuery.isError || commentAttachments.isError) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace. No mock data was substituted." />
   }
 
@@ -148,7 +158,7 @@ export function TasksPage() {
                 {projects.map((project) => <button key={project.id} className="popover-option" data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="pill-dot" style={{ background: project.color }} />{project.name}</button>)}</>}
             </Dropdown>
             <div className="spacer" />
-            <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
+            <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
             {createTask.isError ? <span role="alert" className="text-danger text-xs">Task creation failed.</span> : null}
           </div>

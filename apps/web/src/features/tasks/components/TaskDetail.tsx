@@ -14,6 +14,7 @@ import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
+import { dueDateInputValue, dueDatePatchValue } from '../api/dueDate'
 
 interface TaskDetailProps {
   task: Task | undefined
@@ -217,7 +218,19 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Due date</h4>
-              <button className="button button-ghost tasks-side-prop" disabled title="Due dates are not available in the server contract."><Calendar size={15} />Set due date</button>
+              <label className="tasks-due-date">
+                <Calendar size={15} aria-hidden="true" />
+                <input
+                  type="datetime-local"
+                  aria-label="Due date"
+                  value={dueDateInputValue(task.dueAt)}
+                  disabled={updateTask.isPending}
+                  onChange={(event) => updateTask.mutate({
+                    taskId: task.id,
+                    body: { expected_version: task.version, due_at: dueDatePatchValue(event.target.value) },
+                  })}
+                />
+              </label>
             </div>
           </aside>
 

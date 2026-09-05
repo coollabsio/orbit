@@ -110,6 +110,10 @@ pub fn task_router(state: TaskState) -> Router {
             get(get_task).patch(update_task).delete(delete_task),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity",
+            get(list_task_activity),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/restore",
             post(restore_task),
         )
@@ -780,6 +784,8 @@ struct CreateTaskBody {
     assignee_ids: Vec<String>,
     #[serde(default)]
     label_ids: Vec<String>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    due_at: Option<TimestampMillis>,
 }
 
 #[derive(Clone, Deserialize, ToSchema)]
@@ -794,6 +800,9 @@ struct TaskUpdateBody {
     position: Option<i64>,
     assignee_ids: Option<Vec<String>>,
     label_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_due_patch")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    due_at: Option<Option<TimestampMillis>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -815,6 +824,9 @@ struct BulkItem {
     position: Option<i64>,
     assignee_ids: Option<Vec<String>>,
     label_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_due_patch")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    due_at: Option<Option<TimestampMillis>>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(TaskQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
@@ -888,6 +900,32 @@ async fn get_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity", params(PageQuery, ("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
+async fn list_task_activity(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    ApiQuery(page): ApiQuery<PageQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Page<crate::audit::AuditEvent>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/activity");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .task_activity(
+            workspace_id,
+            task_id,
+            actor_id,
+            page.cursor.as_deref(),
+            page.limit,
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks", params(("workspace_id" = String, Path)), request_body = CreateTaskBody, responses((status = 201, body = crate::repositories::tasks::TaskRecord)))]
 async fn create_task(
     State(state): State<TaskState>,
@@ -922,6 +960,7 @@ async fn create_task(
         position: body.position,
         assignee_ids: parse_ids(body.assignee_ids, &instance, request_id.as_ref())?,
         label_ids: parse_ids(body.label_ids, &instance, request_id.as_ref())?,
+        due_at: body.due_at,
     };
     state
         .tasks
@@ -993,6 +1032,7 @@ async fn bulk_tasks(
                     position: item.position,
                     assignee_ids: item.assignee_ids,
                     label_ids: item.label_ids,
+                    due_at: item.due_at,
                 },
                 &instance,
                 request_id.as_ref(),
@@ -1311,8 +1351,18 @@ fn task_update(
                 .label_ids
                 .map(|values| parse_ids(values, instance, request_id))
                 .transpose()?,
+            due_at: body.due_at,
         },
     })
+}
+
+fn deserialize_due_patch<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<TimestampMillis>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<TimestampMillis>::deserialize(deserializer).map(Some)
 }
 
 fn parse_reorder(

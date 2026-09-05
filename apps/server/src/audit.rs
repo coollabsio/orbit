@@ -172,6 +172,31 @@ pub async fn list_global(
     decode_page(rows, limit)
 }
 
+pub async fn list_resource(
+    database: &Database,
+    workspace_id: Id,
+    resource_type: &str,
+    resource_id: Id,
+    cursor: Option<Id>,
+    limit: usize,
+) -> Result<(Vec<AuditEvent>, Option<Id>), sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, workspace_id, actor_id, action, outcome, resource_type, resource_id, \
+         request_id, metadata_json, occurred_at FROM audit_events \
+         WHERE workspace_id = ? AND resource_type = ? AND resource_id = ? \
+         AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+    )
+    .bind(workspace_id.to_string())
+    .bind(resource_type)
+    .bind(resource_id.to_string())
+    .bind(cursor.map(|id| id.to_string()))
+    .bind(cursor.map(|id| id.to_string()))
+    .bind(i64::try_from(limit.saturating_add(1)).unwrap_or(101))
+    .fetch_all(database.pool())
+    .await?;
+    decode_page(rows, limit)
+}
+
 fn decode_page(
     rows: Vec<sqlx::sqlite::SqliteRow>,
     limit: usize,
