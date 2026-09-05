@@ -731,15 +731,14 @@ async fn revoke_session(
     Path(id): Path<String>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-) -> Result<StatusCode, ApiError> {
-    let user = authenticate(
+) -> Result<Response, ApiError> {
+    let session = authenticate(
         &state,
         &headers,
         "/api/v1/auth/sessions/{id}",
         request_id.as_ref(),
     )
-    .await?
-    .user;
+    .await?;
     let id = id.parse::<Id>().map_err(|_| {
         ApiError::new(
             StatusCode::NOT_FOUND,
@@ -754,7 +753,7 @@ async fn revoke_session(
         .repository
         .revoke_session_audited(
             id,
-            user.id,
+            session.user.id,
             "session.revoked",
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -771,7 +770,15 @@ async fn revoke_session(
             request_id.as_ref(),
         ));
     }
-    Ok(StatusCode::NO_CONTENT)
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if id == session.id {
+        response.headers_mut().insert(
+            SET_COOKIE,
+            HeaderValue::from_str(&session_cookie(state.cookie_mode, "", true))
+                .expect("session cookie is a valid header"),
+        );
+    }
+    Ok(response)
 }
 
 fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
@@ -993,6 +1000,43 @@ mod tests {
         assert!(cookie.contains("; HttpOnly"));
         assert!(cookie.contains("; SameSite=Lax"));
         assert!(!cookie.contains("Domain="));
+    }
+
+    #[tokio::test]
+    async fn revoking_the_current_session_expires_its_browser_cookie() {
+        let (app, _, _database) = application(CookieMode::secure()).await;
+        let login = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password":"correct horse battery"}),
+            ))
+            .await
+            .unwrap();
+        let cookie = login.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let login_body: Value = serde_json::from_slice(&body(login).await).unwrap();
+        let session_id = login_body["session_id"].as_str().unwrap();
+
+        let response = app
+            .oneshot(cookie_request(
+                "DELETE",
+                &format!("/api/v1/auth/sessions/{session_id}"),
+                &cookie,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let expired = response.headers()[header::SET_COOKIE].to_str().unwrap();
+        assert!(expired.starts_with("__Host-orbit_session="));
+        assert!(expired.contains("Max-Age=0"));
+        assert!(expired.contains("; Secure; HttpOnly; SameSite=Lax"));
     }
 
     #[tokio::test]

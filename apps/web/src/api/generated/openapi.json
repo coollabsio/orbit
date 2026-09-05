@@ -101,16 +101,6 @@
               }
             }
           },
-          "404": {
-            "description": "workspace_resource_not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
           "409": {
             "description": "contract_mismatch",
             "content": {
@@ -242,16 +232,6 @@
           },
           "403": {
             "description": "installation_admin_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceProblem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "workspace_resource_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -1,85 +1,64 @@
 # Project overview
 
-## Product
+## Product and milestone status
 
-Orbit is a unified workspace UI inspired by Coolify's visual language and selected UX patterns from the reference projects kept under the ignored `shadow/` directory. It combines:
+Orbit is a self-hosted workspace application with a Rust server and a React web client. Milestone one persists identity, sessions, workspaces, memberships, invitations, projects, workflow statuses, labels, tasks, comments, attachments, trash, and audit records in SQLite.
 
-- Home dashboard
-- Project tasks in list and Kanban layouts
-- Hierarchical collaborative-style docs
-- Three-pane mail client
-- Channel chat and direct messages
-- Notification inbox
-- User profile
-- Workspace administration and chat administration
+The production binary embeds the matching Vite build. It serves the SPA and `/api/v1` from one HTTP listener. Operators terminate HTTPS at a reverse proxy.
 
-The product is optimized for desktop but has responsive master/detail behavior for mobile browsers.
+## Persistent and mock-backed routes
 
-## What is real and what is mocked
+These routes use the production API and SQLite:
 
-### Working frontend behavior
+- `/setup`, `/login`, `/recovery`, and `/accept-invitation`
+- `/tasks`, `/tasks/:taskId`, task trash, and project workflow settings
+- `/settings`, `/settings/members`, and `/settings/sessions`
 
-- Navigation and deep links
-- Editing and creating mock records
-- Drag and drop for tasks, statuses, docs, channels, categories, and mail folders
-- Markdown rendering, mentions, channel mentions, reactions, custom emoji, attachments, embeds, image viewing
-- Responsive layouts, light/dark themes, motion, modals, confirmation dialogs, and settings forms
+These routes still use frontend mock data and show a `Mock data` badge:
 
-### Mock-only behavior
+- `/`
+- `/docs` and `/docs/:docId`
+- `/mail` and `/mail/:threadId`
+- `/chat`, channel, thread, and chat settings routes
+- `/dm` and `/dm/:dmId`
+- `/inbox`
+- `/profile`
 
-- All data lives in memory in `apps/web/src/mock/store.ts`.
-- Seed data is recreated on a full browser reload.
-- Uploads use object/data URLs; there is no durable object storage.
-- Sessions, users, notifications, webhooks, mail delivery, typing, and realtime responses are demonstrations.
-- The Rust server at `apps/server` currently prints `Hello, world!` and is not connected to the web app.
+Mock records never flow into production APIs. Refreshing a mock-backed route recreates its seed data.
 
-## Application routes
-
-Routes are declared in `apps/web/src/App.tsx`.
-
-| Route | Surface |
-|---|---|
-| `/` | Home dashboard |
-| `/tasks` | Task list/Kanban |
-| `/tasks/:taskId` | Full task detail |
-| `/tasks/projects/:projectId/settings` | Project and workflow settings |
-| `/docs` | Docs index/empty selection |
-| `/docs/:docId` | Document editor |
-| `/mail` | Mail folders and thread list |
-| `/mail/:threadId` | Mail reader |
-| `/chat` | Channel list on mobile; first chat channel on desktop |
-| `/chat/:channelId` | Channel conversation |
-| `/chat/:channelId/thread/:rootId` | Full-screen thread |
-| `/chat/settings` | Chat administration: roles, webhooks, emoji |
-| `/dm` | Direct-message list |
-| `/dm/:dmId` | Direct conversation |
-| `/inbox` | Notifications |
-| `/profile` | Current-user profile |
-| `/settings` | Workspace general settings |
-| `/settings/members` | Member administration |
-| `/settings/sessions` | Admin session management |
-
-Unknown routes redirect to `/`.
-
-## Top-level repository layout
+## Runtime shape
 
 ```text
-apps/
-  web/                 React/Vite frontend; the active product
-  server/              Rust placeholder; no API yet
-.ai/                   AI/maintainer documentation and lessons
-shadow/                ignored local reference repositories
-references/            ignored local design/reference material
+browser
+  -> HTTPS reverse proxy
+    -> orbit HTTP listener
+      -> embedded SPA
+      -> /api/v1 routes
+      -> /health/live and /health/ready
+      -> SQLite in WAL mode
+      -> local attachment storage
+      -> local verified backups
 ```
 
-The old root Docker/Coolify deployment scaffolding was deliberately removed. Reintroduce deployment configuration only after the runtime architecture is decided.
+One Orbit process owns a database file. The process validates configuration, runs guarded migrations and a quick integrity check, verifies writable storage and the embedded client contract, then binds HTTP. Retention, attachment reconciliation, and daily backup services start with the server and stop after HTTP begins graceful shutdown.
 
-## Product decisions that should be preserved
+## Repository layout
 
-- Purple is the application accent in both light and dark mode.
-- UI is flat-first: panes are separated by hairline borders; do not wrap entire pages in cards.
-- Second sidebars use aligned 48px headers and are often resizable.
-- The first sidebar is collapsible and persists its state.
-- Shared behavior should be reused. Chat, DMs, task comments, emoji, attachments, mentions, and markdown deliberately share components.
-- Destructive actions require confirmation when data loss is meaningful.
-- Motion is restrained and respects `prefers-reduced-motion`.
+```text
+apps/web/       React, Vite, generated API client, unit tests, Playwright
+apps/server/    orbit binary, Axum routes, SQLx repositories, composition
+crates/orbit/   domain rules and ports
+crates/platform reusable config, DB, jobs, files, backup, HTTP, health
+config/         deployment configuration example
+docs/           design, implementation plan, operations, traceability
+```
+
+## Product rules to preserve
+
+- Purple is the accent in light and dark mode.
+- The UI is flat-first. Hairline borders divide panes; page-sized card wrappers do not.
+- The backend enforces workspace boundaries and roles. UI visibility is not authorization.
+- Migrated routes never fall back to mock data on an API error.
+- Major records use optimistic versions and return explicit conflicts.
+- Destructive actions require confirmation when data loss matters.
+- Motion stays restrained and honors reduced-motion settings.

@@ -250,7 +250,6 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         "list_global_audit" | "export_global_audit" => {
             add_code(&mut responses, "403", "installation_admin_required");
-            add_code(&mut responses, "404", "workspace_resource_not_found");
         }
         id if attachment_list_operation(id) => {
             add_code(&mut responses, "400", "invalid_cursor");

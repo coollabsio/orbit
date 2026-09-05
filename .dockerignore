@@ -1,0 +1,14 @@
+.git
+.github
+.superpowers
+.ai
+target
+**/node_modules
+**/.DS_Store
+data
+backups
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+Dockerfile*
+!Dockerfile

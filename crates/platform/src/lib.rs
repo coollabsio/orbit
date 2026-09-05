@@ -24,7 +24,10 @@ pub use backup::{
     AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,
     BackupManifest, BackupService, BackupSnapshot,
 };
-pub use config::{Config, ConfigError, ConfigOverride, ConfigSources, HttpConfig, Secret};
+pub use config::{
+    Config, ConfigError, ConfigOverride, ConfigSources, DataConfig, HttpConfig, JobsConfig,
+    MetricsConfig, Secret, UploadConfig,
+};
 pub use db::{
     Database, DatabaseConfig, DatabaseError, Migration, MigrationError, MigrationRunner,
     PendingMigration, TestDatabase, TestDatabaseError,

@@ -166,15 +166,17 @@ function BulkBar({
   const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
 
   const bulkStatus = (key: string) => {
-    bulkTasks.mutate(tasks.flatMap((task) => {
+    const updates = tasks.flatMap((task) => {
       const statusId = resolveStatusId(statuses, task.projectId, key)
       return statusId && statusId !== task.statusId
         ? [{ id: task.id, expected_version: task.version, status_id: statusId }]
         : []
-    }))
+    })
+    if (updates.length > 0) bulkTasks.mutate(updates)
   }
   const bulkPriority = (priority: Task['priority']) => {
-    bulkTasks.mutate(tasks.filter((task) => task.priority !== priority).map((task) => ({ id: task.id, expected_version: task.version, priority })))
+    const updates = tasks.filter((task) => task.priority !== priority).map((task) => ({ id: task.id, expected_version: task.version, priority }))
+    if (updates.length > 0) bulkTasks.mutate(updates)
   }
   // everyone has it → remove from all; otherwise add to the tasks that miss it
   const bulkAssign = (userId: string) => {

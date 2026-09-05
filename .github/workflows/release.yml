@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg ORBIT_BUILD_REVISION=${{ github.sha }} -t orbit:release .
+      - run: docker run --rm orbit:release --help
+      - name: Extract static binary
+        run: |
+          container=$(docker create orbit:release)
+          trap 'docker rm -f "$container" >/dev/null' EXIT
+          docker cp "$container:/orbit" orbit-x86_64-unknown-linux-musl
+          sha256sum orbit-x86_64-unknown-linux-musl > orbit-x86_64-unknown-linux-musl.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            orbit-x86_64-unknown-linux-musl
+            orbit-x86_64-unknown-linux-musl.sha256

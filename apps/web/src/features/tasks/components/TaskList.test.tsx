@@ -79,3 +79,22 @@ test('bulk toolbar retry repeats the original valid atomic payload', async () =>
 
   expect(bodies[1]).toEqual(bodies[0])
 })
+
+test('bulk toolbar treats an unchanged priority as a local no-op', async () => {
+  let requests = 0
+  globalThis.fetch = (async () => {
+    requests += 1
+    return Response.json({ items: [], next_cursor: null })
+  }) as unknown as typeof fetch
+  const view = viewFor([task(1), task(2)])
+  for (const checkbox of view.getAllByRole('checkbox')) fireEvent.click(checkbox)
+  const toolbar = view.getByRole('toolbar', { name: 'Selected tasks' })
+
+  fireEvent.click(within(toolbar).getByRole('button', { name: 'Priority' }))
+  fireEvent.click(view.getByRole('button', { name: /^No priority/ }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(requests).toBe(0)
+  expect(view.queryByRole('alert')).toBeNull()
+  expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
+})

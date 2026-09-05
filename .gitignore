@@ -3,3 +3,6 @@ shadow/
 .DS_Store
 **/.DS_Store
 target/
+data/
+backups/
+config/orbit.toml

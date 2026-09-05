@@ -122,7 +122,7 @@ export function useDeleteProject(workspaceId: string) {
 
 export function useProjectTrash(workspaceId: string) {
   return useQuery({
-    queryKey: [...queryKeys.projects(workspaceId), 'trash'],
+    queryKey: queryKeys.projectTrash(workspaceId),
     queryFn: async () => {
       const { data } = await listProjectTrash({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100 }, throwOnError: true })
       return required(data, 'Project trash response was empty.').items
@@ -139,7 +139,7 @@ export function useRestoreProject(workspaceId: string) {
     },
     onError: (error) => {
       if (isTaskVersionConflict(error) && window.confirm('This project now conflicts with an active project key. Refresh trash?')) {
-        void queryClient.invalidateQueries({ queryKey: [...queryKeys.projects(workspaceId), 'trash'] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.projectTrash(workspaceId) })
       }
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),

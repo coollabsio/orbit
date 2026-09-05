@@ -21,5 +21,8 @@ describe('workspace query keys', () => {
     expect(queryKeys.attachments('workspace-a', 'task-one').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
     expect(queryKeys.labels('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
     expect(queryKeys.taskTrash('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.projectTrash('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.workspaceTrash('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.audit('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
   })
 })

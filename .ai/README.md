@@ -13,15 +13,15 @@ This directory is the fast-start guide for a new maintainer and their AI agent. 
 
 ## Current status in one paragraph
 
-Orbit is currently a polished **frontend prototype** of a team workspace combining tasks, docs, mail, channel chat, direct messages, notifications, and administration. The web app is React 19 + TypeScript + Vite and uses a synchronous in-memory mock store. Almost all visible interactions work, but changes reset on refresh and there is no backend integration yet. `apps/server` is only a Rust placeholder. The next major phase is replacing the mock store with real APIs, persistence, authentication, permissions, and realtime events without rewriting the established UI.
+Orbit now ships a Rust, Axum, SQLx, and SQLite foundation with persistent setup, authentication, workspaces, tasks, comments, attachments, trash, audit, backups, and operations. The matching React build is embedded in one production binary. Docs, mail, chat, DMs, inbox, profile, and home summaries remain explicitly mock-backed while their later backend milestones are planned.
 
 ## First commands
 
 ```bash
 cd apps/web
-aube run dev       # current checkout; http://localhost:8888
-aube run build
-aube run lint
+bun run dev        # http://127.0.0.1:8888
+bun run build
+bun run lint
 ```
 
-Aube is **not required**. Bun or pnpm can replace it; see `DEVELOPMENT.md`.
+Bun is the only supported frontend package manager in this milestone; see `DEVELOPMENT.md`.

@@ -355,6 +355,14 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         .as_str()
         .unwrap()
         .contains("origin_forbidden"));
+    for path in ["/api/v1/admin/audit", "/api/v1/admin/audit/export"] {
+        assert!(
+            operation(&document, path, "get")["responses"]
+                .get("404")
+                .is_none(),
+            "global audit does not look up a workspace resource"
+        );
+    }
     let accept = operation(&document, "/api/v1/workspaces/invitations/accept", "post");
     for status in ["200", "201"] {
         assert_eq!(

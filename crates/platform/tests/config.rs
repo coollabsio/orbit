@@ -53,6 +53,7 @@ fn environment_overrides_toml() {
     let cfg = load_fixture("http.port = 8080", [("ORBIT__HTTP__PORT", "8081")], None).unwrap();
 
     assert_eq!(cfg.http.port, 8081);
+    assert_eq!(cfg.http.public_origin, "http://127.0.0.1:8081");
 }
 
 #[test]
@@ -140,4 +141,133 @@ fn malformed_toml_error_does_not_echo_secret_contents() {
     .unwrap_err();
 
     assert!(!error.to_string().contains("dont-print-me"));
+}
+
+#[test]
+fn deployment_config_parses_tailscale_friendly_bind_and_durable_paths() {
+    let cfg = load_fixture(
+        r#"
+        [http]
+        bind = "0.0.0.0"
+        port = 8080
+        public_origin = "https://orbit.tailnet.example"
+        trusted_proxies = ["127.0.0.1/32", "100.64.0.0/10"]
+
+        [data]
+        database = "/var/lib/orbit/orbit.sqlite"
+        attachments = "/var/lib/orbit/attachments"
+        backups = "/var/backups/orbit"
+
+        [jobs]
+        concurrency = 6
+
+        [uploads]
+        max_file_bytes = 10485760
+        max_request_bytes = 52428800
+
+        [metrics]
+        listen = "127.0.0.1:9090"
+        "#,
+        [],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(cfg.http.bind.to_string(), "0.0.0.0");
+    assert_eq!(cfg.http.public_origin, "https://orbit.tailnet.example");
+    assert_eq!(
+        cfg.http
+            .trusted_proxies
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["127.0.0.1/32", "100.64.0.0/10"]
+    );
+    assert_eq!(
+        cfg.data.database,
+        PathBuf::from("/var/lib/orbit/orbit.sqlite")
+    );
+    assert_eq!(
+        cfg.data.attachments,
+        PathBuf::from("/var/lib/orbit/attachments")
+    );
+    assert_eq!(cfg.data.backups, PathBuf::from("/var/backups/orbit"));
+    assert_eq!(cfg.jobs.concurrency, 6);
+    assert_eq!(cfg.uploads.max_file_bytes, 10 * 1024 * 1024);
+    assert_eq!(cfg.uploads.max_request_bytes, 50 * 1024 * 1024);
+    assert_eq!(cfg.metrics.listen.unwrap().to_string(), "127.0.0.1:9090");
+}
+
+#[test]
+fn deployment_environment_overrides_bind_origin_paths_and_worker_count() {
+    let cfg = load_fixture(
+        "http.port = 8080",
+        [
+            ("ORBIT__HTTP__BIND", "100.64.0.12"),
+            ("ORBIT__HTTP__PUBLIC_ORIGIN", "https://orbit.example"),
+            ("ORBIT__DATA__DATABASE", "/srv/orbit.sqlite"),
+            ("ORBIT__DATA__ATTACHMENTS", "/srv/attachments"),
+            ("ORBIT__DATA__BACKUPS", "/mnt/backups"),
+            ("ORBIT__JOBS__CONCURRENCY", "2"),
+            ("ORBIT__UPLOADS__MAX_FILE_BYTES", "8388608"),
+            ("ORBIT__UPLOADS__MAX_REQUEST_BYTES", "33554432"),
+            ("ORBIT__METRICS__LISTEN", "100.64.0.12:9100"),
+        ],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(cfg.http.bind.to_string(), "100.64.0.12");
+    assert_eq!(cfg.http.public_origin, "https://orbit.example");
+    assert_eq!(cfg.data.database, PathBuf::from("/srv/orbit.sqlite"));
+    assert_eq!(cfg.data.attachments, PathBuf::from("/srv/attachments"));
+    assert_eq!(cfg.data.backups, PathBuf::from("/mnt/backups"));
+    assert_eq!(cfg.jobs.concurrency, 2);
+    assert_eq!(cfg.uploads.max_file_bytes, 8 * 1024 * 1024);
+    assert_eq!(cfg.uploads.max_request_bytes, 32 * 1024 * 1024);
+    assert_eq!(cfg.metrics.listen.unwrap().to_string(), "100.64.0.12:9100");
+}
+
+#[test]
+fn metrics_listener_is_disabled_by_default() {
+    assert_eq!(
+        load_fixture("http.port = 8080", [], None)
+            .unwrap()
+            .metrics
+            .listen,
+        None
+    );
+}
+
+#[test]
+fn zero_worker_concurrency_is_rejected_during_config_load() {
+    let error = load_fixture("jobs.concurrency = 0", [], None).unwrap_err();
+
+    assert!(error.to_string().contains("jobs.concurrency"));
+}
+
+#[test]
+fn upload_request_limit_must_cover_an_individual_file() {
+    let error = load_fixture(
+        "uploads.max_file_bytes = 100\nuploads.max_request_bytes = 99",
+        [],
+        None,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("uploads.max_request_bytes"));
+}
+
+#[test]
+fn public_origin_must_be_an_http_origin_without_path_or_query() {
+    for origin in [
+        "https://",
+        "https://orbit.example/path",
+        "https://orbit.example?debug=true",
+        "ftp://orbit.example",
+    ] {
+        let error =
+            load_fixture(&format!("http.public_origin = \"{origin}\""), [], None).unwrap_err();
+        assert!(error.to_string().contains("http.public_origin"), "{origin}");
+    }
 }

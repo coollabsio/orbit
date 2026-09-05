@@ -70,6 +70,26 @@ async function createWorkspaceAndInviteMember(page: Page, browser: Browser) {
   await expect(page.getByRole('button', { name: 'Workspace: Foundation' })).toBeVisible()
 }
 
+async function revokeAnotherOwnerSession(page: Page, browser: Browser) {
+  const secondContext = await browser.newContext()
+  const secondSession = await secondContext.newPage()
+  await secondSession.goto('/login')
+  await secondSession.getByLabel('Email').fill('owner@orbit.test')
+  await secondSession.getByLabel('Password').fill('correct horse battery staple')
+  await secondSession.getByRole('button', { name: 'Sign in' }).click()
+  await expect(secondSession).toHaveURL(/\/(?:$|\?)/)
+
+  await page.goto('/settings/sessions')
+  const revoke = page.getByRole('button', { name: 'Revoke' })
+  await expect(revoke).toHaveCount(1)
+  await revoke.click()
+  await expect(revoke).toHaveCount(0)
+
+  await secondSession.goto('/settings')
+  await expect(secondSession).toHaveURL(/\/login$/)
+  await secondContext.close()
+}
+
 async function createTaskWithAttachment(page: Page) {
   const workspaces = await api<Array<{ id: string; name: string }>>(page, '/api/v1/workspaces')
   const workspaceId = workspaces.find((workspace) => workspace.name === 'Foundation')!.id
@@ -89,6 +109,11 @@ async function createTaskWithAttachment(page: Page) {
     buffer: Buffer.from('persisted attachment'),
   })
   await expect(page.getByText('proof.txt')).toBeVisible()
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('link', { name: /proof\.txt/ }).click(),
+  ])
+  expect(download.suggestedFilename()).toBe('proof.txt')
 
   const priority = page.locator('.tasks-side-group').first().getByRole('button').nth(1)
   await priority.click()
@@ -150,12 +175,27 @@ async function deleteAndRestoreTask(page: Page) {
 test('setup through restored task', async ({ page, browser }) => {
   await bootstrapOwner(page)
   await createWorkspaceAndInviteMember(page, browser)
+  await revokeAnotherOwnerSession(page, browser)
   await createTaskWithAttachment(page)
   await deleteAndRestoreTask(page)
   await page.goto('/tasks')
   await expect(page.getByText('Restored task')).toBeVisible()
 
-  await page.goto('/settings/members')
+  await page.getByRole('button', { name: 'Workspace: Foundation' }).click()
+  await page.getByRole('button', { name: 'Second workspace' }).click()
+  await expect(page.getByRole('button', { name: 'Workspace: Second workspace' })).toBeVisible()
+  await expect(page.getByText('Restored task')).not.toBeVisible()
+  await page.getByRole('button', { name: 'Workspace: Second workspace' }).click()
+  await page.getByRole('button', { name: 'Foundation' }).click()
+  await expect(page.getByRole('button', { name: 'Workspace: Foundation' })).toBeVisible()
+  const foundationSearch = new URL(page.url()).search
+
+  await page.goto(`/docs${foundationSearch}`)
+  await expect(page.getByText('Mock data')).toBeVisible()
+  await page.goto(`/tasks${foundationSearch}`)
+  await expect(page.getByText('Mock data')).not.toBeVisible()
+
+  await page.goto(`/settings/members${foundationSearch}`)
   const memberRow = page.locator('.data-table-row').filter({ hasText: 'member@orbit.test' })
   await memberRow.getByRole('button', { name: 'Manage' }).click()
   page.once('dialog', (dialog) => dialog.accept())

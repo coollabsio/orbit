@@ -1,124 +1,57 @@
 # Architecture
 
+## Backend composition
+
+The Cargo workspace has three crates with one-way dependencies:
+
+- `crates/platform` owns reusable infrastructure such as configuration, SQLite setup, migrations, jobs, backup, files, HTTP policy, health, identifiers, and timestamps.
+- `crates/orbit` owns domain rules and ports. It does not depend on Axum or SQLx.
+- `apps/server` owns SQLx repositories, Axum route adapters, application wiring, the CLI, and the production binary.
+
+`App::build(Config)` in `apps/server/src/app.rs` is the startup boundary. It validates configuration, opens and locks SQLite, creates any required pre-migration backup, runs migrations, performs `quick_check`, checks storage, initializes auth and the one-time setup URL, verifies the embedded frontend contract, then builds the router. `orbit serve` binds only after this returns.
+
+`router.rs` merges independent auth, workspace, task, and attachment routers. It also adds liveness, readiness, embedded assets, SPA fallback, and the common Tower platform layer. Unknown `/api/*` paths return RFC 9457 Problem Details. Only non-API browser routes receive `index.html`.
+
+The public router records bounded request counters. When `metrics.listen` is configured, a separate private listener exposes those identifier-free Prometheus metrics; it is disabled by default and never mounts `/metrics` on the public listener.
+
+On shutdown, the HTTP server stops accepting new connections and drains active requests. Orbit then cancels retention, attachment reconciliation, and backup services. Durable job handlers get up to 30 seconds to finish before local tasks are aborted and leases recover naturally.
+
+## Persistence and security
+
+- SQLite uses WAL, foreign keys, a busy timeout, and one process ownership lock.
+- Repositories own explicit SQL and workspace scoping. HTTP handlers do not issue feature SQL.
+- Major mutations use record versions and return conflict metadata.
+- Session cookies are host-only, HTTP-only, SameSite Lax, and Secure in production.
+- Insecure cookies are accepted only for an explicit loopback development listener.
+- Forwarded transport, client address, and request IDs are trusted only from configured proxy networks.
+- All API failures use Problem Details with stable codes and correlated request IDs.
+- Attachments stream through bounded request handling and a local blob-store abstraction.
+- Backups include SQLite, attachment files, checksums, and schema metadata.
+
+## Frontend data boundaries
+
+React Query and the generated OpenAPI client own persistent server state. Query keys begin with `['workspace', workspaceId]` for workspace-scoped data. Optimistic task writes snapshot relevant caches, roll back rejected requests, and refresh conflict state.
+
+Identity, workspaces, tasks, comments, attachments, trash, and sessions use the API. Docs, mail, chat, DMs, inbox, profile, and home summaries keep their isolated in-memory mock domains. `MockFeatureBadge` labels those routes in development and production.
+
 ## Frontend stack
 
-- React 19
-- TypeScript 6
-- React Router 8
-- Vite 8
-- React Compiler through `@rolldown/plugin-babel`
-- Reicon React for icons
-- Oxlint
-- Plain CSS with design tokens; no CSS-in-JS and no component framework
+- React 19, TypeScript 6, React Router 8
+- TanStack Query and a generated `@hey-api` client
+- Vite 8 and React Compiler
+- Bun for installs, tests, generation, and builds
+- Oxlint and plain CSS with semantic design tokens
 
-Entry points:
+`apps/web/index.html` applies the saved theme before paint. `App.tsx` owns routing and providers. `AppShell.tsx` owns global navigation, mobile chrome, and the command palette.
 
-- `apps/web/index.html` applies the saved dark/light class before paint.
-- `apps/web/src/main.tsx` mounts React in strict mode.
-- `apps/web/src/App.tsx` owns providers and routing.
-- `apps/web/src/components/shell/AppShell.tsx` owns the global sidebar, mobile drawer/dock, topbar, command palette, and routed content.
+## Embedded build contract
 
-## State architecture
+Vite emits `dist/orbit-build.json` from the committed OpenAPI contract ID and `ORBIT_BUILD_REVISION`. Rust embeds the complete `dist` directory and the same compile-time revision. `StaticAssets::verified` refuses to build the application router if either value differs. Hashed assets use a one-year immutable cache policy; HTML and the manifest use `no-cache`.
 
-The mock store is intentionally tiny:
+CI regenerates OpenAPI and TypeScript output twice for determinism, compares it with committed output, rebuilds the frontend, and checks committed embedded assets for drift.
 
-- `mock/store.ts` holds a module-level `AppState` object.
-- `useAppState()` subscribes using `useSyncExternalStore`.
-- `updateState(updater)` immutably replaces state and synchronously notifies listeners.
-- `mock/actions.ts` is the only mutation API used by feature components.
-- `mock/seed.ts` composes seed modules under `mock/seed/`.
-- `mock/types.ts` is the canonical domain schema.
+## UI structure
 
-There is no persistence layer. Refreshing reconstructs `seedState()`.
+Feature code lives under `apps/web/src/features`. Shared controls live under `components/ui`; global chrome lives under `components/shell`. Chat, DMs, task comments, attachments, markdown, emoji, and mentions share components rather than maintaining lookalikes.
 
-### Backend migration seam
-
-When introducing the real backend, keep feature components stable by replacing the mock boundary rather than embedding fetch calls throughout views:
-
-1. Preserve the domain types or introduce API/domain mapping at the boundary.
-2. Replace action functions with request/mutation services.
-3. Replace `useAppState()` with query/store selectors.
-4. Add optimistic updates for existing immediate interactions.
-5. Map websocket events into the same state transitions used by local actions.
-6. Do authentication and permission checks server-side; UI hiding is not authorization.
-
-## Domain model summary
-
-`AppState` contains:
-
-- `users`, `roles`, `workspace`
-- `projects`, per-project `statuses`, `tasks`
-- hierarchical `docs`
-- `mailFolders`, `mailThreads`
-- `chatCategories`, `channels`, `directMessages`, shared `chatMessages`
-- `webhooks`, `customEmojis`, `typingUsers`
-- `sessions`, `notifications`
-
-Important relationships:
-
-- Tasks reference a project and a per-project status by id.
-- Docs form a tree through `parentId`; blocks can link other docs through `refId`.
-- Channel and DM messages share `ChatMessage`; `channelId` may be a channel id or DM id.
-- Threads are messages: roots use `startsThread`; replies use `threadRootId`.
-- Task comments reuse `Attachment` and chat rendering components but live inside each task.
-- Mail messages also reuse `Attachment`.
-
-## Frontend folders
-
-```text
-src/
-  components/
-    shell/       application chrome and navigation
-    ui/          reusable primitives
-    workspace/   shared task/project visual components
-  features/
-    chat/        channels, DMs, messages, threads, settings
-    docs/        document tree and block editor
-    home/        dashboard
-    inbox/       notifications
-    mail/        folders, threads, reader, compose/reply
-    profile/     personal profile
-    settings/    workspace/admin settings
-    shared/      feature-shared card CSS
-    tasks/       list, Kanban, task detail, project workflow settings
-  lib/           formatting, theme, class helper, navigation bridge
-  mock/          domain types, seed, store, actions
-  styles/        tokens, reset/base, shared utilities
-```
-
-Feature-specific components live one level deeper under `features/*/components`.
-
-## Styling architecture
-
-Import order in `src/index.css`:
-
-1. `styles/tokens.css` — semantic colors, sizes, surface ladder.
-2. `styles/base.css` — reset, typography, focus, scrollbars, route motion, reduced-motion override.
-3. `styles/utilities.css` — buttons, inputs, navigation rows, panels, modal, popover, shared emoji shell, tables, badges.
-
-Each feature imports its own CSS. Prefer semantic tokens such as `--canvas`, `--base`, `--elevated`, `--line`, `--hairline`, `--text-*`, and `--accent`; do not scatter literal theme colors.
-
-## Shared UI primitives
-
-- `Modal` — focus-trapped dialog, Escape/outside close, scroll lock.
-- `Dropdown` and `Listbox` — application menus; avoid native selects for styled controls.
-- `EmojiPicker` and `Emoji` — the one shared picker/rendering path, including custom emoji.
-- `Avatar` / `AvatarStack`
-- `DatePicker`, `InfoTip`, `UnsavedBar`, `EmptyState`
-- `Attachments` / `attachmentLib` in chat are reused by tasks and mail.
-- `MessageContent`, markdown utilities, mention autocomplete, and message input power channel chat, DMs, and task comments.
-
-## Navigation bridge
-
-Markdown is rendered by plain functions that cannot call React hooks. `lib/navigateBridge.ts` receives React Router's navigate function from `NavigateBridge` in `App.tsx`, allowing internal markdown links and channel mentions to navigate without a full reload. External links still open externally.
-
-## Responsive behavior
-
-The main breakpoint is `899px`:
-
-- Desktop uses the first sidebar plus multi-pane feature layouts.
-- Mobile hides the desktop sidebar, shows a bottom dock and optional drawer.
-- Master/detail features switch between list and selected-record views based on the route.
-- Resizers are hidden on mobile.
-
-Do not add parallel mobile state when the URL can be the source of truth.
+The main responsive breakpoint is 899px. Desktop uses multi-pane layouts. Mobile uses a bottom dock and route-driven master/detail screens. The URL remains the source of truth where practical.

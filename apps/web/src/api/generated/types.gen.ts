@@ -587,10 +587,6 @@ export type ListGlobalAuditErrors = {
      */
     403: WorkspaceProblem;
     /**
-     * workspace_resource_not_found
-     */
-    404: WorkspaceProblem;
-    /**
      * contract_mismatch
      */
     409: WorkspaceProblem;
@@ -647,10 +643,6 @@ export type ExportGlobalAuditErrors = {
      * installation_admin_required
      */
     403: WorkspaceProblem;
-    /**
-     * workspace_resource_not_found
-     */
-    404: WorkspaceProblem;
     /**
      * contract_mismatch
      */

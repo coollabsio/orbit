@@ -1,5 +1,11 @@
 # Feature behavior
 
+## Persistence status
+
+Milestone one persists setup, login and recovery, sessions, workspaces, memberships, invitations, projects, statuses, labels, tasks, comments, attachments, trash, and audit records. Those flows use the generated `/api/v1` client and never substitute mock records after an error.
+
+Home, Docs, Mail, Chat, direct messages, Inbox, Profile, webhooks, custom emoji administration, typing, and realtime behavior still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP, mailboxes, WebSockets, presence, and typing transport are follow-up milestones.
+
 ## Global shell
 
 - First sidebar groups Workspace, Personal, and Manage navigation.
@@ -34,6 +40,10 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 - Task detail supports title, description, status, priority, assignees, labels, project, due date, activity, comments, replies, and attachments.
 - Description attachments support paste, drop, file selection, image lightbox, compact file chips, and removal.
 - Task comments reuse the chat composer, mentions, channel suggestions, markdown, emoji, and attachments.
+- Projects, workflows, labels, tasks, comments, and task attachments persist in SQLite.
+- Writes include the observed record version. Stale writes restore the server record and expose a conflict prompt.
+- Bulk and reorder requests are one atomic request of at most 100 items. Empty unchanged choices are local no-ops.
+- Task and project trash have server-backed restore flows and 30-day retention.
 
 ### Project workflows
 
@@ -46,6 +56,8 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 ## Docs
 
 Core files: `DocsPage.tsx`, `components/DocTree.tsx`, `components/DocEditor.tsx`, `components/BlockEditor.tsx`.
+
+This feature is mock-backed and does not persist across a reload.
 
 - Hierarchical page tree with create, delete confirmation, deep subtree deletion, reorder, and nesting drag-and-drop.
 - Navigable page breadcrumbs.
@@ -62,6 +74,8 @@ Core files: `DocsPage.tsx`, `components/DocTree.tsx`, `components/DocEditor.tsx`
 
 Core files: `MailPage.tsx`, `components/FolderRail.tsx`, `components/ThreadList.tsx`, `components/ThreadView.tsx`.
 
+This feature is mock-backed. No outbound or inbound SMTP service runs in milestone one.
+
 - Three-pane desktop layout: folders, thread list, reader.
 - Custom folders can be created inline.
 - Threads can be dragged onto system/custom folders with a compact drag ghost.
@@ -74,6 +88,8 @@ Core files: `MailPage.tsx`, `components/FolderRail.tsx`, `components/ThreadList.
 ## Channel chat
 
 Core files: `ChatPage.tsx`, `components/ChannelSidebar.tsx`, `components/ChatArea.tsx`, `components/Message*`, `components/Thread*`.
+
+This feature is mock-backed. WebSocket delivery, replay, presence, and typing transport are deferred.
 
 - Resizable category/channel sidebar; width persists.
 - Editable/reorderable categories and channels with emoji.
@@ -92,6 +108,8 @@ Core files: `ChatPage.tsx`, `components/ChannelSidebar.tsx`, `components/ChatAre
 
 `features/chat/DMPage.tsx` deliberately reuses channel-chat components.
 
+This feature is mock-backed.
+
 - DM entry lives under Personal in the first sidebar.
 - Resizable conversation sidebar persists under `orbit:dm_sidebar_width`.
 - Rows show avatar, fixed online/offline status dot, latest preview/time, active state, and unread count.
@@ -102,10 +120,11 @@ Core files: `ChatPage.tsx`, `components/ChannelSidebar.tsx`, `components/ChatAre
 ## Notifications, profile, and settings
 
 - Inbox can mark individual/all notifications read and links to resources.
+- Inbox and Profile remain mock-backed.
 - Profile edits the current mock user's name, email, and title.
 - Workspace Settings: General, Members, Sessions.
-- Members supports role changes and removal.
-- Sessions is an admin view over all members' sessions. It shows member, device/browser, and last active only—no country or IP.
+- Workspace creation, members, invitations, fixed roles, ownership transfer, and sessions use persistent APIs.
+- Sessions lists the current account's active devices. It shows device/browser and last active only, with controls to revoke any non-current session.
 - Chat administration remains separate at `/chat/settings`.
 
 ## Mobile presentation

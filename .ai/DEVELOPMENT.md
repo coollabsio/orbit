@@ -1,98 +1,157 @@
-# Development and delivery
+# Development and operations
 
 ## Requirements
 
-- Rust 1.97.1 (installed automatically by `rust-toolchain.toml`)
+- Rust 1.97.1 from `rust-toolchain.toml`
 - Bun 1.3.14 or later
 - Just
+- Docker only for OCI builds
 
-## Tooling
-
-Orbit uses Bun as its sole frontend package manager. `apps/web/bun.lock` is committed and installs must use frozen-lockfile mode.
-
-The root `justfile` is the standard command surface:
+## Setup and local development
 
 ```bash
 just setup
 just dev
-just test
-just check
-just build
 ```
 
-`just dev` starts the future Rust server on port **8080** and Vite on port **8888**, stopping both processes when the recipe exits. The initial `orbit` CLI only supplies help; its serving and maintenance subcommands arrive with later backend tasks.
+`just dev` starts Orbit at `http://127.0.0.1:8080` and Vite at `http://127.0.0.1:8888`. Vite proxies `/api` to the Rust server. The recipe records and stops only its own child processes.
 
-## Direct commands
+The underlying commands are:
 
 ```bash
 cd apps/web
 bun install --frozen-lockfile
-bun run dev
-bun run build
-bun run lint
-bun run test
+bun run dev -- --host 127.0.0.1 --port 8888 --strictPort
+
+ORBIT_ENV=development cargo run -p orbit-server -- \
+  --database data/development.sqlite \
+  --attachments data/attachments \
+  --backups backups \
+  serve --listen 127.0.0.1:8080 --origin http://127.0.0.1:8888
 ```
 
-Backend commands remain usable directly, for example `cargo test --workspace` and `cargo run -p orbit-server -- --help`.
-
-## Development server
-
-Vite is configured for port **8888** in `vite.config.ts`. Use `http://localhost:8888`; do not guess or start duplicate servers if one is already running.
-
-## Required verification before committing
+## Verification commands
 
 ```bash
-cd apps/web
-bun run build
-bun run lint
-bun run test
+just test
+just check
+just e2e
 ```
 
-A build is necessary because it includes TypeScript project compilation.
+`just check` runs Rust formatting, Clippy, all Rust tests, frontend lint and tests, deterministic OpenAPI/client drift checks, the Vite production build, embedded-asset drift detection, and release compilation. `just e2e` uses isolated SQLite and storage paths and exercises the setup-to-task flow in Playwright.
 
-For visual or interaction work, also smoke-test the exact route in a browser:
+Direct commands remain supported:
 
-- Check console errors/warnings.
-- Test the changed interaction, not only initial rendering.
-- Check clipping, stacking, focus rings, overflow, and responsive behavior.
-- Check both expanded and collapsed sidebars when shell layout changes.
-- Check light and dark themes for token-based styling changes.
-- Honor reduced-motion settings.
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cd apps/web && bun run lint && bun run test && bun run build
+```
 
-## Git conventions
+## Native production build
 
-- Keep commits small and scoped: `feat(web-chat): ...`, `fix(web-mail): ...`, `style(web-ui): ...`.
-- Do not commit `.DS_Store`; root `.gitignore` excludes it recursively.
-- `shadow/` and `references/` are local ignored reference material, not shipping source.
-- Do not manually create git worktrees unless explicitly requested.
-- Preserve unrelated user changes. If asked to commit all pending work, review the status first and describe notable deletions.
+Build the frontend first because Cargo embeds `apps/web/dist`:
 
-## Adding a feature
+```bash
+just build
+cp config/orbit.example.toml config/orbit.toml
+./target/release/orbit --config config/orbit.toml config check
+./target/release/orbit --config config/orbit.toml config show
+./target/release/orbit --config config/orbit.toml serve
+```
 
-1. Locate the nearest feature and shared components before creating new primitives.
-2. Update `mock/types.ts` when the domain changes.
-3. Add representative seed data under `mock/seed/`.
-4. Add mutations to `mock/actions.ts`; components should not mutate the store directly.
-5. Add routes in `App.tsx` and breadcrumbs in `Topbar.tsx`.
-6. Add desktop and mobile navigation if the feature is top-level.
-7. Use feature CSS and existing semantic tokens.
-8. Build, lint, and manually exercise the interaction.
-9. Update these `.ai` docs when architecture or behavior changes.
+On a fresh database, the server prints one `Initial setup URL` to stderr. Open it in the browser, complete the Owner and workspace form, and store no copy of the token. If it expires before use, stop the server and run:
 
-## Attachments
+```bash
+./target/release/orbit --config config/orbit.toml setup-token rotate
+```
 
-Use `features/chat/attachmentLib.ts` to convert clipboard/files and `features/chat/components/Attachments.tsx` to render them. Tasks and mail already reuse these. Avoid creating a fourth attachment renderer.
+## OCI image
 
-## Emoji and mentions
+```bash
+docker build --build-arg ORBIT_BUILD_REVISION="$(git rev-parse HEAD)" -t orbit:milestone-1 .
+docker run --rm orbit:milestone-1 --help
+docker run --name orbit --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -v "$PWD/config/orbit.toml:/etc/orbit/orbit.toml:ro" \
+  -v orbit-data:/var/lib/orbit \
+  -v "$PWD/backups:/var/backups/orbit" \
+  orbit:milestone-1
+```
 
-- Always reuse `components/ui/EmojiPicker.tsx`; chat, docs, modals, and reactions must not diverge.
-- Render custom values through `components/ui/Emoji.tsx` or markdown custom-emoji handling.
-- Reuse `useMentionAutocomplete` and `MentionPopover` for `@` users and `#` channels.
+The final scratch image runs as numeric user and group 65532. It contains the static Orbit binary, CA certificates, timezone data, and empty mount points. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it.
 
-## Drag and drop
+## Reverse proxy and Tailscale
 
-HTML5 drag sources must remain mounted through `dragstart`; hide/fade via attributes instead. Render an explicit placeholder/drop line. See `lessons.md`.
+Set `http.public_origin` to the exact external HTTPS origin. Bind to `0.0.0.0` for a container or Tailscale-reachable interface, then restrict access with the host firewall. Add only the actual proxy network to `http.trusted_proxies`.
 
-## Backend phase
+Prometheus metrics are disabled by default. To expose them on a private interface only, set `metrics.listen`, for example `127.0.0.1:9090`, and scrape `http://127.0.0.1:9090/metrics`. Never proxy this listener through the public site.
 
-The backend starts as a Rust workspace: `orbit-platform` contains reusable platform interfaces, `orbit-domain` holds Orbit domain logic, and `orbit-server` is the `orbit` binary. Later tasks add HTTP, persistence, and operational commands. The frontend currently assumes synchronous success; preserve perceived speed with optimistic UI when networking is introduced.
+A local Caddy example:
+
+```caddyfile
+orbit.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+For Tailscale Serve:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8080
+```
+
+Use the resulting `https://<host>.<tailnet>.ts.net` value as `http.public_origin`. Keep Orbit bound to `127.0.0.1` when Tailscale Serve runs on the same host. Trust `127.0.0.1/32` and `::1/128`, not the whole tailnet, unless a separate tailnet proxy sends forwarding headers.
+
+## Migration, backup, and restore
+
+Inspect and run migrations while Orbit is stopped:
+
+```bash
+orbit --config config/orbit.toml migrate status
+orbit --config config/orbit.toml migrate run
+```
+
+Startup runs the same forward-only migration gate automatically. A destructive migration requires a verified pre-migration backup before it runs.
+
+Backup commands:
+
+```bash
+orbit --config config/orbit.toml backup create
+orbit --config config/orbit.toml backup list
+orbit --config config/orbit.toml backup list --pre-migration
+orbit --config config/orbit.toml backup verify <backup-id>
+```
+
+Restore procedure:
+
+1. Stop Orbit. Restore refuses a database owned by a running process.
+2. Copy the current data directory somewhere safe.
+3. Run `orbit --config config/orbit.toml backup verify <backup-id>`.
+4. Run `orbit --config config/orbit.toml backup restore <backup-id>`.
+5. Run `orbit --config config/orbit.toml migrate status`.
+6. Start Orbit and check `/health/ready` before sending traffic.
+
+Automatic backups run every 24 hours. Orbit retains 7 daily and 4 weekly verified snapshots. Operators must copy backups off-host and protect their permissions.
+
+## Invitations, recovery, and SMTP status
+
+Workspace Owners and Admins can generate manual invitation links in `/settings/members`. SMTP invitation delivery remains deferred.
+
+Password recovery requests use the server's bounded administrator-delivery boundary. Until an outbound provider is added, an operator can issue a 30-minute link while Orbit is stopped:
+
+```bash
+orbit --config config/orbit.toml recovery-link \
+  --email user@example.com \
+  --origin https://orbit.example.com
+```
+
+Share that URL through an authenticated channel. Do not put it in logs or tickets. Orbit has no inbound SMTP listener or mailbox persistence in milestone one.
+
+## Health and shutdown
+
+- `GET /health/live` proves the event loop responds.
+- `GET /health/ready` checks migrations, SQLite integrity, writable storage, scheduler tables, and critical config.
+- The optional private metrics listener exposes bounded, identifier-free Prometheus counters at `GET /metrics`.
+- Send SIGINT or SIGTERM through the container runtime. Orbit stops accepting HTTP, drains requests, then gives durable jobs 30 seconds to finish.

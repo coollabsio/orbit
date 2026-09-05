@@ -3,7 +3,7 @@ import { relativeTime } from '../../lib/format'
 import { SessionRevocationError, useRevokeSessions, useSessions } from './api/sessions'
 import { SettingsCard } from './SettingsCard'
 
-/** Admin view: every member's signed-in devices. */
+/** Account view: the current user's signed-in devices. */
 export function SessionsPage() {
   const sessionsQuery = useSessions()
   const revokeSessions = useRevokeSessions()
@@ -14,7 +14,7 @@ export function SessionsPage() {
   return (
     <SettingsCard
       title="Sessions"
-      description="Devices signed in across the workspace. Revoking a session signs that device out."
+      description="Devices signed in to your account. Revoking a session signs that device out."
       actions={
         others.length > 0 ? (
           <button type="button" className="button" disabled={revokeSessions.isPending} onClick={() => revokeSessions.mutate(others.map((session) => session.id))}>

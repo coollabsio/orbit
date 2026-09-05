@@ -32,13 +32,14 @@ test:
     cd apps/web && bun run test
 
 check:
+    cd apps/web && bun run build
+    git diff --exit-code -- apps/web/dist
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test --workspace
     cd apps/web && bun run lint
     cd apps/web && bun run test
     just api-check
-    cd apps/web && bun run build
     cargo build --release --workspace
 
 api:
@@ -85,12 +86,19 @@ e2e:
     trap cleanup EXIT
     trap 'exit 0' INT TERM
     setup_url=$(cargo run -q -p orbit-server -- --database "$data_dir/orbit.sqlite" setup-token init --origin http://127.0.0.1:8888)
-    cargo run -p orbit-server -- --database "$data_dir/orbit.sqlite" --attachments "$data_dir/attachments" serve --listen 127.0.0.1:18080 --origin http://127.0.0.1:8888 &
+    cargo run -p orbit-server -- --database "$data_dir/orbit.sqlite" --attachments "$data_dir/attachments" --backups "$data_dir/backups" serve --listen 127.0.0.1:18080 --origin http://127.0.0.1:8888 &
     server_pid=$!
     (cd apps/web && ORBIT_SETUP_URL="$setup_url" bun x playwright test) &
     e2e_pid=$!
     wait -n "$server_pid" "$e2e_pid"
 
 build:
-    cargo build --release --workspace
-    cd apps/web && bun run build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    revision=$(git rev-parse HEAD)
+    (cd apps/web && ORBIT_BUILD_REVISION="$revision" bun run build)
+    ORBIT_BUILD_REVISION="$revision" cargo build --release --workspace
+
+release-image tag="orbit:milestone-1":
+    docker build --build-arg ORBIT_BUILD_REVISION="$(git rev-parse HEAD)" -t "{{ tag }}" .
+    docker run --rm "{{ tag }}" --help

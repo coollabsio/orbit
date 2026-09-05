@@ -1,8 +1,12 @@
+import { useLocation } from 'react-router'
+import { isMockBackedPath } from './mockFeatures'
+
 export function MockFeatureBadge() {
-  if (!import.meta.env.DEV) return null
+  const { pathname } = useLocation()
+  if (!isMockBackedPath(pathname)) return null
 
   return (
-    <span className="mock-feature-badge" title="This screen still uses local development data.">
+    <span className="mock-feature-badge" title="This screen uses local mock data and does not persist.">
       Mock data
     </span>
   )
