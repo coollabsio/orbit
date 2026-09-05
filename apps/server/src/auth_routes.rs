@@ -1,9 +1,6 @@
-use std::collections::VecDeque;
 use std::fmt;
-use std::future::Future;
 use std::net::SocketAddr;
 use std::net::{IpAddr, Ipv4Addr};
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use orbit_platform::{
     AuthenticatedUser, ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor,
-    PasswordService, RequestId, ThrottleDecision, TimestampMillis, generate_opaque_token,
+    PasswordService, RequestId, ThrottleDecision, TimestampMillis,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -24,13 +21,13 @@ use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::audit::AuditOutcome;
-use crate::repositories::identity::{IdentityRepository, SetupError, SetupRequest};
+use crate::repositories::identity::{IdentityError, IdentityRepository, SetupError, SetupRequest};
 
 const SESSION_COOKIE: &str = "__Host-orbit_session";
 const DEV_SESSION_COOKIE: &str = "orbit_session_dev";
 const GENERIC_LOGIN_DETAIL: &str = "Email or password is incorrect.";
 const GENERIC_RECOVERY_DETAIL: &str =
-    "If the account exists, password recovery instructions will be provided.";
+    "Contact your installation administrator to request a password recovery link.";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CookieMode {
@@ -65,69 +62,6 @@ impl CookieMode {
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct RecoveryMessage {
-    pub email: String,
-    pub url: String,
-}
-
-impl fmt::Debug for RecoveryMessage {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("RecoveryMessage")
-            .field("email", &self.email)
-            .field("url", &"[REDACTED]")
-            .finish()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("recovery delivery is unavailable")]
-pub struct RecoveryDeliveryError;
-
-pub type RecoveryDeliveryFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<(), RecoveryDeliveryError>> + Send + 'a>>;
-
-pub trait RecoveryDelivery: Send + Sync {
-    fn deliver(&self, message: RecoveryMessage) -> RecoveryDeliveryFuture<'_>;
-}
-
-#[derive(Debug)]
-pub struct AdminRecoveryDelivery {
-    capacity: usize,
-    messages: Mutex<VecDeque<RecoveryMessage>>,
-}
-
-impl AdminRecoveryDelivery {
-    #[must_use]
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity: capacity.max(1),
-            messages: Mutex::new(VecDeque::new()),
-        }
-    }
-
-    pub fn take_for_admin(&self) -> Option<RecoveryMessage> {
-        self.messages
-            .lock()
-            .expect("delivery mutex poisoned")
-            .pop_front()
-    }
-}
-
-impl RecoveryDelivery for AdminRecoveryDelivery {
-    fn deliver(&self, message: RecoveryMessage) -> RecoveryDeliveryFuture<'_> {
-        Box::pin(async move {
-            let mut messages = self.messages.lock().expect("delivery mutex poisoned");
-            if messages.len() == self.capacity {
-                messages.pop_front();
-            }
-            messages.push_back(message);
-            Ok(())
-        })
-    }
-}
-
-#[derive(Clone, Eq, PartialEq)]
 pub struct SetupLaunch {
     pub url: String,
 }
@@ -146,28 +80,12 @@ pub struct AuthState {
     repository: Arc<IdentityRepository>,
     passwords: PasswordExecutor,
     throttler: Arc<Mutex<LoginThrottler>>,
-    recovery_delivery: Arc<dyn RecoveryDelivery>,
-    public_origin: String,
     cookie_mode: CookieMode,
     dummy_hash: String,
 }
 
 impl AuthState {
     pub fn new(repository: Arc<IdentityRepository>, cookie_mode: CookieMode) -> Self {
-        Self::with_recovery_delivery(
-            repository,
-            cookie_mode,
-            Arc::new(AdminRecoveryDelivery::new(128)),
-            "https://localhost".to_owned(),
-        )
-    }
-
-    pub fn with_recovery_delivery(
-        repository: Arc<IdentityRepository>,
-        cookie_mode: CookieMode,
-        recovery_delivery: Arc<dyn RecoveryDelivery>,
-        public_origin: String,
-    ) -> Self {
         let passwords = PasswordService::default();
         let dummy_hash = passwords
             .hash("not a real account password")
@@ -177,8 +95,6 @@ impl AuthState {
             passwords: PasswordExecutor::new(passwords, 2)
                 .expect("password executor concurrency is non-zero"),
             throttler: Arc::new(Mutex::new(LoginThrottler::new())),
-            recovery_delivery,
-            public_origin: public_origin.trim_end_matches('/').to_owned(),
             cookie_mode,
             dummy_hash,
         }
@@ -188,7 +104,6 @@ impl AuthState {
 pub async fn initialize_auth(
     repository: Arc<IdentityRepository>,
     cookie_mode: CookieMode,
-    recovery_delivery: Arc<dyn RecoveryDelivery>,
     public_origin: String,
 ) -> Result<(AuthState, Option<SetupLaunch>), crate::repositories::identity::IdentityError> {
     let issued = repository
@@ -201,15 +116,7 @@ pub async fn initialize_auth(
             issued.token
         ),
     });
-    Ok((
-        AuthState::with_recovery_delivery(
-            repository,
-            cookie_mode,
-            recovery_delivery,
-            public_origin,
-        ),
-        launch,
-    ))
+    Ok((AuthState::new(repository, cookie_mode), launch))
 }
 
 pub fn auth_router(state: AuthState) -> Router {
@@ -499,11 +406,6 @@ async fn login(
     }
 
     let identity = identity.expect("valid login has an identity");
-    state
-        .throttler
-        .lock()
-        .expect("throttler mutex poisoned")
-        .finish_success(reservation);
     let replacement_hash = verification.and_then(|result| result.replacement_hash);
     let user = AuthenticatedUser {
         id: identity.id,
@@ -514,12 +416,43 @@ async fn login(
         .repository
         .create_session_audited(
             &user,
+            &identity.password_hash,
             replacement_hash.as_deref(),
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
-        .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
+        .await;
+    let session = match session {
+        Ok(session) => {
+            state
+                .throttler
+                .lock()
+                .expect("throttler mutex poisoned")
+                .finish_success(reservation);
+            session
+        }
+        Err(IdentityError::InvalidCredential) => {
+            state
+                .throttler
+                .lock()
+                .expect("throttler mutex poisoned")
+                .finish_failure(reservation, TimestampMillis::now());
+            return Err(ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_credentials",
+                "Authentication failed",
+                GENERIC_LOGIN_DETAIL,
+                "/api/v1/auth/login",
+                request_id.as_ref(),
+            ));
+        }
+        Err(_) => {
+            return Err(ApiError::internal(
+                "/api/v1/auth/login",
+                request_id.as_ref(),
+            ));
+        }
+    };
     let mut response = Json(LoginResponse {
         user: AuthUserResponse {
             id: user.id.to_string(),
@@ -599,39 +532,11 @@ struct RecoveryRequestResponse {
 
 #[utoipa::path(post, path = "/api/v1/auth/recovery/request", request_body = RecoveryRequestBody, responses((status = 202, body = RecoveryRequestResponse)))]
 async fn recovery_request(
-    State(state): State<AuthState>,
-    request_id: Option<Extension<RequestId>>,
+    State(_state): State<AuthState>,
+    _request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<RecoveryRequestBody>,
 ) -> Response {
-    if let Ok(Some(identity)) = state.repository.find_by_email(&body.email).await
-        && !identity.suspended
-    {
-        let token = generate_opaque_token();
-        let expires_at = TimestampMillis::from_millis(
-            TimestampMillis::now().as_millis() + Duration::from_secs(30 * 60).as_millis() as i64,
-        );
-        match state
-            .repository
-            .store_recovery_token_audited(
-                identity.id,
-                &token,
-                expires_at,
-                request_id_value(request_id.as_ref()),
-            )
-            .await
-        {
-            Ok(()) => {
-                let message = RecoveryMessage {
-                    email: identity.email,
-                    url: format!("{}/recovery?token={token}", state.public_origin),
-                };
-                if state.recovery_delivery.deliver(message).await.is_err() {
-                    tracing::error!("recovery delivery failed after durable request creation");
-                }
-            }
-            Err(error) => tracing::error!(%error, "recovery request transaction failed"),
-        }
-    }
+    let _ = body.email;
     (
         StatusCode::ACCEPTED,
         Json(RecoveryRequestResponse {
@@ -697,7 +602,17 @@ async fn recovery_complete(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
+        .map_err(|error| match error {
+            IdentityError::InvalidCredential => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_recovery_token",
+                "Recovery failed",
+                "The recovery token is invalid or expired.",
+                "/api/v1/auth/recovery/complete",
+                request_id.as_ref(),
+            ),
+            _ => ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()),
+        })?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -972,8 +887,7 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use super::{AdminRecoveryDelivery, AuthState, CookieMode, auth_router, initialize_auth};
-    use super::{RecoveryMessage, SetupLaunch};
+    use super::{AuthState, CookieMode, SetupLaunch, auth_router, initialize_auth};
     use crate::repositories::identity::{IdentityRepository, SetupRequest};
 
     #[tokio::test]
@@ -1040,17 +954,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auth_recovery_delivers_a_usable_admin_copy_link_without_changing_public_response() {
+    async fn public_recovery_is_a_generic_no_op_that_preserves_an_admin_link() {
         let database = TestDatabase::new().await.unwrap();
         let repository = Arc::new(IdentityRepository::new((*database).clone()));
         setup_repository(&repository).await;
-        let delivery = Arc::new(AdminRecoveryDelivery::new(16));
-        let state = AuthState::with_recovery_delivery(
-            Arc::clone(&repository),
-            CookieMode::secure(),
-            delivery.clone(),
-            "https://orbit.test".to_owned(),
-        );
+        let identity = repository
+            .find_by_email("owner@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        repository
+            .store_recovery_token_audited(
+                identity.id,
+                "admin-issued-token",
+                TimestampMillis::from_millis(TimestampMillis::now().as_millis() + 60_000),
+                "operator-cli",
+            )
+            .await
+            .unwrap();
+        let state = AuthState::new(Arc::clone(&repository), CookieMode::secure());
         let app = auth_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(
             "https://orbit.test",
         )));
@@ -1063,35 +985,69 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::ACCEPTED);
-        let message = delivery.take_for_admin().unwrap();
-        assert_eq!(message.email, "Owner@Example.com");
-        let token = message
-            .url
-            .strip_prefix("https://orbit.test/recovery?token=")
-            .unwrap();
         assert!(
             repository
-                .recovery_token_valid(token, TimestampMillis::now())
+                .recovery_token_valid("admin-issued-token", TimestampMillis::now())
                 .await
                 .unwrap()
         );
+        let response: Value = serde_json::from_slice(&body(response).await).unwrap();
+        assert_eq!(
+            response["detail"],
+            "Contact your installation administrator to request a password recovery link."
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_recovery_completion_maps_the_loser_to_documented_bad_request() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = Arc::new(IdentityRepository::new((*database).clone()));
+        setup_repository(&repository).await;
+        let identity = repository
+            .find_by_email("owner@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        repository
+            .store_recovery_token_audited(
+                identity.id,
+                "one-time-recovery-token",
+                TimestampMillis::from_millis(TimestampMillis::now().as_millis() + 60_000),
+                "operator-cli",
+            )
+            .await
+            .unwrap();
+        let app = auth_router(AuthState::new(repository, CookieMode::secure())).layer(
+            HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")),
+        );
+        let first = app.clone().oneshot(json_request(
+            "/api/v1/auth/recovery/complete",
+            json!({"token":"one-time-recovery-token","password":"new secure password one"}),
+        ));
+        let second = app.oneshot(json_request(
+            "/api/v1/auth/recovery/complete",
+            json!({"token":"one-time-recovery-token","password":"new secure password two"}),
+        ));
+
+        let (first, second) = tokio::join!(first, second);
+        let mut responses = vec![first.unwrap(), second.unwrap()];
+        responses.sort_by_key(|response| response.status());
+        assert_eq!(responses[0].status(), StatusCode::NO_CONTENT);
+        assert_eq!(responses[1].status(), StatusCode::BAD_REQUEST);
+        let problem: Value = serde_json::from_slice(&body(responses.pop().unwrap()).await).unwrap();
+        assert_eq!(problem["code"], "invalid_recovery_token");
     }
 
     #[test]
     fn auth_secret_bearing_urls_are_redacted_from_debug_output() {
         let secret = "secret-bearer-token";
-        let recovery = RecoveryMessage {
-            email: "owner@example.com".to_owned(),
-            url: format!("https://orbit.test/recovery?token={secret}"),
-        };
         let setup = SetupLaunch {
             url: format!("https://orbit.test/setup?token={secret}"),
         };
 
-        for output in [format!("{recovery:?}"), format!("{setup:?}")] {
-            assert!(output.contains("[REDACTED]"));
-            assert!(!output.contains(secret));
-        }
+        let output = format!("{setup:?}");
+        assert!(output.contains("[REDACTED]"));
+        assert!(!output.contains(secret));
     }
 
     #[tokio::test]
@@ -1190,11 +1146,9 @@ mod tests {
     async fn auth_initialization_returns_setup_url_only_once() {
         let database = TestDatabase::new().await.unwrap();
         let repository = Arc::new(IdentityRepository::new((*database).clone()));
-        let delivery = Arc::new(AdminRecoveryDelivery::new(16));
         let (_, launch) = initialize_auth(
             Arc::clone(&repository),
             CookieMode::secure(),
-            delivery.clone(),
             "https://orbit.test".to_owned(),
         )
         .await
@@ -1204,7 +1158,6 @@ mod tests {
         let (_, repeated) = initialize_auth(
             repository,
             CookieMode::secure(),
-            delivery,
             "https://orbit.test".to_owned(),
         )
         .await
@@ -1477,7 +1430,7 @@ mod tests {
 
         let rows = sqlx::query_as::<_, (String, String)>(
             "SELECT action, outcome FROM audit_events WHERE action LIKE 'authentication.%' \
-             OR action IN ('session.logout', 'recovery.requested') ORDER BY occurred_at, id",
+             OR action = 'session.logout' ORDER BY occurred_at, id",
         )
         .fetch_all(database.pool())
         .await
@@ -1485,7 +1438,11 @@ mod tests {
         assert!(rows.contains(&("authentication.login".to_owned(), "failure".to_owned())));
         assert!(rows.contains(&("authentication.login".to_owned(), "success".to_owned())));
         assert!(rows.contains(&("session.logout".to_owned(), "success".to_owned())));
-        assert!(rows.contains(&("recovery.requested".to_owned(), "success".to_owned())));
+        assert!(
+            !rows
+                .iter()
+                .any(|(action, _)| action == "recovery.requested")
+        );
     }
 
     #[tokio::test]
@@ -1525,7 +1482,7 @@ mod tests {
 
     #[tokio::test]
     async fn logout_revocation_and_success_audit_commit_atomically() {
-        let (app, repository, _) = application(CookieMode::secure()).await;
+        let (app, repository, _database) = application(CookieMode::secure()).await;
         let login = app
             .clone()
             .oneshot(json_request(

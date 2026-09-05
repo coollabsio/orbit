@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { authGateState } from './authState'
+import { authGateState, recoveryRequestCopy } from './authState'
 
 describe('AuthGate state', () => {
   test('sends an uninitialized installation to setup', () => {
@@ -20,5 +20,12 @@ describe('AuthGate state', () => {
         userStatus: 'success',
       }),
     ).toBe('authenticated')
+  })
+})
+
+test('public recovery copy directs users to the installation administrator', () => {
+  expect(recoveryRequestCopy).toEqual({
+    title: 'Contact your administrator',
+    detail: 'Your installation administrator can create a one-time password recovery link for you.',
   })
 })

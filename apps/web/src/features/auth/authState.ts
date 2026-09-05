@@ -10,6 +10,11 @@ interface AuthGateInput {
 
 export type AuthGateState = 'loading' | 'setup' | 'login' | 'authenticated'
 
+export const recoveryRequestCopy = {
+  title: 'Contact your administrator',
+  detail: 'Your installation administrator can create a one-time password recovery link for you.',
+}
+
 export function authGateState(input: AuthGateInput): AuthGateState {
   if (input.setupComplete === undefined) return 'loading'
   if (!input.setupComplete) return 'setup'

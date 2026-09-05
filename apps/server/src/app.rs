@@ -18,7 +18,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::attachment_routes::AttachmentState;
-use crate::auth_routes::{AdminRecoveryDelivery, CookieMode, initialize_auth};
+use crate::auth_routes::{CookieMode, initialize_auth};
 use crate::metrics::Metrics;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
@@ -35,7 +35,6 @@ pub struct App {
     router: Router,
     setup_url: Option<String>,
     attachments: AttachmentState,
-    recovery_delivery: Arc<AdminRecoveryDelivery>,
     metrics: Metrics,
     backups: BackupService,
     workspaces: Arc<WorkspaceRepository>,
@@ -139,12 +138,9 @@ impl App {
         }
 
         let identity = Arc::new(IdentityRepository::new(database.clone()));
-        let recovery_delivery = Arc::new(AdminRecoveryDelivery::new(128));
-        let recovery: Arc<dyn crate::auth_routes::RecoveryDelivery> = recovery_delivery.clone();
         let (auth, setup) = initialize_auth(
             Arc::clone(&identity),
             cookie_mode,
-            recovery,
             config.http.public_origin.clone(),
         )
         .await
@@ -228,7 +224,6 @@ impl App {
             router,
             setup_url: setup.map(|setup| setup.url),
             attachments: attachment_state,
-            recovery_delivery,
             metrics,
             backups,
             workspaces,
@@ -252,11 +247,6 @@ impl App {
     #[must_use]
     pub fn setup_url(&self) -> Option<&str> {
         self.setup_url.as_deref()
-    }
-
-    #[must_use]
-    pub fn recovery_delivery(&self) -> Arc<AdminRecoveryDelivery> {
-        Arc::clone(&self.recovery_delivery)
     }
 
     #[must_use]

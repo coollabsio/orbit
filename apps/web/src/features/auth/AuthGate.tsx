@@ -2,13 +2,12 @@ import { useState } from 'react'
 import { Link, Navigate, Outlet, useNavigate } from 'react-router'
 import { ApiProblem } from '../../api/problem'
 import { useAcceptInvitation } from '../workspaces/api'
-import { authGateState } from './authState'
+import { authGateState, recoveryRequestCopy } from './authState'
 import {
   useCompleteRecovery,
   useCompleteSetup,
   useCurrentUser,
   useLogin,
-  useRequestRecovery,
   useSetupStatus,
 } from './api'
 import { consumeQueryToken } from './authFlow'
@@ -74,18 +73,7 @@ export function LoginPage() {
 
 export function RecoveryPage() {
   const token = useConsumedToken()
-  return token ? <CompleteRecovery token={token} /> : <RequestRecovery />
-}
-
-function RequestRecovery() {
-  const mutation = useRequestRecovery()
-  const [email, setEmail] = useState('')
-  if (mutation.isSuccess) return <AuthMessage title="Check your email" detail={mutation.data.detail} />
-  return (
-    <AuthForm title="Recover your account" error={mutation.error} pending={mutation.isPending} submitLabel="Send recovery link" onSubmit={() => mutation.mutateAsync({ email })} footer={<Link to="/login">Back to sign in</Link>}>
-      <AuthInput label="Email" type="email" value={email} onChange={setEmail} />
-    </AuthForm>
-  )
+  return token ? <CompleteRecovery token={token} /> : <AuthMessage {...recoveryRequestCopy} />
 }
 
 function CompleteRecovery({ token }: { token: string }) {

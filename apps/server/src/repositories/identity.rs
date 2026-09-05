@@ -820,6 +820,7 @@ impl IdentityRepository {
     pub async fn create_session_audited(
         &self,
         user: &AuthenticatedUser,
+        observed_password_hash: &str,
         replacement_hash: Option<&str>,
         request_id: &str,
         now: TimestampMillis,
@@ -827,6 +828,17 @@ impl IdentityRepository {
         let id = Id::new_v7();
         let token = generate_opaque_token();
         let mut transaction = self.database.immediate_transaction().await?;
+        let credential_unchanged = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE id = ? AND password_hash = ? \
+             AND suspended_at IS NULL",
+        )
+        .bind(user.id.to_string())
+        .bind(observed_password_hash)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if credential_unchanged != 1 {
+            return Err(IdentityError::InvalidCredential);
+        }
         if let Some(replacement_hash) = replacement_hash {
             sqlx::query(
                 "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
@@ -1137,7 +1149,133 @@ mod tests {
 
     use orbit_platform::{PasswordService, TestDatabase, TimestampMillis};
 
-    use super::{IdentityRepository, SetupError, SetupRequest};
+    use super::{IdentityError, IdentityRepository, SetupError, SetupRequest};
+
+    #[tokio::test]
+    async fn login_rejects_a_credential_observation_changed_by_recovery() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        repository
+            .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
+            .await
+            .unwrap();
+        let setup = repository
+            .complete_setup(
+                setup_request("operator-secret"),
+                TimestampMillis::from_millis(1_000),
+            )
+            .await
+            .unwrap();
+        let observed = repository
+            .find_by_email("owner@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        repository
+            .store_recovery_token(
+                &setup.user_id.to_string(),
+                "recovery-secret",
+                TimestampMillis::from_millis(60_000),
+            )
+            .await
+            .unwrap();
+        let recovered_hash = PasswordService::default()
+            .hash("a different secure password")
+            .unwrap();
+        repository
+            .complete_recovery(
+                "recovery-secret",
+                &recovered_hash,
+                TimestampMillis::from_millis(2_000),
+            )
+            .await
+            .unwrap();
+
+        let result = repository
+            .create_session_audited(
+                &orbit_platform::AuthenticatedUser {
+                    id: observed.id,
+                    email: observed.email,
+                    display_name: observed.display_name,
+                },
+                &observed.password_hash,
+                Some("rehash-of-old-password"),
+                "login-request",
+                TimestampMillis::from_millis(3_000),
+            )
+            .await;
+
+        assert!(matches!(result, Err(IdentityError::InvalidCredential)));
+        assert_eq!(
+            database
+                .scalar::<String>("SELECT password_hash FROM users")
+                .await
+                .unwrap(),
+            recovered_hash
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL")
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn login_rechecks_suspension_when_creating_the_session() {
+        let database = TestDatabase::new().await.unwrap();
+        let repository = IdentityRepository::new((*database).clone());
+        repository
+            .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
+            .await
+            .unwrap();
+        let setup = repository
+            .complete_setup(
+                setup_request("operator-secret"),
+                TimestampMillis::from_millis(1_000),
+            )
+            .await
+            .unwrap();
+        let observed = repository
+            .find_by_email("owner@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        repository
+            .set_suspended(
+                setup.user_id,
+                setup.user_id,
+                true,
+                "suspend-request",
+                TimestampMillis::from_millis(2_000),
+            )
+            .await
+            .unwrap();
+
+        let result = repository
+            .create_session_audited(
+                &orbit_platform::AuthenticatedUser {
+                    id: observed.id,
+                    email: observed.email,
+                    display_name: observed.display_name,
+                },
+                &observed.password_hash,
+                None,
+                "login-request",
+                TimestampMillis::from_millis(3_000),
+            )
+            .await;
+
+        assert!(matches!(result, Err(IdentityError::InvalidCredential)));
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL")
+                .await
+                .unwrap(),
+            0
+        );
+    }
 
     #[tokio::test]
     async fn auth_setup_and_initial_session_roll_back_together() {

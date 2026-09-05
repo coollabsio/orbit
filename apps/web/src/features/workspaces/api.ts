@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '../../api/client'
+import { fetchAllPages } from '../../api/pagination'
 import { queryKeys } from '../../api/queryKeys'
 import {
   acceptInvitation,
@@ -61,13 +62,16 @@ export function useMembers(workspaceId: string | null) {
     queryKey: queryKeys.members(workspaceId ?? ''),
     enabled: Boolean(workspaceId),
     queryFn: async () => {
-      const { data } = await listMembers({
-        client: apiClient,
-        path: { workspace_id: workspaceId! },
-        query: { limit: 100 },
-        throwOnError: true,
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listMembers({
+          client: apiClient,
+          path: { workspace_id: workspaceId! },
+          query: { limit: 100, cursor },
+          throwOnError: true,
+        })
+        return required(data, 'Members response was empty.')
       })
-      return required(data, 'Members response was empty.').items.map(memberFromRecord)
+      return page.items.map(memberFromRecord)
     },
   })
 }
@@ -77,13 +81,15 @@ export function useInvitations(workspaceId: string | null) {
     queryKey: queryKeys.invitations(workspaceId ?? ''),
     enabled: Boolean(workspaceId),
     queryFn: async () => {
-      const { data } = await listInvitations({
-        client: apiClient,
-        path: { workspace_id: workspaceId! },
-        query: { limit: 100 },
-        throwOnError: true,
+      return fetchAllPages(async (cursor) => {
+        const { data } = await listInvitations({
+          client: apiClient,
+          path: { workspace_id: workspaceId! },
+          query: { limit: 100, cursor },
+          throwOnError: true,
+        })
+        return required(data, 'Invitations response was empty.')
       })
-      return required(data, 'Invitations response was empty.')
     },
   })
 }

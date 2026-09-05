@@ -15,34 +15,26 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::TryStreamExt;
-use orbit_platform::{
-    AuthorizedAttachment, BlobStoreError, Id, RequestId, TimestampMillis, UploadError,
-    UploadService,
-};
+use orbit_platform::{BlobStoreError, Id, RequestId, TimestampMillis, UploadError, UploadService};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use sqlx::Row;
 use tokio_util::io::{ReaderStream, StreamReader};
 use tokio_util::sync::CancellationToken;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::audit::{self, AuditOutcome};
 use crate::auth_routes::CookieMode;
 use crate::repositories::attachments::{
-    AttachmentRepository, AttachmentRepositoryError, CreatedAttachment,
+    AttachmentList, AttachmentRepository, AttachmentRepositoryError, CreatedAttachment,
 };
 use crate::repositories::identity::AuthenticatedSession;
 use crate::repositories::identity::IdentityRepository;
-use crate::repositories::tasks::{CommentRecord, TaskError, TaskRepository};
+use crate::repositories::tasks::CommentRecord;
 
-const DAY_MILLIS: i64 = 24 * 60 * 60 * 1_000;
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone)]
 pub struct AttachmentState {
     identity: Arc<IdentityRepository>,
-    tasks: Arc<TaskRepository>,
     pub(crate) uploads: UploadService,
     attachments: Arc<AttachmentRepository>,
     cookie_mode: CookieMode,
@@ -60,7 +52,6 @@ impl AttachmentState {
             uploads.clone(),
         ));
         Self {
-            tasks: Arc::new(TaskRepository::new(identity.database().clone())),
             identity,
             uploads,
             attachments,
@@ -171,6 +162,19 @@ struct AttachmentPage {
     next_cursor: Option<String>,
 }
 
+impl From<AttachmentList> for AttachmentPage {
+    fn from(value: AttachmentList) -> Self {
+        Self {
+            items: value
+                .items
+                .into_iter()
+                .map(AttachmentRecord::from)
+                .collect(),
+            next_cursor: value.next_cursor,
+        }
+    }
+}
+
 #[derive(Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct PageQuery {
@@ -195,15 +199,6 @@ where
             .map(|Query(value)| Self(value))
             .map_err(|_| AttachmentApiError::invalid_request(&instance, request_id.as_ref()))
     }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct AttachmentCursor {
-    version: u8,
-    scope: String,
-    created_at: i64,
-    id: String,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -233,7 +228,7 @@ async fn list_task_attachments(
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<AttachmentPage>, AttachmentApiError> {
     let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/attachments");
-    let (workspace_id, task_id, _) = authorize_task(
+    let (workspace_id, task_id, session) = authorize_task(
         &state,
         &headers,
         &workspace,
@@ -243,16 +238,19 @@ async fn list_task_attachments(
     )
     .await?;
     Ok(Json(
-        attachments(
-            &state,
-            workspace_id,
-            task_id,
-            None,
-            page,
-            &instance,
-            request_id.as_ref(),
-        )
-        .await?,
+        state
+            .attachments
+            .list(
+                &session,
+                workspace_id,
+                task_id,
+                None,
+                page.cursor.as_deref(),
+                page.limit.unwrap_or(50),
+            )
+            .await
+            .map_err(|error| AttachmentApiError::repository(error, &instance, request_id.as_ref()))?
+            .into(),
     ))
 }
 
@@ -266,7 +264,7 @@ async fn list_comment_attachments(
 ) -> Result<Json<AttachmentPage>, AttachmentApiError> {
     let instance =
         format!("/api/v1/workspaces/{workspace}/tasks/{task}/comments/{comment}/attachments");
-    let (workspace_id, task_id, _) = authorize_task(
+    let (workspace_id, task_id, session) = authorize_task(
         &state,
         &headers,
         &workspace,
@@ -278,6 +276,7 @@ async fn list_comment_attachments(
     let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
     require_comment(
         &state,
+        &session,
         workspace_id,
         task_id,
         comment_id,
@@ -286,16 +285,19 @@ async fn list_comment_attachments(
     )
     .await?;
     Ok(Json(
-        attachments(
-            &state,
-            workspace_id,
-            task_id,
-            Some(comment_id),
-            page,
-            &instance,
-            request_id.as_ref(),
-        )
-        .await?,
+        state
+            .attachments
+            .list(
+                &session,
+                workspace_id,
+                task_id,
+                Some(comment_id),
+                page.cursor.as_deref(),
+                page.limit.unwrap_or(50),
+            )
+            .await
+            .map_err(|error| AttachmentApiError::repository(error, &instance, request_id.as_ref()))?
+            .into(),
     ))
 }
 
@@ -359,6 +361,7 @@ async fn upload_comment_attachments(
     let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
     require_comment(
         &state,
+        &session,
         workspace_id,
         task_id,
         comment_id,
@@ -678,70 +681,23 @@ async fn delete_attachment(
     };
     let (workspace_id, task_id, session) =
         authorize_task(state, headers, workspace, task, &instance, request_id).await?;
-    let actor_id = session.user.id;
     let attachment_id = parse_id(attachment, &instance, request_id)?;
     let comment_id = comment
         .map(|value| parse_id(value, &instance, request_id))
         .transpose()?;
-    let now = TimestampMillis::now();
-    let mut tx = state.identity.database().immediate_transaction().await?;
-    let current_access: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM tasks JOIN projects ON projects.id = tasks.project_id \
-         JOIN workspaces ON workspaces.id = tasks.workspace_id \
-         JOIN memberships ON memberships.workspace_id = tasks.workspace_id AND memberships.user_id = ? \
-         JOIN users ON users.id = memberships.user_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
-         AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL \
-         AND workspaces.deleted_at IS NULL AND users.suspended_at IS NULL",
-    )
-    .bind(actor_id.to_string())
-    .bind(task_id.to_string())
-    .bind(workspace_id.to_string())
-    .fetch_one(&mut *tx)
-    .await?;
-    if current_access != 1 {
-        return Err(AttachmentApiError::not_found(&instance, request_id));
-    }
-    let row = sqlx::query(
-        "SELECT blob_id FROM attachment_references WHERE id = ? AND workspace_id = ? \
-         AND task_id = ? AND comment_id IS ?",
-    )
-    .bind(attachment_id.to_string())
-    .bind(workspace_id.to_string())
-    .bind(task_id.to_string())
-    .bind(comment_id.map(|id| id.to_string()))
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(row) = row else {
-        return Err(AttachmentApiError::not_found(&instance, request_id));
-    };
-    let blob_id: String = row.try_get("blob_id")?;
-    sqlx::query("DELETE FROM attachment_references WHERE id = ?")
-        .bind(attachment_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query(
-        "UPDATE attachment_blobs SET quarantine_until = MAX(quarantine_until, ?) \
-         WHERE id = ? AND NOT EXISTS (SELECT 1 FROM attachment_references WHERE blob_id = ?)",
-    )
-    .bind(now.as_millis().saturating_add(DAY_MILLIS))
-    .bind(&blob_id)
-    .bind(&blob_id)
-    .execute(&mut *tx)
-    .await?;
-    audit::record(
-        &mut tx,
-        workspace_id,
-        Some(actor_id),
-        "attachment.deleted",
-        AuditOutcome::Success,
-        "attachment",
-        Some(attachment_id),
-        request_id_value(request_id),
-        json!({"task_id": task_id, "comment_id": comment_id}),
-        now,
-    )
-    .await?;
-    tx.commit().await?;
+    state
+        .attachments
+        .delete(
+            &session,
+            workspace_id,
+            task_id,
+            comment_id,
+            attachment_id,
+            request_id_value(request_id),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| AttachmentApiError::repository(error, &instance, request_id))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -802,30 +758,15 @@ async fn download_attachment(
     };
     let (workspace_id, task_id, session) =
         authorize_task(state, headers, workspace, task, &instance, request_id).await?;
-    let actor_id = session.user.id;
     let attachment_id = parse_id(attachment, &instance, request_id)?;
     let comment_id = comment
         .map(|value| parse_id(value, &instance, request_id))
         .transpose()?;
     let download = state
-        .uploads
-        .download(|| async {
-            authorized_attachment(
-                state,
-                workspace_id,
-                task_id,
-                comment_id,
-                attachment_id,
-                actor_id,
-            )
-            .await
-            .map_err(|error| match error {
-                AttachmentLookupError::NotFound => UploadError::Unauthorized,
-                AttachmentLookupError::Database(error) => UploadError::Database(error),
-            })
-        })
+        .attachments
+        .download(&session, workspace_id, task_id, comment_id, attachment_id)
         .await
-        .map_err(|error| AttachmentApiError::upload(error, &instance, request_id))?;
+        .map_err(|error| AttachmentApiError::repository(error, &instance, request_id))?;
     let content_type = HeaderValue::from_str(&download.metadata.content_type)
         .map_err(|_| AttachmentApiError::internal(&instance, request_id))?;
     let disposition = HeaderValue::from_str(&download.metadata.content_disposition)
@@ -861,201 +802,27 @@ async fn authorize_task(
     let workspace_id = parse_id(workspace, instance, request_id)?;
     let task_id = parse_id(task, instance, request_id)?;
     state
-        .tasks
-        .get_task(workspace_id, task_id, session.user.id)
+        .attachments
+        .authorize_task(&session, workspace_id, task_id)
         .await
-        .map_err(|error| AttachmentApiError::task(error, instance, request_id))?;
+        .map_err(|error| AttachmentApiError::repository(error, instance, request_id))?;
     Ok((workspace_id, task_id, session))
 }
 
 async fn require_comment(
     state: &AttachmentState,
+    session: &AuthenticatedSession,
     workspace_id: Id,
     task_id: Id,
     comment_id: Id,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<(), AttachmentApiError> {
-    let exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?",
-    )
-    .bind(comment_id.to_string())
-    .bind(workspace_id.to_string())
-    .bind(task_id.to_string())
-    .fetch_one(state.identity.database().pool())
-    .await?;
-    if exists == 1 {
-        Ok(())
-    } else {
-        Err(AttachmentApiError::not_found(instance, request_id))
-    }
-}
-
-async fn attachments(
-    state: &AttachmentState,
-    workspace_id: Id,
-    task_id: Id,
-    comment_id: Option<Id>,
-    page: PageQuery,
-    instance: &str,
-    request_id: Option<&Extension<RequestId>>,
-) -> Result<AttachmentPage, AttachmentApiError> {
-    let scope = format!(
-        "{workspace_id}:{task_id}:{}",
-        comment_id.map_or_else(|| "task".to_owned(), |id| id.to_string())
-    );
-    let after = page
-        .cursor
-        .as_deref()
-        .map(|encoded| {
-            decode_cursor(encoded)
-                .and_then(|cursor| {
-                    if cursor.version != 1
-                        || cursor.scope != scope
-                        || cursor.id.parse::<Id>().is_err()
-                    {
-                        None
-                    } else {
-                        Some((cursor.created_at, cursor.id))
-                    }
-                })
-                .ok_or_else(|| AttachmentApiError::invalid_cursor(instance, request_id))
-        })
-        .transpose()?;
-    let limit = page.limit.unwrap_or(50).clamp(1, 100);
-    let fetch_limit = i64::try_from(limit + 1).expect("attachment page limit fits i64");
-    let comment = comment_id.map(|id| id.to_string());
-    let rows = if let Some((created_at, id)) = after {
-        sqlx::query(
-            "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-             byte_size, created_at FROM attachment_references WHERE workspace_id = ? AND task_id = ? \
-             AND comment_id IS ? AND (created_at > ? OR (created_at = ? AND id > ?)) \
-             ORDER BY created_at, id LIMIT ?",
-        )
-        .bind(workspace_id.to_string()).bind(task_id.to_string()).bind(&comment)
-        .bind(created_at).bind(created_at).bind(id).bind(fetch_limit)
-        .fetch_all(state.identity.database().pool()).await?
-    } else {
-        sqlx::query(
-            "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-             byte_size, created_at FROM attachment_references WHERE workspace_id = ? AND task_id = ? \
-             AND comment_id IS ? ORDER BY created_at, id LIMIT ?",
-        )
-        .bind(workspace_id.to_string()).bind(task_id.to_string()).bind(&comment).bind(fetch_limit)
-        .fetch_all(state.identity.database().pool()).await?
-    };
-    let mut items: Vec<_> = rows
-        .into_iter()
-        .map(attachment_from_row)
-        .collect::<Result<_, _>>()?;
-    let has_more = items.len() > limit;
-    items.truncate(limit);
-    let next_cursor = if has_more {
-        items
-            .last()
-            .map(|record| {
-                encode_cursor(&AttachmentCursor {
-                    version: 1,
-                    scope,
-                    created_at: record.created_at.as_millis(),
-                    id: record.id.to_string(),
-                })
-            })
-            .transpose()
-            .map_err(|_| AttachmentApiError::internal(instance, request_id))?
-    } else {
-        None
-    };
-    Ok(AttachmentPage { items, next_cursor })
-}
-
-fn encode_cursor(cursor: &AttachmentCursor) -> Result<String, serde_json::Error> {
-    Ok(serde_json::to_vec(cursor)?
-        .into_iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
-}
-
-fn decode_cursor(encoded: &str) -> Option<AttachmentCursor> {
-    if !encoded.len().is_multiple_of(2) || encoded.len() > 8_192 {
-        return None;
-    }
-    let bytes = (0..encoded.len())
-        .step_by(2)
-        .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).ok())
-        .collect::<Option<Vec<_>>>()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-fn attachment_from_row(
-    row: sqlx::sqlite::SqliteRow,
-) -> Result<AttachmentRecord, AttachmentApiError> {
-    Ok(AttachmentRecord {
-        id: parse_db_id(row.try_get("id")?)?,
-        workspace_id: parse_db_id(row.try_get("workspace_id")?)?,
-        task_id: parse_db_id(row.try_get("task_id")?)?,
-        comment_id: row
-            .try_get::<Option<String>, _>("comment_id")?
-            .map(parse_db_id)
-            .transpose()?,
-        owner_id: parse_db_id(row.try_get("owner_id")?)?,
-        display_name: row.try_get("display_name")?,
-        media_type: row.try_get("media_type")?,
-        byte_size: u64::try_from(row.try_get::<i64, _>("byte_size")?)
-            .map_err(|_| AttachmentApiError::database_value())?,
-        created_at: TimestampMillis::from_millis(row.try_get("created_at")?),
-    })
-}
-
-enum AttachmentLookupError {
-    NotFound,
-    Database(sqlx::Error),
-}
-
-async fn authorized_attachment(
-    state: &AttachmentState,
-    workspace_id: Id,
-    task_id: Id,
-    comment_id: Option<Id>,
-    attachment_id: Id,
-    actor_id: Id,
-) -> Result<AuthorizedAttachment, AttachmentLookupError> {
-    let row = sqlx::query(
-        "SELECT attachment_blobs.storage_key, attachment_references.media_type, \
-         attachment_references.display_name FROM attachment_references JOIN attachment_blobs \
-         ON attachment_blobs.id = attachment_references.blob_id \
-         AND attachment_blobs.workspace_id = attachment_references.workspace_id \
-         JOIN tasks ON tasks.id = attachment_references.task_id \
-         AND tasks.workspace_id = attachment_references.workspace_id \
-         JOIN projects ON projects.id = tasks.project_id \
-         JOIN workspaces ON workspaces.id = tasks.workspace_id \
-         JOIN memberships ON memberships.workspace_id = tasks.workspace_id AND memberships.user_id = ? \
-         JOIN users ON users.id = memberships.user_id WHERE attachment_references.id = ? \
-         AND attachment_references.workspace_id = ? AND attachment_references.task_id = ? \
-         AND attachment_references.comment_id IS ? AND tasks.deleted_at IS NULL \
-         AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL \
-         AND users.suspended_at IS NULL",
-    )
-    .bind(actor_id.to_string())
-    .bind(attachment_id.to_string())
-    .bind(workspace_id.to_string())
-    .bind(task_id.to_string())
-    .bind(comment_id.map(|id| id.to_string()))
-    .fetch_optional(state.identity.database().pool())
-    .await
-    .map_err(AttachmentLookupError::Database)?
-    .ok_or(AttachmentLookupError::NotFound)?;
-    Ok(AuthorizedAttachment {
-        storage_key: row
-            .try_get("storage_key")
-            .map_err(AttachmentLookupError::Database)?,
-        media_type: row
-            .try_get("media_type")
-            .map_err(AttachmentLookupError::Database)?,
-        display_name: row
-            .try_get("display_name")
-            .map_err(AttachmentLookupError::Database)?,
-    })
+    state
+        .attachments
+        .require_comment(session, workspace_id, task_id, comment_id)
+        .await
+        .map_err(|error| AttachmentApiError::repository(error, instance, request_id))
 }
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -1076,12 +843,6 @@ fn parse_id(
     value
         .parse()
         .map_err(|_| AttachmentApiError::not_found(instance, request_id))
-}
-
-fn parse_db_id(value: String) -> Result<Id, AttachmentApiError> {
-    value
-        .parse()
-        .map_err(|_| AttachmentApiError::database_value())
 }
 
 fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
@@ -1206,13 +967,6 @@ impl AttachmentApiError {
         )
     }
 
-    fn task(error: TaskError, instance: &str, request_id: Option<&Extension<RequestId>>) -> Self {
-        match error {
-            TaskError::NotFound => Self::not_found(instance, request_id),
-            _ => Self::internal(instance, request_id),
-        }
-    }
-
     fn upload(
         error: UploadError,
         instance: &str,
@@ -1257,19 +1011,12 @@ impl AttachmentApiError {
     ) -> Self {
         match error {
             AttachmentRepositoryError::NotFound => Self::not_found(instance, request_id),
+            AttachmentRepositoryError::InvalidCursor => Self::invalid_cursor(instance, request_id),
             AttachmentRepositoryError::Upload(error) => Self::upload(error, instance, request_id),
-            AttachmentRepositoryError::Database(_) => Self::internal(instance, request_id),
+            AttachmentRepositoryError::Database(_) | AttachmentRepositoryError::InvalidRecord => {
+                Self::internal(instance, request_id)
+            }
         }
-    }
-
-    fn database_value() -> Self {
-        Self::internal("attachment metadata", None)
-    }
-}
-
-impl From<sqlx::Error> for AttachmentApiError {
-    fn from(_: sqlx::Error) -> Self {
-        Self::database_value()
     }
 }
 

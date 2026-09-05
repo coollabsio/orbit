@@ -656,6 +656,13 @@ async fn attachment_lists_use_keyset_cursors() {
     assert_ne!(first["items"][0]["id"], second["items"][0]["id"]);
 }
 
+#[test]
+fn attachment_http_handlers_do_not_issue_sql_or_start_transactions() {
+    let source = include_str!("../src/attachment_routes.rs");
+    assert!(!source.contains("sqlx::"));
+    assert!(!source.contains("immediate_transaction"));
+}
+
 #[tokio::test]
 async fn configured_production_layer_allows_streaming_uploads_above_one_mibibyte() {
     let limits = UploadLimits::new(3 * 1024 * 1024, 3 * 1024 * 1024).unwrap();

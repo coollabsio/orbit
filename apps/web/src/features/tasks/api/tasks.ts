@@ -2,6 +2,7 @@ import { useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } f
 import { useRef, useState } from 'react'
 import { apiClient } from '../../../api/client'
 import type { createApiClient } from '../../../api/client'
+import { fetchAllPages } from '../../../api/pagination'
 import {
   bulkTasks,
   createAttachmentComment,
@@ -119,8 +120,11 @@ export function useTaskComments(workspaceId: string, taskId: string | undefined)
     queryKey: queryKeys.comments(workspaceId, taskId ?? ''),
     enabled: Boolean(taskId),
     queryFn: async () => {
-      const { data } = await listComments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100 }, throwOnError: true })
-      return required(data, 'Comments response was empty.').items
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listComments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Comments response was empty.')
+      })
+      return page.items
     },
   })
 }
@@ -130,8 +134,11 @@ export function useTaskAttachments(workspaceId: string, taskId: string | undefin
     queryKey: queryKeys.attachments(workspaceId, taskId ?? ''),
     enabled: Boolean(taskId),
     queryFn: async () => {
-      const { data } = await listTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100 }, throwOnError: true })
-      return required(data, 'Attachments response was empty.').items
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Attachments response was empty.')
+      })
+      return page.items
     },
   })
 }
@@ -141,8 +148,11 @@ export function useCommentAttachments(workspaceId: string, taskId: string | unde
     queries: taskId ? comments.map((comment) => ({
       queryKey: queryKeys.commentAttachments(workspaceId, taskId, comment.id),
       queryFn: async () => {
-        const { data } = await listCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: comment.id }, query: { limit: 100 }, throwOnError: true })
-        return required(data, 'Comment attachments response was empty.').items
+        const page = await fetchAllPages(async (cursor) => {
+          const { data } = await listCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: comment.id }, query: { limit: 100, cursor }, throwOnError: true })
+          return required(data, 'Comment attachments response was empty.')
+        })
+        return page.items
       },
     })) : [],
   })
@@ -157,8 +167,11 @@ export function useTaskTrash(workspaceId: string) {
   return useQuery({
     queryKey: queryKeys.taskTrash(workspaceId),
     queryFn: async () => {
-      const { data } = await listTaskTrash({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100 }, throwOnError: true })
-      return required(data, 'Task trash response was empty.').items
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listTaskTrash({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Task trash response was empty.')
+      })
+      return page.items
     },
   })
 }

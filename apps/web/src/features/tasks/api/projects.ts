@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../../../api/client'
+import { fetchAllPages } from '../../../api/pagination'
 import {
   createProject,
   createStatus,
@@ -51,8 +52,11 @@ export function useProjects(workspaceId: string) {
   return useQuery({
     queryKey: queryKeys.projects(workspaceId),
     queryFn: async () => {
-      const { data } = await listProjects({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100 }, throwOnError: true })
-      return required(data, 'Projects response was empty.').items
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listProjects({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Projects response was empty.')
+      })
+      return page.items
     },
   })
 }
@@ -62,8 +66,11 @@ export function useProjectStatuses(workspaceId: string, projectId: string | unde
     queryKey: queryKeys.statuses(workspaceId, projectId ?? ''),
     enabled: Boolean(projectId),
     queryFn: async () => {
-      const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId! }, query: { limit: 100 }, throwOnError: true })
-      return required(data, 'Statuses response was empty.').items.map(statusFromRecord)
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId! }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Statuses response was empty.')
+      })
+      return page.items.map(statusFromRecord)
     },
   })
 }
@@ -73,8 +80,11 @@ export function useAllStatuses(workspaceId: string, projects: ProjectRecord[]) {
     queries: projects.map((project) => ({
       queryKey: queryKeys.statuses(workspaceId, project.id),
       queryFn: async () => {
-        const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: project.id }, query: { limit: 100 }, throwOnError: true })
-        return required(data, 'Statuses response was empty.').items.map(statusFromRecord)
+        const page = await fetchAllPages(async (cursor) => {
+          const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: project.id }, query: { limit: 100, cursor }, throwOnError: true })
+          return required(data, 'Statuses response was empty.')
+        })
+        return page.items.map(statusFromRecord)
       },
     })),
   })
@@ -124,8 +134,11 @@ export function useProjectTrash(workspaceId: string) {
   return useQuery({
     queryKey: queryKeys.projectTrash(workspaceId),
     queryFn: async () => {
-      const { data } = await listProjectTrash({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100 }, throwOnError: true })
-      return required(data, 'Project trash response was empty.').items
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listProjectTrash({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Project trash response was empty.')
+      })
+      return page.items
     },
   })
 }
