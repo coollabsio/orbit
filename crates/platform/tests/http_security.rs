@@ -165,6 +165,67 @@ async fn same_origin_unsafe_request_reaches_the_handler() {
 }
 
 #[tokio::test]
+async fn development_policy_accepts_any_valid_http_or_https_origin() {
+    let app = test_app(OriginPolicy::new("http://127.0.0.1:8888").allow_any_http_origin());
+
+    for origin in [
+        "http://localhost:18888",
+        "https://jean-server.tail661ee3.ts.net:8888",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/probe")
+                    .header("origin", origin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT, "{origin}");
+    }
+}
+
+#[tokio::test]
+async fn development_policy_rejects_missing_malformed_and_non_http_origins() {
+    let app = test_app(OriginPolicy::new("http://127.0.0.1:8888").allow_any_http_origin());
+
+    for origin in [
+        None,
+        Some("not-an-origin"),
+        Some("ftp://localhost:18888"),
+        Some("http://127.0.0.1:8888////"),
+    ] {
+        let mut request = Request::post("/probe").body(Body::empty()).unwrap();
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert("origin", HeaderValue::from_str(origin).unwrap());
+        }
+        let response = app.clone().oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{origin:?}");
+    }
+}
+
+#[tokio::test]
+async fn production_policy_still_requires_the_configured_exact_origin() {
+    let app = test_app(OriginPolicy::new("https://orbit.example"));
+    let response = app
+        .oneshot(
+            Request::post("/probe")
+                .header("origin", "https://other.example")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn unsafe_request_rejects_ambiguous_multiple_origin_headers() {
     let app = test_app(OriginPolicy::new("https://orbit.test"));
     let mut request = request("POST", "/probe");

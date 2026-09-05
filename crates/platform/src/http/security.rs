@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use axum::http::header::{
     CONTENT_SECURITY_POLICY, HeaderName, HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
 };
-use axum::http::{HeaderMap, Method};
+use axum::http::{HeaderMap, Method, Uri};
 use ipnet::IpNet;
 
 use super::RequestId;
@@ -35,6 +35,7 @@ impl RequestTransport {
 #[derive(Clone, Debug)]
 pub struct OriginPolicy {
     allowed_origins: BTreeSet<String>,
+    allow_any_http_origin: bool,
     trusted_proxies: Vec<IpNet>,
 }
 
@@ -46,8 +47,15 @@ impl OriginPolicy {
         allowed_origins.insert(normalize_origin(&application_origin));
         Self {
             allowed_origins,
+            allow_any_http_origin: false,
             trusted_proxies: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn allow_any_http_origin(mut self) -> Self {
+        self.allow_any_http_origin = true;
+        self
     }
 
     #[must_use]
@@ -86,11 +94,13 @@ impl OriginPolicy {
             return false;
         };
         origins.next().is_none()
-            && origin
-                .to_str()
-                .ok()
-                .map(normalize_origin)
-                .is_some_and(|origin| self.allowed_origins.contains(&origin))
+            && origin.to_str().ok().is_some_and(|origin| {
+                if self.allow_any_http_origin {
+                    is_valid_http_origin(origin)
+                } else {
+                    self.allowed_origins.contains(&normalize_origin(origin))
+                }
+            })
     }
 }
 
@@ -198,4 +208,16 @@ pub(crate) fn add_security_headers(
 
 fn normalize_origin(origin: &str) -> String {
     origin.trim_end_matches('/').to_ascii_lowercase()
+}
+
+fn is_valid_http_origin(origin: &str) -> bool {
+    let Ok(uri) = origin.parse::<Uri>() else {
+        return false;
+    };
+    matches!(uri.scheme_str(), Some("http" | "https"))
+        && uri
+            .authority()
+            .is_some_and(|authority| !authority.as_str().contains('@'))
+        && uri.path() == "/"
+        && uri.query().is_none()
 }

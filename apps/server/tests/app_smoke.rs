@@ -24,6 +24,44 @@ fn app_config(root: &TempDir) -> Config {
     config
 }
 
+fn login_request(origin: Option<&str>) -> Request<Body> {
+    let mut builder =
+        Request::post("/api/v1/auth/login").header(header::CONTENT_TYPE, "application/json");
+    if let Some(origin) = origin {
+        builder = builder.header(header::ORIGIN, origin);
+    }
+    builder
+        .body(Body::from(
+            serde_json::json!({
+                "email": "missing@example.com",
+                "password": "not a real password"
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn development_app_accepts_distinct_http_origins_but_still_requires_one() {
+    let root = TempDir::new().unwrap();
+    let app = App::build(app_config(&root)).await.unwrap();
+
+    for origin in [
+        "http://localhost:18888",
+        "https://jean-server.tail661ee3.ts.net:8888",
+    ] {
+        let response = app
+            .router()
+            .oneshot(login_request(Some(origin)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{origin}");
+    }
+
+    let missing = app.router().oneshot(login_request(None)).await.unwrap();
+    assert_eq!(missing.status(), StatusCode::FORBIDDEN);
+}
+
 #[tokio::test]
 async fn embedded_spa_uses_safe_cache_policies_and_never_masks_api_404s() {
     let assets =

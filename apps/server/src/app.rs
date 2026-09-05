@@ -190,6 +190,9 @@ impl App {
 
         let assets = StaticAssets::verified(crate::openapi::CONTRACT_ID, FRONTEND_REVISION)?;
         let mut origin_policy = OriginPolicy::new(&config.http.public_origin);
+        if config.environment == orbit_platform::EnvironmentMode::Development {
+            origin_policy = origin_policy.allow_any_http_origin();
+        }
         for proxy in &config.http.trusted_proxies {
             origin_policy = origin_policy.trust_proxy(*proxy);
         }
