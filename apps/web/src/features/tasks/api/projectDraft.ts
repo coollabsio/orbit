@@ -7,3 +7,7 @@ export function projectDraft(name: string): ProjectBody {
     color: '#8b5cf6',
   }
 }
+
+export function projectSettingsPath(projectId: string | null): string | null {
+  return projectId ? `/tasks/projects/${projectId}/settings` : null
+}

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Add, ChevronDown, TaskSquare } from 'reicon-react'
+import { Add, ChevronDown, Setting2, TaskSquare } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useCurrentUser } from '../auth/api'
 import { useMembers } from '../workspaces/api'
 import { useWorkspace } from '../workspaces/workspaceContext'
 import { useAllStatuses, useCreateProject, useProjects } from './api/projects'
-import { projectDraft } from './api/projectDraft'
+import { projectDraft, projectSettingsPath } from './api/projectDraft'
 import { useLabels } from './api/labels'
 import { taskFromRecord } from './api/models'
 import {
@@ -162,6 +162,11 @@ export function TasksPage() {
               {(close) => <><button className="popover-option" data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><TaskSquare size={15} />All tasks</button>
                 {projects.map((project) => <button key={project.id} className="popover-option" data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="pill-dot" style={{ background: project.color }} />{project.name}</button>)}
                 <div className="popover-separator" />
+                {activeProject ? <button className="popover-option" onClick={() => {
+                  const path = projectSettingsPath(activeProject.id)
+                  close()
+                  if (path) navigate(path)
+                }}><Setting2 size={15} />Manage {activeProject.name}</button> : null}
                 <button className="popover-option" disabled={createProject.isPending} onClick={() => startNewProject(close)}><Add size={15} />New project</button></>}
             </Dropdown>
             <div className="spacer" />
