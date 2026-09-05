@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Add, ArrowDown2, ArrowRight, Copy, Notification, People, SearchNormal, X } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
@@ -46,6 +46,10 @@ export function MembersPage() {
   const [inviteLink, setInviteLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
+
+  useEffect(() => {
+    if (window.location.pathname.endsWith('/invitations')) document.getElementById('invitations')?.scrollIntoView()
+  }, [membersQuery.isPending])
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -311,7 +315,7 @@ export function MembersPage() {
       </SettingsCard>
 
       {canManage ? (
-        <form onSubmit={(event) => void generateLink(event)}>
+        <form id="invitations" onSubmit={(event) => void generateLink(event)}>
           <SettingsCard
             title="Invite a member"
             description="Create a reusable invitation link or deliver it by email."

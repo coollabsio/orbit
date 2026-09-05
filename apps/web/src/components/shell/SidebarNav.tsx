@@ -5,8 +5,11 @@ import {
   Message,
   Messages2,
   Note2,
+  Notification,
+  People,
   SearchNormal,
   Setting2,
+  ShieldTick,
   Sms,
   TaskSquare,
 } from 'reicon-react'
@@ -76,6 +79,15 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
         >
           <Setting2 size={18} />
           <span className="menu-item-label">Settings</span>
+        </NavLink>
+        <NavLink to="/settings/members" className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')} aria-label="Members" title={collapsed ? 'Members' : undefined} onClick={onNavigate}>
+          <People size={18} /><span className="menu-item-label">Members</span>
+        </NavLink>
+        <NavLink to="/settings/invitations" className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')} aria-label="Invitations" title={collapsed ? 'Invitations' : undefined} onClick={onNavigate}>
+          <Notification size={18} /><span className="menu-item-label">Invitations</span>
+        </NavLink>
+        <NavLink to="/settings/sessions" className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')} aria-label="Sessions" title={collapsed ? 'Sessions' : undefined} onClick={onNavigate}>
+          <ShieldTick size={18} /><span className="menu-item-label">Sessions</span>
         </NavLink>
       </div>
     </>

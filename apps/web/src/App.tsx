@@ -48,6 +48,7 @@ export default function App() {
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
                 <Route path="members" element={<MembersPage />} />
+                <Route path="invitations" element={<MembersPage />} />
                 <Route path="sessions" element={<SessionsPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/tasks" replace />} />
