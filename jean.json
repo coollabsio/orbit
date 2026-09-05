@@ -1,0 +1,17 @@
+{
+  "scripts": {
+    "setup": "just setup",
+    "teardown": null,
+    "run": "just dev"
+  },
+  "ports": [
+    {
+      "port": 8888,
+      "label": "Orbit"
+    },
+    {
+      "port": 8080,
+      "label": "Orbit API"
+    }
+  ]
+}
