@@ -2,15 +2,15 @@
   "scripts": {
     "setup": "just setup",
     "teardown": null,
-    "run": "just dev"
+    "run": "ORBIT_DEV_API_PORT=18080 ORBIT_DEV_WEB_PORT=18888 just dev"
   },
   "ports": [
     {
-      "port": 8888,
+      "port": 18888,
       "label": "Orbit"
     },
     {
-      "port": 8080,
+      "port": 18080,
       "label": "Orbit API"
     }
   ]
