@@ -1,5 +1,5 @@
 import { useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { apiClient } from '../../../api/client'
 import type { createApiClient } from '../../../api/client'
 import {
@@ -37,6 +37,7 @@ import { queryKeys } from '../../../api/queryKeys'
 import { isTaskVersionConflict } from './conflicts'
 import { commentUploadMode } from './commentUpload'
 import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, type WorkspaceTaskSnapshot } from './optimistic'
+import { PartialUploadError, uploadFiles } from './uploadQueue'
 
 type ApiClient = ReturnType<typeof createApiClient>
 export type TaskFilters = NonNullable<ListTasksData['query']>
@@ -57,6 +58,21 @@ export async function taskListPage(
   return data
 }
 
+export async function taskListAllPages(
+  client: ApiClient,
+  workspaceId: string,
+  filters: TaskFilters,
+): Promise<PageTaskRecord> {
+  const items: TaskRecord[] = []
+  let cursor: string | undefined
+  do {
+    const page = await taskListPage(client, workspaceId, filters, cursor)
+    items.push(...page.items)
+    cursor = nextTaskCursor(page)
+  } while (cursor)
+  return { items, next_cursor: null }
+}
+
 export function nextTaskCursor(page: PageTaskRecord): string | undefined {
   return page.next_cursor ?? undefined
 }
@@ -66,11 +82,13 @@ function required<T>(data: T | undefined, message: string): T {
   return data
 }
 
-export function useTasks(workspaceId: string, filters: TaskFilters = {}) {
+export function useTasks(workspaceId: string, filters: TaskFilters = {}, exhaustive = false) {
   return useInfiniteQuery({
-    queryKey: queryKeys.tasks.list(workspaceId, filters),
+    queryKey: queryKeys.tasks.list(workspaceId, { ...filters, exhaustive }),
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => taskListPage(apiClient, workspaceId, filters, pageParam),
+    queryFn: ({ pageParam }) => exhaustive
+      ? taskListAllPages(apiClient, workspaceId, filters)
+      : taskListPage(apiClient, workspaceId, filters, pageParam),
     getNextPageParam: nextTaskCursor,
   })
 }
@@ -262,28 +280,73 @@ export function useRestoreTask(workspaceId: string) {
 
 export function useCreateTaskComment(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: async ({ body, parentId, files }: { body: string; parentId?: string; files: File[] }) => {
-      let commentId: string
-      const mode = commentUploadMode(body, files.length)
-      if (mode === 'text') {
-        const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId }, throwOnError: true })
-        commentId = required(response.data, 'Create comment response was empty.').id
-        for (const file of files) await uploadCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { file }, throwOnError: true })
-      } else if (mode === 'attachment-only') {
-        const [first, ...rest] = files
-        if (!first) throw new Error('A comment attachment was missing.')
-        const response = await createAttachmentComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file: first }, throwOnError: true })
-        commentId = required(response.data, 'Attachment comment response was empty.').comment.id
-        for (const file of rest) await uploadCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { file }, throwOnError: true })
-      } else throw new Error('A comment needs text or an attachment.')
+  const [progress, setProgress] = useState<number>()
+  const [remainingCount, setRemainingCount] = useState(0)
+  const resume = useRef<{ signature: string; commentId: string; version: number; remaining: File[]; total: number } | null>(null)
+  const mutation = useMutation({
+    mutationFn: async (input: { body: string; parentId?: string; files: File[] }) => {
+      const { body, parentId, files } = input
+      const signature = JSON.stringify([body, parentId ?? null, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
+      if (resume.current && resume.current.signature !== signature) {
+        await deleteComment({
+          client: apiClient,
+          path: { workspace_id: workspaceId, task_id: taskId, comment_id: resume.current.commentId },
+          query: { expected_version: resume.current.version },
+          throwOnError: true,
+        })
+        resume.current = null
+      }
+
+      let state = resume.current
+      if (!state) {
+        let comment: CommentRecord
+        let remaining = files
+        setProgress(files.length > 0 ? 0 : undefined)
+        setRemainingCount(files.length)
+        const mode = commentUploadMode(body, files.length)
+        if (mode === 'text') {
+          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId }, throwOnError: true })
+          comment = required(response.data, 'Create comment response was empty.')
+        } else if (mode === 'attachment-only') {
+          const [first, ...rest] = files
+          if (!first) throw new Error('A comment attachment was missing.')
+          const response = await createAttachmentComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file: first }, throwOnError: true })
+          comment = required(response.data, 'Attachment comment response was empty.').comment
+          remaining = rest
+          setProgress(Math.round(100 / files.length))
+        } else {
+          throw new Error('A comment needs text or an attachment.')
+        }
+        state = { signature, commentId: comment.id, version: comment.version, remaining, total: files.length }
+        resume.current = state
+      }
+
+      const completedBefore = state.total - state.remaining.length
+      try {
+        await uploadFiles(
+          state.remaining,
+          (file) => uploadCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: state.commentId }, body: { file }, throwOnError: true }),
+          (remainingProgress) => setProgress(Math.round(((completedBefore + remainingProgress * state.remaining.length / 100) / state.total) * 100)),
+        )
+      } catch (error) {
+        if (error instanceof PartialUploadError) {
+          state.remaining = error.remaining
+          setRemainingCount(error.remaining.length)
+        }
+        throw error
+      }
+      const commentId = state.commentId
+      resume.current = null
+      setRemainingCount(0)
+      if (state.total > 0) setProgress(100)
       return commentId
     },
-    onSuccess: () => {
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) })
     },
   })
+  return { ...mutation, progress, remainingCount }
 }
 
 export function useUpdateTaskComment(workspaceId: string, taskId: string) {
@@ -310,17 +373,31 @@ export function useDeleteTaskComment(workspaceId: string, taskId: string) {
 export function useUploadTaskAttachments(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
   const [progress, setProgress] = useState(0)
+  const [remainingCount, setRemainingCount] = useState(0)
+  const remaining = useRef<File[]>([])
   const mutation = useMutation({
     mutationFn: async (files: File[]) => {
       setProgress(0)
-      for (const [index, file] of files.entries()) {
-        await uploadTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file }, throwOnError: true })
-        setProgress(Math.round(((index + 1) / files.length) * 100))
+      setRemainingCount(files.length)
+      try {
+        await uploadFiles(
+          files,
+          (file) => uploadTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file }, throwOnError: true }),
+          setProgress,
+        )
+      } catch (error) {
+        if (error instanceof PartialUploadError) {
+          remaining.current = error.remaining
+          setRemainingCount(error.remaining.length)
+        }
+        throw error
       }
+      remaining.current = []
+      setRemainingCount(0)
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) }),
   })
-  return { ...mutation, progress }
+  return { ...mutation, progress, remainingCount, retry: () => mutation.mutate(remaining.current) }
 }
 
 export function useDeleteTaskAttachment(workspaceId: string, taskId: string) {

@@ -11,7 +11,7 @@ export function TaskTrashPage() {
   const projects = useProjectTrash(workspace.id)
   const restoreProject = useRestoreProject(workspace.id)
   if (trash.isPending || projects.isPending) return <EmptyState icon={Trash} title="Loading trash" description="Loading deleted projects and tasks." />
-  if (trash.isError || projects.isError) return <EmptyState icon={Trash} title="Trash unavailable" description="The server could not load deleted records." />
+  if (trash.isError || projects.isError) return <div><EmptyState icon={Trash} title="Trash unavailable" description="The server could not load deleted records." /><button className="button" onClick={() => { void trash.refetch(); void projects.refetch() }}>Retry</button></div>
   return (
     <div className="page"><section className="pane" style={{ flex: 1 }}><div className="pane-header"><span className="pane-title">Trash</span></div><div className="pane-body">
       {projects.data.map((project) => <div className="list-row" key={project.id}><span className="truncate" style={{ flex: 1 }}>Project: {project.name}</span><button className="button" disabled={restoreProject.isPending} onClick={() => restoreProject.mutate({ projectId: project.id, version: project.version })}><Refresh size={14} />Restore project</button></div>)}
@@ -19,6 +19,9 @@ export function TaskTrashPage() {
         <div className="list-row" key={task.id}><span className="truncate" style={{ flex: 1 }}>{task.title || 'Untitled task'}</span><button className="button" disabled={restore.isPending} onClick={() => restore.mutate({ taskId: task.id, version: task.version })}><Refresh size={14} />Restore</button></div>
       ))}
       {trash.data.length === 0 && projects.data.length === 0 ? <EmptyState icon={Trash} title="Trash is empty" description="Deleted projects and tasks appear here until restored." /> : null}
+      {restore.isError ? <p role="alert" className="text-danger">Task restore failed. <button className="button button-ghost" onClick={() => restore.variables && restore.mutate(restore.variables)}>Retry</button></p> : null}
+      {restoreProject.isError ? <p role="alert" className="text-danger">Project restore failed. <button className="button button-ghost" onClick={() => restoreProject.variables && restoreProject.mutate(restoreProject.variables)}>Retry</button></p> : null}
+      {restore.isPending || restoreProject.isPending ? <p role="status">Restoring deleted record…</p> : null}
     </div></section></div>
   )
 }

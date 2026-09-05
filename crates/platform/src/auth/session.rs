@@ -39,6 +39,7 @@ pub struct SessionRecord {
     pub idle_expires_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
     pub absolute_expires_at: TimestampMillis,
+    pub current: bool,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -140,6 +141,7 @@ impl SessionStore for InMemorySessionStore {
             last_activity_at: now,
             idle_expires_at,
             absolute_expires_at,
+            current: false,
         };
         self.sessions
             .lock()

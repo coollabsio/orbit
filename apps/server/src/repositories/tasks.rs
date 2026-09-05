@@ -138,6 +138,7 @@ pub struct TaskUpdate {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TaskSort {
     Position,
+    Priority,
     Title,
     CreatedAt,
     UpdatedAt,
@@ -1668,6 +1669,7 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
 fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
     let primary = match filter.sort {
         TaskSort::Position => task.position.to_string(),
+        TaskSort::Priority => priority_rank(&task.priority).to_string(),
         TaskSort::Title => task.title.clone(),
         TaskSort::CreatedAt => task.created_at.as_millis().to_string(),
         TaskSort::UpdatedAt => task.updated_at.as_millis().to_string(),
@@ -1678,6 +1680,9 @@ fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
 fn task_sort_column(sort: &TaskSort) -> &'static str {
     match sort {
         TaskSort::Position => "tasks.position",
+        TaskSort::Priority => {
+            "CASE tasks.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+        }
         TaskSort::Title => "tasks.title",
         TaskSort::CreatedAt => "tasks.created_at",
         TaskSort::UpdatedAt => "tasks.updated_at",
@@ -1693,11 +1698,21 @@ fn push_cursor_value<'a>(
         TaskSort::Title => {
             query.push_bind(value.to_owned());
         }
-        TaskSort::Position | TaskSort::CreatedAt | TaskSort::UpdatedAt => {
+        TaskSort::Position | TaskSort::Priority | TaskSort::CreatedAt | TaskSort::UpdatedAt => {
             query.push_bind(value.parse::<i64>().map_err(|_| TaskError::InvalidCursor)?);
         }
     }
     Ok(())
+}
+
+fn priority_rank(priority: &str) -> i64 {
+    match priority {
+        "urgent" => 0,
+        "high" => 1,
+        "medium" => 2,
+        "low" => 3,
+        _ => 4,
+    }
 }
 
 fn escape_like(value: &str) -> String {

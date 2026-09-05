@@ -1,4 +1,5 @@
 import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from './api/models'
+import type { BulkItem } from '../../api/generated/types.gen'
 import { relativeTime } from '../../lib/format'
 import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from '../../components/workspace/taskMeta'
 
@@ -115,6 +116,20 @@ export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'title', label: 'Title' },
 ]
 
+export function taskApiSort(sort: SortKey): { sort: string; order: string } {
+  switch (sort) {
+    case 'priority': return { sort: 'priority', order: 'asc' }
+    case 'created': return { sort: 'created_at', order: 'desc' }
+    case 'updated': return { sort: 'updated_at', order: 'desc' }
+    case 'title': return { sort: 'title', order: 'asc' }
+    default: return { sort: 'position', order: 'asc' }
+  }
+}
+
+export function needsExhaustiveTaskList(projectId: string | null, statusKey: string | null): boolean {
+  return Boolean(statusKey && !projectId)
+}
+
 /** Order inside a group/column. Manual = the position set by drag and drop. */
 export function sortTasks(tasks: Task[], sort: SortKey): Task[] {
   const list = [...tasks]
@@ -130,4 +145,20 @@ export function sortTasks(tasks: Task[], sort: SortKey): Task[] {
     default:
       return list.sort((a, b) => a.position - b.position)
   }
+}
+
+export function boardDropUpdates(
+  task: Task,
+  destination: Task[],
+  statusId: string,
+  index: number,
+): BulkItem[] {
+  const ordered = destination.filter((item) => item.id !== task.id)
+  ordered.splice(Math.max(0, Math.min(index, ordered.length)), 0, task)
+  return ordered.map((item, position) => ({
+    id: item.id,
+    expected_version: item.version,
+    position,
+    ...(item.id === task.id && task.statusId !== statusId ? { status_id: statusId } : {}),
+  }))
 }

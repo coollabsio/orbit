@@ -971,6 +971,7 @@ impl IdentityRepository {
                     absolute_expires_at: TimestampMillis::from_millis(
                         row.get("absolute_expires_at"),
                     ),
+                    current: false,
                 })
             })
             .collect()

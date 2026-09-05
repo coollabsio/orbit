@@ -707,19 +707,21 @@ async fn list_sessions(
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<Vec<orbit_platform::SessionRecord>>, ApiError> {
-    let user = authenticate(
+    let session = authenticate(
         &state,
         &headers,
         "/api/v1/auth/sessions",
         request_id.as_ref(),
     )
-    .await?
-    .user;
-    let sessions = state
+    .await?;
+    let mut sessions = state
         .repository
-        .list_sessions(user.id, TimestampMillis::now())
+        .list_sessions(session.user.id, TimestampMillis::now())
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/sessions", request_id.as_ref()))?;
+    for item in &mut sessions {
+        item.current = item.id == session.id;
+    }
     Ok(Json(sessions))
 }
 
@@ -1325,6 +1327,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(me.status(), StatusCode::OK);
+
+        let sessions = app
+            .clone()
+            .oneshot(cookie_request("GET", "/api/v1/auth/sessions", &cookie))
+            .await
+            .unwrap();
+        let sessions: Value = serde_json::from_slice(&body(sessions).await).unwrap();
+        assert_eq!(sessions[0]["id"], session_id);
+        assert_eq!(sessions[0]["current"], true);
 
         let revoke = app
             .clone()

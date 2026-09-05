@@ -16,7 +16,7 @@ export function SessionsPage() {
       description="Devices signed in across the workspace. Revoking a session signs that device out."
       actions={
         others.length > 0 ? (
-          <button type="button" className="button" disabled={revokeSession.isPending} onClick={() => void Promise.all(others.map((session) => revokeSession.mutateAsync(session.id)))}>
+          <button type="button" className="button" disabled={revokeSession.isPending} onClick={() => others.forEach((session) => revokeSession.mutate(session.id))}>
             Sign out all other sessions
           </button>
         ) : undefined
@@ -25,7 +25,7 @@ export function SessionsPage() {
     >
       <div className="sessions-list">
         {sessionsQuery.isPending ? <div className="sessions-row">Loading sessions…</div> : null}
-        {sessionsQuery.isError ? <div className="sessions-row" role="alert">Sessions could not be loaded.</div> : null}
+        {sessionsQuery.isError ? <div className="sessions-row" role="alert">Sessions could not be loaded. <button className="button button-ghost" onClick={() => void sessionsQuery.refetch()}>Retry</button></div> : null}
         {sessions.map((session) => {
           return (
             <div key={session.id} className="sessions-row">
@@ -55,6 +55,8 @@ export function SessionsPage() {
             </div>
           )
         })}
+        {revokeSession.isError ? <div className="sessions-row" role="alert">Session revocation failed. <button className="button button-ghost" onClick={() => revokeSession.variables && revokeSession.mutate(revokeSession.variables)}>Retry</button></div> : null}
+        {revokeSession.isPending ? <div className="sessions-row" role="status">Revoking session…</div> : null}
       </div>
     </SettingsCard>
   )

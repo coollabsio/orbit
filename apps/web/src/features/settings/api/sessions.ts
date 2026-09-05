@@ -10,8 +10,8 @@ export interface SessionView extends SessionRecord {
   browser: string
 }
 
-export function sessionView(session: SessionRecord, currentId: string | null): SessionView {
-  return { ...session, current: session.id === currentId, device: 'Signed-in device', browser: 'Orbit web' }
+export function sessionView(session: SessionRecord): SessionView {
+  return { ...session, device: 'Signed-in device', browser: 'Orbit web' }
 }
 
 export function useSessions() {
@@ -20,8 +20,7 @@ export function useSessions() {
     queryFn: async () => {
       const { data } = await listSessions({ client: apiClient, throwOnError: true })
       if (!data) throw new Error('Sessions response was empty.')
-      const currentId = window.sessionStorage.getItem('orbit:session_id')
-      return data.map((session) => sessionView(session, currentId))
+      return data.map(sessionView)
     },
   })
 }

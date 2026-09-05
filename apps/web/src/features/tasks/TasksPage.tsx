@@ -7,6 +7,7 @@ import { useCurrentUser } from '../auth/api'
 import { useMembers } from '../workspaces/api'
 import { useWorkspace } from '../workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from './api/projects'
+import { useLabels } from './api/labels'
 import { taskFromRecord } from './api/models'
 import {
   useCommentAttachments,
@@ -21,18 +22,10 @@ import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
 import { TaskList } from './components/TaskList'
-import { filterTasks, resolveStatusId, statusGroups, type SortKey } from './tasksLib'
+import { filterTasks, needsExhaustiveTaskList, resolveStatusId, statusGroups, taskApiSort, type SortKey } from './tasksLib'
 import './tasks.css'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
-
-const apiSort: Record<SortKey, { sort: string; order: string }> = {
-  manual: { sort: 'position', order: 'asc' },
-  priority: { sort: 'priority', order: 'asc' },
-  created: { sort: 'created_at', order: 'desc' },
-  updated: { sort: 'updated_at', order: 'desc' },
-  title: { sort: 'title', order: 'asc' },
-}
 
 export function TasksPage() {
   const { workspace } = useWorkspace()
@@ -43,6 +36,7 @@ export function TasksPage() {
   const projects = projectsQuery.data ?? EMPTY_PROJECTS
   const statusesQuery = useAllStatuses(workspace.id, projects)
   const membersQuery = useMembers(workspace.id)
+  const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
   const createTask = useCreateTask(workspace.id)
 
@@ -52,13 +46,14 @@ export function TasksPage() {
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const projectFilter = searchParams.get('project')
   const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
+  const exhaustiveStatusFilter = needsExhaustiveTaskList(projectFilter, statusFilter)
   const tasksQuery = useTasks(workspace.id, {
     project_id: projectFilter ?? undefined,
     status_id: statusFilter ? apiStatus : undefined,
     assignee_id: assigneeFilter ?? undefined,
-    ...apiSort[sort],
+    ...taskApiSort(sort),
     limit: 50,
-  })
+  }, exhaustiveStatusFilter)
   const detailQuery = useTask(workspace.id, taskId)
   const commentsQuery = useTaskComments(workspace.id, taskId)
   const attachmentsQuery = useTaskAttachments(workspace.id, taskId)
@@ -74,6 +69,7 @@ export function TasksPage() {
     currentUserId: currentUser.data?.id ?? '',
     users,
     statuses: statusesQuery.data,
+    labels: labelsQuery.data ?? [],
     tasks,
   }
 
@@ -127,10 +123,10 @@ export function TasksPage() {
     statuses: statusesQuery.data,
   })
 
-  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || tasksQuery.isPending || (taskId && detailQuery.isPending)) {
+  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending || (taskId && detailQuery.isPending)) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
-  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || tasksQuery.isError || detailQuery.isError || commentsQuery.isError || attachmentsQuery.isError || commentAttachments.isError) {
+  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.isError || detailQuery.isError || commentsQuery.isError || attachmentsQuery.isError || commentAttachments.isError) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace. No mock data was substituted." />
   }
 
@@ -158,8 +154,8 @@ export function TasksPage() {
           </div>
           <div className="pane-body">
             {layout === 'board'
-              ? <TaskBoard tasks={visibleTasks} users={users} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
-              : <TaskList tasks={visibleTasks} users={users} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
+              ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
+              : <TaskList tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
             {tasksQuery.hasNextPage ? <div className="tasks-load-more"><button className="button" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</button></div> : null}
           </div>
         </section>

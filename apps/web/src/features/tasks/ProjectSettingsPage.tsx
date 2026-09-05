@@ -222,12 +222,18 @@ export function ProjectSettingsPage() {
                     )
                   })}
                 </div>
+                {createStatus.isError ? <p role="alert" className="text-danger">Status creation failed. <button className="button button-ghost" onClick={() => createStatus.variables && createStatus.mutate(createStatus.variables)}>Retry</button></p> : null}
+                {updateStatus.isError ? <p role="alert" className="text-danger">Status update failed. <button className="button button-ghost" onClick={() => updateStatus.variables && updateStatus.mutate(updateStatus.variables)}>Retry</button></p> : null}
+                {deleteStatus.isError ? <p role="alert" className="text-danger">Status deletion failed. <button className="button button-ghost" onClick={() => deleteStatus.variables && deleteStatus.mutate(deleteStatus.variables)}>Retry</button></p> : null}
+                {reorderStatuses.isError ? <p role="alert" className="text-danger">Status reorder failed. <button className="button button-ghost" onClick={() => reorderStatuses.variables && reorderStatuses.mutate(reorderStatuses.variables)}>Retry</button></p> : null}
+                {createStatus.isPending || updateStatus.isPending || deleteStatus.isPending || reorderStatuses.isPending ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
 
               <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
                 <button type="button" className="button button-danger" onClick={() => setConfirmDelete(true)}>
                   Delete project
                 </button>
+                {deleteProject.isError ? <p role="alert" className="text-danger">Project deletion failed. <button className="button button-ghost" onClick={() => deleteProject.variables && deleteProject.mutate(deleteProject.variables, { onSuccess: () => navigate('/tasks') })}>Retry</button></p> : null}
               </SettingsCard>
             </div>
           </div>
@@ -256,8 +262,8 @@ export function ProjectSettingsPage() {
           description={`This will move "${project.name}" and its ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} to trash.`}
           onClose={() => setConfirmDelete(false)}
           onConfirm={() => {
-            deleteProject.mutate({ projectId: project.id, version: project.version })
-            navigate('/tasks')
+            deleteProject.mutate({ projectId: project.id, version: project.version }, { onSuccess: () => navigate('/tasks') })
+            setConfirmDelete(false)
           }}
         />
       ) : null}
@@ -332,6 +338,7 @@ function ProjectGeneralCard({ project }: { project: Project }) {
           saving={!canSave || updateProject.isPending}
         />
       ) : null}
+      {updateProject.isError ? <p role="alert" className="text-danger">Project update failed. <button className="button button-ghost" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</button></p> : null}
     </>
   )
 }

@@ -4,6 +4,7 @@ import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { projectStatuses } from '../../../components/workspace/taskMeta'
 import { shortDate } from '../../../lib/format'
 import type { Task, TaskStatusDef, User } from '../api/models'
+import type { LabelRecord } from '../../../api/generated/types.gen'
 import { useUpdateTask } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { PriorityPicker } from './PriorityPicker'
@@ -11,6 +12,7 @@ import { PriorityPicker } from './PriorityPicker'
 interface TaskRowProps {
   task: Task
   statuses: TaskStatusDef[]
+  labels: LabelRecord[]
   assignees: User[]
   selected: boolean
   dragging: boolean
@@ -21,7 +23,7 @@ interface TaskRowProps {
 }
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
-export function TaskRow({ task, statuses, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+export function TaskRow({ task, statuses, labels, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
@@ -85,15 +87,16 @@ export function TaskRow({ task, statuses, assignees, selected, dragging, onOpen,
       <span className="tasks-row-title truncate">{task.title || 'Untitled'}</span>
       {task.labels.length > 0 ? (
         <span className="tasks-row-labels">
-          {task.labels.map((label) => (
-            <span key={label} className="pill">
-              {label}
-            </span>
-          ))}
+          {task.labels.map((labelId) => {
+            const label = labels.find((item) => item.id === labelId)
+            return label ? <span key={label.id} className="pill"><span className="pill-dot" style={{ background: label.color }} />{label.name}</span> : null
+          })}
         </span>
       ) : null}
       <AvatarStack users={assignees} size={18} />
       <span className="tasks-row-date">{shortDate(task.createdAt)}</span>
+      {updateTask.isPending ? <span role="status" className="text-faint text-xs">Saving status…</span> : null}
+      {updateTask.isError ? <span role="alert" className="text-danger text-xs">Status update failed. <button className="button button-ghost" onClick={(event) => { event.stopPropagation(); if (updateTask.variables) updateTask.mutate(updateTask.variables) }}>Retry</button></span> : null}
     </div>
   )
 }

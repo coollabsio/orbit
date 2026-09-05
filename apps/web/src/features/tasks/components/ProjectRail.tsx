@@ -50,8 +50,9 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
           const name = window.prompt('Project name')?.trim()
           if (!name) return
           const key = name.replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase() || 'PROJ'
-          void createProject.mutateAsync({ name, key, color: '#8b5cf6' }).then((project) => onSelect(project.id))
+          createProject.mutate({ name, key, color: '#8b5cf6' }, { onSuccess: (project) => onSelect(project.id) })
         }}><Add size={16} /><span className="menu-item-label">New project</span></button>
+        {createProject.isError ? <p role="alert" className="text-danger text-xs">Project creation failed. <button className="button button-ghost" onClick={() => createProject.variables && createProject.mutate(createProject.variables)}>Retry</button></p> : null}
       </div>
     </section>
   )

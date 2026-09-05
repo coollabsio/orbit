@@ -843,6 +843,7 @@ async fn list_tasks(
             .transpose()?,
         sort: match query.sort.as_str() {
             "position" => TaskSort::Position,
+            "priority" => TaskSort::Priority,
             "title" => TaskSort::Title,
             "created_at" => TaskSort::CreatedAt,
             "updated_at" => TaskSort::UpdatedAt,

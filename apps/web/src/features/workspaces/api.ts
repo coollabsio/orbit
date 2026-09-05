@@ -12,6 +12,7 @@ import {
   removeMember,
   renameWorkspace,
   revokeInvitation,
+  transferOwnership,
 } from '../../api/generated/sdk.gen'
 import type { AcceptBody, InvitationBody, MemberRecord, RoleBody } from '../../api/generated/types.gen'
 import type { User } from '../tasks/api/models'
@@ -144,6 +145,28 @@ export function useRemoveMember(workspaceId: string) {
       })
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.members(workspaceId) }),
+  })
+}
+
+export function useTransferOwnership(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { membershipId: string; membershipVersion: number; workspaceVersion: number }) => {
+      await transferOwnership({
+        client: apiClient,
+        path: { workspace_id: workspaceId },
+        body: {
+          membership_id: input.membershipId,
+          membership_version: input.membershipVersion,
+          expected_version: input.workspaceVersion,
+        },
+        throwOnError: true,
+      })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members(workspaceId) })
+    },
   })
 }
 

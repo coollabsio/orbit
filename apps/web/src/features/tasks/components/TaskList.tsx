@@ -7,6 +7,7 @@ import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '../../../components/workspace/taskMeta'
 import type { Task, TaskStatusDef, User } from '../api/models'
+import type { LabelRecord } from '../../../api/generated/types.gen'
 import { useBulkTasks, useUpdateTask } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { groupTasksByStatus, resolveStatusId, type SortKey, type StatusGroup } from '../tasksLib'
@@ -15,6 +16,7 @@ import { TaskRow } from './TaskRow'
 interface TaskListProps {
   tasks: Task[]
   users: User[]
+  labels: LabelRecord[]
   statuses: TaskStatusDef[]
   groups: StatusGroup[]
   sort: SortKey
@@ -23,7 +25,7 @@ interface TaskListProps {
 }
 
 /** Status groups: collapsible headers that also accept dropped rows (moves the task to that status). */
-export function TaskList({ tasks, users, statuses, groups, sort, onOpen, onAdd }: TaskListProps) {
+export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen, onAdd }: TaskListProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const taskGroups = groupTasksByStatus(tasks, groups, sort)
@@ -114,6 +116,7 @@ export function TaskList({ tasks, users, statuses, groups, sort, onOpen, onAdd }
                   <TaskRow
                     key={task.id}
                     task={task}
+                    labels={labels}
                     statuses={statuses}
                     assignees={users.filter((u) => task.assigneeIds.includes(u.id))}
                     selected={selected.includes(task.id)}
@@ -134,7 +137,7 @@ export function TaskList({ tasks, users, statuses, groups, sort, onOpen, onAdd }
           users={users}
           statuses={statuses}
           groups={groups}
-          allTasks={tasks}
+          labels={labels}
           onClear={() => setSelected([])}
         />
       ) : null}
@@ -148,19 +151,18 @@ function BulkBar({
   users,
   statuses,
   groups,
-  allTasks,
+  labels,
   onClear,
 }: {
   tasks: Task[]
   users: User[]
   statuses: TaskStatusDef[]
   groups: StatusGroup[]
-  allTasks: Task[]
+  labels: LabelRecord[]
   onClear: () => void
 }) {
   const { workspace } = useWorkspace()
   const bulkTasks = useBulkTasks(workspace.id)
-  const allLabels = Array.from(new Set(allTasks.flatMap((t) => t.labels))).sort((a, b) => a.localeCompare(b))
 
   const bulkStatus = (key: string) => {
     bulkTasks.mutate(tasks.flatMap((task) => {
@@ -182,12 +184,12 @@ function BulkBar({
       assignee_ids: everyone ? task.assigneeIds.filter((id) => id !== userId) : Array.from(new Set([...task.assigneeIds, userId])),
     })))
   }
-  const bulkLabel = (label: string) => {
-    const everyone = tasks.every((t) => t.labels.includes(label))
+  const bulkLabel = (labelId: string) => {
+    const everyone = tasks.every((t) => t.labels.includes(labelId))
     bulkTasks.mutate(tasks.map((task) => ({
       id: task.id,
       expected_version: task.version,
-      label_ids: everyone ? task.labels.filter((item) => item !== label) : Array.from(new Set([...task.labels, label])),
+      label_ids: everyone ? task.labels.filter((item) => item !== labelId) : Array.from(new Set([...task.labels, labelId])),
     })))
   }
 
@@ -253,11 +255,11 @@ function BulkBar({
       <Dropdown direction="up" align="right" trigger={() => <button className="button button-ghost">Labels</button>}>
         {() => (
           <>
-            {allLabels.map((label) => {
-              const everyone = tasks.every((t) => t.labels.includes(label))
+            {labels.map((label) => {
+              const everyone = tasks.every((t) => t.labels.includes(label.id))
               return (
-                <button key={label} className="popover-option" data-selected={everyone || undefined} onClick={() => bulkLabel(label)}>
-                  <span className="pill">{label}</span>
+                <button key={label.id} className="popover-option" data-selected={everyone || undefined} onClick={() => bulkLabel(label.id)}>
+                  <span className="pill"><span className="pill-dot" style={{ background: label.color }} />{label.name}</span>
                   {everyone ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
                 </button>
               )
@@ -266,6 +268,8 @@ function BulkBar({
         )}
       </Dropdown>
       <div className="spacer" />
+      {bulkTasks.isPending ? <span role="status" className="text-faint text-xs">Updating selected tasks…</span> : null}
+      {bulkTasks.isError ? <span role="alert" className="text-danger text-xs">Bulk update failed. <button className="button button-ghost" onClick={() => bulkTasks.variables && bulkTasks.mutate(bulkTasks.variables)}>Retry</button></span> : null}
       <button type="button" className="icon-button" aria-label="Clear selection" title="Clear selection" onClick={onClear}>
         <Xmark size={16} />
       </button>

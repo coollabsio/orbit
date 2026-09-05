@@ -10458,7 +10458,8 @@
           "created_at",
           "last_activity_at",
           "idle_expires_at",
-          "absolute_expires_at"
+          "absolute_expires_at",
+          "current"
         ],
         "properties": {
           "absolute_expires_at": {
@@ -10468,6 +10469,9 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "current": {
+            "type": "boolean"
           },
           "id": {
             "type": "string"

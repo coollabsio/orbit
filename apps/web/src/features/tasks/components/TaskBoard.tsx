@@ -2,14 +2,17 @@ import { useState } from 'react'
 import { AvatarStack } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { Task, TaskStatusDef, User } from '../api/models'
-import { useReorderTasks, useUpdateTask } from '../api/tasks'
+import type { LabelRecord } from '../../../api/generated/types.gen'
+import { useBulkTasks } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
-import { resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '../tasksLib'
+import { boardDropUpdates, resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '../tasksLib'
 import { PriorityPicker } from './PriorityPicker'
+import { LabelPill } from './TaskLabels'
 
 interface TaskBoardProps {
   tasks: Task[]
   users: User[]
+  labels: LabelRecord[]
   statuses: TaskStatusDef[]
   groups: StatusGroup[]
   sort: SortKey
@@ -18,10 +21,9 @@ interface TaskBoardProps {
 }
 
 /** Kanban: one column per status group; dragging a card shows a placeholder where it will land. */
-export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, onOpen }: TaskBoardProps) {
+export function TaskBoard({ tasks, users, labels, statuses, groups, sort, activeTaskId, onOpen }: TaskBoardProps) {
   const { workspace } = useWorkspace()
-  const updateTask = useUpdateTask(workspace.id)
-  const reorderTasks = useReorderTasks(workspace.id)
+  const bulkTasks = useBulkTasks(workspace.id)
   const [dragging, setDragging] = useState<{ id: string; height: number } | null>(null)
   const [drop, setDrop] = useState<{ key: string; index: number } | null>(null)
 
@@ -45,16 +47,7 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
     if (!task) return
     const statusId = resolveStatusId(statuses, task.projectId, group.key)
     if (!statusId) return
-    // position between the neighbours at the drop index (manual order); other sorts still change the status
-    const others = columnTasks.filter((t) => t.id !== task.id)
-    const prev = others[index - 1]
-    const next = others[index]
-    const position = prev && next ? (prev.position + next.position) / 2 : prev ? prev.position + 1 : next ? next.position - 1 : 0
-    if (statusId !== task.statusId) {
-      updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: statusId, position } })
-    } else if (position !== task.position) {
-      reorderTasks.mutate([{ id: task.id, expected_version: task.version, position }])
-    }
+    bulkTasks.mutate(boardDropUpdates(task, columnTasks, statusId, index))
   }
 
   return (
@@ -132,9 +125,10 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
                       <h3>{task.title || 'Untitled'}</h3>
                       {task.labels.length > 0 ? (
                         <div className="tasks-board-labels">
-                          {task.labels.map((label) => (
-                            <span key={label} className="pill">{label}</span>
-                          ))}
+                          {task.labels.map((labelId) => {
+                            const label = labels.find((item) => item.id === labelId)
+                            return label ? <LabelPill key={label.id} label={label} /> : null
+                          })}
                         </div>
                       ) : null}
                     </article>
@@ -149,6 +143,8 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
           </section>
         )
       })}
+      {bulkTasks.isPending ? <p role="status" className="text-faint text-xs">Saving board order…</p> : null}
+      {bulkTasks.isError ? <p role="alert" className="text-danger text-xs">Board reorder failed. <button className="button button-ghost" onClick={() => bulkTasks.variables && bulkTasks.mutate(bulkTasks.variables)}>Retry</button></p> : null}
     </div>
   )
 }

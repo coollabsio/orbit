@@ -38,7 +38,7 @@ I cut the UI over from the generated contract inward, keeping the existing task 
 ## Verification
 
 - `cd apps/web && bun run lint`: passed without warnings.
-- `cd apps/web && bun run test`: 30 passed, 0 failed.
+- `cd apps/web && bun run test`: 45 passed, 0 failed.
 - `cd apps/web && bun run build`: passed. Vite emitted its existing large-chunk advisory.
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/root/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome just e2e`: 1 passed, 0 failed.
 - `cargo fmt --all -- --check`: passed.
@@ -52,5 +52,22 @@ Jean reported no configured or running environment for the base workspace. The i
 ## Scope notes
 
 - The server task contract has no due-date field, so the existing due-date control remains visible but disabled rather than writing non-persisted local state.
-- The server returns task label IDs but no expanded label names on task records; existing label pills therefore represent persisted IDs until the contract supplies expansion or a label-name join is added.
+- Task records retain label IDs, while a workspace-scoped label query now joins them to persisted names and colors, including labels not used by any loaded task.
 - Docs, mail, chat, profiles, notifications, custom roles, and their shell counts remain mock-backed and keep the development badge visible.
+
+## Review follow-up
+
+The ten important findings in `task-14-review.md` were resolved regression-first:
+
+- The server now supports stable, cursor-safe priority sorting. Every advertised task sort has a regression test.
+- Board drops build one atomic bulk update that reindexes the destination column with integers; no fractional positions reach the API.
+- Cross-project status filtering exhausts all task cursors before applying the merged status-group filter.
+- Title and description drafts are controlled by an authoritative task key, so a confirmed conflict refresh visibly replaces rejected text.
+- Multi-file task and comment uploads record the remaining queue, invalidate persisted attachment/comment reads after partial failure, and retry only unfinished files. Comment retries reuse the already-created comment, while changed drafts first clean up that partial comment. Progress and failures are announced in live regions.
+- Workspace labels load through generated SDK calls across all cursor pages. Detail, list, board, and bulk controls join IDs to real label names and colors and offer unused labels.
+- Ordinary invitations and role changes are limited to Admin and Member. Owners can instead use the generated ownership-transfer operation with workspace and membership versions after confirmation.
+- Session responses now contain the server-identified current session. The frontend no longer relies on per-tab session storage, so new tabs and invitation-created sessions cannot accidentally present self-revocation controls.
+- Migrated writes now expose disabled/pending states plus visible `role="alert"` failures and retry actions across workspace, member, invitation, session, project, status, task, comment, attachment, trash, and restore flows.
+- Mounted hook/component coverage now exercises transfer payloads, current-session protection, partial upload resume, comment de-duplication, authoritative field refresh, labels, and owner-role protections. The Playwright milestone additionally covers real invitation acceptance, assigned role, second-workspace switching, new-tab session identity, labels, status/priority changes, text and attachment-only comments, conflict refresh, failed restore retry, and ownership transfer.
+
+The follow-up regenerated the checked-in OpenAPI client for the `SessionRecord.current` contract field. Final verification remained green: 45 Bun tests, the production web build, all Rust targets/features under Clippy and tests, deterministic API generation, and the expanded Playwright milestone (`1 passed` in 56.9 seconds on the same `127.0.0.1:8888` / `127.0.0.1:18080` isolated environment). Jean again reported no configured run environment.

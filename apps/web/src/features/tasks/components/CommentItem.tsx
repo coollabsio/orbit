@@ -110,6 +110,8 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
           }}
         />
       ) : null}
+      {updateComment.isError ? <p role="alert" className="text-danger text-xs">Comment update failed. <button className="button button-ghost" onClick={() => updateComment.variables && updateComment.mutate(updateComment.variables)}>Retry</button></p> : null}
+      {deleteComment.isError ? <p role="alert" className="text-danger text-xs">Comment deletion failed. <button className="button button-ghost" onClick={() => deleteComment.variables && deleteComment.mutate(deleteComment.variables)}>Retry</button></p> : null}
     </>
   )
 }

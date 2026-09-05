@@ -1,4 +1,4 @@
-import type { AttachmentRecord, CommentRecord, ProjectRecord, TaskRecord } from '../../../api/generated/types.gen'
+import type { AttachmentRecord, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '../../../api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
@@ -82,6 +82,7 @@ export interface TaskViewState {
   currentUserId: string
   users: User[]
   statuses: TaskStatusDef[]
+  labels: LabelRecord[]
   tasks: Task[]
 }
 

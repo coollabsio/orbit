@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Paperclip2, Xmark } from 'reicon-react'
 
-export function TaskCommentComposer({ placeholder, pending, progress, onSend }: { placeholder: string; pending: boolean; progress?: number; onSend: (body: string, files: File[]) => Promise<unknown> }) {
+export function TaskCommentComposer({ placeholder, pending, progress, error, onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; onSend: (body: string, files: File[]) => Promise<unknown> }) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const input = useRef<HTMLInputElement>(null)
@@ -19,12 +19,13 @@ export function TaskCommentComposer({ placeholder, pending, progress, onSend }: 
         if (pasted.length > 0) setFiles((current) => [...current, ...pasted])
       }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} />
       {files.length > 0 ? <div className="tasks-native-files">{files.map((file, index) => <span className="pill" key={`${file.name}-${index}`}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Xmark size={12} /></button></span>)}</div> : null}
+      {error ? <p role="alert" className="text-danger text-xs">{error}</p> : null}
       <div className="tasks-native-actions">
-        <input ref={input} type="file" multiple hidden onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
+        <input ref={input} type="file" multiple hidden aria-label="Attach comment files" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
         <button className="button button-ghost" type="button" onClick={() => input.current?.click()}><Paperclip2 size={14} />Attach</button>
-        {pending && progress !== undefined ? <span className="text-faint text-xs">Uploading {progress}%</span> : null}
+        {progress !== undefined && (pending || error) ? <span role="status" aria-live="polite" className="text-faint text-xs">Uploading {progress}%</span> : null}
         <span className="spacer" />
-        <button className="button button-primary" type="button" disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}>{pending ? 'Sending…' : 'Send'}</button>
+        <button className="button button-primary" type="button" disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}>{pending ? 'Sending…' : error ? 'Retry' : 'Send'}</button>
       </div>
     </div>
   )

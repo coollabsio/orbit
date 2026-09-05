@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
-import { Add, ArrowLeft, Calendar, Paperclip2, TaskSquare, Trash, Xmark } from 'reicon-react'
+import { useRef } from 'react'
+import { ArrowLeft, Calendar, Paperclip2, TaskSquare, Trash, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
@@ -9,10 +9,11 @@ import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../compon
 import type { Project, Task, TaskViewState } from '../api/models'
 import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
-import { clipboardFiles } from '../../chat/attachmentLib'
 import { Attachments } from '../../chat/components/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
+import { TaskLabels } from './TaskLabels'
+import { TaskTextFields } from './TaskTextFields'
 
 interface TaskDetailProps {
   task: Task | undefined
@@ -31,18 +32,12 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   const deleteTask = useDeleteTask(workspace.id)
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [dropOver, setDropOver] = useState(false)
   const attach = (files: FileList | File[] | null) => {
     if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
   const status = state.statuses.find((s) => s.id === task?.statusId)
   const statusOptions = task ? projectStatuses(state.statuses, task.projectId) : []
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
-  // every label used in the workspace, so a task can pick from the existing ones
-  const allLabels = useMemo(
-    () => Array.from(new Set(state.tasks.flatMap((t) => t.labels))).sort((a, b) => a.localeCompare(b)),
-    [state.tasks],
-  )
 
   return (
     <section className="pane tasks-detail-pane">
@@ -52,8 +47,14 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
         </button>
         <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
         <div className="spacer" />
-        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" onClick={() => {
-          if (window.confirm(`Move ${task.identifier} to trash?`)) void deleteTask.mutateAsync({ taskId: task.id, version: task.version }).then(onBack)
+        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
+          if (!window.confirm(`Move ${task.identifier} to trash?`)) return
+          try {
+            await deleteTask.mutateAsync({ taskId: task.id, version: task.version })
+            onBack()
+          } catch {
+            // The visible mutation alert keeps the user on this task and offers retry.
+          }
         }}><Trash size={15} /></button> : null}
         <button className="icon-button" onClick={onBack} aria-label="Close task">
           <Xmark size={16} />
@@ -70,57 +71,11 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
       ) : (
         <div className="pane-body tasks-detail-body">
           <div className="tasks-detail-main">
-            <input
-              key={task.id}
-              className="tasks-detail-title"
-              defaultValue={task.title}
-              placeholder="Task title"
-              aria-label="Task title"
-              autoFocus={task.title === 'Untitled'}
-              onBlur={(e) => {
-                const value = e.target.value.trim()
-                if (value && value !== task.title) updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, title: value } })
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-            />
-
-            {/* description: paste (screenshots, files), drop, or pick attachments; they list below the text */}
-            <div
-              className="tasks-desc-wrap"
-              data-drop-over={dropOver || undefined}
-              onDragOver={(e) => {
-                if (!e.dataTransfer.types.includes('Files')) return
-                e.preventDefault()
-                if (!dropOver) setDropOver(true)
-              }}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOver(false)
-              }}
-              onDrop={(e) => {
-                if (!e.dataTransfer.types.includes('Files')) return
-                e.preventDefault()
-                setDropOver(false)
-                attach(e.dataTransfer.files)
-              }}
+            <TaskTextFields
+              task={task}
+              onUpdate={(body) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...body } })}
+              onAttachFiles={attach}
             >
-              <textarea
-                key={`desc-${task.id}`}
-                className="tasks-desc"
-                defaultValue={task.description}
-                placeholder="Add description… (paste or drop images and files)"
-                aria-label="Description"
-                onBlur={(e) => {
-                  if (e.target.value !== task.description) updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, description: e.target.value } })
-                }}
-                onPaste={(e) => {
-                  const files = clipboardFiles(e)
-                  if (files.length === 0) return
-                  e.preventDefault()
-                  attach(files)
-                }}
-              />
               {task.attachments.length > 0 ? (
                 <Attachments attachments={task.attachments} onRemove={(id) => deleteAttachment.mutate(id)} />
               ) : null}
@@ -130,9 +85,14 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                   <Paperclip2 size={14} />
                   Attach
                 </button>
-                {uploadAttachments.isPending ? <span className="text-faint text-xs">Uploading {uploadAttachments.progress}%</span> : null}
+                {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-faint text-xs">Uploading {uploadAttachments.progress}%</span> : null}
+                {uploadAttachments.isError ? <span role="alert" className="text-danger text-xs">{uploadAttachments.remainingCount} file(s) remain. <button type="button" className="button button-ghost" onClick={uploadAttachments.retry}>Retry upload</button></span> : null}
               </div>
-            </div>
+            </TaskTextFields>
+            {updateTask.isError ? <p role="alert" className="text-danger text-xs">Task update failed. <button type="button" className="button button-ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</button></p> : null}
+            {deleteAttachment.isError ? <p role="alert" className="text-danger text-xs">Attachment removal failed. <button type="button" className="button button-ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</button></p> : null}
+            {deleteTask.isError ? <p role="alert" className="text-danger text-xs">Task deletion failed. <button type="button" className="button button-ghost" onClick={() => deleteTask.variables && deleteTask.mutate(deleteTask.variables)}>Retry</button></p> : null}
+            {updateTask.isPending || deleteAttachment.isPending || deleteTask.isPending ? <p role="status" className="text-faint text-xs">Saving task…</p> : null}
 
           </div>
 
@@ -237,52 +197,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Labels</h4>
-              <div className="tasks-side-pills">
-                {task.labels.map((label) => (
-                  <span key={label} className="pill tasks-label-pill">
-                    {label}
-                    <button
-                      type="button"
-                      className="tasks-label-remove"
-                      aria-label={`Remove label ${label}`}
-                      title="Remove label"
-                      onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: task.labels.filter((item) => item !== label) } })}
-                    >
-                      <Xmark size={12} />
-                    </button>
-                  </span>
-                ))}
-                {/* add / remove labels: existing labels toggle (× on active) */}
-                <Dropdown
-                  trigger={() => (
-                    <button className="pill tasks-label-add" aria-label="Add label">
-                      <Add size={12} />
-                      {task.labels.length === 0 ? 'Add label' : null}
-                    </button>
-                  )}
-                >
-                  {() => (
-                    <>
-                      <div className="popover-heading">Labels</div>
-                      {allLabels.map((label) => {
-                        const active = task.labels.includes(label)
-                        return (
-                          <button
-                            key={label}
-                            className="popover-option"
-                            data-selected={active || undefined}
-                            aria-pressed={active}
-                            onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: active ? task.labels.filter((item) => item !== label) : [...task.labels, label] } })}
-                          >
-                            <span className="pill">{label}</span>
-                            {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
-                          </button>
-                        )
-                      })}
-                    </>
-                  )}
-                </Dropdown>
-              </div>
+              <TaskLabels labelIds={task.labels} labels={state.labels} onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })} />
             </div>
 
             <div className="tasks-side-group">
@@ -308,7 +223,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
             <div className="tasks-comment-composer">
-              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} onSend={(body, files) => createComment.mutateAsync({ body, files })} />
+              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ body, files })} />
             </div>
           </div>
         </div>

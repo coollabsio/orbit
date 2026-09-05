@@ -38,6 +38,8 @@ export function PriorityPicker({ task, align = 'left' }: { task: Task; align?: '
           </>
         )}
       </Dropdown>
+      {updateTask.isPending ? <span role="status" className="text-faint text-xs">Saving priority…</span> : null}
+      {updateTask.isError ? <span role="alert" className="text-danger text-xs">Priority update failed. <button className="button button-ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</button></span> : null}
     </div>
   )
 }

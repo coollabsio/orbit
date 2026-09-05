@@ -57,7 +57,6 @@ export function useLogin() {
       return required(data, 'Login response was empty.')
     },
     onSuccess: (response) => {
-      window.sessionStorage.setItem('orbit:session_id', response.session_id)
       queryClient.setQueryData(queryKeys.currentUser, response.user)
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces })
     },
@@ -69,7 +68,6 @@ export function useLogout() {
   return useMutation({
     mutationFn: async () => { await logout({ client: apiClient, throwOnError: true }) },
     onSuccess: () => {
-      window.sessionStorage.removeItem('orbit:session_id')
       queryClient.clear()
     },
   })
@@ -82,8 +80,7 @@ export function useCompleteSetup() {
       const { data } = await setupComplete({ client: apiClient, body, throwOnError: true })
       return required(data, 'Setup response was empty.')
     },
-    onSuccess: (response) => {
-      window.sessionStorage.setItem('orbit:session_id', response.session_id)
+    onSuccess: () => {
       queryClient.setQueryData(queryKeys.setup, { complete: true })
       void queryClient.invalidateQueries({ queryKey: queryKeys.currentUser })
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces })

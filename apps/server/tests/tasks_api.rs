@@ -379,6 +379,42 @@ async fn task_lists_filter_sort_and_reject_cursor_query_mismatches() {
         assert_eq!(response.status(), StatusCode::CREATED);
     }
 
+    let priorities = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks?sort=priority&order=asc&limit=2",
+                fixture.workspace_id
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(priorities.status(), StatusCode::OK);
+    let priorities = response_json(priorities).await;
+    assert_eq!(priorities["items"][0]["priority"], "urgent");
+    assert_eq!(priorities["items"][1]["priority"], "urgent");
+    let priorities_next = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks?sort=priority&order=asc&limit=2&cursor={}",
+                fixture.workspace_id,
+                priorities["next_cursor"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response_json(priorities_next).await["items"][0]["priority"],
+        "low"
+    );
+
     let first = fixture
         .app
         .clone()

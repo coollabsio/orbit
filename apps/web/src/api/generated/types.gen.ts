@@ -417,6 +417,7 @@ export type RoleChangeBody = {
 export type SessionRecord = {
     absolute_expires_at: string;
     created_at: string;
+    current: boolean;
     id: string;
     idle_expires_at: string;
     last_activity_at: string;

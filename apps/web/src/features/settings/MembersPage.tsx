@@ -4,10 +4,10 @@ import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Listbox } from '../../components/ui/Listbox'
 import { useCurrentUser } from '../auth/api'
-import { useChangeMemberRole, useCreateInvitation, useInvitations, useMembers, useRemoveMember, useRevokeInvitation } from '../workspaces/api'
+import { useChangeMemberRole, useCreateInvitation, useInvitations, useMembers, useRemoveMember, useRevokeInvitation, useTransferOwnership } from '../workspaces/api'
 import { useWorkspace } from '../workspaces/workspaceContext'
 import type { User } from '../tasks/api/models'
-import { canManageMember } from './memberPermissions'
+import { INVITABLE_ROLES, canManageMember, canTransferOwnership } from './memberPermissions'
 import { SettingsCard } from './SettingsCard'
 
 type Role = User['role']
@@ -31,8 +31,9 @@ export function MembersPage() {
   const revokeInvitation = useRevokeInvitation(workspace.id)
   const changeRole = useChangeMemberRole(workspace.id)
   const removeMember = useRemoveMember(workspace.id)
+  const transferOwnership = useTransferOwnership(workspace.id)
   const users = membersQuery.data ?? EMPTY_USERS
-  const me = users.find((user) => user.id === currentUser.data?.id)
+  const pendingInvitations = invitations.data?.items.filter((invitation) => invitation.status === 'pending') ?? []
 
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all')
@@ -41,9 +42,10 @@ export function MembersPage() {
   const [perPage, setPerPage] = useState(10)
 
   const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<Role>('Member')
+  const [inviteRole, setInviteRole] = useState<(typeof INVITABLE_ROLES)[number]>('Member')
   const [inviteLink, setInviteLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState(false)
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -74,15 +76,24 @@ export function MembersPage() {
     e.preventDefault()
     const email = inviteEmail.trim()
     if (!email) return
-    const response = await createInvitation.mutateAsync({ email, role: inviteRole.toLowerCase() as 'owner' | 'admin' | 'member', delivery: 'manual' })
-    setInviteLink(response.url ?? null)
-    setCopied(false)
+    try {
+      const response = await createInvitation.mutateAsync({ email, role: inviteRole.toLowerCase() as 'admin' | 'member', delivery: 'manual' })
+      setInviteLink(response.url ?? null)
+      setCopied(false)
+    } catch {
+      // Mutation feedback remains visible in the form.
+    }
   }
 
   const copyLink = async () => {
     if (!inviteLink) return
-    await navigator.clipboard.writeText(inviteLink)
-    setCopied(true)
+    try {
+      await navigator.clipboard.writeText(inviteLink)
+      setCopied(true)
+      setCopyError(false)
+    } catch {
+      setCopyError(true)
+    }
   }
 
   return (
@@ -186,19 +197,27 @@ export function MembersPage() {
                       >
                         {(close) => (
                           <>
-                            {ROLES.filter((role) => role !== user.role).map((role) => (
+                            {INVITABLE_ROLES.filter((role) => role !== user.role).map((role) => (
                               <button
                                 key={role}
                                 type="button"
                                 className="popover-option"
                                 onClick={() => {
-                                  changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role.toLowerCase() as 'owner' | 'admin' | 'member' })
+                                  changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role.toLowerCase() as 'admin' | 'member' })
                                   close()
                                 }}
                               >
                                 Make {role.toLowerCase()}
                               </button>
                             ))}
+                            {canTransferOwnership(workspace.role, currentUser.data?.id, user) ? (
+                              <button type="button" className="popover-option" onClick={() => {
+                                if (window.confirm(`Transfer ownership of ${workspace.name} to ${user.name}?`)) {
+                                  transferOwnership.mutate({ membershipId: user.membershipId, membershipVersion: user.version, workspaceVersion: workspace.version })
+                                }
+                                close()
+                              }}>Transfer ownership</button>
+                            ) : null}
                             <div className="popover-separator" />
                             <button
                               type="button"
@@ -285,6 +304,10 @@ export function MembersPage() {
             />
           </div>
         )}
+        {changeRole.isError ? <p role="alert" className="text-danger">Role change failed. <button className="button button-ghost" onClick={() => changeRole.variables && changeRole.mutate(changeRole.variables)}>Retry</button></p> : null}
+        {removeMember.isError ? <p role="alert" className="text-danger">Member removal failed. <button className="button button-ghost" onClick={() => removeMember.variables && removeMember.mutate(removeMember.variables)}>Retry</button></p> : null}
+        {transferOwnership.isError ? <p role="alert" className="text-danger">Ownership transfer failed. <button className="button button-ghost" onClick={() => transferOwnership.variables && transferOwnership.mutate(transferOwnership.variables)}>Retry</button></p> : null}
+        {changeRole.isPending || removeMember.isPending || transferOwnership.isPending ? <p role="status">Saving member change…</p> : null}
       </SettingsCard>
 
       {canManage ? (
@@ -324,10 +347,10 @@ export function MembersPage() {
                 <label className="field-label" htmlFor="invite-role">
                   Role
                 </label>
-                <Listbox<Role>
+                <Listbox<(typeof INVITABLE_ROLES)[number]>
                   id="invite-role"
                   value={inviteRole}
-                  options={ROLES.filter((role) => role !== 'Owner' || me?.role === 'Owner').map((role) => ({
+                  options={INVITABLE_ROLES.map((role) => ({
                     value: role,
                     label: role,
                   }))}
@@ -350,20 +373,24 @@ export function MembersPage() {
               </div>
             ) : null}
             {createInvitation.isError ? <p role="alert" className="text-danger">The invitation could not be created.</p> : null}
+            {copyError ? <p role="alert" className="text-danger">The invitation link could not be copied. Select and copy it manually.</p> : null}
           </SettingsCard>
         </form>
       ) : null}
 
-      {canManage && (invitations.data?.items.length ?? 0) > 0 ? (
+      {canManage && invitations.isPending ? <SettingsCard title="Pending invitations"><p role="status">Loading invitations…</p></SettingsCard> : null}
+      {canManage && invitations.isError ? <SettingsCard title="Pending invitations"><p role="alert">Invitations could not be loaded. <button className="button button-ghost" onClick={() => void invitations.refetch()}>Retry</button></p></SettingsCard> : null}
+      {canManage && pendingInvitations.length > 0 ? (
         <SettingsCard title="Pending invitations" description="Invitation links that have not been accepted." flush>
           <div className="data-table">
-            {invitations.data?.items.map((invitation) => <div className="data-table-row members-table-grid" key={invitation.id}>
+            {pendingInvitations.map((invitation) => <div className="data-table-row members-table-grid" key={invitation.id}>
               <span className="truncate">{invitation.email}</span><span className="data-table-cell-muted">Expires {new Date(invitation.expires_at).toLocaleDateString()}</span><span className="badge">{invitation.role}</span>
               <span style={{ textAlign: 'right' }}><button className="button button-ghost" disabled={revokeInvitation.isPending} onClick={() => revokeInvitation.mutate(invitation.id)}>Revoke</button></span>
             </div>)}
           </div>
         </SettingsCard>
       ) : null}
+      {revokeInvitation.isError ? <p role="alert" className="text-danger">Invitation revocation failed. <button className="button button-ghost" onClick={() => revokeInvitation.variables && revokeInvitation.mutate(revokeInvitation.variables)}>Retry</button></p> : null}
     </>
   )
 }
