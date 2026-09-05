@@ -2,7 +2,9 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { useCreateTaskComment, useUploadTaskAttachments } from './tasks'
+import { queryKeys } from '../../../api/queryKeys'
+import type { PageTaskRecord, TaskRecord } from '../../../api/generated/types.gen'
+import { useBulkTasks, useCreateTaskComment, useUploadTaskAttachments } from './tasks'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -10,6 +12,16 @@ afterEach(() => { globalThis.fetch = originalFetch })
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>{children}</QueryClientProvider>
 }
+
+function withClient(client: QueryClient) {
+  return ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+}
+
+const task = (id: string, position: number): TaskRecord => ({
+  id, workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title: id,
+  description: '', position, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
+  created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 1,
+})
 
 const attachment = {
   id: 'attachment-1', workspace_id: 'workspace-1', task_id: 'task-1', owner_id: 'user-1',
@@ -64,4 +76,61 @@ test('comment attachment retry resumes the created comment instead of duplicatin
   expect(commentCreates).toBe(1)
   expect(calls).toBe(4)
   expect(view.result.current.progress).toBe(100)
+})
+
+test('bulk hook retries only the failed and not-yet-sent board batches', async () => {
+  const requestIds: string[][] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    const body = await request.json() as { updates: Array<{ id: string }> }
+    requestIds.push(body.updates.map((update) => update.id))
+    if (requestIds.length === 2) return failure()
+    return Response.json({ items: [], next_cursor: null })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const view = renderHook(() => useBulkTasks('workspace-1'), { wrapper: withClient(client) })
+  const updates = Array.from({ length: 205 }, (_, index) => ({
+    id: `task-${index}`, expected_version: 1, position: index,
+  }))
+
+  await act(async () => { await view.result.current.mutateAsync(updates).catch(() => undefined) })
+  await waitFor(() => expect(view.result.current.isError).toBeTrue())
+  await act(async () => { view.result.current.retry() })
+  await waitFor(() => expect(view.result.current.isSuccess).toBeTrue())
+
+  expect(requestIds.map((ids) => ids.length)).toEqual([100, 100, 100, 5])
+  expect(requestIds[2]?.[0]).toBe('task-100')
+})
+
+test('rejected bulk hook request rolls back list and detail caches', async () => {
+  let rejectRequest: ((response: Response) => void) | undefined
+  let requestBody: unknown
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    requestBody = await request.json()
+    return new Promise<Response>((resolve) => { rejectRequest = resolve })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const listKey = queryKeys.tasks.list('workspace-1')
+  const detailKey = queryKeys.tasks.detail('workspace-1', 'task-1')
+  const original = task('task-1', 0)
+  client.setQueryData<PageTaskRecord>(listKey, { items: [original], next_cursor: null })
+  client.setQueryData(detailKey, original)
+  const view = renderHook(() => useBulkTasks('workspace-1'), { wrapper: withClient(client) })
+  let mutation = Promise.resolve()
+  act(() => {
+    mutation = view.result.current.mutateAsync([{ id: 'task-1', expected_version: 1, position: 9 }]).then(() => undefined, () => undefined)
+  })
+
+  await waitFor(() => expect(requestBody).toEqual({ updates: [{ id: 'task-1', expected_version: 1, position: 9 }] }))
+  expect(client.getQueryData<PageTaskRecord>(listKey)?.items[0]?.position).toBe(9)
+  expect(client.getQueryData<TaskRecord>(detailKey)?.position).toBe(9)
+  await act(async () => {
+    rejectRequest?.(failure())
+    await mutation
+  })
+  await waitFor(() => expect(view.result.current.isError).toBeTrue())
+
+  expect(client.getQueryData<PageTaskRecord>(listKey)?.items[0]).toEqual(original)
+  expect(client.getQueryData<TaskRecord>(detailKey)).toEqual(original)
 })

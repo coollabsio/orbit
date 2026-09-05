@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router'
 import { Add, Setting2, TaskSquare } from 'reicon-react'
+import type { ProjectBody } from '../../../api/generated/types.gen'
 import type { Project } from '../api/models'
 import { useCreateProject } from '../api/projects'
 import { useWorkspace } from '../../workspaces/workspaceContext'
@@ -15,6 +16,9 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
   const navigate = useNavigate()
   const { workspace } = useWorkspace()
   const createProject = useCreateProject(workspace.id)
+  const createAndSelectProject = (body: ProjectBody) => createProject.mutate(body, {
+    onSuccess: (project) => onSelect(project.id),
+  })
   return (
     <section className="pane tasks-rail-pane">
       <div className="pane-header">
@@ -50,9 +54,9 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
           const name = window.prompt('Project name')?.trim()
           if (!name) return
           const key = name.replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase() || 'PROJ'
-          createProject.mutate({ name, key, color: '#8b5cf6' }, { onSuccess: (project) => onSelect(project.id) })
+          createAndSelectProject({ name, key, color: '#8b5cf6' })
         }}><Add size={16} /><span className="menu-item-label">New project</span></button>
-        {createProject.isError ? <p role="alert" className="text-danger text-xs">Project creation failed. <button className="button button-ghost" onClick={() => createProject.variables && createProject.mutate(createProject.variables)}>Retry</button></p> : null}
+        {createProject.isError ? <p role="alert" className="text-danger text-xs">Project creation failed. <button className="button button-ghost" onClick={() => createProject.variables && createAndSelectProject(createProject.variables)}>Retry</button></p> : null}
       </div>
     </section>
   )

@@ -38,6 +38,7 @@ import { isTaskVersionConflict } from './conflicts'
 import { commentUploadMode } from './commentUpload'
 import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, type WorkspaceTaskSnapshot } from './optimistic'
 import { PartialUploadError, uploadFiles } from './uploadQueue'
+import { chunkTaskUpdates } from '../tasksLib'
 
 type ApiClient = ReturnType<typeof createApiClient>
 export type TaskFilters = NonNullable<ListTasksData['query']>
@@ -210,10 +211,22 @@ function snapshotBulk(queryClient: ReturnType<typeof useQueryClient>, workspaceI
 
 export function useBulkTasks(workspaceId: string) {
   const queryClient = useQueryClient()
-  return useMutation<PageTaskRecord, Error, BulkItem[], WorkspaceTaskSnapshot>({
+  const retryUpdates = useRef<BulkItem[]>([])
+  const mutation = useMutation<PageTaskRecord, Error, BulkItem[], WorkspaceTaskSnapshot>({
     mutationFn: async (updates) => {
-      const { data } = await bulkTasks({ client: apiClient, path: { workspace_id: workspaceId }, body: { updates }, throwOnError: true })
-      return required(data, 'Bulk task response was empty.')
+      const items: TaskRecord[] = []
+      const batches = chunkTaskUpdates(updates)
+      for (let index = 0; index < batches.length; index += 1) {
+        try {
+          const { data } = await bulkTasks({ client: apiClient, path: { workspace_id: workspaceId }, body: { updates: batches[index]! }, throwOnError: true })
+          items.push(...required(data, 'Bulk task response was empty.').items)
+        } catch (error) {
+          retryUpdates.current = batches.slice(index).flat()
+          throw error
+        }
+      }
+      retryUpdates.current = []
+      return { items, next_cursor: null }
     },
     onMutate: async (updates) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
@@ -226,6 +239,12 @@ export function useBulkTasks(workspaceId: string) {
     onSuccess: (page) => page.items.forEach((record) => reconcileWorkspaceTask(queryClient, workspaceId, record)),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
   })
+  return {
+    ...mutation,
+    retry: () => {
+      if (retryUpdates.current.length > 0) mutation.mutate(retryUpdates.current)
+    },
+  }
 }
 
 export function useReorderTasks(workspaceId: string) {

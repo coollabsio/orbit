@@ -1,14 +1,15 @@
 import { Mobile, Monitor } from 'reicon-react'
 import { relativeTime } from '../../lib/format'
-import { useRevokeSession, useSessions } from './api/sessions'
+import { SessionRevocationError, useRevokeSessions, useSessions } from './api/sessions'
 import { SettingsCard } from './SettingsCard'
 
 /** Admin view: every member's signed-in devices. */
 export function SessionsPage() {
   const sessionsQuery = useSessions()
-  const revokeSession = useRevokeSession()
+  const revokeSessions = useRevokeSessions()
   const sessions = sessionsQuery.data ?? []
   const others = sessions.filter((s) => !s.current)
+  const failure = revokeSessions.error instanceof SessionRevocationError ? revokeSessions.error : null
 
   return (
     <SettingsCard
@@ -16,7 +17,7 @@ export function SessionsPage() {
       description="Devices signed in across the workspace. Revoking a session signs that device out."
       actions={
         others.length > 0 ? (
-          <button type="button" className="button" disabled={revokeSession.isPending} onClick={() => others.forEach((session) => revokeSession.mutate(session.id))}>
+          <button type="button" className="button" disabled={revokeSessions.isPending} onClick={() => revokeSessions.mutate(others.map((session) => session.id))}>
             Sign out all other sessions
           </button>
         ) : undefined
@@ -48,15 +49,15 @@ export function SessionsPage() {
                 {session.user.display_name}
               </span>
               {!session.current ? (
-                <button type="button" className="button button-ghost" disabled={revokeSession.isPending} onClick={() => revokeSession.mutate(session.id)}>
+                <button type="button" className="button button-ghost" disabled={revokeSessions.isPending} onClick={() => revokeSessions.mutate([session.id])}>
                   Revoke
                 </button>
               ) : null}
             </div>
           )
         })}
-        {revokeSession.isError ? <div className="sessions-row" role="alert">Session revocation failed. <button className="button button-ghost" onClick={() => revokeSession.variables && revokeSession.mutate(revokeSession.variables)}>Retry</button></div> : null}
-        {revokeSession.isPending ? <div className="sessions-row" role="status">Revoking session…</div> : null}
+        {revokeSessions.isError ? <div className="sessions-row" role="alert">{failure ? `${failure.failedIds.length} of ${failure.total} sessions could not be revoked.` : 'Session revocation failed.'} <button className="button button-ghost" onClick={() => revokeSessions.mutate(failure?.failedIds ?? revokeSessions.variables ?? [])}>{failure ? 'Retry failed sessions' : 'Retry'}</button></div> : null}
+        {revokeSessions.isPending ? <div className="sessions-row" role="status">Revoking {revokeSessions.variables?.length ?? 1} session{revokeSessions.variables?.length === 1 ? '' : 's'}…</div> : null}
       </div>
     </SettingsCard>
   )

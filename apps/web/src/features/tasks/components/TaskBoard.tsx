@@ -144,7 +144,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
         )
       })}
       {bulkTasks.isPending ? <p role="status" className="text-faint text-xs">Saving board order…</p> : null}
-      {bulkTasks.isError ? <p role="alert" className="text-danger text-xs">Board reorder failed. <button className="button button-ghost" onClick={() => bulkTasks.variables && bulkTasks.mutate(bulkTasks.variables)}>Retry</button></p> : null}
+      {bulkTasks.isError ? <p role="alert" className="text-danger text-xs">Board reorder failed. <button className="button button-ghost" onClick={bulkTasks.retry}>Retry</button></p> : null}
     </div>
   )
 }

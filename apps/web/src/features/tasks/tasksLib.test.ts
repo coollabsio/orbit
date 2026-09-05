@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Task } from './api/models'
-import { SORT_OPTIONS, boardDropUpdates, needsExhaustiveTaskList, taskApiSort } from './tasksLib'
+import { SORT_OPTIONS, boardDropUpdates, chunkTaskUpdates, needsExhaustiveTaskList, taskApiSort } from './tasksLib'
 
 function task(id: string, statusId: string, position: number, version: number): Task {
   return {
@@ -10,7 +10,7 @@ function task(id: string, statusId: string, position: number, version: number): 
   }
 }
 
-test('board drops send one atomic integer reindex of the destination column', () => {
+test('board drops create an exhaustive integer order for the destination column', () => {
   const moving = task('moving', 'todo', 20, 2)
   const updates = boardDropUpdates(moving, [task('first', 'doing', 0, 4), task('last', 'doing', 10, 6)], 'doing', 1)
 
@@ -19,6 +19,18 @@ test('board drops send one atomic integer reindex of the destination column', ()
     { id: 'moving', expected_version: 2, position: 1, status_id: 'doing' },
     { id: 'last', expected_version: 6, position: 2 },
   ])
+  expect(updates.every((update) => Number.isInteger(update.position))).toBeTrue()
+})
+
+test('large board reindexes stay within the 100-update server boundary', () => {
+  const moving = task('moving', 'todo', 500, 2)
+  const destination = Array.from({ length: 205 }, (_, index) => task(`task-${index}`, 'doing', index, 1))
+  const updates = boardDropUpdates(moving, destination, 'doing', 102)
+  const batches = chunkTaskUpdates(updates)
+
+  expect(batches.map((batch) => batch.length)).toEqual([100, 100, 6])
+  expect(batches.flat()).toEqual(updates)
+  expect(batches.every((batch) => batch.length <= 100)).toBeTrue()
   expect(updates.every((update) => Number.isInteger(update.position))).toBeTrue()
 })
 

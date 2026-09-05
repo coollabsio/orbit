@@ -38,6 +38,14 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   const status = state.statuses.find((s) => s.id === task?.statusId)
   const statusOptions = task ? projectStatuses(state.statuses, task.projectId) : []
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
+  const deleteAndClose = async (input: { taskId: string; version: number }) => {
+    try {
+      await deleteTask.mutateAsync(input)
+      onBack()
+    } catch {
+      // The visible mutation alert keeps the user on this task and offers retry.
+    }
+  }
 
   return (
     <section className="pane tasks-detail-pane">
@@ -47,14 +55,9 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
         </button>
         <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
         <div className="spacer" />
-        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
+        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" disabled={deleteTask.isPending} onClick={() => {
           if (!window.confirm(`Move ${task.identifier} to trash?`)) return
-          try {
-            await deleteTask.mutateAsync({ taskId: task.id, version: task.version })
-            onBack()
-          } catch {
-            // The visible mutation alert keeps the user on this task and offers retry.
-          }
+          void deleteAndClose({ taskId: task.id, version: task.version })
         }}><Trash size={15} /></button> : null}
         <button className="icon-button" onClick={onBack} aria-label="Close task">
           <Xmark size={16} />
@@ -91,7 +94,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
             </TaskTextFields>
             {updateTask.isError ? <p role="alert" className="text-danger text-xs">Task update failed. <button type="button" className="button button-ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</button></p> : null}
             {deleteAttachment.isError ? <p role="alert" className="text-danger text-xs">Attachment removal failed. <button type="button" className="button button-ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</button></p> : null}
-            {deleteTask.isError ? <p role="alert" className="text-danger text-xs">Task deletion failed. <button type="button" className="button button-ghost" onClick={() => deleteTask.variables && deleteTask.mutate(deleteTask.variables)}>Retry</button></p> : null}
+            {deleteTask.isError ? <p role="alert" className="text-danger text-xs">Task deletion failed. <button type="button" className="button button-ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</button></p> : null}
             {updateTask.isPending || deleteAttachment.isPending || deleteTask.isPending ? <p role="status" className="text-faint text-xs">Saving task…</p> : null}
 
           </div>

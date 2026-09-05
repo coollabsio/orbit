@@ -60,7 +60,7 @@ Jean reported no configured or running environment for the base workspace. The i
 The ten important findings in `task-14-review.md` were resolved regression-first:
 
 - The server now supports stable, cursor-safe priority sorting. Every advertised task sort has a regression test.
-- Board drops build one atomic bulk update that reindexes the destination column with integers; no fractional positions reach the API.
+- Board drops reindex the destination column with integers and submit sequential generated-client batches of at most 100 updates; no fractional or oversized request reaches the API.
 - Cross-project status filtering exhausts all task cursors before applying the merged status-group filter.
 - Title and description drafts are controlled by an authoritative task key, so a confirmed conflict refresh visibly replaces rejected text.
 - Multi-file task and comment uploads record the remaining queue, invalidate persisted attachment/comment reads after partial failure, and retry only unfinished files. Comment retries reuse the already-created comment, while changed drafts first clean up that partial comment. Progress and failures are announced in live regions.
@@ -71,3 +71,24 @@ The ten important findings in `task-14-review.md` were resolved regression-first
 - Mounted hook/component coverage now exercises transfer payloads, current-session protection, partial upload resume, comment de-duplication, authoritative field refresh, labels, and owner-role protections. The Playwright milestone additionally covers real invitation acceptance, assigned role, second-workspace switching, new-tab session identity, labels, status/priority changes, text and attachment-only comments, conflict refresh, failed restore retry, and ownership transfer.
 
 The follow-up regenerated the checked-in OpenAPI client for the `SessionRecord.current` contract field. Final verification remained green: 45 Bun tests, the production web build, all Rust targets/features under Clippy and tests, deterministic API generation, and the expanded Playwright milestone (`1 passed` in 56.9 seconds on the same `127.0.0.1:8888` / `127.0.0.1:18080` isolated environment). Jean again reported no configured run environment.
+
+## Re-review follow-up, round 1
+
+The four remaining important findings in `task-14-rereview-1.md` were fixed regression-first:
+
+- Large board reindexes are partitioned into sequential generated bulk requests of at most 100 integer updates. Each request retains the server's transactional validation, and a partial failure records only the failed and unsent suffix for retry rather than replaying already-persisted chunks.
+- Workspace creation, project creation, and task deletion now route both the initial write and its retry through the same completion function. Successful retries therefore clear and select the new workspace, select the new project, or return from the deleted task exactly like the original attempt.
+- “Sign out all other sessions” is one aggregate mutation that revokes sessions sequentially. It continues after individual failures, reports the failed count and IDs, refreshes the session list after every outcome, and retries only failed sessions.
+- Mounted coverage now drives a 102-item board reorder through the real hook and generated client, verifies the 100-item boundary, renders the failed-write alert, and retries successfully. Hook coverage separately verifies generated request bodies, optimistic list/detail cache changes, full rollback after rejection, and suffix-only recovery after a later batch fails.
+- Mounted retry-flow coverage verifies the original workspace, project, and task success effects after a rejected first attempt. Session UI coverage verifies single-request concurrency, partial-failure visibility, continued processing, and failed-ID-only retry.
+
+Final verification after this round:
+
+- `cd apps/web && bun run lint && bun run test && bun run build`: passed; 53 tests, 153 assertions, and the existing Vite large-chunk advisory only.
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`: passed.
+- `cargo test --workspace --all-targets --all-features`: passed across every Rust target.
+- `just api-check` and `git diff --check`: passed with no contract drift or whitespace errors.
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/root/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome just e2e`: 1 passed in 54.0 seconds against `http://127.0.0.1:8888` and backend `127.0.0.1:18080`.
+
+Jean reported no configured or running environment for the base workspace before the live check, so verification used the repository's isolated E2E command and ports above.

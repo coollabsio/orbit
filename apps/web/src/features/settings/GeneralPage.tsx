@@ -13,6 +13,15 @@ export function GeneralPage() {
   const [nameDraft, setNameDraft] = useState({ workspaceId: workspace.id, value: workspace.name })
   const [newName, setNewName] = useState('')
   const name = nameDraft.workspaceId === workspace.id ? nameDraft.value : workspace.name
+  const createAndSelectWorkspace = async (workspaceName: string) => {
+    try {
+      const created = await createWorkspace.mutateAsync(workspaceName)
+      setNewName('')
+      selectWorkspace(created.id)
+    } catch {
+      // The visible mutation alert retains the original name and offers retry.
+    }
+  }
 
   return (
     <>
@@ -21,12 +30,12 @@ export function GeneralPage() {
           <div className="settings-field"><label className="field-label" htmlFor="workspace-name">Name</label><input id="workspace-name" className="input" required value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></div>
           <div className="settings-field" style={{ alignSelf: 'end' }}><button className="button button-primary" disabled={renameWorkspace.isPending || name.trim() === workspace.name}>Save workspace</button></div>
         </form>
-        <form className="settings-grid" onSubmit={(event) => { event.preventDefault(); createWorkspace.mutate(newName.trim(), { onSuccess: (created) => { setNewName(''); selectWorkspace(created.id) } }) }}>
+        <form className="settings-grid" onSubmit={(event) => { event.preventDefault(); void createAndSelectWorkspace(newName.trim()) }}>
           <div className="settings-field"><label className="field-label" htmlFor="new-workspace-name">New workspace</label><input id="new-workspace-name" className="input" required value={newName} onChange={(event) => setNewName(event.target.value)} /></div>
           <div className="settings-field" style={{ alignSelf: 'end' }}><button className="button" disabled={createWorkspace.isPending}>Create workspace</button></div>
         </form>
         {renameWorkspace.isError ? <p role="alert" className="text-danger">Workspace rename failed. <button className="button button-ghost" onClick={() => renameWorkspace.variables && renameWorkspace.mutate(renameWorkspace.variables)}>Retry</button></p> : null}
-        {createWorkspace.isError ? <p role="alert" className="text-danger">Workspace creation failed. <button className="button button-ghost" onClick={() => createWorkspace.variables && createWorkspace.mutate(createWorkspace.variables)}>Retry</button></p> : null}
+        {createWorkspace.isError ? <p role="alert" className="text-danger">Workspace creation failed. <button className="button button-ghost" onClick={() => { if (createWorkspace.variables !== undefined) void createAndSelectWorkspace(createWorkspace.variables) }}>Retry</button></p> : null}
         {renameWorkspace.isPending || createWorkspace.isPending ? <p role="status">Saving workspace…</p> : null}
       </SettingsCard>
 

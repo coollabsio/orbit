@@ -162,3 +162,9 @@ export function boardDropUpdates(
     ...(item.id === task.id && task.statusId !== statusId ? { status_id: statusId } : {}),
   }))
 }
+
+export function chunkTaskUpdates(updates: BulkItem[]): BulkItem[][] {
+  const batches: BulkItem[][] = []
+  for (let index = 0; index < updates.length; index += 100) batches.push(updates.slice(index, index + 100))
+  return batches
+}
