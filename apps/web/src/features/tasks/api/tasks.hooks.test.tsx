@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '../../../api/queryKeys'
 import type { PageTaskRecord, TaskRecord } from '../../../api/generated/types.gen'
-import { useBulkTasks, useCreateTaskComment, useUploadTaskAttachments } from './tasks'
+import { useBulkTasks, useCreateTaskComment, useTasks, useUploadTaskAttachments } from './tasks'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -32,6 +32,26 @@ const failure = () => Response.json({
   type: 'about:blank', title: 'Upload failed', status: 500, detail: 'offline', code: 'upload_failed',
   instance: '/attachments', request_id: 'request-1',
 }, { status: 500, headers: { 'content-type': 'application/problem+json' } })
+
+test('changing search keeps the task list mounted while the next result loads', async () => {
+  let calls = 0
+  let finishSearch: ((response: Response) => void) | undefined
+  globalThis.fetch = (async () => {
+    calls += 1
+    if (calls === 1) return Response.json({ items: [task('task-1', 0)], next_cursor: null })
+    return new Promise<Response>((resolve) => { finishSearch = resolve })
+  }) as unknown as typeof fetch
+  const view = renderHook(({ search }) => useTasks('workspace-1', { search }), {
+    initialProps: { search: '' }, wrapper,
+  })
+  await waitFor(() => expect(view.result.current.isSuccess).toBeTrue())
+
+  view.rerender({ search: 'r' })
+
+  expect(view.result.current.isPending).toBeFalse()
+  expect(view.result.current.data?.pages[0]?.items[0]?.id).toBe('task-1')
+  finishSearch?.(Response.json({ items: [], next_cursor: null }))
+})
 
 test('task attachment hook reconciles partial success and retries only remaining files', async () => {
   let calls = 0

@@ -1,4 +1,4 @@
-import { useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { apiClient } from '../../../api/client'
 import type { createApiClient } from '../../../api/client'
@@ -102,6 +102,7 @@ export function useTasks(workspaceId: string, filters: TaskFilters = {}, exhaust
       ? taskListAllPages(apiClient, workspaceId, filters)
       : taskListPage(apiClient, workspaceId, filters, pageParam),
     getNextPageParam: nextTaskCursor,
+    placeholderData: keepPreviousData,
   })
 }
 
