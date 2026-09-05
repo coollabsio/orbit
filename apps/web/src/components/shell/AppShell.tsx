@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
-import { Home2, Message, Messages2, Note2, SidebarLeft, Sms, TaskSquare } from 'reicon-react'
+import { ChevronDown, Home2, Message, Messages2, Note2, SidebarLeft, Sms, TaskSquare } from 'reicon-react'
+import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { useAppState } from '../../mock/store'
+import { Dropdown } from '../ui/Dropdown'
 import { CommandPalette } from './CommandPalette'
 import { MockFeatureBadge } from './MockFeatureBadge'
 import { SidebarNav } from './SidebarNav'
@@ -19,6 +21,7 @@ const DOCK_LINKS = [
 ]
 
 export function AppShell() {
+  const { workspace, workspaces, selectWorkspace } = useWorkspace()
   const state = useAppState()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -53,11 +56,12 @@ export function AppShell() {
     <div className="app-shell">
       <aside className="app-sidebar" data-collapsed={sidebarCollapsed || undefined}>
         <div className="app-sidebar-brand">
-          <span className="app-sidebar-wordmark">
-            <span className="app-sidebar-title">{sidebarCollapsed ? 'O' : 'Orbit'}</span>
-            {!sidebarCollapsed ? <span className="app-sidebar-version">v0.1.0</span> : null}
-            {!sidebarCollapsed ? <MockFeatureBadge /> : null}
-          </span>
+          <Dropdown trigger={() => <button className="app-sidebar-wordmark" aria-label={`Workspace: ${workspace.name}`}>
+            <span className="app-sidebar-title">{sidebarCollapsed ? workspace.name.charAt(0) : workspace.name}</span>
+            {!sidebarCollapsed ? <><ChevronDown size={13} /><MockFeatureBadge /></> : null}
+          </button>}>
+            {(close) => <>{workspaces.map((item) => <button key={item.id} className="popover-option" data-selected={item.id === workspace.id || undefined} onClick={() => { selectWorkspace(item.id); close() }}>{item.name}</button>)}</>}
+          </Dropdown>
         </div>
         <SidebarNav collapsed={sidebarCollapsed} />
         <div className="app-sidebar-footer">

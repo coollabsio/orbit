@@ -33,3 +33,11 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
+.auth-boundary-form { display: grid; gap: 18px; }
+.auth-boundary-fields { display: grid; gap: 14px; }
+.auth-boundary-field { display: grid; gap: 6px; color: var(--text-muted); font-size: 13px; }
+.auth-boundary-form .button { justify-content: center; }
+.auth-boundary-error { color: var(--danger) !important; font-size: 13px; }
+.auth-boundary-footer { text-align: center; font-size: 13px; }
+.auth-boundary-hint { font-size: 13px; }

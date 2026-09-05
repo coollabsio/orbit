@@ -1,4 +1,4 @@
-import type { StatusCategory, TaskPriority, TaskStatusDef } from '../../mock/types'
+import type { StatusCategory, TaskPriority, TaskStatusDef } from '../../features/tasks/api/models'
 
 /** Status categories (workflow stages). Every status belongs to one; the glyph shape comes from it. */
 export const CATEGORY_ORDER: StatusCategory[] = ['unstarted', 'started', 'completed', 'cancelled']

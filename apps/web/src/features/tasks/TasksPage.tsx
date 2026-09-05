@@ -1,9 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { Add, ChevronDown, TaskSquare } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
-import { createTask } from '../../mock/actions'
-import { useAppState } from '../../mock/store'
+import { EmptyState } from '../../components/ui/EmptyState'
+import { useCurrentUser } from '../auth/api'
+import { useMembers } from '../workspaces/api'
+import { useWorkspace } from '../workspaces/workspaceContext'
+import { useAllStatuses, useProjects } from './api/projects'
+import { taskFromRecord } from './api/models'
+import {
+  useCommentAttachments,
+  useCreateTask,
+  useTask,
+  useTaskAttachments,
+  useTaskComments,
+  useTasks,
+} from './api/tasks'
 import { ProjectRail } from './components/ProjectRail'
 import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
@@ -12,18 +24,59 @@ import { TaskList } from './components/TaskList'
 import { filterTasks, resolveStatusId, statusGroups, type SortKey } from './tasksLib'
 import './tasks.css'
 
+const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
+
+const apiSort: Record<SortKey, { sort: string; order: string }> = {
+  manual: { sort: 'position', order: 'asc' },
+  priority: { sort: 'priority', order: 'asc' },
+  created: { sort: 'created_at', order: 'desc' },
+  updated: { sort: 'updated_at', order: 'desc' },
+  title: { sort: 'title', order: 'asc' },
+}
+
 export function TasksPage() {
+  const { workspace } = useWorkspace()
   const { taskId } = useParams()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const state = useAppState()
+  const projectsQuery = useProjects(workspace.id)
+  const projects = projectsQuery.data ?? EMPTY_PROJECTS
+  const statusesQuery = useAllStatuses(workspace.id, projects)
+  const membersQuery = useMembers(workspace.id)
+  const currentUser = useCurrentUser()
+  const createTask = useCreateTask(workspace.id)
 
-  // ?layout=board opens the kanban directly (deep link); the Display menu changes it afterwards
-  const [layout, setLayout] = useState<'list' | 'board'>(() => (searchParams.get('layout') === 'board' ? 'board' : 'list'))
+  const [layout, setLayout] = useState<'list' | 'board'>(() => searchParams.get('layout') === 'board' ? 'board' : 'list')
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const projectFilter = searchParams.get('project')
+  const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
+  const tasksQuery = useTasks(workspace.id, {
+    project_id: projectFilter ?? undefined,
+    status_id: statusFilter ? apiStatus : undefined,
+    assignee_id: assigneeFilter ?? undefined,
+    ...apiSort[sort],
+    limit: 50,
+  })
+  const detailQuery = useTask(workspace.id, taskId)
+  const commentsQuery = useTaskComments(workspace.id, taskId)
+  const attachmentsQuery = useTaskAttachments(workspace.id, taskId)
+  const commentAttachments = useCommentAttachments(workspace.id, taskId, commentsQuery.data ?? [])
+
+  const records = useMemo(() => tasksQuery.data?.pages.flatMap((page) => page.items) ?? [], [tasksQuery.data])
+  const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
+  const activeTask = detailQuery.data
+    ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data])
+    : undefined
+  const users = membersQuery.data ?? []
+  const state = {
+    currentUserId: currentUser.data?.id ?? '',
+    users,
+    statuses: statusesQuery.data,
+    tasks,
+  }
+
   const persisted = new URLSearchParams(searchParams)
   persisted.delete('new')
   persisted.delete('layout')
@@ -35,140 +88,86 @@ export function TasksPage() {
     if (projectId) next.set('project', projectId)
     else next.delete('project')
     next.delete('new')
-    // picking a project in the rail also leaves an open task (back to the list)
     if (taskId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
     else setSearchParams(next, { replace: true })
   }
-
   const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)
   const closeTask = () => navigate(`/tasks${searchSuffix}`)
 
-  // "New task" (header, a group's "+", or the topbar's ?new=1) creates an empty task and opens it;
-  // the task view focuses the title field.
-  const startNewTask = (statusKey: string | null = null, replace = false) => {
-    const projectId = projectFilter ?? state.projects[0]?.id
-    if (!projectId) return
-    const task = createTask({ title: '', projectId, statusId: resolveStatusId(state.statuses, projectId, statusKey) })
-    navigate(`/tasks/${task.id}${searchSuffix}`, { replace })
+  const creating = useRef(false)
+  const startNewTask = async (statusKey: string | null = null, replace = false) => {
+    const projectId = projectFilter ?? projects[0]?.id
+    const statusId = projectId ? resolveStatusId(statusesQuery.data, projectId, statusKey) : undefined
+    if (!projectId || !statusId || creating.current) return
+    creating.current = true
+    try {
+      const task = await createTask.mutateAsync({ title: 'Untitled', project_id: projectId, status_id: statusId })
+      navigate(`/tasks/${task.id}${searchSuffix}`, { replace })
+    } catch {
+      // The mutation exposes the server problem beside the create action.
+    } finally {
+      creating.current = false
+    }
   }
 
   const wantsNew = searchParams.get('new') === '1'
   useEffect(() => {
-    if (wantsNew) startNewTask(null, true)
+    if (wantsNew && projects.length > 0 && statusesQuery.data.length > 0) void startNewTask(null, true)
+    // The URL flag is the one-shot trigger; the ref prevents duplicate in-flight creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsNew])
+  }, [wantsNew, projects.length, statusesQuery.data.length])
 
-  // status columns/groups of the selected project (or of all projects, merged by name)
-  const groups = statusGroups(state.statuses, projectFilter)
-  const activeProject = state.projects.find((p) => p.id === projectFilter)
-  const visibleTasks = filterTasks(state.tasks, {
+  const groups = statusGroups(statusesQuery.data, projectFilter)
+  const activeProject = projects.find((project) => project.id === projectFilter)
+  const visibleTasks = filterTasks(tasks, {
     currentUserId: state.currentUserId,
     projectId: projectFilter,
     statusKey: statusFilter,
     assigneeId: assigneeFilter,
-    statuses: state.statuses,
+    statuses: statusesQuery.data,
   })
 
-  const activeTask = taskId ? state.tasks.find((t) => t.id === taskId) : undefined
+  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || tasksQuery.isPending || (taskId && detailQuery.isPending)) {
+    return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
+  }
+  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || tasksQuery.isError || detailQuery.isError || commentsQuery.isError || attachmentsQuery.isError || commentAttachments.isError) {
+    return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace. No mock data was substituted." />
+  }
 
   return (
     <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
-      <ProjectRail projects={state.projects} projectId={projectFilter} onSelect={setProjectFilter} />
+      <ProjectRail projects={projects} projectId={projectFilter} onSelect={setProjectFilter} />
       {taskId ? (
-        // a task opens as a full page in place of the list (the rail stays)
-        <TaskDetail
-          key={taskId}
-          task={activeTask}
-          project={state.projects.find((p) => p.id === activeTask?.projectId)}
-          state={state}
-          onBack={closeTask}
-        />
+        <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} />
       ) : (
         <section className="pane tasks-list-pane">
           <div className="pane-header">
-            <Dropdown
-              className="tasks-project-picker"
-              trigger={(open) => (
-                <button type="button" className="tasks-project-trigger" data-open={open || undefined}>
-                  {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : <TaskSquare size={15} />}
-                  <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span>
-                  <ChevronDown size={14} />
-                </button>
-              )}
-            >
-              {(close) => (
-                <>
-                  <button
-                    className="popover-option"
-                    data-active={projectFilter === null || undefined}
-                    onClick={() => {
-                      setProjectFilter(null)
-                      close()
-                    }}
-                  >
-                    <TaskSquare size={15} />
-                    All tasks
-                  </button>
-                  {state.projects.map((project) => (
-                    <button
-                      key={project.id}
-                      className="popover-option"
-                      data-active={project.id === projectFilter || undefined}
-                      onClick={() => {
-                        setProjectFilter(project.id)
-                        close()
-                      }}
-                    >
-                      <span className="pill-dot" style={{ background: project.color }} />
-                      {project.name}
-                    </button>
-                  ))}
-                </>
-              )}
+            <Dropdown className="tasks-project-picker" trigger={(open) => (
+              <button type="button" className="tasks-project-trigger" data-open={open || undefined}>
+                {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : <TaskSquare size={15} />}
+                <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span><ChevronDown size={14} />
+              </button>
+            )}>
+              {(close) => <><button className="popover-option" data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><TaskSquare size={15} />All tasks</button>
+                {projects.map((project) => <button key={project.id} className="popover-option" data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="pill-dot" style={{ background: project.color }} />{project.name}</button>)}</>}
             </Dropdown>
             <div className="spacer" />
-            <TaskFilters
-              users={state.users}
-              groups={groups}
-              statusKey={statusFilter}
-              assigneeId={assigneeFilter}
-              sort={sort}
-              layout={layout}
-              onStatusChange={setStatusFilter}
-              onAssigneeChange={setAssigneeFilter}
-              onSortChange={setSort}
-              onLayoutChange={setLayout}
-            />
-            <button className="button button-primary" aria-label="New task" onClick={() => startNewTask()}>
-              <Add size={16} />
-              <span className="tasks-new-label">New task</span>
-            </button>
+            <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
+            <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
+            {createTask.isError ? <span role="alert" className="text-danger text-xs">Task creation failed.</span> : null}
           </div>
           <div className="pane-body">
-            {layout === 'board' ? (
-              <TaskBoard
-                tasks={visibleTasks}
-                users={state.users}
-                statuses={state.statuses}
-                groups={groups}
-                sort={sort}
-                activeTaskId={null}
-                onOpen={openTask}
-              />
-            ) : (
-              <TaskList
-                tasks={visibleTasks}
-                users={state.users}
-                statuses={state.statuses}
-                groups={groups}
-                sort={sort}
-                onOpen={openTask}
-                onAdd={(key) => startNewTask(key)}
-              />
-            )}
+            {layout === 'board'
+              ? <TaskBoard tasks={visibleTasks} users={users} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
+              : <TaskList tasks={visibleTasks} users={users} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
+            {tasksQuery.hasNextPage ? <div className="tasks-load-more"><button className="button" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</button></div> : null}
           </div>
         </section>
       )}
     </div>
   )
+}
+
+function TaskBoundary({ title, description }: { title: string; description: string }) {
+  return <div className="page"><section className="pane" style={{ flex: 1 }}><EmptyState icon={TaskSquare} title={title} description={description} /></section></div>
 }

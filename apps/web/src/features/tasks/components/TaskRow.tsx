@@ -3,8 +3,9 @@ import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { projectStatuses } from '../../../components/workspace/taskMeta'
 import { shortDate } from '../../../lib/format'
-import { setTaskStatus } from '../../../mock/actions'
-import type { Task, TaskStatusDef, User } from '../../../mock/types'
+import type { Task, TaskStatusDef, User } from '../api/models'
+import { useUpdateTask } from '../api/tasks'
+import { useWorkspace } from '../../workspaces/workspaceContext'
 import { PriorityPicker } from './PriorityPicker'
 
 interface TaskRowProps {
@@ -21,6 +22,8 @@ interface TaskRowProps {
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
 export function TaskRow({ task, statuses, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+  const { workspace } = useWorkspace()
+  const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
   const options = projectStatuses(statuses, task.projectId)
   return (
@@ -67,7 +70,7 @@ export function TaskRow({ task, statuses, assignees, selected, dragging, onOpen,
                   className="popover-option"
                   data-selected={option.id === task.statusId || undefined}
                   onClick={() => {
-                    setTaskStatus(task.id, option.id)
+                    updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })
                     close()
                   }}
                 >

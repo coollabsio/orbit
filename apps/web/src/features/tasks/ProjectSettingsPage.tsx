@@ -7,9 +7,10 @@ import { InfoTip } from '../../components/ui/InfoTip'
 import { UnsavedBar } from '../../components/ui/UnsavedBar'
 import { TaskStatusIcon } from '../../components/workspace/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, STATUS_COLORS, defaultStatusOf, projectStatuses } from '../../components/workspace/taskMeta'
-import { createStatus, deleteProject, deleteStatus, reorderStatus, updateProject, updateStatus } from '../../mock/actions'
-import { useAppState } from '../../mock/store'
-import type { Project, StatusCategory, TaskStatusDef } from '../../mock/types'
+import { useWorkspace } from '../workspaces/workspaceContext'
+import type { Project, StatusCategory, TaskStatusDef } from './api/models'
+import { useCreateStatus, useDeleteProject, useDeleteStatus, useProjectStatuses, useProjects, useReorderStatuses, useUpdateProject, useUpdateStatus } from './api/projects'
+import { useTasks } from './api/tasks'
 import { ConfirmDeleteModal } from '../chat/components/ChannelModals'
 import { SettingsCard } from '../settings/SettingsCard'
 import '../shared/cards.css'
@@ -27,22 +28,37 @@ type Editor = { mode: 'new'; category: StatusCategory } | { mode: 'edit'; status
 export function ProjectSettingsPage() {
   const { projectId } = useParams()
   const navigate = useNavigate()
-  const state = useAppState()
-  const project = state.projects.find((p) => p.id === projectId)
+  const { workspace } = useWorkspace()
+  const projectsQuery = useProjects(workspace.id)
+  const statusQuery = useProjectStatuses(workspace.id, projectId)
+  const tasksQuery = useTasks(workspace.id, { project_id: projectId, limit: 100 })
+  const createStatus = useCreateStatus(workspace.id, projectId ?? '')
+  const updateStatus = useUpdateStatus(workspace.id, projectId ?? '')
+  const deleteStatus = useDeleteStatus(workspace.id, projectId ?? '')
+  const reorderStatuses = useReorderStatuses(workspace.id, projectId ?? '')
+  const deleteProject = useDeleteProject(workspace.id)
+  const project = projectsQuery.data?.find((p) => p.id === projectId)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TaskStatusDef | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<{ id: string; position: 'before' | 'after' } | null>(null)
 
-  const tasks = state.tasks.filter((t) => t.projectId === projectId)
-  const statuses = project ? projectStatuses(state.statuses, project.id) : []
-  const defaultStatus = project ? defaultStatusOf(state.statuses, project.id) : undefined
-  const countFor = (statusId: string) => tasks.filter((t) => t.statusId === statusId).length
+  const tasks = tasksQuery.data?.pages.flatMap((page) => page.items) ?? []
+  const statuses = project ? projectStatuses(statusQuery.data ?? [], project.id) : []
+  const defaultStatus = project ? defaultStatusOf(statusQuery.data ?? [], project.id) : undefined
+  const countFor = (statusId: string) => tasks.filter((t) => t.status_id === statusId).length
 
   const endDrag = () => {
     setDragId(null)
     setDropAt(null)
+  }
+
+  if (projectsQuery.isPending || statusQuery.isPending || tasksQuery.isPending) {
+    return <div className="page"><section className="pane" style={{ flex: 1 }}><EmptyState icon={TaskSquare} title="Loading project" description="Loading persisted project settings." /></section></div>
+  }
+  if (projectsQuery.isError || statusQuery.isError || tasksQuery.isError) {
+    return <div className="page"><section className="pane" style={{ flex: 1 }}><EmptyState icon={TaskSquare} title="Project unavailable" description="The server could not load this project." /></section></div>
   }
 
   return (
@@ -89,7 +105,7 @@ export function ProjectSettingsPage() {
                               initial={status}
                               onCancel={() => setEditor(null)}
                               onSave={(values) => {
-                                updateStatus(status.id, values)
+                                updateStatus.mutate({ statusId: status.id, body: { ...values, category: status.category, position: status.position, expected_version: status.version } })
                                 setEditor(null)
                               }}
                             />
@@ -108,7 +124,7 @@ export function ProjectSettingsPage() {
                               onDragEnd={endDrag}
                               onDragOver={(e) => {
                                 // reorder only inside the same category
-                                const dragged = dragId ? state.statuses.find((s) => s.id === dragId) : undefined
+                                const dragged = dragId ? statuses.find((s) => s.id === dragId) : undefined
                                 if (!dragged || dragged.id === status.id || dragged.category !== status.category) return
                                 e.preventDefault()
                                 const rect = e.currentTarget.getBoundingClientRect()
@@ -121,7 +137,16 @@ export function ProjectSettingsPage() {
                               onDrop={(e) => {
                                 e.preventDefault()
                                 const id = e.dataTransfer.getData('text/status-id') || dragId
-                                if (id && dropAt?.id === status.id) reorderStatus(id, status.id, dropAt.position)
+                                if (id && dropAt?.id === status.id) {
+                                  const ordered = own.filter((item) => item.id !== id)
+                                  const targetIndex = ordered.findIndex((item) => item.id === status.id)
+                                  const insertAt = targetIndex + (dropAt.position === 'after' ? 1 : 0)
+                                  const dragged = own.find((item) => item.id === id)
+                                  if (dragged) {
+                                    ordered.splice(insertAt, 0, dragged)
+                                    reorderStatuses.mutate(ordered.map((item, position) => ({ id: item.id, expected_version: item.version, position })))
+                                  }
+                                }
                                 endDrag()
                               }}
                             >
@@ -188,7 +213,7 @@ export function ProjectSettingsPage() {
                             category={category}
                             onCancel={() => setEditor(null)}
                             onSave={(values) => {
-                              createStatus(project.id, { ...values, category })
+                              createStatus.mutate({ ...values, category })
                               setEditor(null)
                             }}
                           />
@@ -199,7 +224,7 @@ export function ProjectSettingsPage() {
                 </div>
               </SettingsCard>
 
-              <SettingsCard title="Danger zone" description="Deleting a project removes the project and all of its tasks.">
+              <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
                 <button type="button" className="button button-danger" onClick={() => setConfirmDelete(true)}>
                   Delete project
                 </button>
@@ -219,7 +244,7 @@ export function ProjectSettingsPage() {
           }
           onClose={() => setDeleteTarget(null)}
           onConfirm={() => {
-            deleteStatus(deleteTarget.id)
+            deleteStatus.mutate({ statusId: deleteTarget.id, version: deleteTarget.version })
             setDeleteTarget(null)
           }}
         />
@@ -228,10 +253,10 @@ export function ProjectSettingsPage() {
       {confirmDelete && project ? (
         <ConfirmDeleteModal
           title="Delete project?"
-          description={`This will permanently delete "${project.name}" and its ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}.`}
+          description={`This will move "${project.name}" and its ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} to trash.`}
           onClose={() => setConfirmDelete(false)}
           onConfirm={() => {
-            deleteProject(project.id)
+            deleteProject.mutate({ projectId: project.id, version: project.version })
             navigate('/tasks')
           }}
         />
@@ -245,6 +270,8 @@ export function ProjectSettingsPage() {
  * keys this component by the saved values, so a fresh draft is created after each save.
  */
 function ProjectGeneralCard({ project }: { project: Project }) {
+  const { workspace } = useWorkspace()
+  const updateProject = useUpdateProject(workspace.id, project.id)
   const [draft, setDraft] = useState({ name: project.name, key: project.key, color: project.color })
   const dirty = draft.name !== project.name || draft.key !== project.key || draft.color !== project.color
   const canSave = draft.name.trim().length > 0 && draft.key.length > 0
@@ -301,8 +328,8 @@ function ProjectGeneralCard({ project }: { project: Project }) {
       {dirty ? (
         <UnsavedBar
           onReset={() => setDraft({ name: project.name, key: project.key, color: project.color })}
-          onSave={() => canSave && updateProject(project.id, { name: draft.name.trim(), key: draft.key, color: draft.color })}
-          saving={!canSave}
+          onSave={() => canSave && updateProject.mutate({ name: draft.name.trim(), key: draft.key, color: draft.color, expected_version: project.version })}
+          saving={!canSave || updateProject.isPending}
         />
       ) : null}
     </>

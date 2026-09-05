@@ -3,6 +3,10 @@ import { Add, Menu, Moon, SearchNormal, Setting2, Sun } from 'reicon-react'
 import { useTheme } from '../../lib/themeContext'
 import { useAppState } from '../../mock/store'
 import { createDoc } from '../../mock/actions'
+import { useWorkspace } from '../../features/workspaces/workspaceContext'
+import { useAllStatuses, useProjects } from '../../features/tasks/api/projects'
+import { taskFromRecord, type Project, type Task, type TaskStatusDef } from '../../features/tasks/api/models'
+import { useTasks } from '../../features/tasks/api/tasks'
 import { threadTitleOf } from '../../features/chat/chatLib'
 import { TaskStatusIcon } from '../workspace/TaskStatusIcon'
 import { Dropdown } from '../ui/Dropdown'
@@ -13,21 +17,23 @@ interface Crumb {
   to?: string
 }
 
-function crumbsFor(pathname: string, folderParam: string | null, state: AppState): { crumbs: Crumb[]; status?: React.ReactNode } {
+type TaskNavigation = { projects: Project[]; tasks: Task[]; statuses: TaskStatusDef[] }
+
+function crumbsFor(pathname: string, folderParam: string | null, state: AppState, taskNavigation: TaskNavigation): { crumbs: Crumb[]; status?: React.ReactNode } {
   const [, root, id, sub, subId] = pathname.split('/')
   switch (root) {
     case 'tasks': {
       const crumbs: Crumb[] = [{ label: 'Tasks', to: '/tasks' }]
       if (id === 'projects' && subId === 'settings') {
-        const project = state.projects.find((p) => p.id === sub)
+        const project = taskNavigation.projects.find((p) => p.id === sub)
         if (project) crumbs.push({ label: project.name, to: `/tasks?project=${project.id}` })
         crumbs.push({ label: 'Settings' })
         return { crumbs }
       }
-      const task = id ? state.tasks.find((t) => t.id === id) : null
+      const task = id ? taskNavigation.tasks.find((t) => t.id === id) : null
       if (task) {
-        const status = state.statuses.find((s) => s.id === task.statusId)
-        const project = state.projects.find((p) => p.id === task.projectId)
+        const status = taskNavigation.statuses.find((s) => s.id === task.statusId)
+        const project = taskNavigation.projects.find((p) => p.id === task.projectId)
         if (project) crumbs.push({ label: project.name, to: `/tasks?project=${project.id}` })
         crumbs.push({ label: task.identifier })
         return {
@@ -95,12 +101,21 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
 
 export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => void; onOpenPalette: () => void }) {
   const state = useAppState()
+  const { workspace } = useWorkspace()
+  const projects = useProjects(workspace.id)
+  const statuses = useAllStatuses(workspace.id, projects.data ?? [])
+  const tasks = useTasks(workspace.id, { limit: 100 })
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
 
-  const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state)
+  const taskNavigation = {
+    projects: projects.data ?? [],
+    statuses: statuses.data,
+    tasks: tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [],
+  }
+  const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state, taskNavigation)
   const routeRoot = location.pathname.split('/')[1] || 'home'
 
   return (

@@ -18,75 +18,6 @@ export interface Role {
   position: number
 }
 
-export interface Workspace {
-  name: string
-  iconUrl: string | null
-}
-
-export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled'
-
-/** A project's workflow status (Linear-style: category gives the glyph, color and order are editable). */
-export interface TaskStatusDef {
-  id: string
-  projectId: string
-  name: string
-  description: string
-  color: string
-  category: StatusCategory
-  /** Order inside the category. */
-  position: number
-}
-export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
-
-export interface Project {
-  id: string
-  name: string
-  key: string
-  color: string
-}
-
-export interface TaskComment {
-  id: string
-  authorId: string
-  body: string
-  createdAt: string
-  /** Set on replies: the id of the top-level comment. */
-  parentId?: string
-  attachments?: Attachment[]
-  editedAt?: string | null
-}
-
-export interface TaskActivity {
-  id: string
-  actorId: string
-  text: string
-  createdAt: string
-  /** Status changes show the status glyph in the timeline. */
-  statusId?: string
-}
-
-export interface Task {
-  id: string
-  identifier: string
-  title: string
-  description: string
-  statusId: string
-  /** Manual order inside a status column (drag and drop); lower comes first. */
-  position: number
-  priority: TaskPriority
-  assigneeIds: string[]
-  creatorId: string
-  projectId: string
-  labels: string[]
-  /** Files and images attached to the description. */
-  attachments: Attachment[]
-  dueAt: string | null
-  createdAt: string
-  updatedAt: string
-  comments: TaskComment[]
-  activity: TaskActivity[]
-}
-
 export interface Doc {
   id: string
   title: string
@@ -246,17 +177,6 @@ export interface ChatMessage {
   threadFollowed?: boolean
 }
 
-/** A signed-in device (Settings → Sessions, admin view across members). */
-export interface Session {
-  id: string
-  userId: string
-  device: string
-  browser: string
-  lastActiveAt: string
-  /** The session this browser is using right now. */
-  current: boolean
-}
-
 export interface Notification {
   id: string
   type: 'mention' | 'assignment' | 'comment' | 'github' | 'system'
@@ -271,12 +191,8 @@ export interface Notification {
 
 export interface AppState {
   currentUserId: string
-  workspace: Workspace
   users: User[]
   roles: Role[]
-  projects: Project[]
-  statuses: TaskStatusDef[]
-  tasks: Task[]
   docs: Doc[]
   mailFolders: MailFolder[]
   mailThreads: MailThread[]
@@ -286,7 +202,6 @@ export interface AppState {
   chatMessages: ChatMessage[]
   webhooks: Webhook[]
   customEmojis: CustomEmoji[]
-  sessions: Session[]
   /** channelId → users currently typing (mock realtime; expires = epoch ms) */
   typingUsers: Record<string, Array<{ userId: string; expires: number }>>
 

@@ -1,45 +1,39 @@
 import { useMemo, useRef, useState } from 'react'
-import { Add, ArrowLeft, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
+import { Add, ArrowLeft, Calendar, Paperclip2, TaskSquare, Trash, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
-import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../components/workspace/taskMeta'
-import { fullDate, timeOfDay } from '../../../lib/format'
-import {
-  addTaskAttachments,
-  addTaskComment,
-  removeTaskAttachment,
-  setTaskDescription,
-  setTaskDueAt,
-  setTaskPriority,
-  setTaskStatus,
-  setTaskTitle,
-  toggleTaskAssignee,
-  toggleTaskLabel,
-} from '../../../mock/actions'
-import type { AppState, Project, Task } from '../../../mock/types'
-import { clipboardFiles, fileToAttachment } from '../../chat/attachmentLib'
+import type { Project, Task, TaskViewState } from '../api/models'
+import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '../api/tasks'
+import { useWorkspace } from '../../workspaces/workspaceContext'
+import { clipboardFiles } from '../../chat/attachmentLib'
 import { Attachments } from '../../chat/components/Attachments'
-import { MessageInput } from '../../chat/components/MessageInput'
 import { ActivityFeed } from './ActivityFeed'
+import { TaskCommentComposer } from './TaskCommentComposer'
 
 interface TaskDetailProps {
   task: Task | undefined
   project: Project | undefined
-  state: AppState
+  state: TaskViewState
   onBack: () => void
 }
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
 export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
+  const { workspace } = useWorkspace()
+  const updateTask = useUpdateTask(workspace.id)
+  const uploadAttachments = useUploadTaskAttachments(workspace.id, task?.id ?? '')
+  const deleteAttachment = useDeleteTaskAttachment(workspace.id, task?.id ?? '')
+  const createComment = useCreateTaskComment(workspace.id, task?.id ?? '')
+  const deleteTask = useDeleteTask(workspace.id)
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dropOver, setDropOver] = useState(false)
   const attach = (files: FileList | File[] | null) => {
-    if (task && files && files.length > 0) addTaskAttachments(task.id, Array.from(files).map(fileToAttachment))
+    if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
   const status = state.statuses.find((s) => s.id === task?.statusId)
   const statusOptions = task ? projectStatuses(state.statuses, task.projectId) : []
@@ -58,6 +52,9 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
         </button>
         <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
         <div className="spacer" />
+        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" onClick={() => {
+          if (window.confirm(`Move ${task.identifier} to trash?`)) void deleteTask.mutateAsync({ taskId: task.id, version: task.version }).then(onBack)
+        }}><Trash size={15} /></button> : null}
         <button className="icon-button" onClick={onBack} aria-label="Close task">
           <Xmark size={16} />
         </button>
@@ -79,10 +76,10 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
               defaultValue={task.title}
               placeholder="Task title"
               aria-label="Task title"
-              autoFocus={task.title === ''}
+              autoFocus={task.title === 'Untitled'}
               onBlur={(e) => {
                 const value = e.target.value.trim()
-                if (value && value !== task.title) setTaskTitle(task.id, value)
+                if (value && value !== task.title) updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, title: value } })
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.currentTarget.blur()
@@ -115,7 +112,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                 placeholder="Add description… (paste or drop images and files)"
                 aria-label="Description"
                 onBlur={(e) => {
-                  if (e.target.value !== task.description) setTaskDescription(task.id, e.target.value)
+                  if (e.target.value !== task.description) updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, description: e.target.value } })
                 }}
                 onPaste={(e) => {
                   const files = clipboardFiles(e)
@@ -125,7 +122,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                 }}
               />
               {task.attachments.length > 0 ? (
-                <Attachments attachments={task.attachments} onRemove={(id) => removeTaskAttachment(task.id, id)} />
+                <Attachments attachments={task.attachments} onRemove={(id) => deleteAttachment.mutate(id)} />
               ) : null}
               <div className="tasks-desc-tools">
                 <input ref={fileInputRef} type="file" multiple hidden aria-label="Attach files" onChange={(e) => attach(e.target.files)} />
@@ -133,6 +130,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                   <Paperclip2 size={14} />
                   Attach
                 </button>
+                {uploadAttachments.isPending ? <span className="text-faint text-xs">Uploading {uploadAttachments.progress}%</span> : null}
               </div>
             </div>
 
@@ -157,7 +155,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                         className="popover-option"
                         data-selected={option.id === task.statusId || undefined}
                         onClick={() => {
-                          setTaskStatus(task.id, option.id)
+                          updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })
                           close()
                         }}
                       >
@@ -184,7 +182,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                         className="popover-option"
                         data-selected={priority === task.priority || undefined}
                         onClick={() => {
-                          setTaskPriority(task.id, priority)
+                          updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })
                           close()
                         }}
                       >
@@ -224,7 +222,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                           className="popover-option"
                           data-selected={active || undefined}
                           aria-pressed={active}
-                          onClick={() => toggleTaskAssignee(task.id, u.id)}
+                          onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
                         >
                           <Avatar user={u} size={16} />
                           {u.name}
@@ -248,7 +246,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                       className="tasks-label-remove"
                       aria-label={`Remove label ${label}`}
                       title="Remove label"
-                      onClick={() => toggleTaskLabel(task.id, label)}
+                      onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: task.labels.filter((item) => item !== label) } })}
                     >
                       <Xmark size={12} />
                     </button>
@@ -274,7 +272,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                             className="popover-option"
                             data-selected={active || undefined}
                             aria-pressed={active}
-                            onClick={() => toggleTaskLabel(task.id, label)}
+                            onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: active ? task.labels.filter((item) => item !== label) : [...task.labels, label] } })}
                           >
                             <span className="pill">{label}</span>
                             {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
@@ -301,27 +299,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Due date</h4>
-              <Dropdown
-                className="tasks-date-dropdown"
-                trigger={() => (
-                  <button className="button button-ghost tasks-side-prop">
-                    <Calendar size={15} />
-                    {task.dueAt ? `${fullDate(task.dueAt)} · ${timeOfDay(task.dueAt)}` : 'Set due date'}
-                  </button>
-                )}
-              >
-                {(close) => (
-                  <DatePicker
-                    value={task.dueAt}
-                    onChange={(iso) => setTaskDueAt(task.id, iso)}
-                    onClear={() => {
-                      setTaskDueAt(task.id, null)
-                      close()
-                    }}
-                    onDone={close}
-                  />
-                )}
-              </Dropdown>
+              <button className="button button-ghost tasks-side-prop" disabled title="Due dates are not available in the server contract."><Calendar size={15} />Set due date</button>
             </div>
           </aside>
 
@@ -330,14 +308,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
             <div className="tasks-comment-composer">
-              <MessageInput
-                state={state}
-                placeholder="Leave a comment…"
-                showThreadAction={false}
-                onSend={(content, attachments) => {
-                  addTaskComment(task.id, content, undefined, attachments)
-                }}
-              />
+              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} onSend={(body, files) => createComment.mutateAsync({ body, files })} />
             </div>
           </div>
         </div>

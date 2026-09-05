@@ -1,12 +1,32 @@
+import { useState } from 'react'
 import { Listbox } from '../../components/ui/Listbox'
 import { useTheme, type Theme } from '../../lib/themeContext'
+import { useCreateWorkspace, useRenameWorkspace } from '../workspaces/api'
+import { useWorkspace } from '../workspaces/workspaceContext'
 import { SettingsCard } from './SettingsCard'
 
 export function GeneralPage() {
   const { theme, setTheme } = useTheme()
+  const { workspace, selectWorkspace } = useWorkspace()
+  const renameWorkspace = useRenameWorkspace(workspace.id)
+  const createWorkspace = useCreateWorkspace()
+  const [nameDraft, setNameDraft] = useState({ workspaceId: workspace.id, value: workspace.name })
+  const [newName, setNewName] = useState('')
+  const name = nameDraft.workspaceId === workspace.id ? nameDraft.value : workspace.name
 
   return (
     <>
+      <SettingsCard title="Workspace" description="Rename this workspace or create another one.">
+        <form className="settings-grid" onSubmit={(event) => { event.preventDefault(); void renameWorkspace.mutateAsync({ name: name.trim(), version: workspace.version }) }}>
+          <div className="settings-field"><label className="field-label" htmlFor="workspace-name">Name</label><input id="workspace-name" className="input" required value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></div>
+          <div className="settings-field" style={{ alignSelf: 'end' }}><button className="button button-primary" disabled={renameWorkspace.isPending || name.trim() === workspace.name}>Save workspace</button></div>
+        </form>
+        <form className="settings-grid" onSubmit={(event) => { event.preventDefault(); void createWorkspace.mutateAsync(newName.trim()).then((created) => { setNewName(''); selectWorkspace(created.id) }) }}>
+          <div className="settings-field"><label className="field-label" htmlFor="new-workspace-name">New workspace</label><input id="new-workspace-name" className="input" required value={newName} onChange={(event) => setNewName(event.target.value)} /></div>
+          <div className="settings-field" style={{ alignSelf: 'end' }}><button className="button" disabled={createWorkspace.isPending}>Create workspace</button></div>
+        </form>
+      </SettingsCard>
+
       <SettingsCard title="Appearance" description="Theme for this browser.">
         <div className="settings-grid">
           <div className="settings-field">
@@ -32,7 +52,7 @@ export function GeneralPage() {
             <label className="field-label" htmlFor="about-version">
               Version
             </label>
-            <input id="about-version" className="input" value="0.1.0 (mock)" readOnly />
+            <input id="about-version" className="input" value="0.1.0" readOnly />
           </div>
           <div className="settings-field">
             <label className="field-label" htmlFor="about-backend">
@@ -41,7 +61,7 @@ export function GeneralPage() {
             <input
               id="about-backend"
               className="input"
-              value="Not connected — using mock data"
+              value="Connected"
               readOnly
             />
           </div>
@@ -49,7 +69,7 @@ export function GeneralPage() {
             <label className="field-label" htmlFor="about-storage">
               Storage
             </label>
-            <input id="about-storage" className="input" value="Local browser session" readOnly />
+            <input id="about-storage" className="input" value="Server data directory" readOnly />
           </div>
         </div>
       </SettingsCard>

@@ -8,280 +8,14 @@ import type {
   Doc,
   DocBlock,
   MailThread,
-  Task,
-  TaskPriority,
-  StatusCategory,
-  TaskStatusDef,
   MailFolder,
-  Project,
   Role,
   Webhook,
   User,
 } from './types'
 
-import { defaultStatusOf, projectStatuses } from '../components/workspace/taskMeta'
 
 const now = () => new Date().toISOString()
-
-/* ---------- tasks ---------- */
-
-function touchTask(taskId: string, patch: Partial<Task>, activityText?: string, activityStatusId?: string) {
-  updateState((s) => ({
-    ...s,
-    tasks: s.tasks.map((t) =>
-      t.id === taskId
-        ? {
-            ...t,
-            ...patch,
-            updatedAt: now(),
-            activity: activityText
-              ? [
-                  ...t.activity,
-                  {
-                    id: nextId('ta'),
-                    actorId: s.currentUserId,
-                    text: activityText,
-                    createdAt: now(),
-                    ...(activityStatusId ? { statusId: activityStatusId } : {}),
-                  },
-                ]
-              : t.activity,
-          }
-        : t,
-    ),
-  }))
-}
-
-export function setTaskStatus(taskId: string, statusId: string) {
-  const name = getState().statuses.find((s) => s.id === statusId)?.name ?? 'Unknown'
-  touchTask(taskId, { statusId }, `changed status to ${name}`, statusId)
-}
-
-/** Drag and drop on the board: new column (status) and manual position inside it. */
-export function moveTask(taskId: string, statusId: string, position: number) {
-  const s = getState()
-  const task = s.tasks.find((t) => t.id === taskId)
-  if (!task) return
-  if (task.statusId !== statusId) {
-    const name = s.statuses.find((st) => st.id === statusId)?.name ?? 'Unknown'
-    touchTask(taskId, { statusId, position }, `changed status to ${name}`, statusId)
-  } else {
-    updateState((prev) => ({ ...prev, tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, position } : t)) }))
-  }
-}
-
-export function setTaskPriority(taskId: string, priority: TaskPriority) {
-  touchTask(taskId, { priority }, `set priority to ${priority}`)
-}
-
-/** Adds or removes one assignee (tasks can have several). */
-export function toggleTaskAssignee(taskId: string, userId: string) {
-  const s = getState()
-  const task = s.tasks.find((t) => t.id === taskId)
-  if (!task) return
-  const name = s.users.find((u) => u.id === userId)?.name ?? 'someone'
-  const assigned = task.assigneeIds.includes(userId)
-  touchTask(
-    taskId,
-    { assigneeIds: assigned ? task.assigneeIds.filter((id) => id !== userId) : [...task.assigneeIds, userId] },
-    assigned ? `unassigned ${name}` : `assigned ${name}`,
-  )
-}
-
-export function setTaskDueAt(taskId: string, dueAt: string | null) {
-  const label = dueAt ? new Date(dueAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null
-  touchTask(taskId, { dueAt }, label ? `set the due date to ${label}` : 'removed the due date')
-}
-
-export function setTaskTitle(taskId: string, title: string) {
-  touchTask(taskId, { title })
-}
-
-export function setTaskDescription(taskId: string, description: string) {
-  touchTask(taskId, { description })
-}
-
-export function addTaskAttachments(taskId: string, attachments: Attachment[]) {
-  const task = getState().tasks.find((t) => t.id === taskId)
-  if (!task || attachments.length === 0) return
-  touchTask(
-    taskId,
-    { attachments: [...task.attachments, ...attachments] },
-    attachments.length === 1 ? `attached ${attachments[0].fileName}` : `attached ${attachments.length} files`,
-  )
-}
-
-export function removeTaskAttachment(taskId: string, attachmentId: string) {
-  const task = getState().tasks.find((t) => t.id === taskId)
-  if (!task) return
-  touchTask(taskId, { attachments: task.attachments.filter((a) => a.id !== attachmentId) })
-}
-
-export function addTaskComment(taskId: string, body: string, parentId?: string, attachments: Attachment[] = []) {
-  updateState((s) => ({
-    ...s,
-    tasks: s.tasks.map((t) =>
-      t.id === taskId
-        ? {
-            ...t,
-            updatedAt: now(),
-            comments: [
-              ...t.comments,
-              {
-                id: nextId('tc'),
-                authorId: s.currentUserId,
-                body,
-                createdAt: now(),
-                ...(parentId ? { parentId } : {}),
-                ...(attachments.length > 0 ? { attachments } : {}),
-              },
-            ],
-          }
-        : t,
-    ),
-  }))
-}
-
-export function editTaskComment(taskId: string, commentId: string, body: string) {
-  updateState((s) => ({
-    ...s,
-    tasks: s.tasks.map((t) =>
-      t.id === taskId
-        ? { ...t, comments: t.comments.map((c) => (c.id === commentId ? { ...c, body, editedAt: now() } : c)) }
-        : t,
-    ),
-  }))
-}
-
-/** Deletes a comment; deleting a top-level comment also removes its replies. */
-export function deleteTaskComment(taskId: string, commentId: string) {
-  updateState((s) => ({
-    ...s,
-    tasks: s.tasks.map((t) =>
-      t.id === taskId ? { ...t, comments: t.comments.filter((c) => c.id !== commentId && c.parentId !== commentId) } : t,
-    ),
-  }))
-}
-
-/** Adds the label when missing, removes it when present. */
-export function toggleTaskLabel(taskId: string, label: string) {
-  const task = getState().tasks.find((t) => t.id === taskId)
-  if (!task) return
-  const has = task.labels.includes(label)
-  touchTask(
-    taskId,
-    { labels: has ? task.labels.filter((l) => l !== label) : [...task.labels, label] },
-    has ? `removed label ${label}` : `added label ${label}`,
-  )
-}
-
-export function createTask(input: {
-  title: string
-  projectId: string
-  statusId?: string
-  priority?: TaskPriority
-  assigneeIds?: string[]
-}): Task {
-  const s = getState()
-  const project = s.projects.find((p) => p.id === input.projectId) ?? s.projects[0]
-  const count = s.tasks.filter((t) => t.projectId === project.id).length
-  const task: Task = {
-    id: nextId('t'),
-    identifier: `${project.key}-${100 + count + 1}`,
-    title: input.title,
-    description: '',
-    statusId: input.statusId ?? defaultStatusOf(s.statuses, project.id)?.id ?? '',
-    position: Math.min(0, ...s.tasks.map((t) => t.position)) - 1,
-    priority: input.priority ?? 'none',
-    assigneeIds: input.assigneeIds ?? [],
-    creatorId: s.currentUserId,
-    projectId: project.id,
-    labels: [],
-    attachments: [],
-    dueAt: null,
-    createdAt: now(),
-    updatedAt: now(),
-    comments: [],
-    activity: [{ id: nextId('ta'), actorId: s.currentUserId, text: 'created this task', createdAt: now() }],
-  }
-  updateState((prev) => ({ ...prev, tasks: [task, ...prev.tasks] }))
-  return task
-}
-
-/* ---------- projects ---------- */
-
-export function updateProject(projectId: string, patch: Partial<Pick<Project, 'name' | 'key' | 'color'>>) {
-  updateState((s) => ({ ...s, projects: s.projects.map((p) => (p.id === projectId ? { ...p, ...patch } : p)) }))
-}
-
-/** Removes the project and every task in it. */
-export function deleteProject(projectId: string) {
-  updateState((s) => ({
-    ...s,
-    projects: s.projects.filter((p) => p.id !== projectId),
-    statuses: s.statuses.filter((st) => st.projectId !== projectId),
-    tasks: s.tasks.filter((t) => t.projectId !== projectId),
-  }))
-}
-
-/* ---------- statuses ---------- */
-
-export function createStatus(
-  projectId: string,
-  input: { name: string; category: StatusCategory; color: string; description?: string },
-): TaskStatusDef {
-  const siblings = getState().statuses.filter((s) => s.projectId === projectId && s.category === input.category)
-  const status: TaskStatusDef = {
-    id: nextId('st'),
-    projectId,
-    name: input.name,
-    description: input.description ?? '',
-    color: input.color,
-    category: input.category,
-    position: siblings.length > 0 ? Math.max(...siblings.map((s) => s.position)) + 1 : 0,
-  }
-  updateState((s) => ({ ...s, statuses: [...s.statuses, status] }))
-  return status
-}
-
-export function updateStatus(statusId: string, patch: Partial<Pick<TaskStatusDef, 'name' | 'description' | 'color'>>) {
-  updateState((s) => ({ ...s, statuses: s.statuses.map((st) => (st.id === statusId ? { ...st, ...patch } : st)) }))
-}
-
-/** Removes a status; its tasks move to the next status of the same category, else the project default. */
-export function deleteStatus(statusId: string) {
-  const s = getState()
-  const status = s.statuses.find((st) => st.id === statusId)
-  if (!status) return
-  const remaining = s.statuses.filter((st) => st.id !== statusId)
-  const fallback =
-    projectStatuses(remaining, status.projectId).find((st) => st.category === status.category) ??
-    defaultStatusOf(remaining, status.projectId)
-  if (!fallback) return
-  updateState((prev) => ({
-    ...prev,
-    statuses: remaining,
-    tasks: prev.tasks.map((t) => (t.statusId === statusId ? { ...t, statusId: fallback.id, updatedAt: now() } : t)),
-  }))
-}
-
-/** Moves a status before/after another one of the same project and category. */
-export function reorderStatus(statusId: string, targetId: string, position: 'before' | 'after') {
-  const s = getState()
-  const moving = s.statuses.find((st) => st.id === statusId)
-  const target = s.statuses.find((st) => st.id === targetId)
-  if (!moving || !target || moving.id === target.id) return
-  if (moving.projectId !== target.projectId || moving.category !== target.category) return
-  const ordered = projectStatuses(s.statuses, moving.projectId)
-    .filter((st) => st.category === moving.category && st.id !== moving.id)
-  const index = ordered.findIndex((st) => st.id === target.id) + (position === 'after' ? 1 : 0)
-  ordered.splice(index, 0, moving)
-  const positions = new Map(ordered.map((st, i) => [st.id, i]))
-  updateState((prev) => ({
-    ...prev,
-    statuses: prev.statuses.map((st) => (positions.has(st.id) ? { ...st, position: positions.get(st.id)! } : st)),
-  }))
-}
 
 /* ---------- custom emojis ---------- */
 
@@ -302,16 +36,6 @@ export function renameCustomEmoji(emojiId: string, name: string) {
 
 export function deleteCustomEmoji(emojiId: string) {
   updateState((s) => ({ ...s, customEmojis: s.customEmojis.filter((e) => e.id !== emojiId) }))
-}
-
-/* ---------- sessions ---------- */
-
-export function revokeSession(sessionId: string) {
-  updateState((s) => ({ ...s, sessions: s.sessions.filter((session) => session.id !== sessionId || session.current) }))
-}
-
-export function revokeOtherSessions() {
-  updateState((s) => ({ ...s, sessions: s.sessions.filter((session) => session.current) }))
 }
 
 /* ---------- docs ---------- */
@@ -764,21 +488,7 @@ export function markAllNotificationsRead() {
   }))
 }
 
-/* ---------- team members ---------- */
-
-export function setUserRole(userId: string, role: User['role']) {
-  updateState((s) => ({
-    ...s,
-    users: s.users.map((u) => (u.id === userId ? { ...u, role } : u)),
-  }))
-}
-
-export function removeUser(userId: string) {
-  updateState((s) => {
-    if (userId === s.currentUserId) return s
-    return { ...s, users: s.users.filter((u) => u.id !== userId) }
-  })
-}
+/* ---------- user profile ---------- */
 
 export function updateUserProfile(userId: string, patch: Partial<Pick<User, 'name' | 'email' | 'title'>>) {
   updateState((s) => ({
@@ -855,10 +565,4 @@ export function reorderRoles(orderedIds: string[]) {
 
 export function assignMemberRoles(userId: string, roleIds: string[]) {
   updateState((s) => ({ ...s, users: s.users.map((u) => (u.id === userId ? { ...u, roleIds } : u)) }))
-}
-
-/* ---------- workspace ---------- */
-
-export function updateWorkspace(patch: { name?: string; iconUrl?: string | null }) {
-  updateState((s) => ({ ...s, workspace: { ...s.workspace, ...patch } }))
 }

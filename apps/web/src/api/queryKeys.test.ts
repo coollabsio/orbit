@@ -14,4 +14,11 @@ describe('workspace query keys', () => {
       [...queryKeys.workspace('workspace-a')],
     )
   })
+
+  test('cover every persisted workspace task collection under that prefix', () => {
+    expect(queryKeys.statuses('workspace-a', 'project-one').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.comments('workspace-a', 'task-one').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.attachments('workspace-a', 'task-one').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.taskTrash('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+  })
 })

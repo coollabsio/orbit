@@ -3,25 +3,36 @@ import { Add, ArrowDown2, ArrowRight, Copy, Notification, People, SearchNormal, 
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Listbox } from '../../components/ui/Listbox'
-import { removeUser, setUserRole } from '../../mock/actions'
-import { useAppState } from '../../mock/store'
-import type { User } from '../../mock/types'
+import { useCurrentUser } from '../auth/api'
+import { useChangeMemberRole, useCreateInvitation, useInvitations, useMembers, useRemoveMember, useRevokeInvitation } from '../workspaces/api'
+import { useWorkspace } from '../workspaces/workspaceContext'
+import type { User } from '../tasks/api/models'
+import { canManageMember } from './memberPermissions'
 import { SettingsCard } from './SettingsCard'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
 
-const ROLES: Role[] = ['Owner', 'Admin', 'Member', 'Visitor']
+const ROLES: Role[] = ['Owner', 'Admin', 'Member']
 const PAGE_SIZES = [10, 25, 50, 100]
+const EMPTY_USERS: User[] = []
 
 function initial(user: User) {
   return (user.name || user.email).charAt(0).toUpperCase()
 }
 
 export function MembersPage() {
-  const state = useAppState()
-  const me = state.users.find((u) => u.id === state.currentUserId)
-  const canManage = me?.role === 'Owner' || me?.role === 'Admin'
+  const { workspace } = useWorkspace()
+  const canManage = workspace.role === 'owner' || workspace.role === 'admin'
+  const currentUser = useCurrentUser()
+  const membersQuery = useMembers(workspace.id)
+  const createInvitation = useCreateInvitation(workspace.id)
+  const invitations = useInvitations(canManage ? workspace.id : null)
+  const revokeInvitation = useRevokeInvitation(workspace.id)
+  const changeRole = useChangeMemberRole(workspace.id)
+  const removeMember = useRemoveMember(workspace.id)
+  const users = membersQuery.data ?? EMPTY_USERS
+  const me = users.find((user) => user.id === currentUser.data?.id)
 
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all')
@@ -36,7 +47,7 @@ export function MembersPage() {
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
-    const list = state.users.filter((u) => {
+    const list = users.filter((u) => {
       const matchesSearch =
         !query || [u.name, u.email, u.role].some((v) => v.toLowerCase().includes(query))
       const matchesRole = roleFilter === 'all' || u.role === roleFilter
@@ -48,7 +59,10 @@ export function MembersPage() {
       if (sortBy === 'role') return a.role.localeCompare(b.role)
       return a.name.localeCompare(b.name)
     })
-  }, [state.users, search, roleFilter, sortBy])
+  }, [users, search, roleFilter, sortBy])
+
+  if (membersQuery.isPending) return <SettingsCard title="Members"><p>Loading workspace members…</p></SettingsCard>
+  if (membersQuery.isError) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage))
   const currentPage = Math.min(page, lastPage)
@@ -56,12 +70,12 @@ export function MembersPage() {
   const lastRow = Math.min(currentPage * perPage, filtered.length)
   const visible = filtered.slice((currentPage - 1) * perPage, currentPage * perPage)
 
-  const generateLink = (e: React.FormEvent) => {
+  const generateLink = async (e: React.FormEvent) => {
     e.preventDefault()
     const email = inviteEmail.trim()
     if (!email) return
-    const token = Math.random().toString(36).slice(2, 10)
-    setInviteLink(`${window.location.origin}/invitations/${token}?email=${encodeURIComponent(email)}`)
+    const response = await createInvitation.mutateAsync({ email, role: inviteRole.toLowerCase() as 'owner' | 'admin' | 'member', delivery: 'manual' })
+    setInviteLink(response.url ?? null)
     setCopied(false)
   }
 
@@ -145,7 +159,7 @@ export function MembersPage() {
                   <div className="members-name">
                     <span className="avatar-tile">{initial(user)}</span>
                     <span className="truncate members-name-text">{user.name}</span>
-                    {user.id === state.currentUserId ? (
+                    {user.id === currentUser.data?.id ? (
                       <span className="badge" data-tone="accent">
                         You
                       </span>
@@ -156,7 +170,7 @@ export function MembersPage() {
                     <span className="badge">{user.role}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    {canManage && user.id !== state.currentUserId ? (
+                    {canManage && canManageMember(workspace.role, currentUser.data?.id, user) ? (
                       <Dropdown
                         align="right"
                         trigger={(open) => (
@@ -178,7 +192,7 @@ export function MembersPage() {
                                 type="button"
                                 className="popover-option"
                                 onClick={() => {
-                                  setUserRole(user.id, role)
+                                  changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role.toLowerCase() as 'owner' | 'admin' | 'member' })
                                   close()
                                 }}
                               >
@@ -191,7 +205,7 @@ export function MembersPage() {
                               className="popover-option"
                               data-tone="danger"
                               onClick={() => {
-                                removeUser(user.id)
+                                removeMember.mutate({ membershipId: user.membershipId, version: user.version })
                                 close()
                               }}
                             >
@@ -274,7 +288,7 @@ export function MembersPage() {
       </SettingsCard>
 
       {canManage ? (
-        <form onSubmit={generateLink}>
+        <form onSubmit={(event) => void generateLink(event)}>
           <SettingsCard
             title="Invite a member"
             description="Create a reusable invitation link or deliver it by email."
@@ -284,7 +298,7 @@ export function MembersPage() {
                   <Notification size={14} />
                   Send email
                 </button>
-                <button type="submit" className="button button-primary">
+                <button type="submit" className="button button-primary" disabled={createInvitation.isPending}>
                   <Add size={14} />
                   Generate link
                 </button>
@@ -335,8 +349,20 @@ export function MembersPage() {
                 </button>
               </div>
             ) : null}
+            {createInvitation.isError ? <p role="alert" className="text-danger">The invitation could not be created.</p> : null}
           </SettingsCard>
         </form>
+      ) : null}
+
+      {canManage && (invitations.data?.items.length ?? 0) > 0 ? (
+        <SettingsCard title="Pending invitations" description="Invitation links that have not been accepted." flush>
+          <div className="data-table">
+            {invitations.data?.items.map((invitation) => <div className="data-table-row members-table-grid" key={invitation.id}>
+              <span className="truncate">{invitation.email}</span><span className="data-table-cell-muted">Expires {new Date(invitation.expires_at).toLocaleDateString()}</span><span className="badge">{invitation.role}</span>
+              <span style={{ textAlign: 'right' }}><button className="button button-ghost" disabled={revokeInvitation.isPending} onClick={() => revokeInvitation.mutate(invitation.id)}>Revoke</button></span>
+            </div>)}
+          </div>
+        </SettingsCard>
       ) : null}
     </>
   )

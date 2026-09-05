@@ -13,6 +13,10 @@ import {
 } from 'reicon-react'
 import type { IconComponent } from 'reicon-react'
 import { useAppState } from '../../mock/store'
+import { useWorkspace } from '../../features/workspaces/workspaceContext'
+import { useProjects } from '../../features/tasks/api/projects'
+import { taskFromRecord } from '../../features/tasks/api/models'
+import { useTasks } from '../../features/tasks/api/tasks'
 
 interface CommandEntry {
   id: string
@@ -25,8 +29,11 @@ interface CommandEntry {
 
 export function CommandPalette({ onClose }: { onClose: () => void }) {
   const state = useAppState()
+  const { workspace } = useWorkspace()
+  const projects = useProjects(workspace.id)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
+  const taskQuery = useTasks(workspace.id, { search: query || undefined, limit: 25 })
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -42,7 +49,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_inbox', icon: DirectInbox, title: 'Go to Inbox', meta: 'Navigation', to: '/inbox', keywords: 'inbox notifications' },
       { id: 'nav_settings', icon: Setting2, title: 'Go to Settings', meta: 'Navigation', to: '/settings', keywords: 'settings preferences' },
     ]
-    const tasks: CommandEntry[] = state.tasks.map((t) => ({
+    const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
       id: t.id,
       icon: TaskSquare,
       title: t.title,
@@ -75,7 +82,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       keywords: `channel chat ${c.name}`,
     }))
     return [...nav, ...tasks, ...docs, ...mail, ...channels]
-  }, [state])
+  }, [projects.data, state, taskQuery.data])
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()

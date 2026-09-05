@@ -640,6 +640,12 @@
   margin-top: 16px;
 }
 
+.tasks-native-composer { display: grid; gap: 8px; }
+.tasks-native-composer textarea { resize: vertical; }
+.tasks-native-files, .tasks-native-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tasks-native-files .pill button { display: inline-flex; margin-left: 4px; color: inherit; }
+.tasks-load-more { display: flex; justify-content: center; padding: 16px; }
+
 .tasks-comment-composer .fc-composer {
   padding: 0;
 }

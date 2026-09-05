@@ -4,12 +4,13 @@ import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
 import { Attachments } from '../../chat/components/Attachments'
 import type { MentionToken } from '../../chat/chatLib'
 import { renderMarkdownBlocks } from '../../chat/markdown'
-import { deleteTaskComment, editTaskComment } from '../../../mock/actions'
-import type { AppState, TaskComment } from '../../../mock/types'
+import type { TaskComment, TaskViewState } from '../api/models'
+import { useDeleteTaskComment, useUpdateTaskComment } from '../api/tasks'
+import { useWorkspace } from '../../workspaces/workspaceContext'
 import { agoLabel } from '../tasksLib'
 
 interface CommentItemProps {
-  state: AppState
+  state: TaskViewState
   taskId: string
   comment: TaskComment
   mentionTokens: MentionToken[]
@@ -18,6 +19,9 @@ interface CommentItemProps {
 
 /** A task comment rendered like a chat message: markdown, attachments, hover toolbar with edit/delete. */
 export function CommentItem({ state, taskId, comment, mentionTokens, reply }: CommentItemProps) {
+  const { workspace } = useWorkspace()
+  const updateComment = useUpdateTaskComment(workspace.id, taskId)
+  const deleteComment = useDeleteTaskComment(workspace.id, taskId)
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
@@ -28,7 +32,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
 
   const commitEdit = () => {
     const trimmed = editText.trim()
-    if (trimmed && trimmed !== comment.body) editTaskComment(taskId, comment.id, trimmed)
+    if (trimmed && trimmed !== comment.body) updateComment.mutate({ commentId: comment.id, body: trimmed, version: comment.version })
     setEditing(false)
   }
 
@@ -101,7 +105,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
           description={reply ? 'This will remove the reply.' : 'This will remove the comment and its replies.'}
           onClose={() => setConfirmDelete(false)}
           onConfirm={() => {
-            deleteTaskComment(taskId, comment.id)
+            deleteComment.mutate({ commentId: comment.id, version: comment.version })
             setConfirmDelete(false)
           }}
         />

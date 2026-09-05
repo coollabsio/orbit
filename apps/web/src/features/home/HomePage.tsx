@@ -6,6 +6,11 @@ import { cx } from '../../lib/cx'
 import { TaskStatusIcon } from '../../components/workspace/TaskStatusIcon'
 import { PriorityIcon } from '../../components/workspace/PriorityIcon'
 import { PRIORITY_ORDER } from '../../components/workspace/taskMeta'
+import { useCurrentUser } from '../auth/api'
+import { useWorkspace } from '../workspaces/workspaceContext'
+import { useAllStatuses, useProjects } from '../tasks/api/projects'
+import { taskFromRecord } from '../tasks/api/models'
+import { useTasks } from '../tasks/api/tasks'
 import '../shared/cards.css'
 import './home.css'
 
@@ -40,14 +45,18 @@ function HomeCard({
 
 export function HomePage() {
   const state = useAppState()
-  const me = state.users.find((u) => u.id === state.currentUserId)
-  const firstName = me?.name.split(' ')[0] ?? 'there'
+  const { workspace } = useWorkspace()
+  const me = useCurrentUser()
+  const projects = useProjects(workspace.id)
+  const statuses = useAllStatuses(workspace.id, projects.data ?? [])
+  const tasks = useTasks(workspace.id, { assignee_id: me.data?.id, limit: 100 })
+  const firstName = me.data?.display_name.split(' ')[0] ?? 'there'
 
-  const myOpenTasks = state.tasks
+  const myOpenTasks = (tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [])
     .filter(
       (t) =>
-        t.assigneeIds.includes(state.currentUserId) &&
-        ['unstarted', 'started'].includes(state.statuses.find((s) => s.id === t.statusId)?.category ?? ''),
+        t.assigneeIds.includes(me.data?.id ?? '') &&
+        ['unstarted', 'started'].includes(statuses.data.find((s) => s.id === t.statusId)?.category ?? ''),
     )
     .sort((a, b) => {
       const p = PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority)
@@ -106,7 +115,7 @@ export function HomePage() {
                 ) : (
                   myOpenTasks.map((task) => (
                     <Link key={task.id} to={`/tasks/${task.id}`} className="list-row">
-                      <TaskStatusIcon status={state.statuses.find((s) => s.id === task.statusId)} />
+                      <TaskStatusIcon status={statuses.data.find((s) => s.id === task.statusId)} />
                       <span className="text-faint" style={{ fontSize: 12, flexShrink: 0 }}>
                         {task.identifier}
                       </span>

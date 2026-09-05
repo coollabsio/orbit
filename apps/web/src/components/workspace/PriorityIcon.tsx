@@ -1,4 +1,4 @@
-import type { TaskPriority } from '../../mock/types'
+import type { TaskPriority } from '../../features/tasks/api/models'
 import { PRIORITY_LABEL } from './taskMeta'
 
 /** Compact priority bars, Linear-style. Urgent renders a warning square. */

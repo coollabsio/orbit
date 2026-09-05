@@ -1,6 +1,8 @@
 import { useNavigate } from 'react-router'
-import { Setting2, TaskSquare } from 'reicon-react'
-import type { Project } from '../../../mock/types'
+import { Add, Setting2, TaskSquare } from 'reicon-react'
+import type { Project } from '../api/models'
+import { useCreateProject } from '../api/projects'
+import { useWorkspace } from '../../workspaces/workspaceContext'
 
 interface ProjectRailProps {
   projects: Project[]
@@ -11,6 +13,8 @@ interface ProjectRailProps {
 /** Second sidebar for Tasks: "All projects" + one row per project (color square, name, hover gear → settings). */
 export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps) {
   const navigate = useNavigate()
+  const { workspace } = useWorkspace()
+  const createProject = useCreateProject(workspace.id)
   return (
     <section className="pane tasks-rail-pane">
       <div className="pane-header">
@@ -42,6 +46,12 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
             </button>
           </div>
         ))}
+        <button className="menu-item" disabled={createProject.isPending} onClick={() => {
+          const name = window.prompt('Project name')?.trim()
+          if (!name) return
+          const key = name.replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase() || 'PROJ'
+          void createProject.mutateAsync({ name, key, color: '#8b5cf6' }).then((project) => onSelect(project.id))
+        }}><Add size={16} /><span className="menu-item-label">New project</span></button>
       </div>
     </section>
   )

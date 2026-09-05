@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { AvatarStack } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { moveTask } from '../../../mock/actions'
-import type { Task, TaskStatusDef, User } from '../../../mock/types'
+import type { Task, TaskStatusDef, User } from '../api/models'
+import { useReorderTasks, useUpdateTask } from '../api/tasks'
+import { useWorkspace } from '../../workspaces/workspaceContext'
 import { resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '../tasksLib'
 import { PriorityPicker } from './PriorityPicker'
 
@@ -18,6 +19,9 @@ interface TaskBoardProps {
 
 /** Kanban: one column per status group; dragging a card shows a placeholder where it will land. */
 export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, onOpen }: TaskBoardProps) {
+  const { workspace } = useWorkspace()
+  const updateTask = useUpdateTask(workspace.id)
+  const reorderTasks = useReorderTasks(workspace.id)
   const [dragging, setDragging] = useState<{ id: string; height: number } | null>(null)
   const [drop, setDrop] = useState<{ key: string; index: number } | null>(null)
 
@@ -46,7 +50,11 @@ export function TaskBoard({ tasks, users, statuses, groups, sort, activeTaskId, 
     const prev = others[index - 1]
     const next = others[index]
     const position = prev && next ? (prev.position + next.position) / 2 : prev ? prev.position + 1 : next ? next.position - 1 : 0
-    if (statusId !== task.statusId || position !== task.position) moveTask(task.id, statusId, position)
+    if (statusId !== task.statusId) {
+      updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: statusId, position } })
+    } else if (position !== task.position) {
+      reorderTasks.mutate([{ id: task.id, expected_version: task.version, position }])
+    }
   }
 
   return (

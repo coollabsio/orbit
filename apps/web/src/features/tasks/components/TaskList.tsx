@@ -6,8 +6,9 @@ import { EmptyState } from '../../../components/ui/EmptyState'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '../../../components/workspace/taskMeta'
-import { setTaskPriority, setTaskStatus, toggleTaskAssignee, toggleTaskLabel } from '../../../mock/actions'
-import type { Task, TaskStatusDef, User } from '../../../mock/types'
+import type { Task, TaskStatusDef, User } from '../api/models'
+import { useBulkTasks, useUpdateTask } from '../api/tasks'
+import { useWorkspace } from '../../workspaces/workspaceContext'
 import { groupTasksByStatus, resolveStatusId, type SortKey, type StatusGroup } from '../tasksLib'
 import { TaskRow } from './TaskRow'
 
@@ -23,6 +24,8 @@ interface TaskListProps {
 
 /** Status groups: collapsible headers that also accept dropped rows (moves the task to that status). */
 export function TaskList({ tasks, users, statuses, groups, sort, onOpen, onAdd }: TaskListProps) {
+  const { workspace } = useWorkspace()
+  const updateTask = useUpdateTask(workspace.id)
   const taskGroups = groupTasksByStatus(tasks, groups, sort)
   const [collapsed, setCollapsed] = useState<string[]>([])
   const [selected, setSelected] = useState<string[]>([])
@@ -75,7 +78,9 @@ export function TaskList({ tasks, users, statuses, groups, sort, onOpen, onAdd }
               if (task) {
                 // the dropped task moves to the status of its own project that matches this group
                 const statusId = resolveStatusId(statuses, task.projectId, group.key)
-                if (statusId && statusId !== task.statusId) setTaskStatus(task.id, statusId)
+                if (statusId && statusId !== task.statusId) {
+                  updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: statusId } })
+                }
               }
               endDrag()
             }}
@@ -153,29 +158,37 @@ function BulkBar({
   allTasks: Task[]
   onClear: () => void
 }) {
+  const { workspace } = useWorkspace()
+  const bulkTasks = useBulkTasks(workspace.id)
   const allLabels = Array.from(new Set(allTasks.flatMap((t) => t.labels))).sort((a, b) => a.localeCompare(b))
 
   const bulkStatus = (key: string) => {
-    for (const task of tasks) {
+    bulkTasks.mutate(tasks.flatMap((task) => {
       const statusId = resolveStatusId(statuses, task.projectId, key)
-      if (statusId && statusId !== task.statusId) setTaskStatus(task.id, statusId)
-    }
+      return statusId && statusId !== task.statusId
+        ? [{ id: task.id, expected_version: task.version, status_id: statusId }]
+        : []
+    }))
   }
   const bulkPriority = (priority: Task['priority']) => {
-    for (const task of tasks) if (task.priority !== priority) setTaskPriority(task.id, priority)
+    bulkTasks.mutate(tasks.filter((task) => task.priority !== priority).map((task) => ({ id: task.id, expected_version: task.version, priority })))
   }
   // everyone has it → remove from all; otherwise add to the tasks that miss it
   const bulkAssign = (userId: string) => {
     const everyone = tasks.every((t) => t.assigneeIds.includes(userId))
-    for (const task of tasks) {
-      if (everyone || !task.assigneeIds.includes(userId)) toggleTaskAssignee(task.id, userId)
-    }
+    bulkTasks.mutate(tasks.map((task) => ({
+      id: task.id,
+      expected_version: task.version,
+      assignee_ids: everyone ? task.assigneeIds.filter((id) => id !== userId) : Array.from(new Set([...task.assigneeIds, userId])),
+    })))
   }
   const bulkLabel = (label: string) => {
     const everyone = tasks.every((t) => t.labels.includes(label))
-    for (const task of tasks) {
-      if (everyone || !task.labels.includes(label)) toggleTaskLabel(task.id, label)
-    }
+    bulkTasks.mutate(tasks.map((task) => ({
+      id: task.id,
+      expected_version: task.version,
+      label_ids: everyone ? task.labels.filter((item) => item !== label) : Array.from(new Set([...task.labels, label])),
+    })))
   }
 
   return (

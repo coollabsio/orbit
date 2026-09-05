@@ -2,7 +2,7 @@ import { Filter, Kanban, List, Setting4, Sort } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import type { User } from '../../../mock/types'
+import type { User } from '../api/models'
 import { SORT_OPTIONS, type SortKey, type StatusGroup } from '../tasksLib'
 
 interface TaskFiltersProps {

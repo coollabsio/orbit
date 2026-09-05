@@ -1,4 +1,4 @@
-import type { Project, Role, User } from '../types'
+import type { Role, User } from '../types'
 
 // Coolify team as mock users
 export const users: User[] = [
@@ -57,12 +57,6 @@ export const users: User[] = [
     title: 'Frontend Engineer',
     roleIds: [],
   },
-]
-
-export const projects: Project[] = [
-  { id: 'p_infra', name: 'Infrastructure', key: 'INF', color: '#8b5cf6' },
-  { id: 'p_web', name: 'Website', key: 'WEB', color: '#0ea5e9' },
-  { id: 'p_internal', name: 'Internal Tools', key: 'INT', color: '#10b981' },
 ]
 
 export const roles: Role[] = [

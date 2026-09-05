@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Logout, Profile, Setting } from 'reicon-react'
 import { useTheme, type Theme } from '../../lib/themeContext'
-import { useAppState } from '../../mock/store'
+import { useCurrentUser, useLogout } from '../../features/auth/api'
 
 const THEMES: { value: Theme; label: string }[] = [
   { value: 'light', label: 'Light' },
@@ -33,16 +33,17 @@ function Check() {
 
 /** Coolify `x-top-user-menu sidebar`: account pill that opens upward with Profile, Appearance, Log out. */
 export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
-  const state = useAppState()
+  const user = useCurrentUser()
+  const logout = useLogout()
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
-  const me = state.users.find((u) => u.id === state.currentUserId)
+  const me = user.data
   const [open, setOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const userName = me?.name ?? 'Account'
-  const initial = (me?.name || me?.email || 'A').charAt(0).toUpperCase()
+  const userName = me?.display_name ?? 'Account'
+  const initial = (me?.display_name || me?.email || 'A').charAt(0).toUpperCase()
 
   useEffect(() => {
     if (!open) return
@@ -135,8 +136,8 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             type="button"
             className="listbox-option"
             data-tone="danger"
-            disabled
-            title="Sign-in is not connected in this preview."
+            disabled={logout.isPending}
+            onClick={() => void logout.mutateAsync().then(() => navigate('/login', { replace: true }))}
           >
             <span className="user-menu-option-label">
               <Logout size={16} style={{ opacity: 0.9 }} />

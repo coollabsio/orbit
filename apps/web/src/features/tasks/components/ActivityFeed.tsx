@@ -1,16 +1,17 @@
 import { useMemo } from 'react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { addTaskComment } from '../../../mock/actions'
-import type { AppState, Task, TaskActivity } from '../../../mock/types'
+import type { Task, TaskActivity, TaskViewState } from '../api/models'
+import { useCreateTaskComment } from '../api/tasks'
+import { useWorkspace } from '../../workspaces/workspaceContext'
 import { buildMentionTokens } from '../../chat/chatLib'
-import { MessageInput } from '../../chat/components/MessageInput'
 import { agoLabel, buildFeed, type CommentThread } from '../tasksLib'
 import { CommentItem } from './CommentItem'
+import { TaskCommentComposer } from './TaskCommentComposer'
 
 interface ActivityFeedProps {
   task: Task
-  state: AppState
+  state: TaskViewState
 }
 
 /**
@@ -18,7 +19,9 @@ interface ActivityFeedProps {
  * so a change made after a comment shows below that comment.
  */
 export function ActivityFeed({ task, state }: ActivityFeedProps) {
-  const mentionTokens = useMemo(() => buildMentionTokens(state.users, state.channels), [state.users, state.channels])
+  const { workspace } = useWorkspace()
+  const createComment = useCreateTaskComment(workspace.id, task.id)
+  const mentionTokens = useMemo(() => buildMentionTokens(state.users, []), [state.users])
   const userById = (id: string) => state.users.find((u) => u.id === id)
   const feed = buildFeed(task)
 
@@ -48,14 +51,7 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
         <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
       ))}
       <div className="tasks-thread-composer">
-        <MessageInput
-          state={state}
-          placeholder="Leave a reply…"
-          showThreadAction={false}
-          onSend={(content, attachments) => {
-            addTaskComment(task.id, content, thread.root.id, attachments)
-          }}
-        />
+        <TaskCommentComposer placeholder="Leave a reply…" pending={createComment.isPending} onSend={(body, files) => createComment.mutateAsync({ body, files, parentId: thread.root.id })} />
       </div>
     </div>
   )

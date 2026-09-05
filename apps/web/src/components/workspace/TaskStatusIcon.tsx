@@ -1,4 +1,4 @@
-import type { StatusCategory, TaskStatusDef } from '../../mock/types'
+import type { StatusCategory, TaskStatusDef } from '../../features/tasks/api/models'
 
 /**
  * Compact Linear-style status glyph. The shape follows the category (○ ◐ ✓ ⊘), the color the status.

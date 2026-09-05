@@ -1,4 +1,4 @@
-import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from '../../mock/types'
+import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from './api/models'
 import { relativeTime } from '../../lib/format'
 import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from '../../components/workspace/taskMeta'
 

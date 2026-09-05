@@ -21,7 +21,7 @@ dev:
     }
     trap cleanup EXIT
     trap 'exit 0' INT TERM
-    cargo run -p orbit-server -- serve --port 8080 &
+    cargo run -p orbit-server -- serve --listen 127.0.0.1:8080 --origin http://127.0.0.1:8888 &
     server_pid=$!
     (cd apps/web && bun run dev -- --port 8888) &
     web_pid=$!
@@ -84,9 +84,10 @@ e2e:
     }
     trap cleanup EXIT
     trap 'exit 0' INT TERM
-    ORBIT_ENV=e2e ORBIT_DATA_DIR="$data_dir" cargo run -p orbit-server -- serve --port 8080 &
+    setup_url=$(cargo run -q -p orbit-server -- --database "$data_dir/orbit.sqlite" setup-token init --origin http://127.0.0.1:8888)
+    cargo run -p orbit-server -- --database "$data_dir/orbit.sqlite" --attachments "$data_dir/attachments" serve --listen 127.0.0.1:18080 --origin http://127.0.0.1:8888 &
     server_pid=$!
-    (cd apps/web && bunx playwright test) &
+    (cd apps/web && ORBIT_SETUP_URL="$setup_url" bun x playwright test) &
     e2e_pid=$!
     wait -n "$server_pid" "$e2e_pid"
 
