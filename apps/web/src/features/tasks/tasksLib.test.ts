@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Task } from './api/models'
-import { SORT_OPTIONS, boardDropUpdates, needsExhaustiveTaskList, taskApiSort } from './tasksLib'
+import { SORT_OPTIONS, boardDropUpdates, filterTasks, needsExhaustiveTaskList, taskApiSort } from './tasksLib'
 
 function task(id: string, statusId: string, position: number, version: number): Task {
   return {
@@ -51,4 +51,15 @@ test('cross-project status filtering exhausts pagination before filtering', () =
   expect(needsExhaustiveTaskList(null, 'unstarted:todo')).toBeTrue()
   expect(needsExhaustiveTaskList('project-1', 'unstarted:todo')).toBeFalse()
   expect(needsExhaustiveTaskList(null, null)).toBeFalse()
+})
+
+test('task search filters title description and identifier entirely in memory', () => {
+  const title = task('ORB-1', 'todo', 0, 1)
+  title.title = 'Ship release'
+  const description = task('ORB-2', 'todo', 1, 1)
+  description.description = 'Prepare launch notes'
+  const filters = { currentUserId: 'user-1', projectId: null, statusKey: null, assigneeId: null, statuses: [], search: 'launch' }
+
+  expect(filterTasks([title, description], filters).map(({ id }) => id)).toEqual(['ORB-2'])
+  expect(filterTasks([title, description], { ...filters, search: 'orb-1' }).map(({ id }) => id)).toEqual(['ORB-1'])
 })

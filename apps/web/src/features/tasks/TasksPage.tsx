@@ -23,7 +23,7 @@ import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
 import { TaskList } from './components/TaskList'
-import { filterTasks, needsExhaustiveTaskList, resolveStatusId, statusGroups, taskApiSort, type SortKey } from './tasksLib'
+import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from './tasksLib'
 import './tasks.css'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
@@ -45,18 +45,16 @@ export function TasksPage() {
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
-  const searchFilter = searchParams.get('q') ?? ''
+  const [searchFilter, setSearchFilter] = useState('')
   const projectFilter = searchParams.get('project')
   const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
-  const exhaustiveStatusFilter = needsExhaustiveTaskList(projectFilter, statusFilter)
   const tasksQuery = useTasks(workspace.id, {
     project_id: projectFilter ?? undefined,
     status_id: statusFilter ? apiStatus : undefined,
     assignee_id: assigneeFilter ?? undefined,
-    search: searchFilter || undefined,
     ...taskApiSort(sort),
     limit: 50,
-  }, exhaustiveStatusFilter)
+  }, true)
   const detailQuery = useTask(workspace.id, taskId)
   const commentsQuery = useTaskComments(workspace.id, taskId)
   const activityQuery = useTaskActivity(workspace.id, taskId)
@@ -93,12 +91,6 @@ export function TasksPage() {
   }
   const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)
   const closeTask = () => navigate(`/tasks${searchSuffix}`)
-  const setSearchFilter = (value: string) => {
-    const next = new URLSearchParams(searchParams)
-    if (value) next.set('q', value)
-    else next.delete('q')
-    setSearchParams(next, { replace: true })
-  }
 
   const creating = useRef(false)
   const startNewTask = async (statusKey: string | null = null, replace = false) => {
@@ -131,6 +123,7 @@ export function TasksPage() {
     statusKey: statusFilter,
     assigneeId: assigneeFilter,
     statuses: statusesQuery.data,
+    search: searchFilter,
   })
 
   if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
