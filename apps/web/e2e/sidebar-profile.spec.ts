@@ -39,6 +39,10 @@ for (const mode of ['desktop', 'collapsed', 'mobile']) {
     if (mode !== 'collapsed') await expect(trigger).toContainText('test@example.com')
     const box = await trigger.boundingBox()
     expect(box!.y).toBeGreaterThan(700)
+    if (mode === 'mobile') {
+      const drawerBox = await sidebar.boundingBox()
+      expect(drawerBox!.y + drawerBox!.height - box!.y - box!.height).toBeGreaterThanOrEqual(12)
+    }
     await trigger.click()
     await page.keyboard.press('Escape')
     await expect(trigger).toHaveAttribute('aria-expanded', 'false')

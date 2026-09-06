@@ -558,7 +558,7 @@ a.topbar-crumb:hover {
   width: min(280px, 84vw);
   background: var(--canvas);
   border-right: 1px solid var(--line);
-  padding: env(safe-area-inset-top, 0px) 12px env(safe-area-inset-bottom, 0px) 12px;
+  padding: env(safe-area-inset-top, 0px) 12px calc(12px + env(safe-area-inset-bottom, 0px)) 12px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
