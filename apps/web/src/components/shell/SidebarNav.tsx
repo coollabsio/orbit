@@ -1,5 +1,6 @@
-import { NavLink } from 'react-router'
+import { NavLink, useLocation } from 'react-router'
 import {
+  Calendar,
   DirectInbox,
   Home2,
   Message,
@@ -11,6 +12,7 @@ import {
   ShieldTick,
   Sms,
   TaskSquare,
+  Timer,
 } from 'reicon-react'
 const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: TaskSquare, enabled: true },
@@ -22,6 +24,10 @@ const WORKSPACE_LINKS = [
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
 export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
+  const location = useLocation()
+  const view = new URLSearchParams(location.search).get('view')
+  const taskViewClass = (name: string | null) =>
+    location.pathname === '/tasks' && view === name ? 'menu-item active' : 'menu-item'
   return (
     <>
       <button
@@ -42,7 +48,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <NavLink
             key={link.to}
             to={link.to}
-            className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+            className={({ isActive }) => (isActive && !view ? 'menu-item active' : 'menu-item')}
             aria-label={link.label}
             title={collapsed ? link.label : undefined}
             onClick={onNavigate}
@@ -58,11 +64,46 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           </button>
         ))}
         <div className="nav-section">Personal</div>
-        <button type="button" className="menu-item menu-item-disabled" disabled title="Inbox — Coming soon">
+        <NavLink
+          to="/inbox"
+          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          aria-label="Inbox"
+          title={collapsed ? 'Inbox' : undefined}
+          onClick={onNavigate}
+        >
           <DirectInbox size={18} />
           <span className="menu-item-label">Inbox</span>
-          {!collapsed ? <span className="coming-soon">Coming soon</span> : null}
-        </button>
+        </NavLink>
+        <NavLink
+          to="/tasks?view=mine"
+          className={() => taskViewClass('mine')}
+          aria-label="My tasks"
+          title={collapsed ? 'My tasks' : undefined}
+          onClick={onNavigate}
+        >
+          <TaskSquare size={18} />
+          <span className="menu-item-label">My tasks</span>
+        </NavLink>
+        <NavLink
+          to="/tasks?view=overdue"
+          className={() => taskViewClass('overdue')}
+          aria-label="Overdue"
+          title={collapsed ? 'Overdue' : undefined}
+          onClick={onNavigate}
+        >
+          <Timer size={18} />
+          <span className="menu-item-label">Overdue</span>
+        </NavLink>
+        <NavLink
+          to="/tasks?view=due_soon"
+          className={() => taskViewClass('due_soon')}
+          aria-label="Due soon"
+          title={collapsed ? 'Due soon' : undefined}
+          onClick={onNavigate}
+        >
+          <Calendar size={18} />
+          <span className="menu-item-label">Due soon</span>
+        </NavLink>
         <button type="button" className="menu-item menu-item-disabled" disabled title="Direct messages — Coming soon">
           <Messages2 size={18} />
           <span className="menu-item-label">Direct messages</span>

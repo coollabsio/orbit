@@ -582,6 +582,87 @@ impl IdentityRepository {
         Ok(())
     }
 
+    pub async fn update_display_name_audited(
+        &self,
+        user_id: Id,
+        display_name: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let changed = sqlx::query(
+            "UPDATE users SET display_name = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+        )
+        .bind(display_name)
+        .bind(now.as_millis())
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if changed == 0 {
+            return Err(IdentityError::InvalidCredential);
+        }
+        audit::record_global(
+            &mut transaction,
+            Some(user_id),
+            "account.updated",
+            AuditOutcome::Success,
+            "user",
+            Some(user_id),
+            request_id,
+            serde_json::json!({"fields":["display_name"]}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub async fn change_password_keeping_session(
+        &self,
+        user_id: Id,
+        keep_session_id: Id,
+        password_hash: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let changed = sqlx::query(
+            "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+        )
+        .bind(password_hash)
+        .bind(now.as_millis())
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if changed == 0 {
+            return Err(IdentityError::InvalidCredential);
+        }
+        sqlx::query(
+            "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id != ? AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(user_id.to_string())
+        .bind(keep_session_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(user_id),
+            "account.password_changed",
+            AuditOutcome::Success,
+            "user",
+            Some(user_id),
+            request_id,
+            serde_json::json!({"other_sessions_revoked": true}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn store_recovery_token(
         &self,
         user_id: &str,

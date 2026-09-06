@@ -240,7 +240,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
             <div className="tasks-comment-composer">
-              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ body, files })} />
+              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentionedUserIds) => createComment.mutateAsync({ body, files, mentionedUserIds })} />
             </div>
           </div>
         </div>

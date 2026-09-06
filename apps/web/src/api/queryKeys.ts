@@ -26,6 +26,8 @@ export const queryKeys = {
   projectTrash: (workspaceId: string) => [...workspace(workspaceId), 'projects', 'trash'] as const,
   workspaceTrash: (workspaceId: string) => [...workspace(workspaceId), 'trash'] as const,
   audit: (workspaceId: string) => [...workspace(workspaceId), 'audit'] as const,
+  notifications: (workspaceId: string, unread?: boolean) =>
+    [...workspace(workspaceId), 'notifications', { unread }] as const,
   tasks: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'tasks'] as const,
     list: (workspaceId: string, filters: TaskFilters = {}) =>

@@ -125,7 +125,8 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/api/v1/setup/complete", post(setup_complete))
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
-        .route("/api/v1/auth/me", get(me))
+        .route("/api/v1/auth/me", get(me).patch(update_me))
+        .route("/api/v1/auth/password", post(change_password))
         .route("/api/v1/auth/recovery/request", post(recovery_request))
         .route("/api/v1/auth/recovery/complete", post(recovery_complete))
         .route("/api/v1/auth/sessions", get(list_sessions))
@@ -517,6 +518,120 @@ async fn me(
         email: user.email,
         display_name: user.display_name,
     }))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateMeBody {
+    display_name: String,
+}
+
+#[utoipa::path(patch, path = "/api/v1/auth/me", request_body = UpdateMeBody, responses((status = 200, body = AuthUserResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_display_name", body = ProblemBody, content_type = "application/problem+json")))]
+async fn update_me(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<UpdateMeBody>,
+) -> Result<Json<AuthUserResponse>, ApiError> {
+    let instance = "/api/v1/auth/me";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let display_name = body.display_name.trim();
+    if display_name.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_display_name",
+            "Invalid display name",
+            "Display name cannot be empty.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let display_name = display_name.to_owned();
+    state
+        .repository
+        .update_display_name_audited(
+            session.user.id,
+            &display_name,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    Ok(Json(AuthUserResponse {
+        id: session.user.id.to_string(),
+        email: session.user.email,
+        display_name,
+    }))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ChangePasswordBody {
+    current_password: String,
+    new_password: String,
+}
+
+#[utoipa::path(post, path = "/api/v1/auth/password", request_body = ChangePasswordBody, responses((status = 204), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_password", body = ProblemBody, content_type = "application/problem+json")))]
+async fn change_password(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ChangePasswordBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance = "/api/v1/auth/password";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let identity = state
+        .repository
+        .find_by_email(&session.user.email)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
+    let verification = state
+        .passwords
+        .verify(body.current_password, identity.password_hash)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    if !verification.valid {
+        state
+            .repository
+            .record_security_event(
+                Some(session.user.id),
+                "account.password_changed",
+                AuditOutcome::Failure,
+                "user",
+                Some(session.user.id),
+                request_id_value(request_id.as_ref()),
+                json!({}),
+                TimestampMillis::now(),
+            )
+            .await
+            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_credentials",
+            "Authentication failed",
+            "Current password is incorrect.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let password_hash = state
+        .passwords
+        .hash(body.new_password)
+        .await
+        .map_err(|error| password_problem(error, instance, request_id.as_ref()))?;
+    state
+        .repository
+        .change_password_keeping_session(
+            session.user.id,
+            session.id,
+            &password_hash,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1481,6 +1596,205 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn patch_me_updates_display_name_and_get_me_reflects_it() {
+        let (app, _, _database) = application(CookieMode::secure()).await;
+        let cookie = login_cookie(&app, "correct horse battery").await;
+
+        let patched = app
+            .clone()
+            .oneshot(json_cookie_request(
+                "PATCH",
+                "/api/v1/auth/me",
+                &cookie,
+                json!({"display_name": "  Ada Lovelace  "}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(patched.status(), StatusCode::OK);
+        let patched: Value = serde_json::from_slice(&body(patched).await).unwrap();
+        assert_eq!(patched["display_name"], "Ada Lovelace");
+        assert_eq!(patched["email"], "Owner@Example.com");
+
+        let me = app
+            .oneshot(cookie_request("GET", "/api/v1/auth/me", &cookie))
+            .await
+            .unwrap();
+        assert_eq!(me.status(), StatusCode::OK);
+        let me: Value = serde_json::from_slice(&body(me).await).unwrap();
+        assert_eq!(me["display_name"], "Ada Lovelace");
+        assert_eq!(me["email"], "Owner@Example.com");
+    }
+
+    #[tokio::test]
+    async fn patch_me_rejects_empty_or_whitespace_display_name() {
+        let (app, _, _database) = application(CookieMode::secure()).await;
+        let cookie = login_cookie(&app, "correct horse battery").await;
+
+        for display_name in ["", "   "] {
+            let response = app
+                .clone()
+                .oneshot(json_cookie_request(
+                    "PATCH",
+                    "/api/v1/auth/me",
+                    &cookie,
+                    json!({ "display_name": display_name }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                "application/problem+json"
+            );
+            let problem: Value = serde_json::from_slice(&body(response).await).unwrap();
+            assert_eq!(problem["code"], "invalid_display_name");
+        }
+
+        let me = app
+            .oneshot(cookie_request("GET", "/api/v1/auth/me", &cookie))
+            .await
+            .unwrap();
+        let me: Value = serde_json::from_slice(&body(me).await).unwrap();
+        assert_eq!(me["display_name"], "Owner");
+    }
+
+    #[tokio::test]
+    async fn patch_me_requires_authentication() {
+        let (app, _, _database) = application(CookieMode::secure()).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/auth/me")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::ORIGIN, "https://orbit.test")
+                    .body(Body::from(json!({"display_name":"Ada"}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let problem: Value = serde_json::from_slice(&body(response).await).unwrap();
+        assert_eq!(problem["code"], "authentication_required");
+    }
+
+    #[tokio::test]
+    async fn password_change_rejects_wrong_current_password_without_updating_hash() {
+        let (app, repository, _database) = application(CookieMode::secure()).await;
+        let cookie = login_cookie(&app, "correct horse battery").await;
+        let before = repository
+            .find_by_email("owner@example.com")
+            .await
+            .unwrap()
+            .unwrap()
+            .password_hash;
+
+        let response = app
+            .clone()
+            .oneshot(json_cookie_request(
+                "POST",
+                "/api/v1/auth/password",
+                &cookie,
+                json!({
+                    "current_password": "wrong password value",
+                    "new_password": "brand new horse battery"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/problem+json"
+        );
+        let problem: Value = serde_json::from_slice(&body(response).await).unwrap();
+        assert_eq!(problem["code"], "invalid_credentials");
+
+        let after = repository
+            .find_by_email("owner@example.com")
+            .await
+            .unwrap()
+            .unwrap()
+            .password_hash;
+        assert_eq!(after, before);
+    }
+
+    #[tokio::test]
+    async fn password_change_replaces_credentials_and_keeps_only_the_current_session() {
+        let (app, _, database) = application(CookieMode::secure()).await;
+        let current = login_cookie(&app, "correct horse battery").await;
+        let other = login_cookie(&app, "correct horse battery").await;
+        let current_password = "correct horse battery";
+        let new_password = "brand new horse battery";
+
+        let response = app
+            .clone()
+            .oneshot(json_cookie_request(
+                "POST",
+                "/api/v1/auth/password",
+                &current,
+                json!({
+                    "current_password": current_password,
+                    "new_password": new_password
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let old_login = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password": current_password}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(old_login.status(), StatusCode::UNAUTHORIZED);
+
+        let new_login = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password": new_password}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(new_login.status(), StatusCode::OK);
+
+        let other_me = app
+            .clone()
+            .oneshot(cookie_request("GET", "/api/v1/auth/me", &other))
+            .await
+            .unwrap();
+        assert_eq!(other_me.status(), StatusCode::UNAUTHORIZED);
+
+        let current_me = app
+            .clone()
+            .oneshot(cookie_request("GET", "/api/v1/auth/me", &current))
+            .await
+            .unwrap();
+        assert_eq!(current_me.status(), StatusCode::OK);
+
+        let rows = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT action, outcome, metadata_json FROM audit_events \
+             WHERE action = 'account.password_changed'",
+        )
+        .fetch_all(database.pool())
+        .await
+        .unwrap();
+        assert!(!rows.is_empty());
+        for (action, outcome, metadata) in rows {
+            assert_eq!(action, "account.password_changed");
+            assert_eq!(outcome, "success");
+            assert!(!metadata.contains(current_password));
+            assert!(!metadata.contains(new_password));
+            assert!(!metadata.contains("password_hash"));
+            assert!(!metadata.contains("$argon2"));
+        }
+    }
+
+    #[tokio::test]
     async fn logout_revocation_and_success_audit_commit_atomically() {
         let (app, repository, _database) = application(CookieMode::secure()).await;
         let login = app
@@ -1569,6 +1883,17 @@ mod tests {
             .unwrap()
     }
 
+    fn json_cookie_request(method: &str, uri: &str, cookie: &str, value: Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::COOKIE, cookie)
+            .header(header::ORIGIN, "https://orbit.test")
+            .body(Body::from(value.to_string()))
+            .unwrap()
+    }
+
     fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {
         Request::builder()
             .method(method)
@@ -1577,6 +1902,28 @@ mod tests {
             .header(header::ORIGIN, "https://orbit.test")
             .body(Body::empty())
             .unwrap()
+    }
+
+    async fn login_cookie(app: &axum::Router, password: &str) -> String {
+        let login = app
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"email":"owner@example.com","password": password}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(login.status(), StatusCode::OK);
+        login
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned()
     }
 
     async fn body(response: axum::response::Response) -> Vec<u8> {

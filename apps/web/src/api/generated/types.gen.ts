@@ -109,8 +109,14 @@ export type BulkItem = {
     title?: string | null;
 };
 
+export type ChangePasswordBody = {
+    current_password: string;
+    new_password: string;
+};
+
 export type CommentBody = {
     body: string;
+    mentioned_user_ids?: Array<string>;
     parent_id?: string | null;
 };
 
@@ -220,6 +226,18 @@ export type MemberRecord = {
     version: number;
 };
 
+export type NotificationRecord = {
+    actor_user_id: string;
+    comment_id?: string | null;
+    created_at: string;
+    id: string;
+    kind: string;
+    read_at?: string | null;
+    recipient_user_id: string;
+    task_id: string;
+    workspace_id: string;
+};
+
 export type PageAuditEvent = {
     items: Array<{
         action: string;
@@ -285,6 +303,21 @@ export type PageMemberRecord = {
         role: string;
         user_id: string;
         version: number;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageNotificationRecord = {
+    items: Array<{
+        actor_user_id: string;
+        comment_id?: string | null;
+        created_at: string;
+        id: string;
+        kind: string;
+        read_at?: string | null;
+        recipient_user_id: string;
+        task_id: string;
+        workspace_id: string;
     }>;
     next_cursor?: string | null;
 };
@@ -385,6 +418,10 @@ export type ProjectUpdateBody = {
     expected_version: number;
     key: string;
     name: string;
+};
+
+export type ReadAllResponse = {
+    updated: number;
 };
 
 export type RecoveryCompleteBody = {
@@ -543,6 +580,10 @@ export type TransferBody = {
     expected_version: number;
     membership_id: string;
     membership_version: number;
+};
+
+export type UpdateMeBody = {
+    display_name: string;
 };
 
 export type WorkspaceConflict = {
@@ -896,6 +937,118 @@ export type MeResponses = {
 };
 
 export type MeResponse = MeResponses[keyof MeResponses];
+
+export type UpdateMeData = {
+    body: UpdateMeBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/me';
+};
+
+export type UpdateMeErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_display_name
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type UpdateMeError = UpdateMeErrors[keyof UpdateMeErrors];
+
+export type UpdateMeResponses = {
+    200: AuthUserResponse;
+};
+
+export type UpdateMeResponse = UpdateMeResponses[keyof UpdateMeResponses];
+
+export type ChangePasswordData = {
+    body: ChangePasswordBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/password';
+};
+
+export type ChangePasswordErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required, invalid_credentials
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_password
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type ChangePasswordError = ChangePasswordErrors[keyof ChangePasswordErrors];
+
+export type ChangePasswordResponses = {
+    204: void;
+};
+
+export type ChangePasswordResponse = ChangePasswordResponses[keyof ChangePasswordResponses];
 
 export type RecoveryCompleteData = {
     body: RecoveryCompleteBody;
@@ -2311,6 +2464,169 @@ export type ChangeMemberRoleResponses = {
 
 export type ChangeMemberRoleResponse = ChangeMemberRoleResponses[keyof ChangeMemberRoleResponses];
 
+export type ListNotificationsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: {
+        unread?: boolean;
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/notifications';
+};
+
+export type ListNotificationsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListNotificationsError = ListNotificationsErrors[keyof ListNotificationsErrors];
+
+export type ListNotificationsResponses = {
+    200: PageNotificationRecord;
+};
+
+export type ListNotificationsResponse = ListNotificationsResponses[keyof ListNotificationsResponses];
+
+export type ReadAllNotificationsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/notifications/read-all';
+};
+
+export type ReadAllNotificationsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ReadAllNotificationsError = ReadAllNotificationsErrors[keyof ReadAllNotificationsErrors];
+
+export type ReadAllNotificationsResponses = {
+    200: ReadAllResponse;
+};
+
+export type ReadAllNotificationsResponse = ReadAllNotificationsResponses[keyof ReadAllNotificationsResponses];
+
+export type ReadNotificationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        notification_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/notifications/{notification_id}/read';
+};
+
+export type ReadNotificationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ReadNotificationError = ReadNotificationErrors[keyof ReadNotificationErrors];
+
+export type ReadNotificationResponses = {
+    200: NotificationRecord;
+};
+
+export type ReadNotificationResponse = ReadNotificationResponses[keyof ReadNotificationResponses];
+
 export type ListProjectsData = {
     body?: never;
     headers?: {
@@ -3056,6 +3372,7 @@ export type ListTasksData = {
         label_id?: string;
         priority?: string;
         search?: string;
+        view?: string;
         sort?: string;
         order?: string;
         cursor?: string;

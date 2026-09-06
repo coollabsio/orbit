@@ -40,19 +40,24 @@ test('settings header uses Tasks muted title and toolbar styling', async () => {
     Bun.file(new URL('../../features/settings/settings.css', import.meta.url)).text(),
   ])
   expect(css).toMatch(/\.topbar\[data-root='settings'\] \.topbar-crumb\s*\{\s*color: var\(--text-muted\)/)
-  expect(css).toMatch(/\.topbar\[data-root='settings'\] \.icon-button\s*\{[^}]*color: var\(--text-muted\)/)
+  expect(css).toMatch(/\.topbar\[data-root='settings'\] \.icon-button:not\(\.topbar-drawer-button\)\s*\{[^}]*color: var\(--text-muted\)/)
   expect(topbar).toContain("<SearchNormal size={routeRoot === 'settings' ? 15 : 16} />")
   expect(settings).toContain('.settings-page-header .pane-title')
   expect(settings).toContain('color: var(--text-muted)')
 })
 
-test('mobile Settings has the same 7px icon-to-label gap as Tasks', async () => {
-  const css = await Bun.file(new URL('../shell/shell.css', import.meta.url)).text()
-  expect(css).toMatch(/\.topbar\[data-root='settings'\]\s*\{[^}]*gap: 7px;/)
-  expect(css).toMatch(/\.topbar\[data-root='settings'\] \.topbar-drawer-button\s*\{[^}]*padding-inline: 7px 0;[^}]*border: 0;/)
+test('settings menu button matches the tasks burger size', async () => {
+  const [css, topbar] = await Promise.all([
+    Bun.file(new URL('../shell/shell.css', import.meta.url)).text(),
+    Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text(),
+  ])
+  expect(topbar).toContain('<Menu size={18} />')
+  expect(topbar).not.toContain("routeRoot === 'settings' ? 15 : 18")
+  expect(css).toMatch(/\.topbar\[data-root='settings'\] \.topbar-drawer-button\s*\{[^}]*width: 28px;[^}]*height: 28px;/)
 })
 
-test('Settings excludes the unrelated New dropdown', async () => {
+test('Settings and Profile exclude the unrelated New dropdown', async () => {
   const topbar = await Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text()
-  expect(topbar).toContain("routeRoot !== 'home' && routeRoot !== 'settings' ? <Dropdown")
+  expect(topbar).toContain("routeRoot !== 'home' && routeRoot !== 'settings' && routeRoot !== 'profile'")
+  expect(topbar).toContain("? <Dropdown")
 })

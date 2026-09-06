@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Logout, Setting } from 'reicon-react'
+import { Logout, Setting, User } from 'reicon-react'
 import { useTheme, type Theme } from '../../lib/themeContext'
 import { Dropdown } from '../ui/Dropdown'
 import { useCurrentUser, useLogout } from '../../features/auth/api'
@@ -71,6 +71,19 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             <div className="user-menu-header-email">{me?.email}</div>
           </div>
           <div className="listbox-separator" />
+          <button
+            type="button"
+            className="listbox-option"
+            onClick={() => {
+              close()
+              navigate('/profile')
+            }}
+          >
+            <span className="user-menu-option-label">
+              <User size={16} style={{ opacity: 0.8 }} />
+              Account settings
+            </span>
+          </button>
           <button
             type="button"
             className="listbox-option"

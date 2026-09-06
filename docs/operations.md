@@ -46,3 +46,30 @@ Stop Orbit and use `orbit --config config/orbit.toml recovery-link --email <emai
 - Production mode requires an HTTPS public origin and at least one explicitly trusted proxy. Requests without a verified HTTPS transport are rejected. Development mode is loopback-only.
 - Tune `[rate_limits]` only after observing the endpoint-class defaults. Values must be between 1 and 1,000,000 requests per minute. Limit responses are correlated `429` Problem Details; IPv6 clients are grouped by `/64` and the in-memory limiter has a hard entry cap.
 - If metrics are enabled, the configured private `/metrics` listener must be reachable only by the monitoring network and must not appear on the public listener.
+
+## Monitoring and operational ownership
+
+Existing endpoints:
+
+- `GET /health/live` — process liveness
+- `GET /health/ready` — serving readiness; treat 503 as take-out-of-proxy
+- Optional private `GET /metrics` when `[metrics].listen` is set
+
+Alerting should live in the operator's existing monitor (systemd, Caddy, Prometheus, host disk checks). Do not scrape `/metrics` through the public origin.
+
+Suggested thresholds:
+
+- Readiness 503 for more than 2 minutes → page the primary
+- Backup directory missing a verified snapshot newer than 36 hours → page the primary
+- Filesystem for database/attachments/backups above 85% → ticket the fallback owner
+
+Ownership template (fill with real names before rollout):
+
+| Area | Primary | Fallback |
+|---|---|---|
+| Account recovery / invitations | | |
+| Backups and restore rehearsal | | |
+| Upgrades and rollback | | |
+| Incident response | | |
+
+Automated subset: `ORBIT_VERIFY_ORIGIN=https://… deploy/verify-production.sh`. Restore rehearsal: `deploy/backup-rehearsal.sh config/orbit.toml <backup-id> /path/to/scratch`. Both require an operator-chosen host and off-host backup destination; they do not complete Tasks 10, 11, or 14 by themselves.

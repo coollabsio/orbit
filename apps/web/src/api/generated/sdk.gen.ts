@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptInvitationData, AcceptInvitationErrors, AcceptInvitationResponses, BulkTasksData, BulkTasksErrors, BulkTasksResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateAttachmentCommentData, CreateAttachmentCommentErrors, CreateAttachmentCommentResponses, CreateCommentData, CreateCommentErrors, CreateCommentResponses, CreateInvitationData, CreateInvitationErrors, CreateInvitationResponses, CreateLabelData, CreateLabelErrors, CreateLabelResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreateStatusData, CreateStatusErrors, CreateStatusResponses, CreateTaskData, CreateTaskErrors, CreateTaskResponses, CreateWorkspaceData, CreateWorkspaceErrors, CreateWorkspaceResponses, DeleteCommentAttachmentData, DeleteCommentAttachmentErrors, DeleteCommentAttachmentResponses, DeleteCommentData, DeleteCommentErrors, DeleteCommentResponses, DeleteLabelData, DeleteLabelErrors, DeleteLabelResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteStatusData, DeleteStatusErrors, DeleteStatusResponses, DeleteTaskAttachmentData, DeleteTaskAttachmentErrors, DeleteTaskAttachmentResponses, DeleteTaskData, DeleteTaskErrors, DeleteTaskResponses, DeleteWorkspaceData, DeleteWorkspaceErrors, DeleteWorkspaceResponses, DownloadCommentAttachmentData, DownloadCommentAttachmentErrors, DownloadCommentAttachmentResponses, DownloadTaskAttachmentData, DownloadTaskAttachmentErrors, DownloadTaskAttachmentResponses, ExportGlobalAuditData, ExportGlobalAuditErrors, ExportGlobalAuditResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetWorkspaceData, GetWorkspaceErrors, GetWorkspaceResponses, ListAuditData, ListAuditErrors, ListAuditResponses, ListCommentAttachmentsData, ListCommentAttachmentsErrors, ListCommentAttachmentsResponses, ListCommentsData, ListCommentsErrors, ListCommentsResponses, ListGlobalAuditData, ListGlobalAuditErrors, ListGlobalAuditResponses, ListInvitationsData, ListInvitationsErrors, ListInvitationsResponses, ListLabelsData, ListLabelsErrors, ListLabelsResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectTrashData, ListProjectTrashErrors, ListProjectTrashResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStatusesData, ListStatusesErrors, ListStatusesResponses, ListTaskActivityData, ListTaskActivityErrors, ListTaskActivityResponses, ListTaskAttachmentsData, ListTaskAttachmentsErrors, ListTaskAttachmentsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTaskTrashData, ListTaskTrashErrors, ListTaskTrashResponses, ListTrashData, ListTrashErrors, ListTrashResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspacesResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, MeData, MeErrors, MeResponses, PreviewInvitationData, PreviewInvitationErrors, PreviewInvitationResponses, RecoveryCompleteData, RecoveryCompleteErrors, RecoveryCompleteResponses, RecoveryRequestData, RecoveryRequestErrors, RecoveryRequestResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, RenameWorkspaceData, RenameWorkspaceErrors, RenameWorkspaceResponses, ReorderStatusesData, ReorderStatusesErrors, ReorderStatusesResponses, ReorderTasksData, ReorderTasksErrors, ReorderTasksResponses, RestoreProjectData, RestoreProjectErrors, RestoreProjectResponses, RestoreTaskData, RestoreTaskErrors, RestoreTaskResponses, RestoreWorkspaceData, RestoreWorkspaceErrors, RestoreWorkspaceResponses, RevokeInvitationData, RevokeInvitationErrors, RevokeInvitationResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, SetAccountSuspensionData, SetAccountSuspensionErrors, SetAccountSuspensionResponses, SetupCompleteData, SetupCompleteErrors, SetupCompleteResponses, SetupStatusData, SetupStatusErrors, SetupStatusResponses, TransferOwnershipData, TransferOwnershipErrors, TransferOwnershipResponses, UpdateCommentData, UpdateCommentErrors, UpdateCommentResponses, UpdateLabelData, UpdateLabelErrors, UpdateLabelResponses, UpdateProjectData, UpdateProjectErrors, UpdateProjectResponses, UpdateStatusData, UpdateStatusErrors, UpdateStatusResponses, UpdateTaskData, UpdateTaskErrors, UpdateTaskResponses, UploadCommentAttachmentsData, UploadCommentAttachmentsErrors, UploadCommentAttachmentsResponses, UploadTaskAttachmentsData, UploadTaskAttachmentsErrors, UploadTaskAttachmentsResponses } from './types.gen';
+import type { AcceptInvitationData, AcceptInvitationErrors, AcceptInvitationResponses, BulkTasksData, BulkTasksErrors, BulkTasksResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CreateAttachmentCommentData, CreateAttachmentCommentErrors, CreateAttachmentCommentResponses, CreateCommentData, CreateCommentErrors, CreateCommentResponses, CreateInvitationData, CreateInvitationErrors, CreateInvitationResponses, CreateLabelData, CreateLabelErrors, CreateLabelResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreateStatusData, CreateStatusErrors, CreateStatusResponses, CreateTaskData, CreateTaskErrors, CreateTaskResponses, CreateWorkspaceData, CreateWorkspaceErrors, CreateWorkspaceResponses, DeleteCommentAttachmentData, DeleteCommentAttachmentErrors, DeleteCommentAttachmentResponses, DeleteCommentData, DeleteCommentErrors, DeleteCommentResponses, DeleteLabelData, DeleteLabelErrors, DeleteLabelResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteStatusData, DeleteStatusErrors, DeleteStatusResponses, DeleteTaskAttachmentData, DeleteTaskAttachmentErrors, DeleteTaskAttachmentResponses, DeleteTaskData, DeleteTaskErrors, DeleteTaskResponses, DeleteWorkspaceData, DeleteWorkspaceErrors, DeleteWorkspaceResponses, DownloadCommentAttachmentData, DownloadCommentAttachmentErrors, DownloadCommentAttachmentResponses, DownloadTaskAttachmentData, DownloadTaskAttachmentErrors, DownloadTaskAttachmentResponses, ExportGlobalAuditData, ExportGlobalAuditErrors, ExportGlobalAuditResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetWorkspaceData, GetWorkspaceErrors, GetWorkspaceResponses, ListAuditData, ListAuditErrors, ListAuditResponses, ListCommentAttachmentsData, ListCommentAttachmentsErrors, ListCommentAttachmentsResponses, ListCommentsData, ListCommentsErrors, ListCommentsResponses, ListGlobalAuditData, ListGlobalAuditErrors, ListGlobalAuditResponses, ListInvitationsData, ListInvitationsErrors, ListInvitationsResponses, ListLabelsData, ListLabelsErrors, ListLabelsResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListNotificationsData, ListNotificationsErrors, ListNotificationsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectTrashData, ListProjectTrashErrors, ListProjectTrashResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStatusesData, ListStatusesErrors, ListStatusesResponses, ListTaskActivityData, ListTaskActivityErrors, ListTaskActivityResponses, ListTaskAttachmentsData, ListTaskAttachmentsErrors, ListTaskAttachmentsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTaskTrashData, ListTaskTrashErrors, ListTaskTrashResponses, ListTrashData, ListTrashErrors, ListTrashResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspacesResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, MeData, MeErrors, MeResponses, PreviewInvitationData, PreviewInvitationErrors, PreviewInvitationResponses, ReadAllNotificationsData, ReadAllNotificationsErrors, ReadAllNotificationsResponses, ReadNotificationData, ReadNotificationErrors, ReadNotificationResponses, RecoveryCompleteData, RecoveryCompleteErrors, RecoveryCompleteResponses, RecoveryRequestData, RecoveryRequestErrors, RecoveryRequestResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, RenameWorkspaceData, RenameWorkspaceErrors, RenameWorkspaceResponses, ReorderStatusesData, ReorderStatusesErrors, ReorderStatusesResponses, ReorderTasksData, ReorderTasksErrors, ReorderTasksResponses, RestoreProjectData, RestoreProjectErrors, RestoreProjectResponses, RestoreTaskData, RestoreTaskErrors, RestoreTaskResponses, RestoreWorkspaceData, RestoreWorkspaceErrors, RestoreWorkspaceResponses, RevokeInvitationData, RevokeInvitationErrors, RevokeInvitationResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, SetAccountSuspensionData, SetAccountSuspensionErrors, SetAccountSuspensionResponses, SetupCompleteData, SetupCompleteErrors, SetupCompleteResponses, SetupStatusData, SetupStatusErrors, SetupStatusResponses, TransferOwnershipData, TransferOwnershipErrors, TransferOwnershipResponses, UpdateCommentData, UpdateCommentErrors, UpdateCommentResponses, UpdateLabelData, UpdateLabelErrors, UpdateLabelResponses, UpdateMeData, UpdateMeErrors, UpdateMeResponses, UpdateProjectData, UpdateProjectErrors, UpdateProjectResponses, UpdateStatusData, UpdateStatusErrors, UpdateStatusResponses, UpdateTaskData, UpdateTaskErrors, UpdateTaskResponses, UploadCommentAttachmentsData, UploadCommentAttachmentsErrors, UploadCommentAttachmentsResponses, UploadTaskAttachmentsData, UploadTaskAttachmentsErrors, UploadTaskAttachmentsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -79,6 +79,34 @@ export const me = <ThrowOnError extends boolean = false>(options?: Options<MeDat
         }],
     url: '/api/v1/auth/me',
     ...options
+});
+
+export const updateMe = <ThrowOnError extends boolean = false>(options: Options<UpdateMeData, ThrowOnError>): RequestResult<UpdateMeResponses, UpdateMeErrors, ThrowOnError> => (options.client ?? client).patch<UpdateMeResponses, UpdateMeErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/auth/me',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const changePassword = <ThrowOnError extends boolean = false>(options: Options<ChangePasswordData, ThrowOnError>): RequestResult<ChangePasswordResponses, ChangePasswordErrors, ThrowOnError> => (options.client ?? client).post<ChangePasswordResponses, ChangePasswordErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/auth/password',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 export const recoveryComplete = <ThrowOnError extends boolean = false>(options: Options<RecoveryCompleteData, ThrowOnError>): RequestResult<RecoveryCompleteResponses, RecoveryCompleteErrors, ThrowOnError> => (options.client ?? client).post<RecoveryCompleteResponses, RecoveryCompleteErrors, ThrowOnError>({
@@ -345,6 +373,36 @@ export const changeMemberRole = <ThrowOnError extends boolean = false>(options: 
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+export const listNotifications = <ThrowOnError extends boolean = false>(options: Options<ListNotificationsData, ThrowOnError>): RequestResult<ListNotificationsResponses, ListNotificationsErrors, ThrowOnError> => (options.client ?? client).get<ListNotificationsResponses, ListNotificationsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/notifications',
+    ...options
+});
+
+export const readAllNotifications = <ThrowOnError extends boolean = false>(options: Options<ReadAllNotificationsData, ThrowOnError>): RequestResult<ReadAllNotificationsResponses, ReadAllNotificationsErrors, ThrowOnError> => (options.client ?? client).post<ReadAllNotificationsResponses, ReadAllNotificationsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/notifications/read-all',
+    ...options
+});
+
+export const readNotification = <ThrowOnError extends boolean = false>(options: Options<ReadNotificationData, ThrowOnError>): RequestResult<ReadNotificationResponses, ReadNotificationErrors, ThrowOnError> => (options.client ?? client).post<ReadNotificationResponses, ReadNotificationErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/notifications/{notification_id}/read',
+    ...options
 });
 
 export const listProjects = <ThrowOnError extends boolean = false>(options: Options<ListProjectsData, ThrowOnError>): RequestResult<ListProjectsResponses, ListProjectsErrors, ThrowOnError> => (options.client ?? client).get<ListProjectsResponses, ListProjectsErrors, ThrowOnError>({

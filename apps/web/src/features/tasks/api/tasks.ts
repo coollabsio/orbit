@@ -332,9 +332,9 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
   const [remainingCount, setRemainingCount] = useState(0)
   const resume = useRef<{ signature: string; commentId: string; version: number; remaining: File[]; total: number } | null>(null)
   const mutation = useMutation({
-    mutationFn: async (input: { body: string; parentId?: string; files: File[] }) => {
-      const { body, parentId, files } = input
-      const signature = JSON.stringify([body, parentId ?? null, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
+    mutationFn: async (input: { body: string; parentId?: string; files: File[]; mentionedUserIds?: string[] }) => {
+      const { body, parentId, files, mentionedUserIds = [] } = input
+      const signature = JSON.stringify([body, parentId ?? null, mentionedUserIds, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
       if (resume.current && resume.current.signature !== signature) {
         await deleteComment({
           client: apiClient,
@@ -353,7 +353,7 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
         setRemainingCount(files.length)
         const mode = commentUploadMode(body, files.length)
         if (mode === 'text') {
-          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId }, throwOnError: true })
+          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId, mentioned_user_ids: mentionedUserIds }, throwOnError: true })
           comment = required(response.data, 'Create comment response was empty.')
         } else if (mode === 'attachment-only') {
           const [first, ...rest] = files

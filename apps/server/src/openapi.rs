@@ -24,6 +24,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::login,
         crate::auth_routes::logout,
         crate::auth_routes::me,
+        crate::auth_routes::update_me,
+        crate::auth_routes::change_password,
         crate::auth_routes::recovery_request,
         crate::auth_routes::recovery_complete,
         crate::auth_routes::list_sessions,
@@ -77,6 +79,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::create_comment,
         crate::task_routes::update_comment,
         crate::task_routes::delete_comment,
+        crate::task_routes::list_notifications,
+        crate::task_routes::read_notification,
+        crate::task_routes::read_all_notifications,
         crate::attachment_routes::list_task_attachments,
         crate::attachment_routes::list_comment_attachments,
         crate::attachment_routes::upload_task_attachments,
@@ -213,6 +218,11 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "400", "invalid_recovery_token");
             add_code(&mut responses, "422", "invalid_password");
         }
+        "update_me" => add_code(&mut responses, "422", "invalid_display_name"),
+        "change_password" => {
+            add_code(&mut responses, "401", "invalid_credentials");
+            add_code(&mut responses, "422", "invalid_password");
+        }
         "revoke_session" => add_code(&mut responses, "404", "session_not_found"),
         "preview_invitation" => add_code(&mut responses, "404", "invitation_not_found"),
         "accept_invitation" => {
@@ -305,6 +315,8 @@ fn invalid_request_operation(operation_id: &str) -> bool {
         operation_id,
         "setup_complete"
             | "login"
+            | "update_me"
+            | "change_password"
             | "recovery_request"
             | "recovery_complete"
             | "create_workspace"

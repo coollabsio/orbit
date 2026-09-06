@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '../../api/client'
 import { queryKeys } from '../../api/queryKeys'
 import {
+  changePassword,
   login,
   logout,
   me,
@@ -9,8 +10,16 @@ import {
   recoveryRequest,
   setupComplete,
   setupStatus,
+  updateMe,
 } from '../../api/generated/sdk.gen'
-import type { LoginBody, RecoveryCompleteBody, RecoveryRequestBody, SetupBody } from '../../api/generated/types.gen'
+import type {
+  ChangePasswordBody,
+  LoginBody,
+  RecoveryCompleteBody,
+  RecoveryRequestBody,
+  SetupBody,
+  UpdateMeBody,
+} from '../../api/generated/types.gen'
 import { ApiProblem } from '../../api/problem'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -101,6 +110,31 @@ export function useCompleteRecovery() {
   return useMutation({
     mutationFn: async (body: RecoveryCompleteBody) => {
       await recoveryComplete({ client: apiClient, body, throwOnError: true })
+    },
+  })
+}
+
+export function useUpdateProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: UpdateMeBody) => {
+      const { data } = await updateMe({ client: apiClient, body, throwOnError: true })
+      return required(data, 'Profile update response was empty.')
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData(queryKeys.currentUser, user)
+    },
+  })
+}
+
+export function useChangePassword() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: ChangePasswordBody) => {
+      await changePassword({ client: apiClient, body, throwOnError: true })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
     },
   })
 }

@@ -49,11 +49,15 @@ export function TasksPage() {
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const [searchFilter, setSearchFilter] = useState('')
   const projectFilter = searchParams.get('project')
+  const viewFilter = ['mine', 'overdue', 'due_soon'].includes(searchParams.get('view') ?? '')
+    ? searchParams.get('view') ?? undefined
+    : undefined
   const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
   const tasksQuery = useTasks(workspace.id, {
     project_id: projectFilter ?? undefined,
     status_id: statusFilter ? apiStatus : undefined,
     assignee_id: assigneeFilter ?? undefined,
+    view: viewFilter,
     ...taskApiSort(sort),
     limit: 50,
   }, true)
@@ -158,7 +162,7 @@ export function TasksPage() {
             </button>
             <Dropdown className="tasks-project-picker" trigger={(open) => (
               <button type="button" className="tasks-project-trigger" data-open={open || undefined}>
-                {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : <TaskSquare size={15} />}
+                {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : null}
                 <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span><ChevronDown size={14} />
               </button>
             )}>

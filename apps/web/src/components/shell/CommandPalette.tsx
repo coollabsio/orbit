@@ -2,17 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import {
   DirectInbox,
-  Hashtag,
   Home2,
-  Messages2,
-  Note2,
+  People,
   SearchNormal,
   Setting2,
-  Sms,
+  ShieldTick,
   TaskSquare,
+  Trash,
 } from 'reicon-react'
 import type { IconComponent } from 'reicon-react'
-import { useAppState } from '../../mock/store'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { useProjects } from '../../features/tasks/api/projects'
 import { taskFromRecord } from '../../features/tasks/api/models'
@@ -28,7 +26,6 @@ interface CommandEntry {
 }
 
 export function CommandPalette({ onClose }: { onClose: () => void }) {
-  const state = useAppState()
   const { workspace } = useWorkspace()
   const projects = useProjects(workspace.id)
   const navigate = useNavigate()
@@ -42,12 +39,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const nav: CommandEntry[] = [
       { id: 'nav_home', icon: Home2, title: 'Go to Home', meta: 'Navigation', to: '/', keywords: 'home' },
       { id: 'nav_tasks', icon: TaskSquare, title: 'Go to Tasks', meta: 'Navigation', to: '/tasks', keywords: 'tasks' },
-      { id: 'nav_docs', icon: Note2, title: 'Go to Docs', meta: 'Navigation', to: '/docs', keywords: 'docs documents' },
-      { id: 'nav_mail', icon: Sms, title: 'Go to Mail', meta: 'Navigation', to: '/mail', keywords: 'mail email' },
-      { id: 'nav_chat', icon: Hashtag, title: 'Go to Chat', meta: 'Navigation', to: '/chat', keywords: 'chat channels' },
-      { id: 'nav_dm', icon: Messages2, title: 'Go to Direct Messages', meta: 'Navigation', to: '/dm', keywords: 'dm direct messages people' },
       { id: 'nav_inbox', icon: DirectInbox, title: 'Go to Inbox', meta: 'Navigation', to: '/inbox', keywords: 'inbox notifications' },
+      { id: 'nav_profile', icon: People, title: 'Go to Profile', meta: 'Navigation', to: '/profile', keywords: 'profile account password name' },
       { id: 'nav_settings', icon: Setting2, title: 'Go to Settings', meta: 'Navigation', to: '/settings', keywords: 'settings preferences' },
+      { id: 'nav_members', icon: People, title: 'Go to Members', meta: 'Navigation', to: '/settings/members', keywords: 'members invitations people' },
+      { id: 'nav_sessions', icon: ShieldTick, title: 'Go to Sessions', meta: 'Navigation', to: '/settings/sessions', keywords: 'sessions devices' },
+      { id: 'nav_trash', icon: Trash, title: 'Go to Task trash', meta: 'Navigation', to: '/tasks-trash', keywords: 'trash deleted tasks' },
     ]
     const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
       id: t.id,
@@ -57,32 +54,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       to: `/tasks/${t.id}`,
       keywords: `${t.identifier} ${t.labels.join(' ')}`,
     }))
-    const docs: CommandEntry[] = state.docs.map((d) => ({
-      id: d.id,
-      icon: Note2,
-      title: d.title,
-      meta: 'Doc',
-      to: `/docs/${d.id}`,
-      keywords: 'doc document',
-    }))
-    const mail: CommandEntry[] = state.mailThreads.map((m) => ({
-      id: m.id,
-      icon: Sms,
-      title: m.subject,
-      meta: 'Mail',
-      to: `/mail/${m.id}`,
-      keywords: `mail ${m.messages[0]?.from.name ?? ''}`,
-    }))
-    const channels: CommandEntry[] = state.channels.map((c) => ({
-      id: c.id,
-      icon: Hashtag,
-      title: `#${c.name}`,
-      meta: 'Channel',
-      to: `/chat/${c.id}`,
-      keywords: `channel chat ${c.name}`,
-    }))
-    return [...nav, ...tasks, ...docs, ...mail, ...channels]
-  }, [projects.data, state, taskQuery.data])
+    return [...nav, ...tasks]
+  }, [projects.data, taskQuery.data])
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -136,7 +109,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           <input
             ref={inputRef}
             className="command-input"
-            placeholder="Search tasks, docs, mail, channels…"
+            placeholder="Search tasks and navigation…"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value)

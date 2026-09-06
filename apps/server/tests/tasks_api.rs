@@ -1731,6 +1731,119 @@ async fn duplicate_batches_are_rejected_and_conflicts_link_to_readable_resources
     assert!(refresh.ends_with(&format!("/tasks/{task_id}")));
 }
 
+#[tokio::test]
+async fn mine_overdue_and_due_soon_views_use_the_authenticated_user_and_utc_day() {
+    let fixture = Fixture::new().await;
+    let (member_id, member_cookie) = add_member(&fixture, "assignee@example.com").await;
+    let past = TimestampMillis::from_millis(TimestampMillis::now().as_millis() - 3 * 86_400_000);
+    let soon = TimestampMillis::from_millis(TimestampMillis::now().as_millis() + 2 * 86_400_000);
+    for (title, assignee, due) in [
+        ("Mine overdue", Some(member_id), Some(past)),
+        ("Mine soon", Some(member_id), Some(soon)),
+        ("Theirs overdue", None, Some(past)),
+        ("No date", Some(member_id), None),
+    ] {
+        let mut body = json!({
+            "project_id": fixture.project_id,
+            "status_id": fixture.status_id,
+            "title": title,
+        });
+        if let Some(id) = assignee {
+            body["assignee_ids"] = json!([id.to_string()]);
+        }
+        if let Some(due_at) = due {
+            body["due_at"] = json!(due_at);
+        }
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+                &fixture.owner_cookie,
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    let mine = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!("/api/v1/workspaces/{}/tasks?view=mine", fixture.workspace_id),
+                &member_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let mine_titles: Vec<_> = mine["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(mine_titles.contains(&"Mine overdue".to_owned()));
+    assert!(mine_titles.contains(&"Mine soon".to_owned()));
+    assert!(!mine_titles.contains(&"Theirs overdue".to_owned()));
+
+    let overdue = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks?view=overdue",
+                    fixture.workspace_id
+                ),
+                &member_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let overdue_titles: Vec<_> = overdue["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(overdue_titles.contains(&"Mine overdue".to_owned()));
+    assert!(overdue_titles.contains(&"Theirs overdue".to_owned()));
+    assert!(!overdue_titles.contains(&"Mine soon".to_owned()));
+    assert!(!overdue_titles.contains(&"No date".to_owned()));
+
+    let soon_view = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks?view=due_soon",
+                    fixture.workspace_id
+                ),
+                &member_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let soon_titles: Vec<_> = soon_view["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(soon_titles.contains(&"Mine soon".to_owned()));
+    assert!(!soon_titles.contains(&"Mine overdue".to_owned()));
+}
+
 async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {
     let id = Id::new_v7();
     let membership_id = Id::new_v7();

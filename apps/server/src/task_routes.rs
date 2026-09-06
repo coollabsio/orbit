@@ -16,8 +16,8 @@ use utoipa::{IntoParams, ToSchema};
 use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::tasks::{
-    CreateTask, Page, SortOrder, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository,
-    TaskSort, TaskUpdate,
+    CreateTask, NotificationRecord, Page, SortOrder, TaskChanges, TaskError, TaskFilter,
+    TaskRecord, TaskRepository, TaskSort, TaskUpdate,
 };
 
 #[derive(Clone)]
@@ -124,6 +124,18 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}",
             patch(update_comment).delete(delete_comment),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/notifications",
+            get(list_notifications),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/notifications/read-all",
+            post(read_all_notifications),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/notifications/{notification_id}/read",
+            post(read_notification),
         )
         .with_state(state)
 }
@@ -757,6 +769,7 @@ struct TaskQuery {
     label_id: Option<String>,
     priority: Option<String>,
     search: Option<String>,
+    view: Option<String>,
     #[serde(default = "default_task_sort")]
     #[param(required = false)]
     sort: String,
@@ -853,6 +866,11 @@ async fn list_tasks(
             .search
             .map(|value| bounded(value, 200, 200, "search", &instance, request_id.as_ref()))
             .transpose()?,
+        view: match query.view.as_deref() {
+            None | Some("") => None,
+            Some("mine") | Some("overdue") | Some("due_soon") => query.view,
+            _ => return Err(validation("view", &instance, request_id.as_ref())),
+        },
         sort: match query.sort.as_str() {
             "position" => TaskSort::Position,
             "priority" => TaskSort::Priority,
@@ -1179,6 +1197,8 @@ async fn list_task_trash(
 struct CommentBody {
     body: String,
     parent_id: Option<String>,
+    #[serde(default)]
+    mentioned_user_ids: Vec<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1227,6 +1247,7 @@ async fn create_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let parent_id = optional_id(body.parent_id, &instance, request_id.as_ref())?;
+    let mentioned_user_ids = parse_ids(body.mentioned_user_ids, &instance, request_id.as_ref())?;
     let body = message(
         body.body,
         100_000,
@@ -1243,6 +1264,7 @@ async fn create_comment(
             actor_id,
             parent_id,
             body,
+            mentioned_user_ids,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -1315,6 +1337,90 @@ async fn delete_comment(
         )
         .await
         .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct NotificationQuery {
+    #[serde(default)]
+    unread: bool,
+    cursor: Option<String>,
+    #[serde(default = "default_limit")]
+    #[param(required = false)]
+    limit: usize,
+}
+
+#[derive(Serialize, ToSchema)]
+struct ReadAllResponse {
+    updated: u64,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/notifications", params(NotificationQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<NotificationRecord>)))]
+async fn list_notifications(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    ApiQuery(query): ApiQuery<NotificationQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Page<NotificationRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/notifications");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .tasks
+        .notifications(
+            workspace_id,
+            actor_id,
+            query.unread,
+            query.cursor.as_deref(),
+            query.limit,
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/notifications/{notification_id}/read", params(("workspace_id" = String, Path), ("notification_id" = String, Path)), responses((status = 200, body = NotificationRecord)))]
+async fn read_notification(
+    State(state): State<TaskState>,
+    Path((workspace, notification)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<NotificationRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/notifications/{notification}/read");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let notification_id = parse_id(&notification, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .mark_notification_read(
+            workspace_id,
+            actor_id,
+            notification_id,
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/notifications/read-all", params(("workspace_id" = String, Path)), responses((status = 200, body = ReadAllResponse)))]
+async fn read_all_notifications(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<ReadAllResponse>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/notifications/read-all");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .tasks
+        .mark_notifications_read(workspace_id, actor_id, TimestampMillis::now())
+        .await
+        .map(|updated| Json(ReadAllResponse { updated }))
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 

@@ -1,9 +1,8 @@
-import { useRef, useState } from 'react'
-import { Eye, EyeSlash, Key } from 'reicon-react'
-import { EmptyState } from '../../components/ui/EmptyState'
-import { Modal } from '../../components/ui/Modal'
-import { updateUserProfile } from '../../mock/actions'
-import { useAppState } from '../../mock/store'
+import { useEffect, useRef, useState } from 'react'
+import { Eye, EyeSlash } from 'reicon-react'
+import { ApiProblem } from '../../api/problem'
+import { UnsavedBar } from '../../components/ui/UnsavedBar'
+import { useChangePassword, useCurrentUser, useUpdateProfile } from '../auth/api'
 import { SettingsCard } from '../settings/SettingsCard'
 import '../shared/cards.css'
 import '../settings/settings.css'
@@ -51,128 +50,73 @@ function PasswordInput({
   )
 }
 
-function recoveryCodes() {
-  return Array.from({ length: 8 }, () =>
-    Array.from({ length: 2 }, () => Math.random().toString(36).slice(2, 7)).join('-'),
-  )
+function errorDetail(error: unknown, fallback: string) {
+  return error instanceof ApiProblem ? error.detail : fallback
 }
 
-/** Coolify `livewire/profile/index`: picture, details, password, two-factor. */
+/** Account settings: display name and authenticated password change. */
 export function ProfilePage() {
-  const state = useAppState()
-  const me = state.users.find((u) => u.id === state.currentUserId)
+  const user = useCurrentUser()
+  const me = user.data
+  const updateProfile = useUpdateProfile()
+  const changePasswordMutation = useChangePassword()
 
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-  const [avatarError, setAvatarError] = useState<string | null>(null)
-
-  const [name, setName] = useState(me?.name ?? '')
-  const [emailModalOpen, setEmailModalOpen] = useState(false)
-  const [newEmail, setNewEmail] = useState('')
-
+  const formRef = useRef<HTMLFormElement>(null)
+  const [name, setName] = useState(me?.display_name ?? '')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState<string | null>(null)
 
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
-  const [codes, setCodes] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (me?.display_name != null) setName(me.display_name)
+  }, [me?.display_name])
 
-  const initial = (me?.name || me?.email || 'A').charAt(0).toUpperCase()
-  const nameDirty = name.trim() !== (me?.name ?? '')
-
-  const pickAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setAvatarError('The image could not be processed in this browser.')
-      return
-    }
-    setAvatarError(null)
-    if (avatarUrl) URL.revokeObjectURL(avatarUrl)
-    setAvatarUrl(URL.createObjectURL(file))
-    e.target.value = ''
-  }
-
-  const removeAvatar = () => {
-    if (avatarUrl) URL.revokeObjectURL(avatarUrl)
-    setAvatarUrl(null)
-  }
+  const nameDirty = name.trim() !== (me?.display_name ?? '')
 
   const saveDetails = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!me || !name.trim()) return
-    updateUserProfile(me.id, { name: name.trim() })
+    const displayName = name.trim()
+    if (!displayName || !nameDirty || updateProfile.isPending) return
+    updateProfile.mutate({ display_name: displayName })
   }
 
-  const submitEmail = (e: React.FormEvent) => {
-    e.preventDefault()
-    const trimmed = newEmail.trim()
-    if (!me || !trimmed) return
-    updateUserProfile(me.id, { email: trimmed })
-    setNewEmail('')
-    setEmailModalOpen(false)
-  }
-
-  const changePassword = (e: React.FormEvent) => {
+  const submitPassword = (e: React.FormEvent) => {
     e.preventDefault()
     if (newPassword !== confirmPassword) {
       setPasswordError('The new password confirmation does not match.')
       return
     }
     setPasswordError(null)
-    setCurrentPassword('')
-    setNewPassword('')
-    setConfirmPassword('')
+    changePasswordMutation.mutate(
+      { current_password: currentPassword, new_password: newPassword },
+      {
+        onSuccess: () => {
+          setCurrentPassword('')
+          setNewPassword('')
+          setConfirmPassword('')
+        },
+      },
+    )
   }
+
+  const passwordAlert = passwordError
+    ?? (changePasswordMutation.isError
+      ? errorDetail(changePasswordMutation.error, 'Password could not be changed.')
+      : null)
 
   return (
     <div className="page">
-      <div className="pane" style={{ flex: 1 }}>
+      <div className="pane" style={{ flex: 1, position: 'relative' }}>
         <div className="pane-header">
-          <span className="pane-title">Profile</span>
+          <span className="pane-title">Account settings</span>
         </div>
         <div className="settings-scroll">
           <div className="profile-workspace">
-            <SettingsCard title="Profile picture" description="Upload a JPG, PNG, or WebP image.">
-              <div className="profile-picture">
-                <div className="profile-picture-avatar">
-                  {avatarUrl ? <img src={avatarUrl} alt={me?.name} /> : <span>{initial}</span>}
-                </div>
-                <div className="profile-picture-actions">
-                  <div className="profile-picture-buttons">
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      hidden
-                      onChange={pickAvatar}
-                    />
-                    <button type="button" className="button" onClick={() => fileRef.current?.click()}>
-                      Browse…
-                    </button>
-                    {avatarUrl ? (
-                      <button type="button" className="button button-danger" onClick={removeAvatar}>
-                        Remove
-                      </button>
-                    ) : null}
-                  </div>
-                  {avatarError ? <p className="profile-error">{avatarError}</p> : null}
-                </div>
-              </div>
-            </SettingsCard>
-
-            <form onSubmit={saveDetails}>
+            <form ref={formRef} onSubmit={saveDetails}>
               <SettingsCard
                 title="Profile details"
                 description="Your display name and verified sign-in address."
-                actions={
-                  nameDirty ? (
-                    <button type="submit" className="button" disabled={!name.trim()}>
-                      Save
-                    </button>
-                  ) : null
-                }
               >
                 <div className="settings-grid">
                   <div className="settings-field">
@@ -187,33 +131,28 @@ export function ProfilePage() {
                       onChange={(e) => setName(e.target.value)}
                     />
                   </div>
-                  <div className="settings-field-row">
-                    <div className="settings-field">
-                      <label className="field-label" htmlFor="profile-email">
-                        Email
-                      </label>
-                      <input id="profile-email" className="input" value={me?.email ?? ''} readOnly />
-                    </div>
-                    <button
-                      type="button"
-                      className="button"
-                      disabled={emailModalOpen}
-                      onClick={() => setEmailModalOpen(true)}
-                    >
-                      Change
-                    </button>
+                  <div className="settings-field">
+                    <label className="field-label" htmlFor="profile-email">
+                      Email
+                    </label>
+                    <input id="profile-email" className="input" value={me?.email ?? ''} readOnly />
                   </div>
                 </div>
+                {updateProfile.isError ? (
+                  <p className="profile-error" role="alert">
+                    {errorDetail(updateProfile.error, 'Display name could not be saved.')}
+                  </p>
+                ) : null}
               </SettingsCard>
             </form>
 
-            <form onSubmit={changePassword}>
+            <form onSubmit={submitPassword}>
               <SettingsCard
                 title="Password"
-                description="Changing your password signs out every active session."
+                description="Other devices will be signed out."
                 actions={
-                  <button type="submit" className="button">
-                    Change password
+                  <button type="submit" className="button" disabled={changePasswordMutation.isPending}>
+                    {changePasswordMutation.isPending ? 'Changing…' : 'Change password'}
                   </button>
                 }
               >
@@ -241,98 +180,28 @@ export function ProfilePage() {
                     value={confirmPassword}
                     onChange={setConfirmPassword}
                   />
-                  {passwordError ? (
-                    <p className="profile-error col-span-2">{passwordError}</p>
+                  {passwordAlert ? (
+                    <p className="profile-error col-span-2" role="alert">
+                      {passwordAlert}
+                    </p>
                   ) : null}
                 </div>
               </SettingsCard>
             </form>
-
-            <SettingsCard
-              title="Two-factor authentication"
-              description="Add a time-based one-time password to protect your account."
-              actions={
-                !twoFactorEnabled ? (
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() => {
-                      setTwoFactorEnabled(true)
-                      setCodes(recoveryCodes())
-                    }}
-                  >
-                    Configure 2FA
-                  </button>
-                ) : null
-              }
-            >
-              {twoFactorEnabled ? (
-                <div className="profile-2fa">
-                  <div className="profile-2fa-actions">
-                    <button type="button" className="button" onClick={() => setCodes(recoveryCodes())}>
-                      Regenerate recovery codes
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-danger"
-                      onClick={() => {
-                        setTwoFactorEnabled(false)
-                        setCodes(null)
-                      }}
-                    >
-                      Disable 2FA
-                    </button>
-                  </div>
-                  {codes ? (
-                    <div className="profile-recovery-codes">
-                      {codes.map((code) => (
-                        <div key={code}>{code}</div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <EmptyState
-                  size="sm"
-                  icon={Key}
-                  title="Two-factor authentication is off"
-                  description="Configure an authenticator app to add another sign-in check."
-                />
-              )}
-            </SettingsCard>
           </div>
         </div>
+        {nameDirty ? (
+          <UnsavedBar
+            onReset={() => {
+              if (updateProfile.isPending) return
+              setName(me?.display_name ?? '')
+              updateProfile.reset()
+            }}
+            onSave={() => formRef.current?.requestSubmit()}
+            saving={updateProfile.isPending}
+          />
+        ) : null}
       </div>
-
-      {emailModalOpen ? (
-        <Modal
-          title="Change email"
-          description="A six-digit verification code will be sent to the new address."
-          maxWidth={576}
-          onClose={() => setEmailModalOpen(false)}
-        >
-          <form onSubmit={submitEmail} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="settings-field">
-              <label className="field-label" htmlFor="new-email">
-                New email address <span className="field-required">*</span>
-              </label>
-              <input
-                id="new-email"
-                type="email"
-                className="input"
-                required
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-              />
-            </div>
-            <div className="modal-footer" style={{ marginTop: 0 }}>
-              <button type="submit" className="button button-primary">
-                Send code
-              </button>
-            </div>
-          </form>
-        </Modal>
-      ) : null}
     </div>
   )
 }

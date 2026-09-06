@@ -25,10 +25,9 @@ export function MobileDock() {
           )}
         </NavLink>
       ) : (
-        <button key={link.to} type="button" className="mobile-dock-item" disabled aria-label={`${link.label}, coming soon`}>
+        <button key={link.to} type="button" className="mobile-dock-item" disabled aria-label={link.label}>
           <link.icon size={20} />
           {link.label}
-          <span className="mobile-dock-soon">Soon</span>
         </button>
       ))}
     </nav>

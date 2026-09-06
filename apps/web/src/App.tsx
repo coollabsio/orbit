@@ -11,6 +11,8 @@ import { GeneralPage } from './features/settings/GeneralPage'
 import { DangerZonePage } from './features/settings/DangerZonePage'
 import { MembersPage } from './features/settings/MembersPage'
 import { SessionsPage } from './features/settings/SessionsPage'
+import { ProfilePage } from './features/profile/ProfilePage'
+import { InboxPage } from './features/inbox/InboxPage'
 import { AcceptInvitationPage, AuthGate, LoginPage, RecoveryPage, SetupPage } from './features/auth/AuthGate'
 import { WorkspaceProvider } from './features/workspaces/WorkspaceProvider'
 import './features/auth/auth.css'
@@ -46,8 +48,8 @@ export default function App() {
               <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
               <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
               <Route path="dm/*" element={<Navigate to="/tasks" replace />} />
-              <Route path="inbox/*" element={<Navigate to="/tasks" replace />} />
-              <Route path="profile/*" element={<Navigate to="/tasks" replace />} />
+              <Route path="inbox" element={<InboxPage />} />
+              <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
                 <Route path="danger-zone" element={<DangerZonePage />} />

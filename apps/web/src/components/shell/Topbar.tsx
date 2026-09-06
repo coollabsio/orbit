@@ -121,7 +121,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
   return (
     <header className="topbar" data-root={routeRoot}>
       <button className="icon-button topbar-menu-button topbar-drawer-button" onClick={onOpenDrawer} aria-label="Menu">
-        <Menu size={routeRoot === 'settings' ? 15 : 18} />
+        <Menu size={18} />
       </button>
       <nav className="topbar-crumbs">
         {crumbs.map((crumb, index) => {
@@ -155,7 +155,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
             <Setting2 size={15} />
           </button>
         ) : null}
-        {routeRoot !== 'home' && routeRoot !== 'settings' ? <Dropdown
+        {routeRoot !== 'home' && routeRoot !== 'settings' && routeRoot !== 'profile' ? <Dropdown
           className="topbar-new-menu"
           align="right"
           trigger={() => (

@@ -1,19 +1,42 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Paperclip2, Xmark } from 'reicon-react'
+import type { User } from '../api/models'
 
-export function TaskCommentComposer({ placeholder, pending, progress, error, onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; onSend: (body: string, files: File[]) => Promise<unknown> }) {
+export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; members?: User[]; onSend: (body: string, files: File[], mentionedUserIds: string[]) => Promise<unknown> }) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
+  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([])
   const input = useRef<HTMLInputElement>(null)
+  const mentionQuery = useMemo(() => {
+    const match = body.match(/(?:^|\s)@([^\s@]*)$/)
+    return match ? match[1].toLowerCase() : null
+  }, [body])
+  const suggestions = mentionQuery === null
+    ? []
+    : members.filter((member) => member.name.toLowerCase().includes(mentionQuery) || member.handle.toLowerCase().includes(mentionQuery)).slice(0, 8)
   const send = async () => {
     if (!body.trim() && files.length === 0) return
-    await onSend(body, files)
+    await onSend(body, files, mentionedUserIds)
     setBody('')
     setFiles([])
+    setMentionedUserIds([])
     if (input.current) input.current.value = ''
+  }
+  const insertMention = (member: User) => {
+    setBody((current) => current.replace(/@([^\s@]*)$/, `@${member.name} `))
+    setMentionedUserIds((current) => current.includes(member.id) ? current : [...current, member.id])
   }
   return (
     <div className="tasks-native-composer" onDrop={(event) => { event.preventDefault(); setFiles((current) => [...current, ...event.dataTransfer.files]) }} onDragOver={(event) => event.preventDefault()}>
+      {suggestions.length > 0 ? (
+        <div className="tasks-mention-list" role="listbox" aria-label="Mention member">
+          {suggestions.map((member) => (
+            <button key={member.id} type="button" className="popover-option" onMouseDown={(event) => { event.preventDefault(); insertMention(member) }}>
+              @{member.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <textarea className="input" rows={2} value={body} placeholder={placeholder} onChange={(event) => setBody(event.target.value)} onPaste={(event) => {
         const pasted = Array.from(event.clipboardData.files)
         if (pasted.length > 0) setFiles((current) => [...current, ...pasted])

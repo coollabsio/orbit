@@ -2,10 +2,13 @@
 
 .app-shell {
   display: flex;
-  height: 100dvh;
+  height: var(--app-height, 100svh);
   width: 100%;
   overflow: hidden;
   background: var(--canvas);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* ---------- sidebar ---------- */
@@ -478,9 +481,11 @@ a.topbar-crumb:hover {
 .mobile-dock {
   display: none;
   align-items: stretch;
-  height: calc(var(--dock-height) + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
-  border-top: 1px solid var(--line);
+  min-height: var(--dock-height);
+  height: auto;
+  padding-top: 12px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-top: none;
   background: var(--canvas);
   flex-shrink: 0;
 }
@@ -515,13 +520,8 @@ a.topbar-crumb:hover {
   border-radius: 0;
   background: transparent;
   font-family: inherit;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--text-faint) 70%, var(--canvas));
   cursor: not-allowed;
-}
-
-.mobile-dock-soon {
-  font-size: 8px;
-  line-height: 1;
 }
 
 .mobile-dock-badge {
@@ -558,7 +558,7 @@ a.topbar-crumb:hover {
   width: min(280px, 84vw);
   background: var(--canvas);
   border-right: 1px solid var(--line);
-  padding: 0 12px 12px;
+  padding: env(safe-area-inset-top, 0px) 12px env(safe-area-inset-bottom, 0px) 12px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -618,14 +618,29 @@ a.topbar-crumb:hover {
     display: none;
   }
 
+  .app-shell {
+    border: none;
+    box-shadow: none;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .app-main,
+  .app-content {
+    border: none;
+    box-shadow: none;
+  }
+
   .mobile-dock {
     display: flex;
+    border-top: none;
   }
 
   .topbar {
     display: flex;
     height: 48px;
     padding: 0 8px;
+    border-bottom: none;
   }
 
   .topbar[data-root='settings'] {
@@ -651,17 +666,19 @@ a.topbar-crumb:hover {
     gap: 8px;
   }
 
-  .topbar[data-root='settings'] .icon-button {
+  .topbar[data-root='settings'] .icon-button:not(.topbar-drawer-button) {
     width: auto;
     height: 32px;
     padding-inline: 10px;
     color: var(--text-muted);
   }
 
-  /* Keep the icon-to-title gap equal to the Tasks project trigger. */
   .topbar[data-root='settings'] .topbar-drawer-button {
-    padding-inline: 7px 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border: 0;
+    color: var(--text-faint);
   }
 
   .topbar[data-root='settings'] .icon-button:hover {

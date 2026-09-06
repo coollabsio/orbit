@@ -106,6 +106,27 @@ pub struct CommentRecord {
     pub updated_at: TimestampMillis,
 }
 
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct NotificationRecord {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = String)]
+    pub workspace_id: Id,
+    #[schema(value_type = String)]
+    pub recipient_user_id: Id,
+    #[schema(value_type = String)]
+    pub actor_user_id: Id,
+    pub kind: String,
+    #[schema(value_type = String)]
+    pub task_id: Id,
+    #[schema(value_type = Option<String>)]
+    pub comment_id: Option<Id>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub read_at: Option<TimestampMillis>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: TimestampMillis,
+}
+
 #[derive(Clone, Debug)]
 pub struct CreateTask {
     pub project_id: Id,
@@ -162,6 +183,7 @@ pub struct TaskFilter {
     pub label_id: Option<Id>,
     pub priority: Option<String>,
     pub search: Option<String>,
+    pub view: Option<String>,
     pub sort: TaskSort,
     pub order: SortOrder,
 }
@@ -959,11 +981,34 @@ impl TaskRepository {
                 .push(" AND tasks.priority = ")
                 .push_bind(priority.clone());
         }
-        if let Some(assignee_id) = filter.assignee_id {
+        if filter.view.as_deref() == Some("mine") || filter.assignee_id.is_some() {
+            let assignee_id = if filter.view.as_deref() == Some("mine") {
+                actor_id
+            } else {
+                filter.assignee_id.unwrap()
+            };
             query
                 .push(" AND EXISTS (SELECT 1 FROM task_assignees JOIN memberships ON memberships.id = task_assignees.membership_id JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id AND memberships.workspace_id = tasks.workspace_id AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL AND task_assignees.user_id = ")
                 .push_bind(assignee_id.to_string())
                 .push(")");
+        }
+        if matches!(filter.view.as_deref(), Some("overdue") | Some("due_soon")) {
+            let day_ms = 86_400_000;
+            let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;
+            query.push(
+                " AND tasks.due_at IS NOT NULL AND EXISTS (SELECT 1 FROM task_statuses WHERE task_statuses.id = tasks.status_id AND task_statuses.category NOT IN ('completed', 'cancelled'))",
+            );
+            if filter.view.as_deref() == Some("overdue") {
+                query
+                    .push(" AND tasks.due_at < ")
+                    .push_bind(start_of_utc_day);
+            } else {
+                query
+                    .push(" AND tasks.due_at >= ")
+                    .push_bind(start_of_utc_day)
+                    .push(" AND tasks.due_at < ")
+                    .push_bind(start_of_utc_day + 7 * day_ms);
+            }
         }
         if let Some(label_id) = filter.label_id {
             query
@@ -1104,6 +1149,17 @@ impl TaskRepository {
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
         replace_labels(&mut tx, id, &input.label_ids).await?;
+        notify_users(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            "task_assigned",
+            id,
+            None,
+            &input.assignee_ids,
+            now,
+        )
+        .await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1146,7 +1202,7 @@ impl TaskRepository {
     ) -> Result<TaskRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let task = update_task_in_tx(&mut tx, workspace_id, update, now).await?;
+        let task = update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1194,7 +1250,7 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let mut records = Vec::with_capacity(updates.len());
         for update in updates {
-            records.push(update_task_in_tx(&mut tx, workspace_id, update, now).await?);
+            records.push(update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?);
         }
         record_mutation(
             &mut tx,
@@ -1418,6 +1474,7 @@ impl TaskRepository {
         actor_id: Id,
         parent_id: Option<Id>,
         body: String,
+        mentioned_user_ids: Vec<Id>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<CommentRecord, TaskError> {
@@ -1432,6 +1489,17 @@ impl TaskRepository {
         }
         sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)")
             .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
+        notify_users(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            "comment_mentioned",
+            task_id,
+            Some(id),
+            &mentioned_user_ids,
+            now,
+        )
+        .await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1525,11 +1593,115 @@ impl TaskRepository {
         tx.commit().await?;
         Ok(())
     }
+
+    pub async fn notifications(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        unread_only: bool,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Page<NotificationRecord>, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let fingerprint = format!("notifications:{actor_id}:{}", unread_only);
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, read_at, created_at \
+             FROM notifications WHERE workspace_id = ",
+        );
+        query
+            .push_bind(workspace_id.to_string())
+            .push(" AND recipient_user_id = ")
+            .push_bind(actor_id.to_string());
+        if unread_only {
+            query.push(" AND read_at IS NULL");
+        }
+        if let Some((created_at, id)) = after {
+            query
+                .push(" AND (created_at < ")
+                .push_bind(created_at)
+                .push(" OR (created_at = ")
+                .push_bind(created_at)
+                .push(" AND id < ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY created_at DESC, id DESC LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let items = query
+            .build()
+            .fetch_all(self.database.pool())
+            .await?
+            .into_iter()
+            .map(notification_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        finish_page(items, limit, &fingerprint, |notification| {
+            vec![
+                notification.created_at.as_millis().to_string(),
+                notification.id.to_string(),
+            ]
+        })
+    }
+
+    pub async fn mark_notification_read(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        notification_id: Id,
+        now: TimestampMillis,
+    ) -> Result<NotificationRecord, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let mut tx = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "UPDATE notifications SET read_at = COALESCE(read_at, ?) \
+             WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
+        )
+        .bind(now.as_millis())
+        .bind(notification_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        let row = sqlx::query(
+            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, read_at, created_at \
+             FROM notifications WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
+        )
+        .bind(notification_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(TaskError::NotFound)?;
+        tx.commit().await?;
+        notification_from_row(row)
+    }
+
+    pub async fn mark_notifications_read(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<u64, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let changed = sqlx::query(
+            "UPDATE notifications SET read_at = ? WHERE workspace_id = ? AND recipient_user_id = ? AND read_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .execute(self.database.pool())
+        .await?
+        .rows_affected();
+        Ok(changed)
+    }
 }
 
 async fn update_task_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
+    actor_id: Id,
     update: &TaskUpdate,
     now: TimestampMillis,
 ) -> Result<TaskRecord, TaskError> {
@@ -1564,7 +1736,23 @@ async fn update_task_in_tx(
     sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, priority = ?, position = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
         .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&priority).bind(position).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
     if let Some(assignees) = &update.changes.assignee_ids {
+        let added: Vec<Id> = assignees
+            .iter()
+            .copied()
+            .filter(|id| !current.assignee_ids.contains(id))
+            .collect();
         replace_assignees(tx, update.id, assignees).await?;
+        notify_users(
+            tx,
+            workspace_id,
+            actor_id,
+            "task_assigned",
+            update.id,
+            None,
+            &added,
+            now,
+        )
+        .await?;
     }
     if let Some(labels) = &update.changes.label_ids {
         replace_labels(tx, update.id, labels).await?;
@@ -1683,7 +1871,7 @@ fn cursor_i64_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(i64
 
 fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
     format!(
-        "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:r={}:q={}:sort={:?}:order={:?}",
+        "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:r={}:q={}:v={}:sort={:?}:order={:?}",
         filter
             .project_id
             .map_or_else(String::new, |id| id.to_string()),
@@ -1698,6 +1886,7 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
             .map_or_else(String::new, |id| id.to_string()),
         filter.priority.as_deref().unwrap_or(""),
         filter.search.as_deref().unwrap_or(""),
+        filter.view.as_deref().unwrap_or(""),
         filter.sort,
         filter.order,
     )
@@ -1896,6 +2085,63 @@ async fn validate_assignees(
                 field: "assignee_ids",
             });
         }
+    }
+    Ok(())
+}
+
+async fn notify_users(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    actor_id: Id,
+    kind: &str,
+    task_id: Id,
+    comment_id: Option<Id>,
+    recipients: &[Id],
+    now: TimestampMillis,
+) -> Result<(), TaskError> {
+    let field = if kind == "comment_mentioned" {
+        "mentioned_user_ids"
+    } else {
+        "assignee_ids"
+    };
+    let mut unique = recipients.to_vec();
+    unique.sort_unstable();
+    unique.dedup();
+    if unique.len() != recipients.len() {
+        return Err(TaskError::Invalid { field });
+    }
+    for recipient in recipients.iter().copied().filter(|id| *id != actor_id) {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
+             WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND users.suspended_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .bind(recipient.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+        if exists != 1 {
+            return Err(TaskError::Invalid { field });
+        }
+        let dedupe_key = format!(
+            "{workspace_id}:{recipient}:{kind}:{}",
+            comment_id.unwrap_or(task_id)
+        );
+        sqlx::query(
+            "INSERT OR IGNORE INTO notifications \
+             (id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, dedupe_key, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(workspace_id.to_string())
+        .bind(recipient.to_string())
+        .bind(actor_id.to_string())
+        .bind(kind)
+        .bind(task_id.to_string())
+        .bind(comment_id.map(|id| id.to_string()))
+        .bind(dedupe_key)
+        .bind(now.as_millis())
+        .execute(&mut **tx)
+        .await?;
     }
     Ok(())
 }
@@ -2234,6 +2480,25 @@ fn task_record_from_row(
             .map(TimestampMillis::from_millis),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
+    })
+}
+
+fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRecord, TaskError> {
+    Ok(NotificationRecord {
+        id: parse_id(row.get("id"))?,
+        workspace_id: parse_id(row.get("workspace_id"))?,
+        recipient_user_id: parse_id(row.get("recipient_user_id"))?,
+        actor_user_id: parse_id(row.get("actor_user_id"))?,
+        kind: row.get("kind"),
+        task_id: parse_id(row.get("task_id"))?,
+        comment_id: row
+            .get::<Option<String>, _>("comment_id")
+            .map(parse_id)
+            .transpose()?,
+        read_at: row
+            .get::<Option<i64>, _>("read_at")
+            .map(TimestampMillis::from_millis),
+        created_at: TimestampMillis::from_millis(row.get("created_at")),
     })
 }
 

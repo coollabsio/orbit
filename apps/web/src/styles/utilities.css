@@ -816,10 +816,26 @@ textarea.input {
 }
 
 @media (max-width: 899px) {
+  .page,
+  .pane {
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .pane + .pane {
+    border-left: none;
+  }
+
+  .pane-header {
+    border-bottom: none;
+  }
+
   .product-pane-header {
     gap: 8px;
     min-height: 44px;
     padding: 6px 8px;
+    border-bottom: none;
   }
 
   .product-pane-header .pane-title {
