@@ -285,21 +285,32 @@
   gap: 8px;
 }
 
+/* Keep the selection target active across the left gutter, even while its box is hidden. */
 .tasks-row-check {
+  width: 28px;
+  height: auto;
+  align-self: stretch;
+  margin: -6px 0 -6px -12px;
+}
+
+.tasks-row-check .checkbox-box-visual {
+  inset: 50% auto auto 12px;
   width: 16px;
   height: 16px;
+  transform: translateY(-50%);
+  border-radius: 4px;
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.tasks-row:hover .tasks-row-check,
-.tasks-row[data-selected='true'] .tasks-row-check,
-.tasks-row-check:focus-within {
+.tasks-row:hover .tasks-row-check .checkbox-box-visual,
+.tasks-row[data-selected='true'] .tasks-row-check .checkbox-box-visual,
+.tasks-row-check:focus-within .checkbox-box-visual {
   opacity: 1;
 }
 
-.tasks-row-check .checkbox-box-visual {
-  border-radius: 4px;
+.tasks-row-check .checkbox-box-tick {
+  left: 12px;
 }
 
 .tasks-row-check input:checked ~ .checkbox-box-tick {
@@ -736,8 +747,17 @@
   overflow: visible;
 }
 
+.tasks-sidebar-button {
+  display: none;
+}
+
 /* responsive: one pane on mobile */
 @media (max-width: 899px) {
+  .tasks-sidebar-button {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
   .tasks-rail-pane {
     display: none;
   }
@@ -1077,7 +1097,7 @@
 
 .ps-status-row:hover .ps-status-menu,
 .ps-status-menu:focus-visible,
-.ps-status-row:has(.popover) .ps-status-menu {
+.ps-status-row:has([data-dropdown-open]) .ps-status-menu {
   opacity: 1;
 }
 

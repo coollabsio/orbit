@@ -1,3 +1,4 @@
+import { ConfirmationModalHost } from '../../../components/ui/ConfirmationModal'
 import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
@@ -5,7 +6,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import type { WorkspaceRecord } from '../../../api/generated/types.gen'
-import { GeneralPage } from '../../settings/GeneralPage'
+import { WorkspaceSwitcher } from '../../../components/shell/WorkspaceSwitcher'
 import { WorkspaceContext } from '../../workspaces/workspaceContext'
 import type { Task, TaskViewState } from '../api/models'
 import { ProjectRail } from './ProjectRail'
@@ -13,12 +14,10 @@ import { TaskDetail } from './TaskDetail'
 
 const originalFetch = globalThis.fetch
 const originalPrompt = window.prompt
-const originalConfirm = window.confirm
 
 afterEach(() => {
   globalThis.fetch = originalFetch
   window.prompt = originalPrompt
-  window.confirm = originalConfirm
 })
 
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
@@ -32,6 +31,7 @@ function wrapper(selectWorkspace = mock(() => {})) {
         <MemoryRouter>
           <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace }}>
             {children}
+            <ConfirmationModalHost />
           </WorkspaceContext.Provider>
         </MemoryRouter>
       </QueryClientProvider>
@@ -56,19 +56,21 @@ test('workspace creation retry repeats form clearing and workspace selection', a
   }) as unknown as typeof fetch
   const selectWorkspace = mock(() => {})
   const { Wrapper } = wrapper(selectWorkspace)
-  const view = render(<GeneralPage />, { wrapper: Wrapper })
+  const view = render(<WorkspaceSwitcher />, { wrapper: Wrapper })
   const user = userEvent.setup()
 
+  await user.click(view.getByRole('button', { name: 'Workspace: Orbit' }))
+  await user.click(view.getByRole('button', { name: 'Create workspace' }))
   await user.type(view.getByLabelText('New workspace'), 'Second')
   expect((view.getByLabelText('New workspace') as HTMLInputElement).value).toBe('Second')
   await user.click(view.getByRole('button', { name: 'Create workspace' }))
   await view.findByRole('alert')
-  await user.click(view.getByRole('button', { name: 'Retry' }))
+  await user.click(view.getByRole('button', { name: 'Create workspace' }))
 
   await waitFor(() => expect(calls).toBe(2))
   await waitFor(() => expect(selectWorkspace).toHaveBeenCalledWith('workspace-2'))
   expect(bodies).toEqual([{ name: 'Second' }, { name: 'Second' }])
-  expect((view.getByLabelText('New workspace') as HTMLInputElement).value).toBe('')
+  expect(view.queryByLabelText('New workspace')).toBeNull()
 })
 
 test('project creation retry selects the created project', async () => {
@@ -98,7 +100,6 @@ test('task deletion retry returns to the task list after success', async () => {
     calls += 1
     return calls === 1 ? failure() : new Response(null, { status: 204 })
   }) as unknown as typeof fetch
-  window.confirm = () => true
   const onBack = mock(() => {})
   const { Wrapper } = wrapper()
   const task: Task = {
@@ -110,6 +111,10 @@ test('task deletion retry returns to the task list after success', async () => {
   const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={onBack} />, { wrapper: Wrapper })
 
   fireEvent.click(view.getByRole('button', { name: 'Delete task' }))
+  fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
+  expect(calls).toBe(0)
+  fireEvent.click(view.getByRole('button', { name: 'Delete task' }))
+  fireEvent.click(view.getByRole('button', { name: 'Move to trash' }))
   await view.findByRole('alert')
   fireEvent.click(view.getByRole('button', { name: 'Retry' }))
 

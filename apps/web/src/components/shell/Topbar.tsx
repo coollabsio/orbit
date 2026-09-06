@@ -91,6 +91,7 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       const crumbs: Crumb[] = [{ label: 'Settings', to: '/settings' }]
       if (id === 'members') crumbs.push({ label: 'Members' })
       else if (id === 'sessions') crumbs.push({ label: 'Sessions' })
+      else if (id === 'danger-zone') crumbs.push({ label: 'Danger zone' })
       return { crumbs }
     }
     default:
@@ -123,7 +124,6 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
         <Menu size={routeRoot === 'settings' ? 15 : 18} />
       </button>
       <nav className="topbar-crumbs">
-        {routeRoot === 'settings' ? <Setting2 className="product-pane-header-icon" size={15} /> : null}
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1
           return (
@@ -145,7 +145,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
       </nav>
       <div className="topbar-actions">
         <button className="icon-button topbar-menu-button" onClick={onOpenPalette} aria-label="Search">
-          <SearchNormal size={16} />
+          <SearchNormal size={routeRoot === 'settings' ? 15 : 16} />
         </button>
         <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
@@ -155,7 +155,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
             <Setting2 size={15} />
           </button>
         ) : null}
-        {routeRoot !== 'home' ? <Dropdown
+        {routeRoot !== 'home' && routeRoot !== 'settings' ? <Dropdown
           className="topbar-new-menu"
           align="right"
           trigger={() => (

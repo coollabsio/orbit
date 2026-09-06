@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dropdown clipping regression</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { Dropdown } from '/src/components/ui/Dropdown.tsx'
+      import '/src/index.css'
+
+      // A short, clipped card near the viewport edge reproduces table-row menus.
+      createRoot(document.getElementById('root')).render(
+        React.createElement('div', {
+          style: {
+            position: 'absolute', bottom: 80, right: 16,
+            width: 260, height: 60, overflow: 'hidden', border: '1px solid gray',
+          },
+        }, React.createElement(Dropdown, {
+          align: 'right',
+          trigger: () => React.createElement('button', { className: 'button' }, 'Actions'),
+        }, (close) => [10, 25, 50, 100].map((size) => React.createElement('button', {
+          className: 'popover-option', key: size, onClick: close,
+        }, String(size)))))
+      )
+    </script>
+  </body>
+</html>

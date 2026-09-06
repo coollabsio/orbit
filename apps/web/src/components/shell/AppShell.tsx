@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '../../features/realtime/useWorkspaceEvents'
 import { Outlet } from 'react-router'
-import { ChevronDown, SidebarLeft } from 'reicon-react'
+import { SidebarLeft } from 'reicon-react'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
-import { Dropdown } from '../ui/Dropdown'
+import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
@@ -12,11 +12,18 @@ import './shell.css'
 import { MobileDock } from './MobileDock'
 
 export function AppShell() {
-  const { workspace, workspaces, selectWorkspace } = useWorkspace()
+  const { workspace } = useWorkspace()
   const live = useWorkspaceEvents(workspace.id)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('orbit:sidebar_collapsed') === 'true')
+
+  useLayoutEffect(() => {
+    // Safari can retain the document pan from the login keyboard after navigation.
+    // The app scrolls within panes, so its outer document must start at the top.
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    document.body.scrollTop = 0
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -26,11 +33,14 @@ export function AppShell() {
       }
     }
     const onOpen = () => setPaletteOpen(true)
+    const onOpenSidebar = () => setDrawerOpen(true)
     document.addEventListener('keydown', onKeyDown)
     window.addEventListener('open-command-palette', onOpen)
+    window.addEventListener('open-sidebar', onOpenSidebar)
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('open-command-palette', onOpen)
+      window.removeEventListener('open-sidebar', onOpenSidebar)
     }
   }, [])
 
@@ -43,12 +53,7 @@ export function AppShell() {
       {!live ? <div className="connection-status" role="status">Connecting to live updates…</div> : null}
       <aside className="app-sidebar" data-collapsed={sidebarCollapsed || undefined}>
         <div className="app-sidebar-brand">
-          <Dropdown trigger={() => <button className="app-sidebar-wordmark" aria-label={`Workspace: ${workspace.name}`}>
-            <span className="app-sidebar-title">{sidebarCollapsed ? workspace.name.charAt(0) : workspace.name}</span>
-            {!sidebarCollapsed ? <ChevronDown size={13} /> : null}
-          </button>}>
-            {(close) => <>{workspaces.map((item) => <button key={item.id} className="popover-option" data-selected={item.id === workspace.id || undefined} onClick={() => { selectWorkspace(item.id); close() }}>{item.name}</button>)}</>}
-          </Dropdown>
+          <WorkspaceSwitcher collapsed={sidebarCollapsed} />
         </div>
         <SidebarNav collapsed={sidebarCollapsed} />
         <div className="app-sidebar-footer">
@@ -78,8 +83,7 @@ export function AppShell() {
           <div className="mobile-drawer-backdrop" onClick={() => setDrawerOpen(false)} />
           <aside className="mobile-drawer">
             <div className="app-sidebar-brand">
-              <span className="app-sidebar-title">Orbit</span>
-              <span className="app-sidebar-version">v0.1.0</span>
+              <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
             </div>
             <SidebarNav onNavigate={() => setDrawerOpen(false)} />
           </aside>

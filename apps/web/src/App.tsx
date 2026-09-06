@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { ConfirmationModalHost } from './components/ui/ConfirmationModal'
 import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router'
 import { setAppNavigate } from './lib/navigateBridge'
 import { AppShell } from './components/shell/AppShell'
@@ -7,6 +8,7 @@ import { TasksPage } from './features/tasks/TasksPage'
 import { TaskTrashPage } from './features/tasks/TaskTrashPage'
 import { SettingsLayout } from './features/settings/SettingsLayout'
 import { GeneralPage } from './features/settings/GeneralPage'
+import { DangerZonePage } from './features/settings/DangerZonePage'
 import { MembersPage } from './features/settings/MembersPage'
 import { SessionsPage } from './features/settings/SessionsPage'
 import { AcceptInvitationPage, AuthGate, LoginPage, RecoveryPage, SetupPage } from './features/auth/AuthGate'
@@ -26,6 +28,7 @@ export default function App() {
   return (
     <>
       <NavigateBridge />
+      <ConfirmationModalHost />
       <Routes>
         <Route path="setup" element={<SetupPage />} />
         <Route path="login" element={<LoginPage />} />
@@ -47,8 +50,9 @@ export default function App() {
               <Route path="profile/*" element={<Navigate to="/tasks" replace />} />
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
+                <Route path="danger-zone" element={<DangerZonePage />} />
                 <Route path="members" element={<MembersPage />} />
-                <Route path="invitations" element={<MembersPage />} />
+                <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
                 <Route path="sessions" element={<SessionsPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/tasks" replace />} />

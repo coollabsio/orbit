@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Add, ArrowDown2, ArrowRight, Copy, Notification, People, SearchNormal, X } from 'reicon-react'
+import { useMemo, useState } from 'react'
+import { confirmAction } from '../../components/ui/confirmAction'
+import { Add, ArrowRight, Copy, Notification, People, SearchNormal, X } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Listbox } from '../../components/ui/Listbox'
@@ -46,10 +47,6 @@ export function MembersPage() {
   const [inviteLink, setInviteLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
-
-  useEffect(() => {
-    if (window.location.pathname.endsWith('/invitations')) document.getElementById('invitations')?.scrollIntoView()
-  }, [membersQuery.isPending])
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -215,11 +212,11 @@ export function MembersPage() {
                               </button>
                             ))}
                             {canTransferOwnership(workspace.role, currentUser.data?.id, user) ? (
-                              <button type="button" className="popover-option" onClick={() => {
-                                if (window.confirm(`Transfer ownership of ${workspace.name} to ${user.name}?`)) {
+                              <button type="button" className="popover-option" onClick={async () => {
+                                close()
+                                if (await confirmAction({ title: `Transfer ownership of ${workspace.name} to ${user.name}?`, confirmLabel: 'Transfer ownership', danger: true })) {
                                   transferOwnership.mutate({ membershipId: user.membershipId, membershipVersion: user.version, workspaceVersion: workspace.version })
                                 }
-                                close()
                               }}>Transfer ownership</button>
                             ) : null}
                             <div className="popover-separator" />
@@ -247,34 +244,16 @@ export function MembersPage() {
                 <span>
                   {firstRow}-{lastRow} of {filtered.length}
                 </span>
-                <Dropdown
-                  trigger={() => (
-                    <button type="button" className="pagination-size" aria-label="Items per page">
-                      <span>{perPage}</span>
-                      <ArrowDown2 size={12} />
-                    </button>
-                  )}
-                >
-                  {(close) => (
-                    <>
-                      {PAGE_SIZES.map((size) => (
-                        <button
-                          key={size}
-                          type="button"
-                          className="popover-option"
-                          data-selected={size === perPage || undefined}
-                          onClick={() => {
-                            setPerPage(size)
-                            setPage(1)
-                            close()
-                          }}
-                        >
-                          {size}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </Dropdown>
+                <Listbox
+                  className="pagination-size"
+                  aria-label="Items per page"
+                  value={String(perPage)}
+                  options={PAGE_SIZES.map((size) => ({ value: String(size), label: String(size) }))}
+                  onChange={(value) => {
+                    setPerPage(Number(value))
+                    setPage(1)
+                  }}
+                />
               </div>
               <div className="pagination-nav">
                 <button

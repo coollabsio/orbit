@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { listboxPosition } from './listboxPosition'
 import { cx } from '../../lib/cx'
 
 export interface ListboxOption<T extends string> {
@@ -31,12 +33,40 @@ export function Listbox<T extends string>({
 }: ListboxProps<T>) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [position, setPosition] = useState<ReturnType<typeof listboxPosition> | null>(null)
+  useLayoutEffect(() => {
+    if (!open) return
+    const update = () => {
+      if (!rootRef.current || !panelRef.current) return
+      const viewport = window.visualViewport
+      const dock = document.querySelector('.mobile-dock')?.getBoundingClientRect()
+      const bottom = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight)
+      setPosition(listboxPosition(rootRef.current.getBoundingClientRect(), panelRef.current.scrollHeight + 2, {
+        top: viewport?.offsetTop ?? 0,
+        bottom: dock && dock.height > 0 ? Math.min(bottom, dock.top) : bottom,
+        left: viewport?.offsetLeft ?? 0,
+        width: viewport?.width ?? window.innerWidth,
+      }))
+    }
+    update()
+    window.addEventListener('resize', update)
+    document.addEventListener('scroll', update, true)
+    window.visualViewport?.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('scroll', update)
+    return () => {
+      window.removeEventListener('resize', update)
+      document.removeEventListener('scroll', update, true)
+      window.visualViewport?.removeEventListener('resize', update)
+      window.visualViewport?.removeEventListener('scroll', update)
+    }
+  }, [open])
   const current = options.find((option) => option.value === value)
 
   useEffect(() => {
     if (!open) return
     const onPointerDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+      if (rootRef.current && !rootRef.current.contains(e.target as Node) && !panelRef.current?.contains(e.target as Node)) setOpen(false)
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -74,8 +104,8 @@ export function Listbox<T extends string>({
           <path strokeLinecap="round" strokeLinejoin="round" d="m8 9 4-4 4 4m0 6-4 4-4-4" />
         </svg>
       </button>
-      {open ? (
-        <div className="listbox-panel" role="listbox">
+      {open ? createPortal(
+        <div ref={panelRef} className="listbox-panel" role="listbox" style={{ ...position, position: 'fixed', minWidth: 0, zIndex: 200, visibility: position ? 'visible' : 'hidden' }}>
           {options.length === 0 ? <div className="listbox-empty">No options available.</div> : null}
           {options.map((option) => {
             const selected = option.value === value
@@ -108,7 +138,7 @@ export function Listbox<T extends string>({
               </button>
             )
           })}
-        </div>
+        </div>, document.body
       ) : null}
     </div>
   )

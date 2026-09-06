@@ -117,7 +117,12 @@ function AuthInput({ label, value, onChange, type = 'text', required = true }: {
 
 function AuthForm({ title, children, error, pending, submitLabel, onSubmit, footer }: { title: string; children: React.ReactNode; error: Error | null; pending: boolean; submitLabel: string; onSubmit: () => Promise<unknown>; footer?: React.ReactNode }) {
   return (
-    <main className="auth-boundary-page"><form className="auth-boundary-card auth-boundary-form" onSubmit={(event) => { event.preventDefault(); void onSubmit().catch(() => undefined) }}>
+    <main className="auth-boundary-page"><form className="auth-boundary-card auth-boundary-form" onSubmit={(event) => {
+      event.preventDefault()
+      // Dismiss the mobile keyboard before replacing the login form with the app.
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      void onSubmit().catch(() => undefined)
+    }}>
       <span className="auth-boundary-wordmark">Orbit</span><h1>{title}</h1>
       <div className="auth-boundary-fields">{children}</div>
       {error ? <p className="auth-boundary-error" role="alert">{error instanceof ApiProblem ? error.detail : 'The server could not complete the request.'}</p> : null}

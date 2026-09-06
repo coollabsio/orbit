@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { confirmAction } from '../../../components/ui/confirmAction'
 import { ArrowLeft, Calendar, Paperclip2, TaskSquare, Trash, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
@@ -56,8 +57,8 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
         </button>
         <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
         <div className="spacer" />
-        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" disabled={deleteTask.isPending} onClick={() => {
-          if (!window.confirm(`Move ${task.identifier} to trash?`)) return
+        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
+          if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
           void deleteAndClose({ taskId: task.id, version: task.version })
         }}><Trash size={15} /></button> : null}
         <button className="icon-button" onClick={onBack} aria-label="Close task">

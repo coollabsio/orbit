@@ -975,12 +975,17 @@ textarea.input {
 }
 
 .pagination-size {
+  width: 48px;
+}
+
+.pagination-size .listbox-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
   height: 28px;
-  width: 48px;
+  border: 0;
+  background: transparent;
   padding: 0 4px;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -988,7 +993,7 @@ textarea.input {
   transition: color 0.15s;
 }
 
-.pagination-size:hover {
+.pagination-size .listbox-trigger:hover {
   color: var(--text-primary);
 }
 
@@ -1610,4 +1615,12 @@ textarea.input {
   border-radius: 3px;
   object-fit: contain;
   vertical-align: -4px;
+}
+
+/* Shared confirmation actions use the existing modal and button tokens. */
+.confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }

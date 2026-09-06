@@ -559,7 +559,43 @@ a.topbar-crumb:hover {
   }
 }
 
+.workspace-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  max-width: 100%;
+  padding: 8px;
+}
+
+.workspace-switcher,
+.workspace-switcher > div:first-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.workspace-switcher .app-sidebar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-switcher svg {
+  flex-shrink: 0;
+}
+
 @media (max-width: 899px) {
+  .mobile-drawer .app-sidebar-wordmark {
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .workspace-switcher .popover-option {
+    min-height: 44px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   .app-sidebar {
     display: none;
   }
@@ -575,6 +611,7 @@ a.topbar-crumb:hover {
   }
 
   .topbar[data-root='settings'] {
+    gap: 7px;
     height: 44px;
     min-height: 44px;
     padding: 6px 8px;
@@ -583,22 +620,34 @@ a.topbar-crumb:hover {
 
   .topbar[data-root='settings'] .topbar-crumbs {
     gap: 7px;
-    padding: 5px 7px;
+    padding: 5px 0;
   }
 
   .topbar[data-root='settings'] .topbar-crumb {
-    color: var(--text-heading);
+    color: var(--text-muted);
     font-size: 13px;
     font-weight: 600;
   }
 
-  .topbar[data-root='settings'] .topbar-drawer-button {
-    order: 1;
+  .topbar[data-root='settings'] .topbar-actions {
+    gap: 8px;
   }
 
-  .topbar[data-root='settings'] .topbar-actions {
-    order: 2;
-    gap: 8px;
+  .topbar[data-root='settings'] .icon-button {
+    width: auto;
+    height: 32px;
+    padding-inline: 10px;
+    color: var(--text-muted);
+  }
+
+  /* Keep the icon-to-title gap equal to the Tasks project trigger. */
+  .topbar[data-root='settings'] .topbar-drawer-button {
+    padding-inline: 7px 0;
+    border: 0;
+  }
+
+  .topbar[data-root='settings'] .icon-button:hover {
+    color: var(--text-primary);
   }
 
   .topbar-menu-button {

@@ -350,3 +350,32 @@
     display: none;
   }
 }
+
+/* Match the Tasks project heading's inset, icon gap, and muted label. */
+.settings-page-header {
+  gap: 7px;
+  padding-left: 19px;
+}
+
+.settings-page-header .product-pane-header-icon,
+.settings-page-header .pane-title {
+  color: var(--text-muted);
+}
+
+.settings-danger-zone {
+  border-color: var(--danger);
+}
+
+.settings-danger-zone .layer-card-heading h3 {
+  color: var(--danger);
+}
+
+.workspace-delete-warning {
+  margin-block: 12px;
+  font-size: 13px;
+}
+
+.modal .button-danger[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

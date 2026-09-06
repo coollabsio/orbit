@@ -1,3 +1,4 @@
+import { confirmAction } from '../../../components/ui/confirmAction'
 import { keepPreviousData, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { apiClient } from '../../../api/client'
@@ -192,8 +193,8 @@ export function useTaskTrash(workspaceId: string) {
   })
 }
 
-function promptForConflict(error: Error, refresh: () => void) {
-  if (isTaskVersionConflict(error) && window.confirm('This task changed on the server. Refresh it now?')) refresh()
+async function promptForConflict(error: Error, refresh: () => void) {
+  if (isTaskVersionConflict(error) && await confirmAction({ title: 'Refresh task?', description: 'This task changed on the server. Refresh it now?', confirmLabel: 'Refresh' })) refresh()
 }
 
 function optimisticTaskPatch(body: Omit<TaskUpdateBody, 'expected_version'>): Partial<TaskRecord> {
@@ -228,7 +229,7 @@ export function useUpdateTask(workspaceId: string) {
     },
     onError: (error, _input, snapshot) => {
       if (snapshot) restoreWorkspaceTasks(queryClient, snapshot)
-      promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
+      return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
     },
     onSuccess: (record) => reconcileWorkspaceTask(queryClient, workspaceId, record),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
@@ -262,7 +263,7 @@ export function useBulkTasks(workspaceId: string) {
     },
     onError: (error, _input, snapshot) => {
       if (snapshot) restoreWorkspaceTasks(queryClient, snapshot)
-      promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
+      return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
     },
     onSuccess: (page) => page.items.forEach((record) => reconcileWorkspaceTask(queryClient, workspaceId, record)),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
@@ -288,7 +289,7 @@ export function useReorderTasks(workspaceId: string) {
     },
     onError: (error, _input, snapshot) => {
       if (snapshot) restoreWorkspaceTasks(queryClient, snapshot)
-      promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
+      return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
     },
     onSuccess: (page) => page.items.forEach((record) => reconcileWorkspaceTask(queryClient, workspaceId, record)),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),

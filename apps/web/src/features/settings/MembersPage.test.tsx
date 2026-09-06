@@ -31,3 +31,32 @@ test('mounted member management excludes ordinary owner roles and exposes protec
   fireEvent.click(view.getByRole('button', { name: 'Manage' }))
   expect(view.getByRole('button', { name: 'Transfer ownership' })).toBeTruthy()
 })
+
+test('page size options escape the card and changing size resets pagination', () => {
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
+  client.setQueryData(queryKeys.currentUser, { id: 'member-0' })
+  client.setQueryData(queryKeys.members('pagination-workspace'), Array.from({ length: 30 }, (_, i) => member(`member-${i}`, 'Member')))
+  const workspace = { id: 'pagination-workspace', name: 'Orbit', role: 'member', version: 1 }
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider>
+  const view = render(<MembersPage />, { wrapper })
+
+  fireEvent.click(view.getByRole('button', { name: 'Next page' }))
+  expect(view.getByText('11-20 of 30')).toBeTruthy()
+  const trigger = view.getByRole('button', { name: 'Items per page' })
+  fireEvent.click(trigger)
+  const option = view.getByRole('option', { name: '25' })
+  expect(view.container.contains(option)).toBe(false)
+  expect(view.getAllByRole('option').map((item) => item.textContent)).toEqual(['10', '25', '50', '100'])
+  fireEvent.click(option)
+  expect(view.queryByRole('listbox')).toBeNull()
+  expect(trigger.textContent).toBe('25')
+  expect(view.getByText('1-25 of 30')).toBeTruthy()
+  expect(view.container.querySelectorAll('.data-table-row')).toHaveLength(25)
+
+  fireEvent.click(trigger)
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(view.queryByRole('listbox')).toBeNull()
+  fireEvent.click(trigger)
+  fireEvent.pointerDown(document.body)
+  expect(view.queryByRole('listbox')).toBeNull()
+})

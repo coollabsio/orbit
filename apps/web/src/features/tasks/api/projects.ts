@@ -1,3 +1,4 @@
+import { confirmAction } from '../../../components/ui/confirmAction'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../../../api/client'
 import { fetchAllPages } from '../../../api/pagination'
@@ -150,8 +151,8 @@ export function useRestoreProject(workspaceId: string) {
       const { data } = await restoreProject({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, body: { expected_version: version }, throwOnError: true })
       return required(data, 'Restore project response was empty.')
     },
-    onError: (error) => {
-      if (isTaskVersionConflict(error) && window.confirm('This project now conflicts with an active project key. Refresh trash?')) {
+    onError: async (error) => {
+      if (isTaskVersionConflict(error) && await confirmAction({ title: 'Refresh trash?', description: 'This project now conflicts with an active project key. Refresh trash?', confirmLabel: 'Refresh trash' })) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.projectTrash(workspaceId) })
       }
     },

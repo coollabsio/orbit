@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router'
-import { Notification, People, Setting2, ShieldTick, Trash } from 'reicon-react'
+import { Danger, People, Setting2, ShieldTick, Trash } from 'reicon-react'
 import '../shared/cards.css'
 import './settings.css'
 
@@ -23,8 +23,11 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
     label: 'Team',
     items: [
       { to: '/settings/members', label: 'Members', icon: People },
-      { to: '/settings/invitations', label: 'Invitations', icon: Notification },
     ],
+  },
+  {
+    label: 'Workspace',
+    items: [{ to: '/settings/danger-zone', label: 'Danger zone', icon: Danger }],
   },
 ]
 
@@ -32,7 +35,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
 export function SettingsLayout() {
   return (
     <div className="page">
-      <div className="pane" style={{ flex: 1 }}>
+      <div className="pane" style={{ flex: 1, position: 'relative' }}>
         <div className="pane-header product-pane-header settings-page-header">
           <Setting2 className="product-pane-header-icon" size={15} />
           <span className="pane-title">Settings</span>

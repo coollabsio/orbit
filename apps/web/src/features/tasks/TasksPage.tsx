@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Add, ChevronDown, Setting2, TaskSquare } from 'reicon-react'
+import { Add, ChevronDown, Menu, Setting2, TaskSquare } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useCurrentUser } from '../auth/api'
@@ -153,6 +153,9 @@ export function TasksPage() {
       ) : (
         <section className="pane tasks-list-pane">
           <div className="pane-header product-pane-header">
+            <button type="button" className="icon-button tasks-sidebar-button" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
+              <Menu size={18} />
+            </button>
             <Dropdown className="tasks-project-picker" trigger={(open) => (
               <button type="button" className="tasks-project-trigger" data-open={open || undefined}>
                 {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : <TaskSquare size={15} />}

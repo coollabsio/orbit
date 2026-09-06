@@ -7,6 +7,7 @@ import {
   changeMemberRole,
   createInvitation,
   createWorkspace,
+  deleteWorkspace,
   listInvitations,
   listMembers,
   listWorkspaces,
@@ -15,7 +16,7 @@ import {
   revokeInvitation,
   transferOwnership,
 } from '../../api/generated/sdk.gen'
-import type { AcceptBody, InvitationBody, MemberRecord, RoleBody } from '../../api/generated/types.gen'
+import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, WorkspaceRecord } from '../../api/generated/types.gen'
 import type { User } from '../tasks/api/models'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -215,5 +216,29 @@ export function useRevokeInvitation(workspaceId: string) {
       })
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.invitations(workspaceId) }),
+  })
+}
+
+export function useDeleteWorkspace(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (version: number) => {
+      await deleteWorkspace({
+        client: apiClient,
+        path: { workspace_id: workspaceId },
+        query: { expected_version: version },
+        throwOnError: true,
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.workspaces })
+      await queryClient.cancelQueries({ queryKey: queryKeys.workspace(workspaceId) })
+      queryClient.removeQueries({ queryKey: queryKeys.workspace(workspaceId) })
+      queryClient.setQueryData<WorkspaceRecord[]>(queryKeys.workspaces, (items) =>
+        items?.filter((item) => item.id !== workspaceId))
+      if (window.localStorage.getItem('orbit:selected_workspace') === workspaceId) {
+        window.localStorage.removeItem('orbit:selected_workspace')
+      }
+    },
   })
 }

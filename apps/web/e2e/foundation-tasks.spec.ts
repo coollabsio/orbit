@@ -62,6 +62,8 @@ async function createWorkspaceAndInviteMember(page: Page, browser: Browser) {
   await newTab.close()
 
   await page.goto('/settings')
+  await page.getByRole('button', { name: 'Workspace: Foundation' }).click()
+  await page.getByRole('button', { name: 'Create workspace' }).click()
   await page.getByLabel('New workspace').fill('Second workspace')
   await page.getByRole('button', { name: 'Create workspace' }).click()
   await expect(page.getByRole('button', { name: 'Workspace: Second workspace' })).toBeVisible()
