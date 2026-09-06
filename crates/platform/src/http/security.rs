@@ -84,7 +84,8 @@ impl OriginPolicy {
         if matches!(
             *method,
             Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
-        ) {
+        ) && !headers.contains_key(axum::http::header::UPGRADE)
+        {
             return true;
         }
 

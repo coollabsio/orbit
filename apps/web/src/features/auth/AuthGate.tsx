@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, Outlet, useNavigate } from 'react-router'
 import { ApiProblem } from '../../api/problem'
 import { useAcceptInvitation } from '../workspaces/api'
-import { authGateState, recoveryRequestCopy } from './authState'
+import { authGateState, initialLoginValues, recoveryRequestCopy } from './authState'
 import {
   useCompleteRecovery,
   useCompleteSetup,
@@ -58,8 +58,8 @@ export function SetupPage() {
 export function LoginPage() {
   const navigate = useNavigate()
   const mutation = useLogin()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState(() => initialLoginValues(import.meta.env.DEV).email)
+  const [password, setPassword] = useState(() => initialLoginValues(import.meta.env.DEV).password)
   return (
     <AuthForm title="Sign in to Orbit" error={mutation.error} pending={mutation.isPending} submitLabel="Sign in" onSubmit={async () => {
       await mutation.mutateAsync({ email, password })

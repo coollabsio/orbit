@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { authGateState, recoveryRequestCopy } from './authState'
+import { authGateState, initialLoginValues, recoveryRequestCopy } from './authState'
+
+test('login prefills seeded credentials only in development', () => {
+  expect(initialLoginValues(true)).toEqual({ email: 'test@example.com', password: 'password' })
+  expect(initialLoginValues(false)).toEqual({ email: '', password: '' })
+})
 
 describe('AuthGate state', () => {
   test('sends an uninitialized installation to setup', () => {

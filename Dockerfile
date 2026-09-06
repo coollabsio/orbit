@@ -34,6 +34,6 @@ COPY --from=runtime-files --chown=65532:65532 /etc/orbit /etc/orbit
 COPY --from=server /src/target/release/orbit /orbit
 USER 65532:65532
 VOLUME ["/var/lib/orbit", "/var/backups/orbit", "/etc/orbit"]
-EXPOSE 8080 2525
+EXPOSE 8080
 ENTRYPOINT ["/orbit", "--config", "/etc/orbit/orbit.toml"]
 CMD ["serve"]

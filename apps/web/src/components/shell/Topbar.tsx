@@ -2,7 +2,6 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { Add, Menu, Moon, SearchNormal, Setting2, Sun } from 'reicon-react'
 import { useTheme } from '../../lib/themeContext'
 import { useAppState } from '../../mock/store'
-import { createDoc } from '../../mock/actions'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '../../features/tasks/api/projects'
 import { taskFromRecord, type Project, type Task, type TaskStatusDef } from '../../features/tasks/api/models'
@@ -121,9 +120,10 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
   return (
     <header className="topbar" data-root={routeRoot}>
       <button className="icon-button topbar-menu-button topbar-drawer-button" onClick={onOpenDrawer} aria-label="Menu">
-        <Menu size={18} />
+        <Menu size={routeRoot === 'settings' ? 15 : 18} />
       </button>
       <nav className="topbar-crumbs">
+        {routeRoot === 'settings' ? <Setting2 className="product-pane-header-icon" size={15} /> : null}
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1
           return (
@@ -176,34 +176,9 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
               >
                 Task
               </button>
-              <button
-                className="popover-option"
-                onClick={() => {
-                  close()
-                  const doc = createDoc(null)
-                  navigate(`/docs/${doc.id}`)
-                }}
-              >
-                Document
-              </button>
-              <button
-                className="popover-option"
-                onClick={() => {
-                  close()
-                  navigate('/mail?compose=1')
-                }}
-              >
-                Email
-              </button>
-              <button
-                className="popover-option"
-                onClick={() => {
-                  close()
-                  navigate('/chat')
-                }}
-              >
-                Chat message
-              </button>
+              <button className="popover-option" disabled>Document</button>
+              <button className="popover-option" disabled>Email</button>
+              <button className="popover-option" disabled>Chat message</button>
             </>
           )}
         </Dropdown> : null}

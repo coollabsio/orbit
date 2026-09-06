@@ -490,6 +490,22 @@ a.topbar-crumb:hover {
   color: var(--accent);
 }
 
+.mobile-dock-item:disabled {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: inherit;
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.mobile-dock-soon {
+  font-size: 8px;
+  line-height: 1;
+}
+
 .mobile-dock-badge {
   position: absolute;
   top: 6px;
@@ -556,6 +572,33 @@ a.topbar-crumb:hover {
     display: flex;
     height: 48px;
     padding: 0 8px;
+  }
+
+  .topbar[data-root='settings'] {
+    height: 44px;
+    min-height: 44px;
+    padding: 6px 8px;
+    border-bottom-color: var(--line);
+  }
+
+  .topbar[data-root='settings'] .topbar-crumbs {
+    gap: 7px;
+    padding: 5px 7px;
+  }
+
+  .topbar[data-root='settings'] .topbar-crumb {
+    color: var(--text-heading);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .topbar[data-root='settings'] .topbar-drawer-button {
+    order: 1;
+  }
+
+  .topbar[data-root='settings'] .topbar-actions {
+    order: 2;
+    gap: 8px;
   }
 
   .topbar-menu-button {
@@ -713,4 +756,18 @@ a.topbar-crumb:hover {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+.connection-status {
+  position: fixed;
+  bottom: 64px;
+  right: 12px;
+  z-index: 50;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--canvas);
+  color: var(--text-secondary);
+  font-size: 12px;
+  pointer-events: none;
 }

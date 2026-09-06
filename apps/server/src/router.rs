@@ -32,7 +32,9 @@ pub fn production_router(
     require_secure_transport: bool,
 ) -> Router {
     let csp_script_hash = assets.csp_script_hash().to_owned();
+    let realtime = crate::realtime::router(api.tasks.clone());
     auth_router(api.auth)
+        .merge(realtime)
         .merge(workspace_router(api.workspaces))
         .merge(task_router(api.tasks))
         .merge(attachment_router(api.attachments))

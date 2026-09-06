@@ -16,7 +16,7 @@ The source design is [`2026-09-03-backend-platform-design.md`](superpowers/specs
 
 ## Deferred by the approved design
 
-- D-050 to D-052: WebSocket outbox, replay, resync, presence, and typing transport.
+- D-052: presence and typing. Task invalidations now use authenticated WebSockets and a durable workspace outbox; see [deployment and collaboration](../deploy/README.md#live-task-collaboration).
 - D-053: outbound provider delivery. Milestone one keeps manual invitation and administrator-issued recovery links.
 - D-054 to D-056: inbound SMTP, public-MX and relay modes, domains, and mailboxes.
 - Persistent Docs, Mail, Chat, DMs, Inbox, Profile, and Home data.

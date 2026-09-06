@@ -1,0 +1,39 @@
+# Copy to config/orbit.toml and set the public HTTPS origin before first start.
+environment = "production"
+
+[http]
+# 0.0.0.0 works for containers and Tailscale interfaces. Firewall the port.
+bind = "0.0.0.0"
+port = 8080
+public_origin = "https://orbit.example.com"
+# Trust only the local reverse proxy or the exact proxy network you operate.
+trusted_proxies = ["127.0.0.1/32", "::1/128"]
+
+[data]
+# Keep the database, attachment directory, and backup directory separate.
+database = "/var/lib/orbit/orbit.sqlite"
+attachments = "/var/lib/orbit/attachments"
+# Backups must be outside the live attachment directory.
+backups = "/var/backups/orbit"
+
+[jobs]
+concurrency = 4
+
+[uploads]
+max_file_bytes = 26214400
+max_request_bytes = 104857600
+
+[rate_limits]
+# Each value must be in 1..=1000000. IPv6 clients are grouped by /64.
+authentication_per_minute = 30
+recovery_per_minute = 10
+invitation_per_minute = 60
+upload_per_minute = 120
+general_per_minute = 600
+
+# Metrics are disabled unless a private listener is configured.
+[metrics]
+# listen = "127.0.0.1:9090"
+
+# Milestone one uses administrator-shared invitation and recovery links.
+# Outbound and inbound SMTP are intentionally not configured yet.

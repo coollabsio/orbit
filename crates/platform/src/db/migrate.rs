@@ -137,6 +137,11 @@ impl MigrationRunner {
                 Migration::new(8, TASK_INTEGRITY_SCHEMA, false),
                 Migration::new(9, ATTACHMENT_INTEGRITY_SCHEMA, false),
                 Migration::new(10, TASK_DUE_DATE_SCHEMA, false),
+                Migration::new(
+                    11,
+                    include_str!("../../../../apps/server/migrations/0011_realtime.sql"),
+                    false,
+                ),
             ],
         )
     }

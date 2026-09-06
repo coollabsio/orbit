@@ -344,3 +344,9 @@
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+@media (max-width: 899px) {
+  .settings-page-header {
+    display: none;
+  }
+}

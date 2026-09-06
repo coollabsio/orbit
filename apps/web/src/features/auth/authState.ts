@@ -10,6 +10,12 @@ interface AuthGateInput {
 
 export type AuthGateState = 'loading' | 'setup' | 'login' | 'authenticated'
 
+export function initialLoginValues(development: boolean) {
+  return development
+    ? { email: 'test@example.com', password: 'password' }
+    : { email: '', password: '' }
+}
+
 export const recoveryRequestCopy = {
   title: 'Contact your administrator',
   detail: 'Your installation administrator can create a one-time password recovery link for you.',

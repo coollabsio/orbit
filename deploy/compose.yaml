@@ -1,0 +1,43 @@
+services:
+  orbit:
+    build:
+      context: ..
+    image: ${ORBIT_IMAGE:-orbit:local}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:size=64m,mode=1777]
+    stop_grace_period: 40s
+    environment:
+      ORBIT__ENVIRONMENT: production
+      ORBIT__HTTP__PUBLIC_ORIGIN: https://${ORBIT_DOMAIN:?Set ORBIT_DOMAIN in deploy/.env}
+      ORBIT__HTTP__TRUSTED_PROXIES: 172.30.0.2/32
+    volumes:
+      - ./orbit.toml:/etc/orbit/orbit.toml:ro
+      - orbit-data:/var/lib/orbit
+      - orbit-backups:/var/backups/orbit
+    networks: [backend]
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      ORBIT_DOMAIN: ${ORBIT_DOMAIN:?Set ORBIT_DOMAIN in deploy/.env}
+    ports: ['80:80', '443:443']
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      backend:
+        ipv4_address: 172.30.0.2
+networks:
+  backend:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+volumes:
+  orbit-data:
+  orbit-backups:
+  caddy-data:
+  caddy-config:

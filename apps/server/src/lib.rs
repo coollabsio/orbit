@@ -9,3 +9,5 @@ pub mod router;
 pub mod static_assets;
 pub mod task_routes;
 pub mod workspace_routes;
+
+pub mod realtime;

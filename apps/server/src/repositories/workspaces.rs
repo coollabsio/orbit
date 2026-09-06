@@ -1724,6 +1724,10 @@ impl WorkspaceRepository {
                 .await?
                 .rows_affected();
         }
+        sqlx::query("DELETE FROM outbox_events WHERE created_at < ?")
+            .bind(now.as_millis() - 7 * 24 * 60 * 60 * 1000)
+            .execute(&mut *transaction)
+            .await?;
         let audit_events_purged = sqlx::query("DELETE FROM audit_events WHERE occurred_at < ?")
             .bind(now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS))
             .execute(&mut *transaction)

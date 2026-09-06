@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router'
-import { ChevronDown, Setting2, SidebarLeft, TaskSquare } from 'reicon-react'
+import { useWorkspaceEvents } from '../../features/realtime/useWorkspaceEvents'
+import { Outlet } from 'react-router'
+import { ChevronDown, SidebarLeft } from 'reicon-react'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { Dropdown } from '../ui/Dropdown'
 import { CommandPalette } from './CommandPalette'
@@ -8,14 +9,11 @@ import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import './shell.css'
-import { mobileDockPaths } from './productNavigation'
-
-const DOCK_LINKS = mobileDockPaths.map((to) => to === '/tasks'
-  ? { to, label: 'Tasks', icon: TaskSquare }
-  : { to, label: 'Settings', icon: Setting2 })
+import { MobileDock } from './MobileDock'
 
 export function AppShell() {
   const { workspace, workspaces, selectWorkspace } = useWorkspace()
+  const live = useWorkspaceEvents(workspace.id)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('orbit:sidebar_collapsed') === 'true')
@@ -42,6 +40,7 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
+      {!live ? <div className="connection-status" role="status">Connecting to live updates…</div> : null}
       <aside className="app-sidebar" data-collapsed={sidebarCollapsed || undefined}>
         <div className="app-sidebar-brand">
           <Dropdown trigger={() => <button className="app-sidebar-wordmark" aria-label={`Workspace: ${workspace.name}`}>
@@ -71,18 +70,7 @@ export function AppShell() {
         <div className="app-content">
           <Outlet />
         </div>
-        <nav className="mobile-dock">
-          {DOCK_LINKS.map((link) => (
-            <NavLink key={link.to} to={link.to}>
-              {({ isActive }) => (
-                <span className="mobile-dock-item" data-active={isActive}>
-                  <link.icon size={20} />
-                  {link.label}
-                </span>
-              )}
-            </NavLink>
-          ))}
-        </nav>
+        <MobileDock />
       </div>
 
       {drawerOpen ? (

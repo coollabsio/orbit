@@ -1,0 +1,3 @@
+{$ORBIT_DOMAIN} {
+    reverse_proxy orbit:8080
+}

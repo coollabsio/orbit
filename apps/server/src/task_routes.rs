@@ -22,9 +22,9 @@ use crate::repositories::tasks::{
 
 #[derive(Clone)]
 pub struct TaskState {
-    identity: Arc<IdentityRepository>,
+    pub(crate) identity: Arc<IdentityRepository>,
     tasks: Arc<TaskRepository>,
-    cookie_mode: CookieMode,
+    pub(crate) cookie_mode: CookieMode,
 }
 
 impl TaskState {

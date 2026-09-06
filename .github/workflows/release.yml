@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   binary:
@@ -27,6 +28,15 @@ jobs:
       - run: just e2e
       - run: docker build --build-arg ORBIT_BUILD_REVISION=${{ github.sha }} -t orbit:release .
       - run: docker run --rm orbit:release --help
+      - run: bash deploy/smoke.sh orbit:release
+      - name: Publish tested image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag orbit:release "$image:$GITHUB_REF_NAME"
+          docker push "$image:$GITHUB_REF_NAME"
       - name: Extract static binary
         run: |
           container=$(docker create orbit:release)

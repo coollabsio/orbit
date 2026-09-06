@@ -725,3 +725,26 @@ async fn production_transport_ignores_absolute_https_targets_from_cleartext_peer
         StatusCode::NO_CONTENT
     );
 }
+
+#[tokio::test]
+async fn websocket_upgrade_requires_an_allowed_origin_even_for_get() {
+    let app = test_app(OriginPolicy::new("https://orbit.example.com"));
+    for (origin, expected) in [
+        (None, StatusCode::FORBIDDEN),
+        (Some("https://evil.example"), StatusCode::FORBIDDEN),
+        (Some("https://orbit.example.com"), StatusCode::OK),
+    ] {
+        let mut request = Request::get("/probe").header("upgrade", "websocket");
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        assert_eq!(
+            app.clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status(),
+            expected
+        );
+    }
+}
