@@ -207,24 +207,24 @@
   gap: 6px;
 }
 
-.app-sidebar[data-collapsed='true'] .app-sidebar-footer > .spacer {
-  display: none;
+/* Sidebar profile */
+.user-menu {
+  min-width: 0;
+  flex: 1;
 }
 
-/* Coolify x-top-user-menu (sidebar): h-8 rounded-full border bg-white/6 px-2 gap-1.5 max-w-36 */
-.user-menu {
-  position: relative;
-  min-width: 0;
+.app-sidebar-footer .user-menu > div:first-child {
+  width: 100%;
 }
 
 .user-menu-trigger {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  max-width: 144px;
-  padding: 0 8px;
-  border-radius: 9999px;
+  min-height: 48px;
+  width: 100%;
+  padding: 6px;
+  border-radius: 8px;
   border: 1px solid var(--button-border);
   background: var(--button-bg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -258,6 +258,22 @@
   color: var(--text-primary);
 }
 
+.user-menu-identity {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
+}
+
+.user-menu-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .user-menu-name {
   min-width: 0;
   overflow: hidden;
@@ -280,17 +296,19 @@
   transform: rotate(180deg);
 }
 
-/* panel: bottom-full left-0 mb-1 w-52 */
 .user-menu-panel {
-  top: auto;
-  bottom: calc(100% + 4px);
-  left: 0;
-  z-index: 90;
-  width: 208px;
-  min-width: 0;
-  max-height: none;
-  overflow: visible;
-  transform-origin: bottom left;
+  width: 220px;
+  max-width: calc(100vw - 32px);
+}
+
+.user-menu-panel .listbox-option {
+  min-height: 44px;
+}
+
+.user-menu-error {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--danger);
 }
 
 .user-menu-header {

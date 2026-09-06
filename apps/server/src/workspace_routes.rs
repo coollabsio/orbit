@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::extract::{Extension, FromRequest, FromRequestParts, Path, Query, Request, State};
-use axum::http::header::{CONTENT_TYPE, COOKIE, RETRY_AFTER};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, RETRY_AFTER};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -77,6 +77,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             get(list_workspaces).post(create_workspace),
         )
         .route("/api/v1/workspaces/trash", get(list_trash))
+        .route(
+            "/api/v1/workspaces/invitations/preview",
+            post(preview_invitation),
+        )
         .route(
             "/api/v1/workspaces/invitations/accept",
             post(accept_invitation),
@@ -562,6 +566,40 @@ async fn revoke_invitation(
         .await
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct PreviewInvitationBody {
+    token: String,
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/invitations/preview", request_body = PreviewInvitationBody, responses((status = 200, body = crate::repositories::workspaces::InvitationPreview)))]
+async fn preview_invitation(
+    State(state): State<WorkspaceState>,
+    request_id: Option<Extension<RequestId>>,
+    body: Result<ApiJson<PreviewInvitationBody>, ApiError>,
+) -> Response {
+    let result = match body {
+        Ok(ApiJson(body)) => state
+            .workspaces
+            .preview_invitation(&body.token, TimestampMillis::now())
+            .await
+            .map(Json)
+            .map_err(|error| {
+                workspace_problem(
+                    error,
+                    "/api/v1/workspaces/invitations/preview",
+                    request_id.as_ref(),
+                )
+            }),
+        Err(error) => Err(error),
+    };
+    let mut response = result.into_response();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 #[derive(Deserialize, ToSchema)]

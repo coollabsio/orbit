@@ -14,6 +14,132 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn invitation_preview_is_public_read_only_and_rejects_inactive_tokens() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let setup = setup_owner(&identity).await;
+    let owner_cookie = format!("__Host-orbit_session={}", setup.1);
+    let app = workspace_router(WorkspaceState::new(
+        Arc::clone(&identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ))
+    .layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    let path = "/api/v1/workspaces/invitations/preview";
+
+    for state in [
+        "pending",
+        "existing_account",
+        "expired",
+        "accepted_at",
+        "revoked_at",
+        "replaced_at",
+    ] {
+        let email = format!("{state}@example.com");
+        if state == "existing_account" {
+            create_user(&database, &identity, &email, "Existing").await;
+        }
+        let invitation = app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/invitations", setup.0),
+                &owner_cookie,
+                json!({"email": email, "role": "member", "delivery": "manual"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(invitation.status(), StatusCode::CREATED);
+        let invitation = response_json(invitation).await;
+        let id = invitation["invitation"]["id"].as_str().unwrap();
+        let token = invitation["url"]
+            .as_str()
+            .unwrap()
+            .split("token=")
+            .nth(1)
+            .unwrap();
+        if state == "expired" {
+            sqlx::query("UPDATE workspace_invitations SET expires_at = 0 WHERE id = ?")
+                .bind(id)
+                .execute(database.pool())
+                .await
+                .unwrap();
+        } else if state.ends_with("_at") {
+            sqlx::query(&format!(
+                "UPDATE workspace_invitations SET {state} = 1 WHERE id = ?"
+            ))
+            .bind(id)
+            .execute(database.pool())
+            .await
+            .unwrap();
+        }
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(json_request_without_cookie(
+                    "POST",
+                    path,
+                    json!({"token": token}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.headers().get(header::CACHE_CONTROL).unwrap(),
+                "no-store"
+            );
+            if state == "pending" || state == "existing_account" {
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(
+                    response_json(response).await,
+                    json!({"email": email, "workspace_name": "Orbit"})
+                );
+            } else {
+                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+                assert_eq!(
+                    response_json(response).await["code"],
+                    "invitation_not_found"
+                );
+            }
+        }
+        if state == "pending" {
+            let user = create_user(&database, &identity, &email, "Invited").await;
+            WorkspaceRepository::new((*database).clone())
+                .accept_invitation(
+                    token,
+                    user.0,
+                    &email,
+                    "after-preview",
+                    TimestampMillis::now(),
+                )
+                .await
+                .unwrap();
+        }
+    }
+    for token in ["unknown", ""] {
+        let response = app
+            .clone()
+            .oneshot(json_request_without_cookie(
+                "POST",
+                path,
+                json!({"token": token}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        assert_eq!(
+            response_json(response).await["code"],
+            "invitation_not_found"
+        );
+    }
+}
+
+#[tokio::test]
 async fn workspace_memberships_invitations_and_audit_are_path_scoped() {
     let database = TestDatabase::new().await.unwrap();
     let identity = Arc::new(IdentityRepository::new((*database).clone()));

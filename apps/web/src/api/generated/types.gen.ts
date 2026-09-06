@@ -160,6 +160,11 @@ export type InvitationBody = {
     role: RoleBody;
 };
 
+export type InvitationPreview = {
+    email: string;
+    workspace_name: string;
+};
+
 export type InvitationRecord = {
     created_at: string;
     delivery: string;
@@ -334,6 +339,10 @@ export type PageTaskRecord = {
         workspace_id: string;
     }>;
     next_cursor?: string | null;
+};
+
+export type PreviewInvitationBody = {
+    token: string;
 };
 
 /**
@@ -1362,6 +1371,58 @@ export type AcceptInvitationResponses = {
 };
 
 export type AcceptInvitationResponse = AcceptInvitationResponses[keyof AcceptInvitationResponses];
+
+export type PreviewInvitationData = {
+    body: PreviewInvitationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/workspaces/invitations/preview';
+};
+
+export type PreviewInvitationErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * invitation_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type PreviewInvitationError = PreviewInvitationErrors[keyof PreviewInvitationErrors];
+
+export type PreviewInvitationResponses = {
+    200: InvitationPreview;
+};
+
+export type PreviewInvitationResponse = PreviewInvitationResponses[keyof PreviewInvitationResponses];
 
 export type ListTrashData = {
     body?: never;

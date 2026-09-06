@@ -4,6 +4,7 @@ import { fetchAllPages } from '../../api/pagination'
 import { queryKeys } from '../../api/queryKeys'
 import {
   acceptInvitation,
+  previewInvitation,
   changeMemberRole,
   createInvitation,
   createWorkspace,
@@ -194,6 +195,19 @@ export function useRenameWorkspace(workspaceId: string) {
   })
 }
 
+export function useInvitationPreview(token: string | null) {
+  return useQuery({
+    queryKey: ['invitation-preview', token],
+    enabled: !!token,
+    retry: false,
+    gcTime: 0,
+    queryFn: async () => {
+      const { data } = await previewInvitation({ client: apiClient, body: { token: token! }, throwOnError: true })
+      return required(data, 'Invitation preview response was empty.')
+    },
+  })
+}
+
 export function useAcceptInvitation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -201,7 +215,12 @@ export function useAcceptInvitation() {
       const { data } = await acceptInvitation({ client: apiClient, body, throwOnError: true })
       return required(data, 'Invitation acceptance response was empty.')
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.currentUser }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workspaces }),
+      ])
+    },
   })
 }
 

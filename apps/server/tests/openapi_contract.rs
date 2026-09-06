@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 48);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 49);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,11 +40,12 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 66);
+    assert_eq!(operation_count, 67);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
         "/api/v1/workspaces",
+        "/api/v1/workspaces/invitations/preview",
         "/api/v1/workspaces/{workspace_id}/tasks",
         "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity",
         "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments",
@@ -56,6 +57,21 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
             ["content"]["application/problem+json"]["schema"]["$ref"],
         "#/components/schemas/TaskProblem"
     );
+
+    let preview = operation(&document, "/api/v1/workspaces/invitations/preview", "post");
+    assert_eq!(preview["operationId"], "preview_invitation");
+    assert_eq!(preview["security"], serde_json::json!([{}]));
+    assert_eq!(
+        preview["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/InvitationPreview"
+    );
+    assert!(
+        preview["responses"]["404"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("invitation_not_found")
+    );
+    assert!(preview["responses"].get("401").is_none());
 
     let tasks = operation(&document, "/api/v1/workspaces/{workspace_id}/tasks", "get");
     assert_eq!(

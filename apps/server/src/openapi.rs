@@ -40,6 +40,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::list_invitations,
         crate::workspace_routes::revoke_invitation,
         crate::workspace_routes::accept_invitation,
+        crate::workspace_routes::preview_invitation,
         crate::workspace_routes::delete_workspace,
         crate::workspace_routes::restore_workspace,
         crate::workspace_routes::list_trash,
@@ -173,7 +174,12 @@ fn problem_schema(route: &str) -> &'static str {
 fn public_operation(operation_id: &str) -> bool {
     matches!(
         operation_id,
-        "setup_status" | "setup_complete" | "login" | "recovery_request" | "recovery_complete"
+        "setup_status"
+            | "setup_complete"
+            | "login"
+            | "recovery_request"
+            | "recovery_complete"
+            | "preview_invitation"
     )
 }
 
@@ -208,6 +214,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "invalid_password");
         }
         "revoke_session" => add_code(&mut responses, "404", "session_not_found"),
+        "preview_invitation" => add_code(&mut responses, "404", "invitation_not_found"),
         "accept_invitation" => {
             add_code(&mut responses, "403", "invitation_email_mismatch");
             add_code(&mut responses, "404", "invitation_not_found");
@@ -309,6 +316,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_invitation"
             | "list_invitations"
             | "accept_invitation"
+            | "preview_invitation"
             | "delete_workspace"
             | "restore_workspace"
             | "list_audit"

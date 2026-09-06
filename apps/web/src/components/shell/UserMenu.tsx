@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Logout, Profile, Setting } from 'reicon-react'
+import { Logout, Setting } from 'reicon-react'
 import { useTheme, type Theme } from '../../lib/themeContext'
+import { Dropdown } from '../ui/Dropdown'
 import { useCurrentUser, useLogout } from '../../features/auth/api'
 
 const THEMES: { value: Theme; label: string }[] = [
@@ -31,69 +32,45 @@ function Check() {
   )
 }
 
-/** Coolify `x-top-user-menu sidebar`: account pill that opens upward with Profile, Appearance, Log out. */
+/** Signed-in profile and account actions shared by both sidebars. */
 export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const user = useCurrentUser()
   const logout = useLogout()
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
   const me = user.data
-  const [open, setOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
 
   const userName = me?.display_name ?? 'Account'
   const initial = (me?.display_name || me?.email || 'A').charAt(0).toUpperCase()
 
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
-
-  const toggle = () => {
-    setAppearanceOpen(false)
-    setOpen((o) => !o)
-  }
-
   return (
-    <div ref={rootRef} className="user-menu">
+    <Dropdown className="user-menu" direction="up" trigger={(open) => (
       <button
         type="button"
         className="user-menu-trigger"
         title={userName}
         aria-label={`Account menu for ${userName}`}
         aria-expanded={open}
-        onClick={toggle}
+        onClick={() => setAppearanceOpen(false)}
       >
         <span className="user-menu-avatar">{initial}</span>
-        {!collapsed ? <span className="user-menu-name">{userName}</span> : null}
+        {!collapsed ? (
+          <span className="user-menu-identity">
+            <span className="user-menu-name">{userName}</span>
+            <span className="user-menu-email">{me?.email}</span>
+          </span>
+        ) : null}
         {!collapsed ? <Chevron open={open} /> : null}
       </button>
-
-      {open ? (
-        <div className="listbox-panel user-menu-panel">
+    )}>
+      {(close) => (
+        <div className="user-menu-panel">
           <div className="user-menu-header">
             <div className="user-menu-header-name">{userName}</div>
             <div className="user-menu-header-email">{me?.email}</div>
           </div>
           <div className="listbox-separator" />
-          <button type="button" className="listbox-option" disabled title="Profile — Coming soon">
-            <span className="user-menu-option-label">
-              <Profile size={16} style={{ opacity: 0.8 }} />
-              Profile · Coming soon
-            </span>
-          </button>
           <button
             type="button"
             className="listbox-option"
@@ -115,7 +92,7 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
                   className="user-menu-sub-option"
                   onClick={() => {
                     setTheme(option.value)
-                    setOpen(false)
+                    close()
                   }}
                 >
                   <span>{option.label}</span>
@@ -130,15 +107,16 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             className="listbox-option"
             data-tone="danger"
             disabled={logout.isPending}
-            onClick={() => void logout.mutateAsync().then(() => navigate('/login', { replace: true }))}
+            onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/login', { replace: true }) })}
           >
             <span className="user-menu-option-label">
               <Logout size={16} style={{ opacity: 0.9 }} />
-              Log out
+              {logout.isPending ? 'Logging out…' : 'Log out'}
             </span>
           </button>
+          {logout.isError ? <p className="user-menu-error" role="alert">Could not log out. Please try again.</p> : null}
         </div>
-      ) : null}
-    </div>
+      )}
+    </Dropdown>
   )
 }

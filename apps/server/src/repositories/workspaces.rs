@@ -79,6 +79,12 @@ pub struct InvitationRecord {
     pub created_at: TimestampMillis,
 }
 
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct InvitationPreview {
+    pub email: String,
+    pub workspace_name: String,
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct IssuedInvitation {
     pub invitation: InvitationRecord,
@@ -915,6 +921,30 @@ impl WorkspaceRepository {
                 idle_expires_at,
                 absolute_expires_at,
             },
+        })
+    }
+
+    pub async fn preview_invitation(
+        &self,
+        token: &str,
+        now: TimestampMillis,
+    ) -> Result<InvitationPreview, WorkspaceError> {
+        let row = sqlx::query(
+            "SELECT invitations.email, workspaces.name AS workspace_name \
+             FROM workspace_invitations AS invitations \
+             JOIN workspaces ON workspaces.id = invitations.workspace_id \
+             WHERE invitations.token_hash = ? AND invitations.expires_at > ? \
+             AND invitations.accepted_at IS NULL AND invitations.revoked_at IS NULL \
+             AND invitations.replaced_at IS NULL AND workspaces.deleted_at IS NULL",
+        )
+        .bind(token_hash(token).to_vec())
+        .bind(now.as_millis())
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(WorkspaceError::InvalidInvitation)?;
+        Ok(InvitationPreview {
+            email: row.get("email"),
+            workspace_name: row.get("workspace_name"),
         })
     }
 

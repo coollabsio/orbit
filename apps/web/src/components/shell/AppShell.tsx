@@ -58,7 +58,6 @@ export function AppShell() {
         <SidebarNav collapsed={sidebarCollapsed} />
         <div className="app-sidebar-footer">
           <UserMenu collapsed={sidebarCollapsed} />
-          <span className="spacer" />
           <button
             type="button"
             className="icon-button app-sidebar-collapse"
@@ -86,6 +85,9 @@ export function AppShell() {
               <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
             </div>
             <SidebarNav onNavigate={() => setDrawerOpen(false)} />
+            <div className="app-sidebar-footer">
+              <UserMenu />
+            </div>
           </aside>
         </>
       ) : null}
