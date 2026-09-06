@@ -19,10 +19,26 @@ export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('orbit:sidebar_collapsed') === 'true')
 
   useLayoutEffect(() => {
-    // Safari can retain the document pan from the login keyboard after navigation.
-    // The app scrolls within panes, so its outer document must start at the top.
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-    document.body.scrollTop = 0
+    const viewport = window.visualViewport
+    const resetDocumentScroll = () => {
+      // The shell scrolls inside panes. Safari can also pan the outer document
+      // when any input opens the keyboard, even after the shell has mounted.
+      // Leave panning alone while the user is pinch-zoomed.
+      if (viewport && viewport.scale > 1) return
+      if (window.scrollX || window.scrollY || document.body.scrollTop || viewport?.offsetTop) {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+        document.body.scrollTop = 0
+      }
+    }
+    resetDocumentScroll()
+    window.addEventListener('scroll', resetDocumentScroll)
+    viewport?.addEventListener('resize', resetDocumentScroll)
+    viewport?.addEventListener('scroll', resetDocumentScroll)
+    return () => {
+      window.removeEventListener('scroll', resetDocumentScroll)
+      viewport?.removeEventListener('resize', resetDocumentScroll)
+      viewport?.removeEventListener('scroll', resetDocumentScroll)
+    }
   }, [])
 
   useEffect(() => {

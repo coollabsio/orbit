@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Paperclip2, Xmark } from 'reicon-react'
 import type { User } from '../api/models'
 
-export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; members?: User[]; onSend: (body: string, files: File[], mentionedUserIds: string[]) => Promise<unknown> }) {
+export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], compact, onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; members?: User[]; compact?: boolean; onSend: (body: string, files: File[], mentionedUserIds: string[]) => Promise<unknown> }) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([])
@@ -27,7 +27,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
     setMentionedUserIds((current) => current.includes(member.id) ? current : [...current, member.id])
   }
   return (
-    <div className="tasks-native-composer" onDrop={(event) => { event.preventDefault(); setFiles((current) => [...current, ...event.dataTransfer.files]) }} onDragOver={(event) => event.preventDefault()}>
+    <div className="tasks-native-composer" data-compact={compact || undefined} onDrop={(event) => { event.preventDefault(); setFiles((current) => [...current, ...event.dataTransfer.files]) }} onDragOver={(event) => event.preventDefault()}>
       {suggestions.length > 0 ? (
         <div className="tasks-mention-list" role="listbox" aria-label="Mention member">
           {suggestions.map((member) => (
@@ -37,7 +37,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
           ))}
         </div>
       ) : null}
-      <textarea className="input" rows={2} value={body} placeholder={placeholder} onChange={(event) => setBody(event.target.value)} onPaste={(event) => {
+      <textarea className="input" rows={compact ? 1 : 2} value={body} placeholder={placeholder} onChange={(event) => setBody(event.target.value)} onPaste={(event) => {
         const pasted = Array.from(event.clipboardData.files)
         if (pasted.length > 0) setFiles((current) => [...current, ...pasted])
       }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} />

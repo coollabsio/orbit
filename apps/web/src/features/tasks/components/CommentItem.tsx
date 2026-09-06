@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Edit, Trash } from 'reicon-react'
+import { Avatar } from '../../../components/ui/Avatar'
 import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
 import { Attachments } from '../../chat/components/Attachments'
 import type { MentionToken } from '../../chat/chatLib'
@@ -17,12 +18,11 @@ interface CommentItemProps {
   reply?: boolean
 }
 
-/** A task comment rendered like a chat message: markdown, attachments, hover toolbar with edit/delete. */
+/** A task comment with author, timestamp, body, and a compact hover action row. */
 export function CommentItem({ state, taskId, comment, mentionTokens, reply }: CommentItemProps) {
   const { workspace } = useWorkspace()
   const updateComment = useUpdateTaskComment(workspace.id, taskId)
   const deleteComment = useDeleteTaskComment(workspace.id, taskId)
-  const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -38,66 +38,53 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
 
   return (
     <>
-      <div
-        className="fc-msg tasks-comment"
-        data-full="true"
-        data-reply={reply || undefined}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-      >
-        <div className="fc-msg-row">
-          <div className="fc-msg-gutter">
-            <div
-              className="fc-avatar"
-              style={author ? { background: `color-mix(in srgb, ${author.color} 22%, transparent)`, color: author.color } : undefined}
-            >
-              {name.charAt(0).toUpperCase()}
-            </div>
-          </div>
-          <div className="fc-msg-body">
-            <div className="fc-msg-header">
-              <span className="fc-msg-author">{name}</span>
-              <span className="fc-msg-time">
-                {agoLabel(comment.createdAt)}
-                {comment.editedAt ? ' (edited)' : ''}
-              </span>
-            </div>
-            {editing ? (
-              <EditingTextarea value={editText} onChange={setEditText} onCommit={commitEdit} onCancel={() => setEditing(false)} />
-            ) : comment.body.trim() ? (
-              <div className="fc-msg-text">{renderMarkdownBlocks(comment.body, comment.id, mentionTokens)}</div>
+      <article className="tasks-comment" data-reply={reply || undefined}>
+        <Avatar user={author} size={reply ? 22 : 28} name={name} />
+        <div className="tasks-comment-body">
+          <div className="tasks-comment-header">
+            <span className="tasks-comment-author">{name}</span>
+            <span className="tasks-comment-dot" aria-hidden="true">·</span>
+            <time className="tasks-comment-time" dateTime={comment.createdAt}>
+              {agoLabel(comment.createdAt)}
+              {comment.editedAt ? ' (edited)' : ''}
+            </time>
+            {!editing ? (
+              <div className="tasks-comment-actions">
+                <button type="button" className="icon-button" aria-label="Copy text" title="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body)}>
+                  <Copy size={14} />
+                </button>
+                {isAuthor ? (
+                  <>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Edit comment"
+                      title="Edit comment"
+                      onClick={() => {
+                        setEditText(comment.body)
+                        setEditing(true)
+                      }}
+                    >
+                      <Edit size={14} />
+                    </button>
+                    <button type="button" className="icon-button" data-danger="true" aria-label="Delete comment" title="Delete comment" onClick={() => setConfirmDelete(true)}>
+                      <Trash size={14} />
+                    </button>
+                  </>
+                ) : null}
+              </div>
             ) : null}
-            {comment.attachments && comment.attachments.length > 0 ? (
-              <Attachments attachments={comment.attachments} hasTextContent={!!comment.body.trim()} />
-            ) : null}
           </div>
+          {editing ? (
+            <EditingTextarea value={editText} onChange={setEditText} onCommit={commitEdit} onCancel={() => setEditing(false)} />
+          ) : comment.body.trim() ? (
+            <div className="tasks-comment-text">{renderMarkdownBlocks(comment.body, comment.id, mentionTokens)}</div>
+          ) : null}
+          {comment.attachments && comment.attachments.length > 0 ? (
+            <Attachments attachments={comment.attachments} hasTextContent={!!comment.body.trim()} />
+          ) : null}
         </div>
-
-        {hovered && !editing ? (
-          <div className="fc-toolbar">
-            <button title="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body)}>
-              <Copy />
-            </button>
-            {isAuthor ? (
-              <>
-                <button
-                  title="Edit comment"
-                  onClick={() => {
-                    setEditText(comment.body)
-                    setEditing(true)
-                  }}
-                >
-                  <Edit />
-                </button>
-                <div className="fc-toolbar-sep" />
-                <button data-danger="true" title="Delete comment" onClick={() => setConfirmDelete(true)}>
-                  <Trash />
-                </button>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      </article>
 
       {confirmDelete ? (
         <ConfirmDeleteModal
@@ -139,12 +126,13 @@ function EditingTextarea({
   }, [])
 
   return (
-    <div>
+    <div className="tasks-comment-edit">
       <textarea
         ref={ref}
-        className="fc-edit-area"
+        className="input"
         value={value}
-        rows={1}
+        rows={2}
+        aria-label="Edit comment"
         onChange={(e) => {
           onChange(e.target.value)
           e.target.style.height = 'auto'
@@ -158,7 +146,7 @@ function EditingTextarea({
           if (e.key === 'Escape') onCancel()
         }}
       />
-      <div className="fc-edit-hint">
+      <div className="tasks-comment-edit-hint">
         escape to <b>cancel</b> · enter to <b>save</b>
       </div>
     </div>

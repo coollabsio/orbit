@@ -97,7 +97,6 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
             {updateTask.isError ? <p role="alert" className="text-danger text-xs">Task update failed. <button type="button" className="button button-ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</button></p> : null}
             {deleteAttachment.isError ? <p role="alert" className="text-danger text-xs">Attachment removal failed. <button type="button" className="button button-ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</button></p> : null}
             {deleteTask.isError ? <p role="alert" className="text-danger text-xs">Task deletion failed. <button type="button" className="button button-ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</button></p> : null}
-            {updateTask.isPending || deleteAttachment.isPending || deleteTask.isPending ? <p role="status" className="text-faint text-xs">Saving task…</p> : null}
 
           </div>
 
@@ -202,7 +201,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Labels</h4>
-              <TaskLabels labelIds={task.labels} labels={state.labels} onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })} />
+              <TaskLabels workspaceId={workspace.id} labelIds={task.labels} labels={state.labels} onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })} />
             </div>
 
             <div className="tasks-side-group">

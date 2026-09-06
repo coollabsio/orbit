@@ -485,48 +485,68 @@
   margin-top: 0;
 }
 
-.tasks-desc-wrap .fc-attachments {
+.tasks-desc-wrap .fc-attachments,
+.tasks-comment .fc-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 8px;
   max-width: 520px;
 }
 
 /* non-image files: compact chips instead of full-width cards */
-.tasks-desc-wrap .fc-file-cards {
+.tasks-desc-wrap .fc-file-cards,
+.tasks-comment .fc-file-cards {
+  display: flex;
   max-width: none;
   flex-direction: row;
   flex-wrap: wrap;
+  gap: 6px;
 }
 
-.tasks-desc-wrap .fc-file-card-wrap {
+.tasks-desc-wrap .fc-file-card-wrap,
+.tasks-comment .fc-file-card-wrap {
   width: max-content;
 }
 
-.tasks-desc-wrap .fc-file-card {
+.tasks-desc-wrap .fc-file-card,
+.tasks-comment .fc-file-card {
+  display: flex;
+  align-items: center;
   max-width: 280px;
   gap: 8px;
   padding: 7px 30px 7px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--recessed);
+  color: var(--text-muted);
 }
 
-.tasks-desc-wrap .fc-file-card > svg {
+.tasks-desc-wrap .fc-file-card > svg,
+.tasks-comment .fc-file-card > svg {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
 }
 
-.tasks-desc-wrap .fc-file-card-name {
+.tasks-desc-wrap .fc-file-card-name,
+.tasks-comment .fc-file-card-name {
   font-size: 12px;
 }
 
-.tasks-desc-wrap .fc-file-card-size {
+.tasks-desc-wrap .fc-file-card-size,
+.tasks-comment .fc-file-card-size {
   font-size: 11px;
 }
 
 /* the chip itself downloads on click; the corner only hosts the remove × */
-.tasks-desc-wrap .fc-file-card-download {
+.tasks-desc-wrap .fc-file-card-download,
+.tasks-comment .fc-file-card-download {
   display: none;
 }
 
-.tasks-desc-wrap .fc-attachment-remove {
+.tasks-desc-wrap .fc-attachment-remove,
+.tasks-comment .fc-attachment-remove {
   top: 50%;
   transform: translateY(-50%);
 }
@@ -645,67 +665,257 @@
   background: var(--elevated);
 }
 
-/* comments reuse the chat message layout inside the card, at the task page's text scale */
-.tasks-thread .tasks-comment {
-  padding: 10px 12px;
+.tasks-comment {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  transition: background-color 0.12s ease;
 }
 
-.tasks-comment .fc-msg-gutter {
-  width: 28px;
-  margin-right: 4px;
+.tasks-comment:hover,
+.tasks-comment:focus-within {
+  background: color-mix(in srgb, var(--fill) 40%, transparent);
 }
 
-.tasks-comment .fc-avatar {
-  width: 28px;
-  height: 28px;
-  font-size: 12px;
-}
-
-.tasks-comment .fc-msg-author {
-  font-size: 13px;
-}
-
-.tasks-comment .fc-msg-text {
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 19px;
+.tasks-thread > .tasks-comment:first-child {
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
 }
 
 .tasks-thread .tasks-comment + .tasks-comment {
   border-top: 1px solid var(--hairline);
 }
 
-.tasks-thread .tasks-comment[data-reply='true'] {
-  padding-left: 24px;
+.tasks-comment[data-reply='true'] {
+  padding-left: 52px;
 }
 
-/* slim chat composer as the reply row of a thread card */
+.tasks-comment-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.tasks-comment-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+
+.tasks-comment-author {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tasks-comment-dot {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.tasks-comment-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.tasks-comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.tasks-comment:hover .tasks-comment-actions,
+.tasks-comment:focus-within .tasks-comment-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tasks-comment-actions .icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+.tasks-comment-actions .icon-button[data-danger='true']:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.tasks-comment-text {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 19px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.tasks-comment-text .fc-md-p {
+  min-height: 19px;
+}
+
+.tasks-comment-text .fc-md-blank {
+  height: 8px;
+}
+
+.tasks-comment-text .fc-md-heading {
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.tasks-comment-text .fc-md-quote {
+  margin: 4px 0;
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+
+.tasks-comment-text .fc-md-list {
+  margin: 4px 0 4px 16px;
+  list-style: disc;
+}
+
+.tasks-comment-text .fc-md-list[data-ordered='true'] {
+  list-style: decimal;
+}
+
+.tasks-comment-text .fc-code {
+  border-radius: 4px;
+  background: var(--fill);
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.tasks-comment-text .fc-mention {
+  border-radius: 4px;
+  padding: 0 2px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tasks-comment-text .fc-link {
+  color: var(--accent);
+}
+
+.tasks-comment .fc-attachment-grid {
+  display: grid;
+  max-width: 360px;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tasks-comment .fc-attachment-image {
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+}
+
+.tasks-comment .fc-attachment-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  object-fit: cover;
+}
+
+.tasks-comment-edit {
+  margin-top: 6px;
+}
+
+.tasks-comment-edit textarea.input {
+  min-height: 52px;
+  font-size: 13px;
+}
+
+.tasks-comment-edit-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tasks-comment-edit-hint b {
+  color: var(--text-secondary);
+}
+
 .tasks-thread-composer {
   border-top: 1px solid var(--hairline);
+  padding: 10px 12px 12px;
 }
 
-.tasks-thread-composer .fc-composer {
-  padding: 6px 8px;
-}
-
-.tasks-thread-composer .fc-input-row,
-.tasks-comment-composer .fc-input-row {
-  background: transparent;
-}
-
-/* full chat composer at the end of the page */
 .tasks-comment-composer {
   margin-top: 16px;
 }
 
-.tasks-native-composer { display: grid; gap: 8px; }
-.tasks-native-composer textarea { resize: vertical; }
-.tasks-native-files, .tasks-native-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tasks-native-files .pill button { display: inline-flex; margin-left: 4px; color: inherit; }
-.tasks-load-more { display: flex; justify-content: center; padding: 16px; }
+.tasks-native-composer {
+  position: relative;
+  display: grid;
+  gap: 8px;
+}
 
-.tasks-comment-composer .fc-composer {
-  padding: 0;
+.tasks-native-composer textarea {
+  resize: vertical;
+}
+
+.tasks-native-composer[data-compact] textarea.input {
+  min-height: 44px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.tasks-native-files,
+.tasks-native-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tasks-native-files .pill button {
+  display: inline-flex;
+  margin-left: 4px;
+  color: inherit;
+}
+
+.tasks-mention-list {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin-bottom: 6px;
+  max-height: 200px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--elevated);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.tasks-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+}
+
+@media (hover: none) {
+  .tasks-comment-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* labels: pills with a remove button + an add pill */
@@ -738,6 +948,38 @@
 
 .tasks-label-add:hover {
   color: var(--text-primary);
+}
+
+.popover-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.tasks-label-create {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.tasks-label-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tasks-label-color {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid transparent;
+}
+
+.tasks-label-color[aria-pressed='true'] {
+  border-color: var(--text-primary);
 }
 
 
@@ -838,14 +1080,13 @@
     margin-top: 12px;
   }
 
-  .tasks-comment-composer .fc-input-row {
-    min-height: 38px;
-    padding: 3px 6px;
+  .tasks-comment[data-reply='true'] {
+    padding-left: 40px;
   }
 
-  .tasks-comment-composer .fc-input-button {
-    width: 30px;
-    height: 30px;
+  .tasks-comment-actions {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .tasks-list-pane > .pane-header {
