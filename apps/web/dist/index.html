@@ -3,14 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Orbit" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
     <title>Orbit</title>
     <script>
       // Apply the stored theme before first paint (default: dark) to avoid a light flash.
       document.documentElement.classList.toggle('dark', localStorage.getItem('theme') !== 'light')
     </script>
-    <script type="module" crossorigin src="/assets/index-DG7pPsGo.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Cyv8ryPF.css">
+    <script type="module" crossorigin src="/assets/index-BFBUlxjB.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Ba3a5W0a.css">
   </head>
   <body>
     <div id="root"></div>
