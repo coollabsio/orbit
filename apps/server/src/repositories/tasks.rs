@@ -1153,10 +1153,12 @@ impl TaskRepository {
             &mut tx,
             workspace_id,
             actor_id,
-            "task_assigned",
-            id,
-            None,
-            &input.assignee_ids,
+            NotificationRequest {
+                kind: "task_assigned",
+                task_id: id,
+                comment_id: None,
+                recipients: &input.assignee_ids,
+            },
             now,
         )
         .await?;
@@ -1493,10 +1495,12 @@ impl TaskRepository {
             &mut tx,
             workspace_id,
             actor_id,
-            "comment_mentioned",
-            task_id,
-            Some(id),
-            &mentioned_user_ids,
+            NotificationRequest {
+                kind: "comment_mentioned",
+                task_id,
+                comment_id: Some(id),
+                recipients: &mentioned_user_ids,
+            },
             now,
         )
         .await?;
@@ -1746,10 +1750,12 @@ async fn update_task_in_tx(
             tx,
             workspace_id,
             actor_id,
-            "task_assigned",
-            update.id,
-            None,
-            &added,
+            NotificationRequest {
+                kind: "task_assigned",
+                task_id: update.id,
+                comment_id: None,
+                recipients: &added,
+            },
             now,
         )
         .await?;
@@ -2089,28 +2095,37 @@ async fn validate_assignees(
     Ok(())
 }
 
+struct NotificationRequest<'a> {
+    kind: &'a str,
+    task_id: Id,
+    comment_id: Option<Id>,
+    recipients: &'a [Id],
+}
+
 async fn notify_users(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
-    kind: &str,
-    task_id: Id,
-    comment_id: Option<Id>,
-    recipients: &[Id],
+    request: NotificationRequest<'_>,
     now: TimestampMillis,
 ) -> Result<(), TaskError> {
-    let field = if kind == "comment_mentioned" {
+    let field = if request.kind == "comment_mentioned" {
         "mentioned_user_ids"
     } else {
         "assignee_ids"
     };
-    let mut unique = recipients.to_vec();
+    let mut unique = request.recipients.to_vec();
     unique.sort_unstable();
     unique.dedup();
-    if unique.len() != recipients.len() {
+    if unique.len() != request.recipients.len() {
         return Err(TaskError::Invalid { field });
     }
-    for recipient in recipients.iter().copied().filter(|id| *id != actor_id) {
+    for recipient in request
+        .recipients
+        .iter()
+        .copied()
+        .filter(|id| *id != actor_id)
+    {
         let exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
              WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND users.suspended_at IS NULL",
@@ -2123,8 +2138,9 @@ async fn notify_users(
             return Err(TaskError::Invalid { field });
         }
         let dedupe_key = format!(
-            "{workspace_id}:{recipient}:{kind}:{}",
-            comment_id.unwrap_or(task_id)
+            "{workspace_id}:{recipient}:{}:{}",
+            request.kind,
+            request.comment_id.unwrap_or(request.task_id)
         );
         sqlx::query(
             "INSERT OR IGNORE INTO notifications \
@@ -2135,9 +2151,9 @@ async fn notify_users(
         .bind(workspace_id.to_string())
         .bind(recipient.to_string())
         .bind(actor_id.to_string())
-        .bind(kind)
-        .bind(task_id.to_string())
-        .bind(comment_id.map(|id| id.to_string()))
+        .bind(request.kind)
+        .bind(request.task_id.to_string())
+        .bind(request.comment_id.map(|id| id.to_string()))
         .bind(dedupe_key)
         .bind(now.as_millis())
         .execute(&mut **tx)
