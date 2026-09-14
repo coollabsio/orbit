@@ -1774,7 +1774,10 @@ async fn mine_overdue_and_due_soon_views_use_the_authenticated_user_and_utc_day(
             .clone()
             .oneshot(cookie_request(
                 "GET",
-                &format!("/api/v1/workspaces/{}/tasks?view=mine", fixture.workspace_id),
+                &format!(
+                    "/api/v1/workspaces/{}/tasks?view=mine",
+                    fixture.workspace_id
+                ),
                 &member_cookie,
             ))
             .await
