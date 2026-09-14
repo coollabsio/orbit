@@ -295,17 +295,19 @@ async fn list_files(root: &Path, directory: &Path) -> Result<Vec<BlobObject>, Bl
             .await
             .map_err(|source| io_error(&current, source))?
         {
-            let file_type = entry
-                .file_type()
-                .await
-                .map_err(|source| io_error(&entry.path(), source))?;
+            let file_type = match entry.file_type().await {
+                Ok(file_type) => file_type,
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(source) => return Err(io_error(&entry.path(), source)),
+            };
             if file_type.is_dir() {
                 pending.push(entry.path());
             } else if file_type.is_file() {
-                let metadata = entry
-                    .metadata()
-                    .await
-                    .map_err(|source| io_error(&entry.path(), source))?;
+                let metadata = match entry.metadata().await {
+                    Ok(metadata) => metadata,
+                    Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(source) => return Err(io_error(&entry.path(), source)),
+                };
                 let modified_at_millis = metadata
                     .modified()
                     .unwrap_or(UNIX_EPOCH)
