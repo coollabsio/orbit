@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Paperclip2, Xmark } from 'reicon-react'
 import type { User } from '../api/models'
 
@@ -14,13 +14,15 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
   const suggestions = mentionQuery === null
     ? []
     : members.filter((member) => member.name.toLowerCase().includes(mentionQuery) || member.handle.toLowerCase().includes(mentionQuery)).slice(0, 8)
+  useEffect(() => {
+    if (files.length === 0 && input.current) input.current.value = ''
+  }, [files.length])
   const send = async () => {
     if (!body.trim() && files.length === 0) return
     await onSend(body, files, mentionedUserIds)
-    setBody('')
-    setFiles([])
-    setMentionedUserIds([])
-    if (input.current) input.current.value = ''
+    setBody((current) => current === body ? '' : current)
+    setFiles((current) => current === files ? [] : current)
+    setMentionedUserIds((current) => current === mentionedUserIds ? [] : current)
   }
   const insertMention = (member: User) => {
     setBody((current) => current.replace(/@([^\s@]*)$/, `@${member.name} `))

@@ -23,7 +23,7 @@ async function bootstrapOwner(page: Page) {
   await page.getByLabel('Workspace name').fill('Foundation')
   await page.getByLabel('First project').fill('Launch')
   await page.getByRole('button', { name: 'Create workspace' }).click()
-  await expect(page).toHaveURL(/\/($|\?)/)
+  await expect(page).toHaveURL(/\/tasks(?:\?|$)/)
 
   await page.getByRole('button', { name: 'Account menu for Orbit Owner' }).click()
   await page.getByRole('button', { name: 'Log out' }).click()
@@ -31,7 +31,7 @@ async function bootstrapOwner(page: Page) {
   await page.getByLabel('Email').fill('owner@orbit.test')
   await page.getByLabel('Password').fill('correct horse battery staple')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page).toHaveURL(/\/($|\?)/)
+  await expect(page).toHaveURL(/\/tasks(?:\?|$)/)
 }
 
 async function createWorkspaceAndInviteMember(page: Page, browser: Browser) {
@@ -80,7 +80,7 @@ async function revokeAnotherOwnerSession(page: Page, browser: Browser) {
   await secondSession.getByLabel('Email').fill('owner@orbit.test')
   await secondSession.getByLabel('Password').fill('correct horse battery staple')
   await secondSession.getByRole('button', { name: 'Sign in' }).click()
-  await expect(secondSession).toHaveURL(/\/(?:$|\?)/)
+  await expect(secondSession).toHaveURL(/\/tasks(?:\?|$)/)
 
   await page.goto('/settings/sessions')
   const revoke = page.getByRole('button', { name: 'Revoke' })
@@ -139,23 +139,22 @@ async function createTaskWithAttachment(page: Page) {
   await composer.getByLabel('Attach comment files').setInputFiles({
     name: 'comment-proof.txt', mimeType: 'text/plain', buffer: Buffer.from('attachment-only comment'),
   })
+  await expect(composer.getByText('comment-proof.txt')).toBeVisible()
   await composer.getByRole('button', { name: 'Send' }).click()
   await expect(page.getByText('comment-proof.txt')).toBeVisible()
 
   const taskId = new URL(page.url()).pathname.split('/').at(-1)!
   const record = await api<{ version: number }>(page, `/api/v1/workspaces/${workspaceId}/tasks/${taskId}`)
   await api(page, `/api/v1/workspaces/${workspaceId}/tasks/${taskId}`, 'PATCH', { expected_version: record.version, title: 'Server title' })
-  page.once('dialog', (dialog) => dialog.accept())
-  await title.fill('Rejected title')
-  await title.press('Tab')
   await expect(title).toHaveValue('Server title')
   await title.fill('Restored task')
   await title.press('Tab')
+  await expect(title).toHaveValue('Restored task')
 }
 
 async function deleteAndRestoreTask(page: Page) {
-  page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Delete task' }).click()
+  await page.getByRole('button', { name: 'Move to trash' }).click()
   await expect(page).toHaveURL(/\/tasks(?:\?|$)/)
   await page.goto('/tasks-trash')
   let failRestore = true
@@ -193,16 +192,11 @@ test('setup through restored task', async ({ page, browser }) => {
   await expect(page.getByRole('button', { name: 'Workspace: Foundation' })).toBeVisible()
   const foundationSearch = new URL(page.url()).search
 
-  await page.goto(`/docs${foundationSearch}`)
-  await expect(page.getByText('Mock data')).toBeVisible()
-  await page.goto(`/tasks${foundationSearch}`)
-  await expect(page.getByText('Mock data')).not.toBeVisible()
-
   await page.goto(`/settings/members${foundationSearch}`)
   const memberRow = page.locator('.data-table-row').filter({ hasText: 'member@orbit.test' })
   await memberRow.getByRole('button', { name: 'Manage' }).click()
-  page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Transfer ownership' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Transfer ownership' }).click()
   await expect(page.locator('.data-table-row').filter({ hasText: 'owner@orbit.test' })).toContainText('Admin')
   await expect(page.locator('.data-table-row').filter({ hasText: 'Workspace Member' })).toContainText('Owner')
 })

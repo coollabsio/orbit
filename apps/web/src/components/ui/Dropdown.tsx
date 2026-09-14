@@ -44,7 +44,7 @@ export function Dropdown({ trigger, children, align = 'left', direction = 'down'
       Object.assign(panel.style, {
         top: `${next.top}px`,
         left: `${next.left}px`,
-        maxHeight: `${Math.max(180, Math.min(height, next.maxHeight))}px`,
+        maxHeight: `${Math.max(0, Math.min(height, next.maxHeight))}px`,
         visibility: 'visible',
       })
       panel.scrollTop = scrollTop
