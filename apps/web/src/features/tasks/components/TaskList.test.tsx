@@ -51,6 +51,7 @@ test('bulk toolbar rejects more than 100 selected tasks without a server request
   }) as unknown as typeof fetch
   const view = viewFor(Array.from({ length: 101 }, (_, index) => task(index)))
   for (const checkbox of view.getAllByRole('checkbox')) fireEvent.click(checkbox)
+  await waitFor(() => expect(view.getByText('101 selected')).toBeTruthy())
 
   chooseUrgent(view)
 
