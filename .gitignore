@@ -6,6 +6,7 @@ target/
 data/
 backups/
 config/orbit.toml
+todo.md
 
 # Local production domain/image selection
 deploy/.env
