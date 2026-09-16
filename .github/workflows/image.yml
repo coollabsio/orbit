@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -41,13 +45,13 @@ jobs:
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}-${ARCHITECTURE}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
           docker build --build-arg ORBIT_BUILD_REVISION="$GITHUB_SHA" -t "$image" .
       - name: Verify and smoke-test native image
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}-${ARCHITECTURE}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
           test "$(docker image inspect "$image" --format '{{.Architecture}}')" = "$ARCHITECTURE"
           docker run --rm "$image" --help
           bash deploy/smoke.sh "$image"
@@ -55,7 +59,7 @@ jobs:
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}-${ARCHITECTURE}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
           docker push "$image"
 
   publish:
@@ -74,10 +78,11 @@ jobs:
       - name: Publish multi-platform manifest
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag=${GITHUB_SHA::7}
           docker buildx imagetools create \
-            --tag "$image:$GITHUB_SHA" \
-            "$image:$GITHUB_SHA-amd64" \
-            "$image:$GITHUB_SHA-arm64"
-          docker buildx imagetools inspect "$image:$GITHUB_SHA" | tee manifest.txt
+            --tag "$image:$tag" \
+            "$image:$tag-amd64" \
+            "$image:$tag-arm64"
+          docker buildx imagetools inspect "$image:$tag" | tee manifest.txt
           grep -E 'Platform:[[:space:]]+linux/amd64' manifest.txt
           grep -E 'Platform:[[:space:]]+linux/arm64' manifest.txt

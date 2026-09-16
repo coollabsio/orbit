@@ -13,7 +13,7 @@ docker run -d --name "$name" --read-only --cap-drop ALL --security-opt no-new-pr
   -v "$root/deploy/orbit.toml:/etc/orbit/orbit.toml:ro" \
   -e ORBIT__ENVIRONMENT=production \
   -e ORBIT__HTTP__PUBLIC_ORIGIN=https://orbit.test \
-  -e "ORBIT__HTTP__TRUSTED_PROXIES=$proxy/32" "$image" >/dev/null
+  -e "ORBIT__HTTP__TRUSTED_PROXIES=127.0.0.1/32,$proxy/32" "$image" >/dev/null
 url="http://$(docker port "$name" 8080/tcp)"
 ready() {
   url="http://$(docker port "$name" 8080/tcp)"
@@ -25,6 +25,11 @@ ready() {
   return 1
 }
 ready
+for _ in $(seq 1 20); do
+  [[ $(docker inspect "$name" --format '{{.State.Health.Status}}') == healthy ]] && break
+  sleep 1
+done
+[[ $(docker inspect "$name" --format '{{.State.Health.Status}}') == healthy ]]
 [[ $(docker inspect "$name" --format '{{.Config.User}}') == 65532:65532 ]]
 docker exec "$name" /bin/bash -lc 'test "$(id -u)" = 65532'
 [[ $(curl -s -o /dev/null -w '%{http_code}' "$url/health/ready") == 400 ]]

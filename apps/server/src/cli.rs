@@ -167,7 +167,9 @@ fn healthcheck(address: SocketAddr) -> Result<String, CliError> {
     stream.set_read_timeout(Some(timeout)).map_err(operation)?;
     stream.set_write_timeout(Some(timeout)).map_err(operation)?;
     stream
-        .write_all(b"GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .write_all(
+            b"GET /health/ready HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n",
+        )
         .map_err(operation)?;
 
     let mut response = [0; 1024];
@@ -948,7 +950,7 @@ mod tests {
             let mut request = [0; 1024];
             let size = stream.read(&mut request).unwrap();
             assert!(String::from_utf8_lossy(&request[..size]).starts_with(
-                "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n"
             ));
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
