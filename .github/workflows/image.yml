@@ -1,12 +1,8 @@
-name: Release
+name: Container image
 
 on:
   push:
-    tags: ['v*']
-
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
+    branches: [main]
 
 permissions:
   contents: read
@@ -45,13 +41,13 @@ jobs:
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}-${ARCHITECTURE}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}-${ARCHITECTURE}"
           docker build --build-arg ORBIT_BUILD_REVISION="$GITHUB_SHA" -t "$image" .
       - name: Verify and smoke-test native image
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}-${ARCHITECTURE}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}-${ARCHITECTURE}"
           test "$(docker image inspect "$image" --format '{{.Architecture}}')" = "$ARCHITECTURE"
           docker run --rm "$image" --help
           bash deploy/smoke.sh "$image"
@@ -59,17 +55,15 @@ jobs:
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}-${ARCHITECTURE}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}-${ARCHITECTURE}"
           docker push "$image"
 
   publish:
     needs: image
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v4
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -81,22 +75,9 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           docker buildx imagetools create \
-            --tag "$image:$GITHUB_REF_NAME" \
-            "$image:$GITHUB_REF_NAME-amd64" \
-            "$image:$GITHUB_REF_NAME-arm64"
-          docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" | tee manifest.txt
+            --tag "$image:$GITHUB_SHA" \
+            "$image:$GITHUB_SHA-amd64" \
+            "$image:$GITHUB_SHA-arm64"
+          docker buildx imagetools inspect "$image:$GITHUB_SHA" | tee manifest.txt
           grep -E 'Platform:[[:space:]]+linux/amd64' manifest.txt
           grep -E 'Platform:[[:space:]]+linux/arm64' manifest.txt
-      - name: Extract AMD64 static binary
-        run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:$GITHUB_REF_NAME-amd64"
-          docker pull "$image"
-          container=$(docker create "$image")
-          trap 'docker rm -f "$container" >/dev/null' EXIT
-          docker cp "$container:/orbit" orbit-x86_64-unknown-linux-musl
-          sha256sum orbit-x86_64-unknown-linux-musl > orbit-x86_64-unknown-linux-musl.sha256
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            orbit-x86_64-unknown-linux-musl
-            orbit-x86_64-unknown-linux-musl.sha256

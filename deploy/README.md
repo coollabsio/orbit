@@ -42,7 +42,7 @@ Copy `config/orbit.example.toml` to your deployment configuration, set your orig
 ./orbit --config /etc/orbit/orbit.toml serve
 ```
 
-Run under an unprivileged service account and an HTTPS reverse proxy. The binary architecture matches the Docker build platform. Tagged GitHub releases publish one image manifest for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>:<tag>`. Each image is built and smoke-tested on a native runner for its architecture; the release workflow does not use QEMU. GitHub Releases also include an x86_64 Linux musl binary with a checksum. Registry publishing happens only when the workflow runs; local builds do not publish anything.
+Run under an unprivileged service account and an HTTPS reverse proxy. The binary architecture matches the Docker build platform. Each commit on `main` publishes one image manifest for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>:<full-commit-sha>`. Each image is built and smoke-tested on a native runner; the image workflow does not use QEMU. The workflow does not create GitHub Releases or downloadable binaries. Local builds do not publish anything.
 
 ## Backups and upgrades
 
