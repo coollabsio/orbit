@@ -82,7 +82,7 @@ docker run --name orbit --restart unless-stopped \
   orbit:milestone-1
 ```
 
-The final scratch image runs as numeric user and group 65532. It contains the static Orbit binary, CA certificates, timezone data, and empty mount points. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it.
+The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it.
 
 ## Reverse proxy and Tailscale
 

@@ -26,6 +26,7 @@ ready() {
 }
 ready
 [[ $(docker inspect "$name" --format '{{.Config.User}}') == 65532:65532 ]]
+docker exec "$name" /bin/bash -lc 'test "$(id -u)" = 65532'
 [[ $(curl -s -o /dev/null -w '%{http_code}' "$url/health/ready") == 400 ]]
 curl -fsS -D "$tmp/headers" -H 'X-Forwarded-Proto: https' "$url/" >"$tmp/index"
 grep -qi 'strict-transport-security:' "$tmp/headers"

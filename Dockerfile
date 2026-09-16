@@ -20,17 +20,10 @@ COPY apps/server/ apps/server/
 COPY --from=web /src/apps/web/dist/ apps/web/dist/
 RUN cargo build --locked --release -p orbit-server
 
-FROM alpine:3.23 AS runtime-files
-RUN apk add --no-cache ca-certificates tzdata \
+FROM alpine:3.23
+RUN apk add --no-cache bash ca-certificates tzdata \
     && mkdir -p /var/lib/orbit /var/backups/orbit /etc/orbit \
     && chown -R 65532:65532 /var/lib/orbit /var/backups/orbit /etc/orbit
-
-FROM scratch
-COPY --from=runtime-files /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=runtime-files /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=runtime-files --chown=65532:65532 /var/lib/orbit /var/lib/orbit
-COPY --from=runtime-files --chown=65532:65532 /var/backups/orbit /var/backups/orbit
-COPY --from=runtime-files --chown=65532:65532 /etc/orbit /etc/orbit
 COPY --from=server /src/target/release/orbit /orbit
 USER 65532:65532
 VOLUME ["/var/lib/orbit", "/var/backups/orbit", "/etc/orbit"]
