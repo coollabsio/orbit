@@ -367,6 +367,31 @@ async fn trusted_proxy_rejects_ambiguous_forwarded_headers() {
 }
 
 #[tokio::test]
+async fn trusted_proxy_accepts_repeated_identical_forwarded_proto_values() {
+    let policy =
+        OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
+    let app = test_app(policy);
+    let mut request = request("GET", "/forwarding-view");
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(SocketAddr::from((
+            Ipv4Addr::new(10, 1, 2, 3),
+            4123,
+        ))));
+    request
+        .headers_mut()
+        .append("x-forwarded-proto", HeaderValue::from_static("https"));
+    request
+        .headers_mut()
+        .append("x-forwarded-proto", HeaderValue::from_static("https"));
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["secure"], true);
+}
+
+#[tokio::test]
 async fn forwarded_chain_cannot_spoof_an_address_before_the_nearest_untrusted_hop() {
     let policy =
         OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());

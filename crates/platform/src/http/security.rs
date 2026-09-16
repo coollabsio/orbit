@@ -143,8 +143,8 @@ pub(crate) fn inspect_request(
             request_id =
                 RequestId::from_trusted_header(value.to_str().map_err(|_| ())?).ok_or(())?;
         }
-        if let Some(value) = single_header(headers, X_FORWARDED_PROTO)? {
-            transport = match value.to_str().map_err(|_| ())? {
+        if let Some(value) = forwarded_proto(headers)? {
+            transport = match value {
                 "https" => RequestTransport::Https,
                 "http" => RequestTransport::Http,
                 _ => return Err(()),
@@ -172,6 +172,19 @@ fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a He
         return Err(());
     }
     Ok(value)
+}
+
+fn forwarded_proto(headers: &HeaderMap) -> Result<Option<&str>, ()> {
+    let mut protocol = None;
+    for value in headers.get_all(X_FORWARDED_PROTO) {
+        for candidate in value.to_str().map_err(|_| ())?.split(',').map(str::trim) {
+            if candidate.is_empty() || protocol.is_some_and(|protocol| protocol != candidate) {
+                return Err(());
+            }
+            protocol = Some(candidate);
+        }
+    }
+    Ok(protocol)
 }
 
 pub(crate) fn add_security_headers(
