@@ -29,3 +29,4 @@ jobs:
       - run: just e2e
       - run: docker build --build-arg ORBIT_BUILD_REVISION=${{ github.sha }} -t orbit:ci .
       - run: docker run --rm orbit:ci --help
+      - run: bash deploy/smoke.sh orbit:ci

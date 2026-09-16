@@ -1,11 +1,12 @@
-# Serialize GitHub Actions workflows
+# Move release quality gate to CI
 
-- [x] Allow only the newest CI run across the repository.
-- [x] Cancel an older release run when a newer release starts.
-- [x] Validate both workflow files and review the diff.
+- [x] Remove the duplicate general quality job from Release.
+- [x] Run the production-image smoke test in CI.
+- [x] Validate workflows and push the change.
+- [ ] Wait for CI success before creating the next release tag.
 
 ## Review
 
-- CI uses one workflow-wide group, so a new run cancels any older CI run.
-- Release uses one workflow-wide group, so the newest tag release cancels an older release run.
+- General checks, browser E2E, Docker build, CLI smoke, and production-image smoke now run in CI.
+- Release starts native image builds directly and retains per-architecture smoke tests.
 - Actionlint 1.7.7 and `git diff --check` pass.
