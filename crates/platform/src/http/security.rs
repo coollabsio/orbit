@@ -137,12 +137,8 @@ pub(crate) fn inspect_request(
             request_id =
                 RequestId::from_trusted_header(value.to_str().map_err(|_| ())?).ok_or(())?;
         }
-        if let Some(value) = forwarded_proto(headers)? {
-            transport = match value {
-                "https" => RequestTransport::Https,
-                "http" => RequestTransport::Http,
-                _ => return Err(()),
-            };
+        if let Some(forwarded_transport) = forwarded_transport(headers)? {
+            transport = forwarded_transport;
         }
     }
 
@@ -183,17 +179,22 @@ fn forwarded_for(headers: &HeaderMap) -> Result<Vec<IpAddr>, ()> {
         .collect()
 }
 
-fn forwarded_proto(headers: &HeaderMap) -> Result<Option<&str>, ()> {
-    let mut protocol = None;
+fn forwarded_transport(headers: &HeaderMap) -> Result<Option<RequestTransport>, ()> {
+    let mut transport = None;
     for value in headers.get_all(X_FORWARDED_PROTO) {
         for candidate in value.to_str().map_err(|_| ())?.split(',').map(str::trim) {
-            if candidate.is_empty() || protocol.is_some_and(|protocol| protocol != candidate) {
+            let candidate = match candidate {
+                "https" | "wss" => RequestTransport::Https,
+                "http" | "ws" => RequestTransport::Http,
+                _ => return Err(()),
+            };
+            if transport.is_some_and(|transport| transport != candidate) {
                 return Err(());
             }
-            protocol = Some(candidate);
+            transport = Some(candidate);
         }
     }
-    Ok(protocol)
+    Ok(transport)
 }
 
 pub(crate) fn add_security_headers(
