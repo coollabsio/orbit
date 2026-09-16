@@ -6,7 +6,7 @@
 - [x] Keep native AMD64 and ARM64 builds and smoke tests.
 - [x] Let all image runs finish so that no commit image is skipped.
 - [x] Remove the old Git version tags and GitHub Releases.
-- [x] Add package cleanup for old `v<number>` container image tags.
+- [x] Remove old `v<number>` container images, then remove the one-time cleanup job.
 - [x] Validate, commit, push, and verify the image workflow.
 
 ## Review
