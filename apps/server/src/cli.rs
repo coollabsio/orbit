@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -44,6 +46,7 @@ pub enum Command {
         #[arg(long)]
         origin: Option<String>,
     },
+    Healthcheck,
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
@@ -132,6 +135,10 @@ pub enum CliError {
 pub async fn run(cli: Cli) -> Result<String, CliError> {
     match &cli.command {
         Command::Serve { listen, origin } => serve(&cli, *listen, origin.as_deref()).await,
+        Command::Healthcheck => {
+            let config = effective_config(&cli)?;
+            healthcheck(healthcheck_address(&config))
+        }
         Command::Config { command } => config_command(&cli, command),
         Command::Migrate { command } => migrate(&cli, command).await,
         Command::Backup { command } => backup(&cli, command).await,
@@ -143,6 +150,40 @@ pub async fn run(cli: Cli) -> Result<String, CliError> {
         Command::Openapi { output } => write_openapi(output),
         Command::SetupToken { command } => setup_token(&cli, command).await,
     }
+}
+
+fn healthcheck_address(config: &Config) -> SocketAddr {
+    let host = match config.http.bind {
+        IpAddr::V4(address) if address.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(address) if address.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        address => address,
+    };
+    SocketAddr::new(host, config.http.port)
+}
+
+fn healthcheck(address: SocketAddr) -> Result<String, CliError> {
+    let timeout = Duration::from_secs(2);
+    let mut stream = TcpStream::connect_timeout(&address, timeout).map_err(operation)?;
+    stream.set_read_timeout(Some(timeout)).map_err(operation)?;
+    stream.set_write_timeout(Some(timeout)).map_err(operation)?;
+    stream
+        .write_all(b"GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .map_err(operation)?;
+
+    let mut response = [0; 1024];
+    let size = stream.read(&mut response).map_err(operation)?;
+    let status_line = String::from_utf8_lossy(&response[..size])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    if !matches!(status_line.split_whitespace().nth(1), Some(code) if code.starts_with('2')) {
+        return Err(CliError::Operation(format!(
+            "readiness endpoint returned {status_line}"
+        )));
+    }
+
+    Ok("Orbit is ready".to_owned())
 }
 
 fn write_openapi(output: &Path) -> Result<String, CliError> {
@@ -759,6 +800,8 @@ fn operation(error: impl std::fmt::Display) -> CliError {
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::{Path, PathBuf};
 
     use clap::Parser;
@@ -770,7 +813,7 @@ mod tests {
 
     use super::{
         BackupCommand, Cli, Command, ConfigCommand, MigrateCommand, SetupTokenCommand,
-        failure_message, parent_directory, redacted_config, remove_sidecars, run,
+        failure_message, healthcheck, parent_directory, redacted_config, remove_sidecars, run,
         validate_reset_paths,
     };
 
@@ -779,6 +822,12 @@ mod tests {
         assert!(matches!(
             Cli::try_parse_from(["orbit", "serve"]).unwrap().command,
             Command::Serve { .. }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["orbit", "healthcheck"])
+                .unwrap()
+                .command,
+            Command::Healthcheck
         ));
         assert!(matches!(
             Cli::try_parse_from(["orbit", "config", "show"])
@@ -888,6 +937,26 @@ mod tests {
 
         assert_eq!(cli.attachment_max_file_bytes, Some(1024));
         assert_eq!(cli.attachment_max_request_bytes, Some(4096));
+    }
+
+    #[test]
+    fn healthcheck_accepts_a_successful_readiness_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let size = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..size]).starts_with(
+                "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            ));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+
+        assert_eq!(healthcheck(address).unwrap(), "Orbit is ready");
+        server.join().unwrap();
     }
 
     #[tokio::test]

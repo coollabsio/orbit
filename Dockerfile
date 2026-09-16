@@ -35,5 +35,6 @@ COPY --from=server /src/target/release/orbit /orbit
 USER 65532:65532
 VOLUME ["/var/lib/orbit", "/var/backups/orbit", "/etc/orbit"]
 EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=10 CMD ["/orbit", "--config", "/etc/orbit/orbit.toml", "healthcheck"]
 ENTRYPOINT ["/orbit", "--config", "/etc/orbit/orbit.toml"]
 CMD ["serve"]

@@ -1,12 +1,14 @@
-# Move release quality gate to CI
+# Orbit shell-less health check
 
-- [x] Remove the duplicate general quality job from Release.
-- [x] Run the production-image smoke test in CI.
-- [x] Validate workflows and push the change.
-- [ ] Wait for CI success before creating the next release tag.
+- [x] Add a failing CLI/probe test for an exec-form health check.
+- [x] Add the minimal Orbit health-check command.
+- [x] Add an exec-form Docker `HEALTHCHECK` that does not require `/bin/sh`.
+- [x] Run focused tests, formatting, lint checks, and container verification.
+- [x] Review the final diff and record results.
 
 ## Review
 
-- General checks, browser E2E, Docker build, CLI smoke, and production-image smoke now run in CI.
-- Release starts native image builds directly and retains per-architecture smoke tests.
-- Actionlint 1.7.7 and `git diff --check` pass.
+- Root cause: Orbit uses a scratch runtime image, while Coolify generated a `CMD-SHELL` probe that required `/bin/sh`.
+- Added `orbit healthcheck`, which probes the existing `/health/ready` endpoint with the configured bind address and port.
+- The image now declares an exec-form health check, so Coolify preserves it instead of adding a shell-based probe.
+- `cargo fmt --check`, strict Clippy, all `orbit-server` tests, Docker image build, image metadata inspection, and a live container health transition passed.
