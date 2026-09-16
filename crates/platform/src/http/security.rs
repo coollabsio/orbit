@@ -123,14 +123,8 @@ pub(crate) fn inspect_request(
     let mut transport = RequestTransport::Http;
 
     if trusted {
-        if let Some(value) = single_header(headers, X_FORWARDED_FOR)? {
-            let value = value.to_str().map_err(|_| ())?;
-            let chain = value
-                .split(',')
-                .map(str::trim)
-                .map(str::parse)
-                .collect::<Result<Vec<IpAddr>, _>>()
-                .map_err(|_| ())?;
+        let chain = forwarded_for(headers)?;
+        if !chain.is_empty() {
             let first = *chain.first().ok_or(())?;
             client_ip = chain
                 .iter()
@@ -139,7 +133,7 @@ pub(crate) fn inspect_request(
                 .find(|ip| !policy.is_trusted_ip(*ip))
                 .unwrap_or(first);
         }
-        if let Some(value) = single_header(headers, X_REQUEST_ID)? {
+        if let Some(value) = consistent_header(headers, X_REQUEST_ID)? {
             request_id =
                 RequestId::from_trusted_header(value.to_str().map_err(|_| ())?).ok_or(())?;
         }
@@ -165,13 +159,28 @@ pub(crate) fn strip_forwarding_headers(headers: &mut HeaderMap) {
     headers.remove(X_FORWARDED_PROTO);
 }
 
-fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a HeaderValue>, ()> {
+fn consistent_header<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+) -> Result<Option<&'a HeaderValue>, ()> {
     let mut values = headers.get_all(name).iter();
     let value = values.next();
-    if values.next().is_some() {
+    if value.is_some_and(|value| values.any(|candidate| candidate != value)) {
         return Err(());
     }
     Ok(value)
+}
+
+fn forwarded_for(headers: &HeaderMap) -> Result<Vec<IpAddr>, ()> {
+    headers
+        .get_all(X_FORWARDED_FOR)
+        .iter()
+        .map(|value| value.to_str().map_err(|_| ()))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flat_map(|value| value.split(',').map(str::trim))
+        .map(|value| value.parse().map_err(|_| ()))
+        .collect()
 }
 
 fn forwarded_proto(headers: &HeaderMap) -> Result<Option<&str>, ()> {

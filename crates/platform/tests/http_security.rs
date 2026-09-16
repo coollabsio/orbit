@@ -392,6 +392,39 @@ async fn trusted_proxy_accepts_repeated_identical_forwarded_proto_values() {
 }
 
 #[tokio::test]
+async fn trusted_proxy_accepts_forwarded_for_split_across_header_lines() {
+    let policy =
+        OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
+    let app = test_app(policy);
+    let mut request = request("GET", "/forwarding-view");
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(SocketAddr::from((
+            Ipv4Addr::new(10, 1, 2, 3),
+            4123,
+        ))));
+    request
+        .headers_mut()
+        .append("x-forwarded-for", HeaderValue::from_static("203.0.113.9"));
+    request
+        .headers_mut()
+        .append("x-forwarded-for", HeaderValue::from_static("10.2.3.4"));
+    request
+        .headers_mut()
+        .append("x-request-id", HeaderValue::from_static("edge-request-123"));
+    request
+        .headers_mut()
+        .append("x-request-id", HeaderValue::from_static("edge-request-123"));
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["client_ip"], "203.0.113.9");
+    assert_eq!(body["request_id"], "edge-request-123");
+}
+
+#[tokio::test]
 async fn forwarded_chain_cannot_spoof_an_address_before_the_nearest_untrusted_hop() {
     let policy =
         OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
