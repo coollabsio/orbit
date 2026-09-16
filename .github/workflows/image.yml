@@ -8,6 +8,22 @@ permissions:
   contents: read
 
 jobs:
+  remove-version-images:
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Remove old version-tagged images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          package=${GITHUB_REPOSITORY#*/}
+          gh api --paginate "/orgs/$GITHUB_REPOSITORY_OWNER/packages/container/$package/versions?per_page=100" \
+            --jq '.[] | select(any(.metadata.container.tags[]?; test("^v[0-9]"))) | .id' \
+            | while read -r version; do
+                gh api --method DELETE "/orgs/$GITHUB_REPOSITORY_OWNER/packages/container/$package/versions/$version"
+              done
+
   image:
     strategy:
       fail-fast: false
