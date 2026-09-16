@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../api/generated/types.gen'
 import { WorkspaceContext } from '../../workspaces/workspaceContext'
@@ -50,7 +50,9 @@ test('bulk toolbar rejects more than 100 selected tasks without a server request
     return Response.json({ items: [], next_cursor: null })
   }) as unknown as typeof fetch
   const view = viewFor(Array.from({ length: 101 }, (_, index) => task(index)))
-  for (const checkbox of view.getAllByRole('checkbox')) fireEvent.click(checkbox)
+  act(() => {
+    for (const checkbox of view.getAllByRole('checkbox')) checkbox.click()
+  })
   await waitFor(() => expect(view.getByText('101 selected')).toBeTruthy())
 
   chooseUrgent(view)
