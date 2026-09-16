@@ -2,8 +2,8 @@
 
 - [x] Remove automatic push and pull-request triggers.
 - [x] Keep the CI workflow available for manual runs.
-- [ ] Cancel the active CI run.
-- [ ] Commit and push the workflow change.
+- [x] Cancel the active CI run.
+- [x] Commit and push the workflow change.
 
 ## Review
 
