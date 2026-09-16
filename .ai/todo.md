@@ -1,14 +1,11 @@
-# Publish native multi-platform images
+# Serialize GitHub Actions workflows
 
-- [x] Split release quality, native image builds, and manifest publication.
-- [x] Assert runner, Docker daemon, and image architecture without QEMU.
-- [x] Verify the workflow contract and repository quality gate.
-- [x] Review the final diff and document release/test results.
+- [x] Cancel superseded CI runs on the same branch or pull request.
+- [x] Cancel an older release run when a newer release starts.
+- [x] Validate both workflow files and review the diff.
 
 ## Review
 
-- The release matrix builds AMD64 on `ubuntu-24.04` and ARM64 on `ubuntu-24.04-arm`.
-- Each job verifies the native kernel and Docker daemon architecture, checks the built image architecture, and runs the production smoke test before pushing.
-- No QEMU action or foreign `--platform` build is present. The final tag is a manifest containing both tested architecture tags.
-- Actionlint 1.7.7, `git diff --check`, and `just check` pass.
-- A new `v*` tag must run the release workflow before an ARM64 image is available in GHCR; the existing `v0.1.0` remains AMD64-only.
+- CI uses a workflow-and-ref group, so a new run cancels an older run only for the same branch or pull request.
+- Release uses one workflow-wide group, so the newest tag release cancels an older release run.
+- Actionlint 1.7.7 and `git diff --check` pass.
