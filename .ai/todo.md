@@ -1,12 +1,11 @@
-# Release v0.1.2
+# Temporarily disable automatic CI
 
-- [x] Add Bash to the Alpine runtime image while keeping the non-root user.
-- [x] Fix the CI timeout in the bulk-selection test by batching React updates.
-- [x] Run the focused test and the full `just check` quality suite.
-- [ ] Push the CI fix and wait for CI to pass.
-- [ ] Tag and push `v0.1.2`.
-- [ ] Verify the multi-platform release image and Bash on the published image.
+- [x] Remove automatic push and pull-request triggers.
+- [x] Keep the CI workflow available for manual runs.
+- [ ] Cancel the active CI run.
+- [ ] Commit and push the workflow change.
 
 ## Review
 
-- Pending release verification.
+- CI can run only through the GitHub Actions **Run workflow** action.
+- Release publishing remains separate and unchanged.
