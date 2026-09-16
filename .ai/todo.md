@@ -1,10 +1,14 @@
-# Verify Orbit restart
+# Publish native multi-platform images
 
-- [x] Restart `orbit-local`.
-- [x] Verify container health and Tailscale HTTPS readiness.
-- [x] Confirm the setup state survives the restart.
+- [x] Split release quality, native image builds, and manifest publication.
+- [x] Assert runner, Docker daemon, and image architecture without QEMU.
+- [x] Verify the workflow contract and repository quality gate.
+- [x] Review the final diff and document release/test results.
 
 ## Review
-- Restart completed at `2026-09-14T18:22:02.006848357Z`.
-- The container is running and all readiness checks pass through Tailscale HTTPS.
-- The first-run setup state and persistent volumes survived the restart.
+
+- The release matrix builds AMD64 on `ubuntu-24.04` and ARM64 on `ubuntu-24.04-arm`.
+- Each job verifies the native kernel and Docker daemon architecture, checks the built image architecture, and runs the production smoke test before pushing.
+- No QEMU action or foreign `--platform` build is present. The final tag is a manifest containing both tested architecture tags.
+- Actionlint 1.7.7, `git diff --check`, and `just check` pass.
+- A new `v*` tag must run the release workflow before an ARM64 image is available in GHCR; the existing `v0.1.0` remains AMD64-only.
