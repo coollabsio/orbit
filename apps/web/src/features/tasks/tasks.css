@@ -323,11 +323,12 @@
 }
 
 .tasks-row-id {
-  width: 56px;
+  width: 72px;
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .tasks-row-status {
@@ -355,6 +356,14 @@
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.tasks-row-assignees {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
 .tasks-project-trigger {

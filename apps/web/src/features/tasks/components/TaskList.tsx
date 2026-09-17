@@ -118,6 +118,7 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
                     task={task}
                     labels={labels}
                     statuses={statuses}
+                    users={users}
                     assignees={users.filter((u) => task.assigneeIds.includes(u.id))}
                     selected={selected.includes(task.id)}
                     dragging={task.id === draggingId}

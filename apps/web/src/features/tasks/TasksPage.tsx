@@ -107,6 +107,15 @@ export function TasksPage() {
   const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)
   const closeTask = () => navigate(`/tasks${searchSuffix}`)
 
+  useEffect(() => {
+    if (!taskId) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') navigate(`/tasks${searchSuffix}`)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [navigate, searchSuffix, taskId])
+
   const creating = useRef(false)
   const startNewTask = async (statusKey: string | null = null, replace = false) => {
     const projectId = projectFilter ?? projects[0]?.id

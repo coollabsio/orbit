@@ -18,9 +18,10 @@ export function TaskTextFields({
 }
 
 function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<typeof TaskTextFields>[0]) {
-  const [title, setTitle] = useState(task.title)
+  const isUntitled = task.title === 'Untitled'
+  const [title, setTitle] = useState(isUntitled ? '' : task.title)
   const [description, setDescription] = useState(task.description)
-  const [editingTitle, setEditingTitle] = useState(task.title === 'Untitled')
+  const [editingTitle, setEditingTitle] = useState(isUntitled)
   const [editingDescription, setEditingDescription] = useState(false)
   const [dropOver, setDropOver] = useState(false)
   return (
@@ -36,10 +37,16 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
           onBlur={() => {
             const value = title.trim()
             if (value && value !== task.title) onUpdate({ title: value })
+            else if (!value) setTitle(task.title)
             setEditingTitle(false)
           }}
           onKeyDown={(event) => {
             if (event.key === 'Enter') event.currentTarget.blur()
+            if (event.key === 'Tab' && !event.shiftKey) {
+              event.preventDefault()
+              event.currentTarget.blur()
+              setEditingDescription(true)
+            }
           }}
         />
       ) : (

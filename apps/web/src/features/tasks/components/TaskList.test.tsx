@@ -4,7 +4,7 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../api/generated/types.gen'
 import { WorkspaceContext } from '../../workspaces/workspaceContext'
-import type { Task, TaskStatusDef } from '../api/models'
+import type { Task, TaskStatusDef, User } from '../api/models'
 import type { StatusGroup } from '../tasksLib'
 import { TaskList } from './TaskList'
 
@@ -19,6 +19,10 @@ const status: TaskStatusDef = {
 const groups: StatusGroup[] = [{
   key: 'unstarted:todo', name: 'Todo', category: 'unstarted', status, statusIds: [status.id],
 }]
+const user: User = {
+  id: 'user-1', membershipId: 'membership-1', name: 'Ada Lovelace', handle: 'ada', email: 'ada@example.com',
+  role: 'Member', color: '#8b5cf6', online: true, title: '', roleIds: [], version: 1,
+}
 
 function task(index: number): Task {
   return {
@@ -33,8 +37,8 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider>
 }
 
-function viewFor(tasks: Task[], onOpen = () => {}) {
-  return render(<TaskList tasks={tasks} users={[]} labels={[]} statuses={[status]} groups={groups} sort="manual" onOpen={onOpen} onAdd={() => {}} />, { wrapper })
+function viewFor(tasks: Task[], onOpen = () => {}, users: User[] = []) {
+  return render(<TaskList tasks={tasks} users={users} labels={[]} statuses={[status]} groups={groups} sort="manual" onOpen={onOpen} onAdd={() => {}} />, { wrapper })
 }
 
 function chooseUrgent(view: ReturnType<typeof render>) {
@@ -112,5 +116,23 @@ test('task list titles link web addresses without opening the task row', () => {
   expect(link.href).toBe('https://example.com/pull/1')
   expect(link.target).toBe('_blank')
   fireEvent.click(link)
+  expect(opened).toBe(0)
+})
+
+test('task list assignee opens the assignment dropdown and updates without opening the task', async () => {
+  let opened = 0
+  let body: unknown
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    body = await (input as Request).json()
+    return Response.json({})
+  }) as unknown as typeof fetch
+  const assignedTask = task(1)
+  assignedTask.assigneeIds = [user.id]
+  const view = viewFor([assignedTask], () => { opened += 1 }, [user])
+
+  fireEvent.click(view.getByRole('button', { name: 'Assignees: Ada Lovelace' }))
+  fireEvent.click(view.getByRole('button', { pressed: true }))
+
+  await waitFor(() => expect(body).toEqual({ expected_version: 1, assignee_ids: [] }))
   expect(opened).toBe(0)
 })

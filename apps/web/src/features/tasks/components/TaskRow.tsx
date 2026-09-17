@@ -1,4 +1,5 @@
-import { AvatarStack } from '../../../components/ui/Avatar'
+import { Xmark } from 'reicon-react'
+import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { projectStatuses } from '../../../components/workspace/taskMeta'
@@ -14,6 +15,7 @@ interface TaskRowProps {
   task: Task
   statuses: TaskStatusDef[]
   labels: LabelRecord[]
+  users: User[]
   assignees: User[]
   selected: boolean
   dragging: boolean
@@ -24,7 +26,7 @@ interface TaskRowProps {
 }
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
-export function TaskRow({ task, statuses, labels, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+export function TaskRow({ task, statuses, labels, users, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
@@ -94,7 +96,50 @@ export function TaskRow({ task, statuses, labels, assignees, selected, dragging,
           })}
         </span>
       ) : null}
-      <AvatarStack users={assignees} size={18} />
+      <div onClick={(e) => e.stopPropagation()}>
+        <Dropdown
+          align="right"
+          trigger={() => (
+            <button
+              type="button"
+              className="tasks-row-assignees"
+              aria-label={assignees.length > 0 ? `Assignees: ${assignees.map((user) => user.name).join(', ')}` : 'Assign task'}
+            >
+              <AvatarStack users={assignees} size={18} />
+            </button>
+          )}
+        >
+          {() => (
+            <>
+              <div className="popover-heading">Assignees</div>
+              {users.map((user) => {
+                const active = task.assigneeIds.includes(user.id)
+                return (
+                  <button
+                    key={user.id}
+                    className="popover-option"
+                    data-selected={active || undefined}
+                    aria-pressed={active}
+                    onClick={() => updateTask.mutate({
+                      taskId: task.id,
+                      body: {
+                        expected_version: task.version,
+                        assignee_ids: active
+                          ? task.assigneeIds.filter((id) => id !== user.id)
+                          : [...task.assigneeIds, user.id],
+                      },
+                    })}
+                  >
+                    <Avatar user={user} size={16} />
+                    {user.name}
+                    {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
+                  </button>
+                )
+              })}
+            </>
+          )}
+        </Dropdown>
+      </div>
       <span className="tasks-row-date">{shortDate(task.createdAt)}</span>
       {updateTask.isPending ? <span role="status" className="text-faint text-xs">Saving status…</span> : null}
       {updateTask.isError ? <span role="alert" className="text-danger text-xs">Status update failed. <button className="button button-ghost" onClick={(event) => { event.stopPropagation(); if (updateTask.variables) updateTask.mutate(updateTask.variables) }}>Retry</button></span> : null}

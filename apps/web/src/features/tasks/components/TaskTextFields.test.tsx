@@ -55,3 +55,21 @@ test('plain task text stays editable when clicked', () => {
   fireEvent.click(view.getByText('Editable description'))
   expect(view.getByLabelText('Description')).toBeTruthy()
 })
+
+test('new untitled task opens with an empty focused title field', () => {
+  const view = render(<TaskTextFields task={task(1, 'Untitled', '')} onUpdate={() => {}} />)
+  const title = view.getByLabelText('Task title') as HTMLInputElement
+
+  expect(title.value).toBe('')
+  expect(title.placeholder).toBe('Task title')
+  expect(document.activeElement).toBe(title)
+})
+
+test('Tab moves focus from a new task title to its description', () => {
+  const view = render(<TaskTextFields task={task(1, 'Untitled', '')} onUpdate={() => {}} />)
+  const title = view.getByLabelText('Task title')
+
+  fireEvent.keyDown(title, { key: 'Tab' })
+
+  expect(document.activeElement).toBe(view.getByLabelText('Description'))
+})
