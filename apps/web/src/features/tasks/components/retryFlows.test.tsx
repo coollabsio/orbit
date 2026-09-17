@@ -110,10 +110,12 @@ test('task deletion retry returns to the task list after success', async () => {
   const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }
   const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={onBack} />, { wrapper: Wrapper })
 
-  fireEvent.click(view.getByRole('button', { name: 'Delete task' }))
+  const deleteButton = view.getByRole('button', { name: 'Delete' })
+  expect(deleteButton.classList.contains('button-danger')).toBe(true)
+  fireEvent.click(deleteButton)
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
   expect(calls).toBe(0)
-  fireEvent.click(view.getByRole('button', { name: 'Delete task' }))
+  fireEvent.click(view.getByRole('button', { name: 'Delete' }))
   fireEvent.click(view.getByRole('button', { name: 'Move to trash' }))
   await view.findByRole('alert')
   fireEvent.click(view.getByRole('button', { name: 'Retry' }))

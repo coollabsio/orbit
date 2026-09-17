@@ -19,7 +19,6 @@ import {
   useTaskComments,
   useTasks,
 } from './api/tasks'
-import { ProjectRail } from './components/ProjectRail'
 import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
@@ -151,7 +150,6 @@ export function TasksPage() {
 
   return (
     <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
-      <ProjectRail projects={projects} projectId={projectFilter} onSelect={setProjectFilter} />
       {taskId ? (
         <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} />
       ) : (
@@ -161,21 +159,23 @@ export function TasksPage() {
               <Menu size={18} />
             </button>
             <Dropdown className="tasks-project-picker" trigger={(open) => (
-              <button type="button" className="tasks-project-trigger" data-open={open || undefined}>
+              <button type="button" className="tasks-project-trigger" data-open={open || undefined} aria-label="Select project">
                 {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : null}
-                <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span><ChevronDown size={14} />
+                <span>{activeProject?.name ?? 'All projects'}</span><ChevronDown size={14} />
               </button>
             )}>
-              {(close) => <><button className="popover-option" data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><TaskSquare size={15} />All tasks</button>
+              {(close) => <><button className="popover-option" data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><TaskSquare size={15} />All projects</button>
                 {projects.map((project) => <button key={project.id} className="popover-option" data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="pill-dot" style={{ background: project.color }} />{project.name}</button>)}
                 <div className="popover-separator" />
+                <button className="popover-option" disabled={createProject.isPending} onClick={() => startNewProject(close)}><Add size={15} />New project</button>
                 {activeProject ? <button className="popover-option" onClick={() => {
                   const path = projectSettingsPath(activeProject.id)
                   close()
                   if (path) navigate(path)
                 }}><Setting2 size={15} />{projectSettingsLabel()}</button> : null}
-                <button className="popover-option" disabled={createProject.isPending} onClick={() => startNewProject(close)}><Add size={15} />New project</button></>}
+                </>}
             </Dropdown>
+            <span className="pane-title">All tasks</span>
             <div className="spacer" />
             <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>

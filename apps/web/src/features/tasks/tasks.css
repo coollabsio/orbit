@@ -427,14 +427,20 @@
 }
 
 .tasks-due-date {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 32px;
+  margin-left: -8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
 }
 
-.tasks-due-date input {
-  min-width: 0;
-  width: 100%;
+.tasks-due-date:hover,
+.tasks-date-dropdown[data-dropdown-open='true'] .tasks-due-date {
+  background: var(--fill);
 }
 
 .tasks-side-prop {

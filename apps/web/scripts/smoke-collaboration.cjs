@@ -47,7 +47,7 @@ await b.setOffline(false);
 await expect(q.getByRole('textbox',{name:'Task title',exact:true})).toHaveValue(title+' reconnect',{timeout:20000});
 console.log('PASS reconnect catches up');
 p.once('dialog',d=>d.accept());
-await p.getByRole('button',{name:'Delete task',exact:true}).click();
+await p.getByRole('button',{name:'Delete',exact:true}).click();
 await p.waitForURL(/\/tasks(?:\?|$)/);
 console.log('PASS smoke task moved to trash');
 } finally {await browser.close()}

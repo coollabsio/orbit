@@ -1,7 +1,8 @@
 import { useRef } from 'react'
 import { confirmAction } from '../../../components/ui/confirmAction'
-import { ArrowLeft, Calendar, Paperclip2, TaskSquare, Trash, Xmark } from 'reicon-react'
+import { ArrowLeft, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
+import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
@@ -15,7 +16,17 @@ import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
-import { dueDateInputValue, dueDatePatchValue } from '../api/dueDate'
+
+function dueDateLabel(value: string | null) {
+  if (!value) return 'Set due date'
+  return new Date(value).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 interface TaskDetailProps {
   task: Task | undefined
@@ -57,10 +68,10 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
         </button>
         <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
         <div className="spacer" />
-        {task ? <button className="icon-button" aria-label="Delete task" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
+        {task ? <button type="button" className="button button-danger" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
           if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
           void deleteAndClose({ taskId: task.id, version: task.version })
-        }}><Trash size={15} /></button> : null}
+        }}>Delete</button> : null}
         <button className="icon-button" onClick={onBack} aria-label="Close task">
           <Xmark size={16} />
         </button>
@@ -218,19 +229,40 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Due date</h4>
-              <label className="tasks-due-date">
-                <Calendar size={15} aria-hidden="true" />
-                <input
-                  type="datetime-local"
-                  aria-label="Due date"
-                  value={dueDateInputValue(task.dueAt)}
-                  disabled={updateTask.isPending}
-                  onChange={(event) => updateTask.mutate({
-                    taskId: task.id,
-                    body: { expected_version: task.version, due_at: dueDatePatchValue(event.target.value) },
-                  })}
-                />
-              </label>
+              <Dropdown
+                className="tasks-date-dropdown"
+                direction="up"
+                trigger={(open) => (
+                  <button
+                    type="button"
+                    className="tasks-due-date"
+                    aria-label="Due date"
+                    aria-expanded={open}
+                    disabled={updateTask.isPending}
+                  >
+                    <Calendar size={15} aria-hidden="true" />
+                    <span>{dueDateLabel(task.dueAt)}</span>
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <DatePicker
+                    value={task.dueAt}
+                    onChange={(dueAt) => updateTask.mutate({
+                      taskId: task.id,
+                      body: { expected_version: task.version, due_at: dueAt },
+                    })}
+                    onClear={() => {
+                      updateTask.mutate({
+                        taskId: task.id,
+                        body: { expected_version: task.version, due_at: null },
+                      })
+                      close()
+                    }}
+                    onDone={close}
+                  />
+                )}
+              </Dropdown>
             </div>
           </aside>
 

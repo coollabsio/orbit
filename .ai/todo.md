@@ -1,9 +1,10 @@
-# Task: Add a short project README
+# Task: Switch project menu actions
 
-- [x] Review project purpose and main commands.
-- [x] Write a brief root `README.md`.
-- [x] Verify the content against the repository.
+- [x] Add a failing test for the requested action order
+- [x] Move New project above Project settings
+- [x] Run focused verification
+- [x] Verify the running dropdown
 
 ## Review
-- Added a concise project summary, development setup, verification commands, and links to operations and license details.
-- Confirmed all referenced files and Just recipes exist. README validation passed.
+- The project dropdown now shows `New project` before `Project settings`.
+- The focused test passes, lint has no new warnings, and browser verification confirmed the live menu order.
