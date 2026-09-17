@@ -81,6 +81,7 @@ jobs:
           tag=${GITHUB_SHA::7}
           docker buildx imagetools create \
             --tag "$image:$tag" \
+            --tag "$image:main" \
             "$image:$tag-amd64" \
             "$image:$tag-arm64"
           docker buildx imagetools inspect "$image:$tag" | tee manifest.txt
