@@ -58,7 +58,6 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
         {!collapsed ? (
           <span className="user-menu-identity">
             <span className="user-menu-name">{userName}</span>
-            <span className="user-menu-email">{me?.email}</span>
           </span>
         ) : null}
         {!collapsed ? <Chevron open={open} /> : null}
