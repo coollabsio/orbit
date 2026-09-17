@@ -40,7 +40,7 @@ browser
       -> local verified backups
 ```
 
-One Orbit process owns a database file. The process validates configuration, runs guarded migrations and a quick integrity check, verifies writable storage and the embedded client contract, then binds HTTP. Retention, attachment reconciliation, and daily backup services start with the server and stop after HTTP begins graceful shutdown.
+One Orbit process owns a database file. The process validates configuration, runs guarded migrations and a quick integrity check, verifies writable storage and the embedded client contract, then binds HTTP. Retention and attachment reconciliation services start with the server and stop after HTTP begins graceful shutdown. Backups are started manually.
 
 ## Repository layout
 

@@ -14,7 +14,7 @@ The Cargo workspace has three crates with one-way dependencies:
 
 The public router records bounded request counters. When `metrics.listen` is configured, a separate private listener exposes those identifier-free Prometheus metrics; it is disabled by default and never mounts `/metrics` on the public listener.
 
-On shutdown, the HTTP server stops accepting new connections and drains active requests. Orbit then cancels retention, attachment reconciliation, and backup services. Durable job handlers get up to 30 seconds to finish before local tasks are aborted and leases recover naturally.
+On shutdown, the HTTP server stops accepting new connections and drains active requests. Orbit then cancels retention and attachment reconciliation services. Durable job handlers get up to 30 seconds to finish before local tasks are aborted and leases recover naturally.
 
 ## Persistence and security
 

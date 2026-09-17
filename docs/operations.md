@@ -21,7 +21,7 @@ Do not attempt automatic repair. Verify a known-good backup, restore it with the
 
 ## A background service fails
 
-Retention, reconciliation, scheduler, or integrity supervision failure cancels normal serving. Daily backups, weekly integrity checks, and retention use durable schedules, so an overdue run is materialized immediately after restart. The process stops accepting HTTP and tells workers to stop claiming jobs immediately, then bounds the combined drain to 30 seconds. Fix the reported database or storage condition, verify backups, and restart. Durable job leases recover after expiry; do not edit the jobs table.
+Retention, reconciliation, scheduler, or integrity supervision failure cancels normal serving. Weekly integrity checks and retention use durable schedules, so an overdue run is materialized immediately after restart. Backups are manual. The process stops accepting HTTP and tells workers to stop claiming jobs immediately, then bounds the combined drain to 30 seconds. Fix the reported database or storage condition, verify backups, and restart. Durable job leases recover after expiry; do not edit the jobs table.
 
 ## Restore rollback or ownership error
 

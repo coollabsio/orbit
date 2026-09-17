@@ -177,7 +177,6 @@ impl App {
         let production_services = initialize_production_services(
             &database,
             Arc::clone(&workspaces),
-            backups.clone(),
             integrity.clone(),
             config.jobs.concurrency,
         )
@@ -497,11 +496,11 @@ fn health_registry(
             let count = database
                 .scalar::<i64>(
                     "SELECT COUNT(DISTINCT job_kind) FROM schedules WHERE enabled = 1 \
-                     AND job_kind IN ('workspace.retention', 'backup.daily', 'integrity.weekly')",
+                     AND job_kind IN ('workspace.retention', 'integrity.weekly')",
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-            if count == 3 {
+            if count == 2 {
                 Scheduler::new(JobStore::new(database))
                     .validate_enabled()
                     .await
@@ -522,7 +521,6 @@ fn health_registry(
 async fn initialize_production_services(
     database: &Database,
     workspaces: Arc<WorkspaceRepository>,
-    backups: BackupService,
     integrity: IntegrityService,
     concurrency: usize,
 ) -> Result<ProductionServices, AppError> {
@@ -530,8 +528,6 @@ async fn initialize_production_services(
     let scheduler = Scheduler::new(store.clone());
     let failure = CancellationToken::new();
     let retention_repository = Arc::clone(&workspaces);
-    let backup_service = backups;
-    let backup_database = database.clone();
     let integrity_service = integrity;
     let integrity_failure = failure.clone();
     let worker_config = WorkerConfig::new(concurrency)
@@ -545,19 +541,6 @@ async fn initialize_production_services(
                     .await
                     .map_err(|_| JobError::Retryable("retention maintenance failed".to_owned()))
             }
-        })
-        .and_then(|worker| {
-            worker.with_handler(maintenance_kind("backup.daily"), move |context| {
-                let backups = backup_service.clone();
-                let database = backup_database.clone();
-                async move {
-                    backups
-                        .create_cancellable(&database, context.cancellation_token())
-                        .await
-                        .map(|_| ())
-                        .map_err(|_| JobError::Retryable("automatic backup failed".to_owned()))
-                }
-            })
         })
         .and_then(|worker| {
             worker.with_handler(integrity_kind(), move |_| {
@@ -585,14 +568,14 @@ async fn initialize_production_services(
         now,
     )
     .await?;
-    ensure_schedule(
-        database,
-        &scheduler,
-        "backup.daily",
-        Duration::from_secs(24 * 60 * 60),
-        now,
-    )
-    .await?;
+    database
+        .execute("UPDATE schedules SET enabled = 0 WHERE job_kind = 'backup.daily'")
+        .await
+        .map_err(|error| AppError::ProductionServices(error.to_string()))?;
+    database
+        .execute("DELETE FROM jobs WHERE kind = 'backup.daily'")
+        .await
+        .map_err(|error| AppError::ProductionServices(error.to_string()))?;
     ensure_schedule(
         database,
         &scheduler,

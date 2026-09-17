@@ -46,7 +46,7 @@ Run under an unprivileged service account and an HTTPS reverse proxy. The binary
 
 ## Backups and upgrades
 
-Automatic daily backups retain seven daily and four weekly snapshots. A backup volume on the same machine is not disaster recovery: copy it off-host, protect access, and regularly test restore into separate storage.
+Backups are created manually from Orbit Settings. Snapshot retention keeps seven daily and four weekly buckets when enough backups exist. A backup volume on the same machine is not disaster recovery: copy it off-host, protect access, and regularly test restore into separate storage.
 
 ```sh
 docker compose --env-file deploy/.env -f deploy/compose.yaml exec orbit /orbit --config /etc/orbit/orbit.toml backup create

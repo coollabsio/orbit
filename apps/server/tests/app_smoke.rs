@@ -444,11 +444,43 @@ async fn critical_durable_schedules_exist_before_serve() {
         .await
         .unwrap();
 
-    assert_eq!(
-        kinds,
-        ["backup.daily", "integrity.weekly", "workspace.retention"]
-    );
+    assert_eq!(kinds, ["integrity.weekly", "workspace.retention"]);
     assert!(app.production_services_ready());
+}
+
+#[tokio::test]
+async fn startup_disables_legacy_automatic_backup_work() {
+    let root = TempDir::new().unwrap();
+    let config = app_config(&root);
+    let first = App::build(config.clone()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO schedules (id, job_kind, payload_json, schedule, next_run_at, enabled, updated_at) \
+         VALUES ('legacy-backup', 'backup.daily', '{}', '@every 86400000ms', 1, 1, 1)",
+    )
+    .execute(first.database().pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO jobs (id, kind, payload_json, state, priority, max_attempts, available_at, created_at, updated_at) \
+         VALUES ('legacy-backup-job', 'backup.daily', '{}', 'queued', 'critical', 8, 1, 1, 1)",
+    )
+    .execute(first.database().pool())
+    .await
+    .unwrap();
+    drop(first);
+
+    let app = App::build(config).await.unwrap();
+    let enabled: i64 =
+        sqlx::query_scalar("SELECT enabled FROM schedules WHERE job_kind = 'backup.daily'")
+            .fetch_one(app.database().pool())
+            .await
+            .unwrap();
+    let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'backup.daily'")
+        .fetch_one(app.database().pool())
+        .await
+        .unwrap();
+    assert_eq!(enabled, 0);
+    assert_eq!(queued, 0);
 }
 
 #[tokio::test]
@@ -458,7 +490,7 @@ async fn malformed_critical_schedule_fails_before_serve() {
     let first = App::build(config.clone()).await.unwrap();
     sqlx::query(
         "UPDATE schedules SET schedule = 'not-a-schedule', next_run_at = 4102444800000 \
-         WHERE job_kind = 'backup.daily'",
+         WHERE job_kind = 'integrity.weekly'",
     )
     .execute(first.database().pool())
     .await
@@ -467,47 +499,6 @@ async fn malformed_critical_schedule_fails_before_serve() {
 
     let error = App::build(config).await.unwrap_err();
     assert!(error.to_string().contains("invalid stored schedule"));
-}
-
-#[tokio::test]
-async fn overdue_daily_backup_survives_restart_and_runs_immediately() {
-    let root = TempDir::new().unwrap();
-    let first = App::build(app_config(&root)).await.unwrap();
-    first
-        .database()
-        .execute("UPDATE schedules SET next_run_at = 1 WHERE job_kind = 'backup.daily'")
-        .await
-        .unwrap();
-    drop(first);
-
-    let app = App::build(app_config(&root)).await.unwrap();
-    let next_run: i64 =
-        sqlx::query_scalar("SELECT next_run_at FROM schedules WHERE job_kind = 'backup.daily'")
-            .fetch_one(app.database().pool())
-            .await
-            .unwrap();
-    assert_eq!(next_run, 1, "restart must not reset an overdue clock");
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let shutdown = CancellationToken::new();
-    let stop = shutdown.clone();
-    let server = tokio::spawn(app.serve(listener, shutdown));
-    let backup = orbit_platform::BackupService::new(
-        root.path().join("backups"),
-        root.path().join("data/attachments"),
-    );
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            if !backup.list().await.unwrap().is_empty() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the overdue backup runs after restart");
-    stop.cancel();
-    server.await.unwrap().unwrap();
 }
 
 #[tokio::test]
