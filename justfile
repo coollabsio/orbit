@@ -31,10 +31,23 @@ dev:
     wait -n "$server_pid" "$web_pid"
 
 test:
+    just version-check
     cargo test --workspace
     cd apps/web && bun run test
 
+version-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo_version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml)
+    web_version=$(bun -e 'console.log(require("./apps/web/package.json").version)')
+    test -n "$cargo_version"
+    test "$web_version" = "$cargo_version" || {
+        echo "version mismatch: Cargo workspace is $cargo_version, web app is $web_version" >&2
+        exit 1
+    }
+
 check:
+    just version-check
     cd apps/web && bun run build
     git diff --exit-code -- apps/web/dist
     cargo fmt --check
