@@ -625,12 +625,33 @@
 
 /* activity: timeline of events, then comment threads */
 .tasks-activity-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin: 20px 0 8px;
   padding-top: 14px;
   border-top: 1px solid var(--hairline);
+}
+
+.tasks-activity-heading h3 {
+  margin: 0;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-heading);
+}
+
+.tasks-activity-toggle {
+  width: 24px;
+  height: 24px;
+  color: var(--text-muted);
+}
+
+.tasks-activity-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.tasks-activity-toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
 }
 
 .tasks-timeline {

@@ -1,30 +1,32 @@
 # syntax=docker/dockerfile:1.7
 ARG ORBIT_BUILD_REVISION=container
 FROM oven/bun:1.3.14-alpine AS web
-ARG ORBIT_BUILD_REVISION
-ENV ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION}
 WORKDIR /src/apps/web
 COPY apps/web/package.json apps/web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY apps/web/ ./
-RUN bun run build
+ARG ORBIT_BUILD_REVISION
+RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} bun run build
 
 FROM rust:1.97.1-alpine AS server
-ARG ORBIT_BUILD_REVISION
-ENV ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION}
 RUN apk add --no-cache musl-dev
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
 COPY apps/server/ apps/server/
 COPY --from=web /src/apps/web/dist/ apps/web/dist/
-RUN cargo build --locked --release -p orbit-server
+ARG ORBIT_BUILD_REVISION
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} \
+    cargo build --locked --release -p orbit-server \
+    && cp target/release/orbit /orbit
 
 FROM alpine:3.23
 RUN apk add --no-cache bash ca-certificates tzdata \
     && mkdir -p /var/lib/orbit /var/backups/orbit /etc/orbit \
     && chown -R 65532:65532 /var/lib/orbit /var/backups/orbit /etc/orbit
-COPY --from=server /src/target/release/orbit /orbit
+COPY --from=server /orbit /orbit
 USER 65532:65532
 VOLUME ["/var/lib/orbit", "/var/backups/orbit", "/etc/orbit"]
 EXPOSE 8080

@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { ChevronDown } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { Task, TaskActivity, TaskViewState } from '../api/models'
@@ -19,11 +20,18 @@ interface ActivityFeedProps {
  * so a change made after a comment shows below that comment.
  */
 export function ActivityFeed({ task, state }: ActivityFeedProps) {
+  const [expanded, setExpanded] = useState(false)
   const { workspace } = useWorkspace()
   const createComment = useCreateTaskComment(workspace.id, task.id)
   const mentionTokens = useMemo(() => buildMentionTokens(state.users, []), [state.users])
   const userById = (id: string) => state.users.find((u) => u.id === id)
-  const feed = buildFeed(task)
+  const hasMoreActivity = task.activity.length > 3
+  const visibleActivity = expanded || !hasMoreActivity
+    ? task.activity
+    : [...task.activity]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 3)
+  const feed = buildFeed({ ...task, activity: visibleActivity })
 
   const renderTimeline = (items: TaskActivity[], key: string) => (
     <ol key={key} className="tasks-timeline">
@@ -58,7 +66,20 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
 
   return (
     <div className="tasks-activity">
-      <h3 className="tasks-activity-heading">Activity</h3>
+      <div className="tasks-activity-heading">
+        <h3>Activity</h3>
+        {hasMoreActivity ? (
+          <button
+            type="button"
+            className="icon-button tasks-activity-toggle"
+            aria-label={expanded ? 'Show fewer activities' : 'Show all activities'}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <ChevronDown size={14} />
+          </button>
+        ) : null}
+      </div>
       {feed.map((entry, index) =>
         entry.kind === 'activity' ? renderTimeline(entry.items, `timeline-${index}`) : renderThread(entry.thread),
       )}

@@ -11,16 +11,17 @@ test('standalone web apps opt into iOS safe-area insets', async () => {
   expect(manifest.scope).toBe('/')
 })
 
-test('the app shell fills the webview and keeps chrome inside the safe area', async () => {
+test('the app shell fills the webview and only pads the dock in standalone mode', async () => {
   const css = await Bun.file(new URL('./shell.css', import.meta.url)).text()
   const shell = css.slice(css.indexOf('.app-shell {'), css.indexOf('.app-sidebar {'))
   expect(shell).toContain('height: var(--app-height, 100svh)')
   expect(shell).toContain('env(safe-area-inset-top')
   expect(shell).not.toMatch(/height:\s*100dvh/)
   const dock = css.slice(css.indexOf('.mobile-dock {'), css.indexOf('.mobile-dock > a'))
-  expect(dock).toContain('env(safe-area-inset-bottom')
+  expect(dock).toContain('padding-bottom: 0')
   expect(dock).toContain('min-height: var(--dock-height)')
   expect(dock).toContain('padding-top: 12px')
+  expect(css).toMatch(/@media \(display-mode: standalone\)[\s\S]*?\.mobile-dock \{[\s\S]*?env\(safe-area-inset-bottom/)
 })
 
 test('mobile chrome has no outer or dock hairlines', async () => {

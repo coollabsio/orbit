@@ -475,10 +475,17 @@ a.topbar-crumb:hover {
   min-height: var(--dock-height);
   height: auto;
   padding-top: 12px;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: 0;
   border-top: none;
   background: var(--canvas);
   flex-shrink: 0;
+}
+
+/* Installed apps extend behind the home indicator. Safari tabs do not. */
+@media (display-mode: standalone) {
+  .mobile-dock {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 .mobile-dock > a {
