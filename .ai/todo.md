@@ -1,12 +1,9 @@
-# Fix production WebSocket connections
+# Task: Add a short project README
 
-- [x] Reproduce the Cloudflare WebSocket handshake failure.
-- [x] Identify whether the application or proxy rejects the upgrade.
-- [x] Add a regression test and implement the smallest fix.
-- [ ] Verify locally and publish a new short-SHA image.
+- [x] Review project purpose and main commands.
+- [x] Write a brief root `README.md`.
+- [x] Verify the content against the repository.
 
 ## Review
-
-- Cloudflare reaches Orbit, but the application returns `invalid_proxy_headers` during the upgrade.
-- The proxy chain repeats the same `X-Forwarded-Proto` value. Orbit now accepts identical repeated values but still rejects conflicting values.
-- Pending local suite and published-image verification.
+- Added a concise project summary, development setup, verification commands, and links to operations and license details.
+- Confirmed all referenced files and Just recipes exist. README validation passed.
