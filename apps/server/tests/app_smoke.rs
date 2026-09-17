@@ -365,6 +365,64 @@ async fn api_method_mismatches_are_problem_details() {
 }
 
 #[tokio::test]
+async fn installation_admin_can_create_an_online_backup() {
+    let root = TempDir::new().unwrap();
+    let app = App::build(app_config(&root)).await.unwrap();
+    let token = app.setup_url().unwrap().split_once("token=").unwrap().1;
+    let setup = app
+        .router()
+        .oneshot(
+            Request::post("/api/v1/setup/complete")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "http://127.0.0.1:8080")
+                .body(Body::from(
+                    serde_json::json!({
+                        "token": token,
+                        "email": "owner@example.com",
+                        "display_name": "Owner",
+                        "password": "a long unique launch password 9347",
+                        "workspace_name": "Orbit",
+                        "project_name": "Tasks"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(setup.status(), StatusCode::CREATED);
+    let cookie = setup.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .router()
+        .oneshot(
+            Request::post("/api/v1/admin/backups")
+                .header(header::ORIGIN, "http://127.0.0.1:8080")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let id = body["id"].as_str().unwrap();
+    let backups = orbit_platform::BackupService::new(
+        root.path().join("backups"),
+        root.path().join("data/attachments"),
+    );
+    backups.verify(id).await.unwrap();
+}
+
+#[tokio::test]
 async fn critical_durable_schedules_exist_before_serve() {
     let root = TempDir::new().unwrap();
     let app = App::build(app_config(&root)).await.unwrap();

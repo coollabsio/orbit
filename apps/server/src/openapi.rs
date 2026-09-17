@@ -50,6 +50,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::set_account_suspension,
         crate::workspace_routes::list_global_audit,
         crate::workspace_routes::export_global_audit,
+        crate::workspace_routes::create_backup,
         crate::task_routes::list_projects,
         crate::task_routes::create_project,
         crate::task_routes::update_project,

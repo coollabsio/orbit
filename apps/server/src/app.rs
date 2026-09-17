@@ -205,6 +205,7 @@ impl App {
                     Arc::clone(&workspaces),
                     config.http.public_origin.clone(),
                     cookie_mode,
+                    backups.clone(),
                 ),
                 tasks: TaskState::new(identity, cookie_mode),
                 attachments: attachment_state.clone(),

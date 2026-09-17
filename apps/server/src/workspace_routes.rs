@@ -11,8 +11,8 @@ use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use orbit_domain::WorkspaceRole;
 use orbit_platform::{
-    ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor, PasswordService, RequestId,
-    ThrottleDecision, TimestampMillis,
+    BackupService, ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor, PasswordService,
+    RequestId, ThrottleDecision, TimestampMillis,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,7 @@ pub struct WorkspaceState {
     cookie_mode: CookieMode,
     passwords: PasswordExecutor,
     registration_throttler: Arc<Mutex<LoginThrottler>>,
+    backups: Option<BackupService>,
 }
 
 impl WorkspaceState {
@@ -48,6 +49,7 @@ impl WorkspaceState {
             passwords: PasswordExecutor::new(PasswordService::default(), 2)
                 .expect("password executor concurrency is non-zero"),
             registration_throttler: Arc::new(Mutex::new(LoginThrottler::new())),
+            backups: None,
         }
     }
 
@@ -57,6 +59,7 @@ impl WorkspaceState {
         workspaces: Arc<WorkspaceRepository>,
         public_origin: String,
         cookie_mode: CookieMode,
+        backups: BackupService,
     ) -> Self {
         Self {
             identity,
@@ -66,6 +69,7 @@ impl WorkspaceState {
             passwords: PasswordExecutor::new(PasswordService::default(), 2)
                 .expect("password executor concurrency is non-zero"),
             registration_throttler: Arc::new(Mutex::new(LoginThrottler::new())),
+            backups: Some(backups),
         }
     }
 }
@@ -122,6 +126,7 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         )
         .route("/api/v1/admin/audit", get(list_global_audit))
         .route("/api/v1/admin/audit/export", get(export_global_audit))
+        .route("/api/v1/admin/backups", post(create_backup))
         .with_state(state)
 }
 
@@ -880,6 +885,46 @@ async fn set_account_suspension(
         .await
         .map_err(|error| suspension_problem(error, &instance, request_id.as_ref()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize, ToSchema)]
+struct BackupCreated {
+    id: String,
+}
+
+#[utoipa::path(post, path = "/api/v1/admin/backups", responses((status = 201, body = BackupCreated)))]
+async fn create_backup(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<(StatusCode, Json<BackupCreated>), ApiError> {
+    let instance = "/api/v1/admin/backups";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
+    let backups = state.backups.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "backup_unavailable",
+            "Backup unavailable",
+            "The backup service is not available.",
+            instance,
+            request_id.as_ref(),
+        )
+    })?;
+    let snapshot = backups
+        .create(state.identity.database())
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "backup_failed",
+                "Backup failed",
+                "Orbit could not create a verified backup.",
+                instance,
+                request_id.as_ref(),
+            )
+        })?;
+    Ok((StatusCode::CREATED, Json(BackupCreated { id: snapshot.id })))
 }
 
 #[derive(Deserialize, IntoParams, ToSchema)]

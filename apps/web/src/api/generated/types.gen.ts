@@ -91,6 +91,10 @@ export type AuthenticatedUser = {
     id: string;
 };
 
+export type BackupCreated = {
+    id: string;
+};
+
 export type BulkBody = {
     updates: Array<BulkItem>;
 };
@@ -723,6 +727,58 @@ export type ExportGlobalAuditResponses = {
 };
 
 export type ExportGlobalAuditResponse = ExportGlobalAuditResponses[keyof ExportGlobalAuditResponses];
+
+export type CreateBackupData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/backups';
+};
+
+export type CreateBackupErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateBackupError = CreateBackupErrors[keyof CreateBackupErrors];
+
+export type CreateBackupResponses = {
+    201: BackupCreated;
+};
+
+export type CreateBackupResponse = CreateBackupResponses[keyof CreateBackupResponses];
 
 export type SetAccountSuspensionData = {
     body: SuspensionBody;

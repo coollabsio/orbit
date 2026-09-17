@@ -1,4 +1,7 @@
 import { useRef, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { apiClient } from '../../api/client'
+import { createBackup } from '../../api/generated/sdk.gen'
 import { Listbox } from '../../components/ui/Listbox'
 import { UnsavedBar } from '../../components/ui/UnsavedBar'
 import { useTheme, type Theme } from '../../lib/themeContext'
@@ -10,6 +13,13 @@ export function GeneralPage() {
   const { theme, setTheme } = useTheme()
   const { workspace } = useWorkspace()
   const renameWorkspace = useRenameWorkspace(workspace.id)
+  const backup = useMutation({
+    mutationFn: async () => {
+      const { data } = await createBackup({ client: apiClient, throwOnError: true })
+      if (!data) throw new Error('Backup response was empty.')
+      return data
+    },
+  })
   const formRef = useRef<HTMLFormElement>(null)
   const [nameDraft, setNameDraft] = useState<{ workspaceId: string; value: string } | null>(null)
   const name = nameDraft?.workspaceId === workspace.id ? nameDraft.value : workspace.name
@@ -78,6 +88,13 @@ export function GeneralPage() {
             <input id="about-storage" className="input" value="Server data directory" readOnly />
           </div>
         </div>
+      </SettingsCard>
+      <SettingsCard title="Backup" description="Create a verified snapshot of the database and attachments without stopping Orbit.">
+        <button className="button button-primary" disabled={backup.isPending} onClick={() => backup.mutate()}>
+          {backup.isPending ? 'Creating backup…' : 'Create backup now'}
+        </button>
+        {backup.isSuccess ? <p role="status">Backup created: <code>{backup.data.id}</code></p> : null}
+        {backup.isError ? <p role="alert" className="text-danger">Backup failed. Installation administrator access is required.</p> : null}
       </SettingsCard>
       {dirty ? (
         <UnsavedBar
