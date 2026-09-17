@@ -41,12 +41,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build native image
+      - uses: docker/setup-buildx-action@v3
+      - name: Set image name
+        id: image
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
-          docker build --build-arg ORBIT_BUILD_REVISION="$GITHUB_SHA" -t "$image" .
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+      - name: Build native image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: ORBIT_BUILD_REVISION=${{ github.sha }}
+          tags: ${{ steps.image.outputs.name }}
+          load: true
+          cache-from: type=gha,scope=orbit-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=orbit-${{ matrix.architecture }}
       - name: Verify and smoke-test native image
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
