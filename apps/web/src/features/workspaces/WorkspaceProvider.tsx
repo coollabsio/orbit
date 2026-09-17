@@ -4,6 +4,7 @@ import type { WorkspaceRecord } from '../../api/generated/types.gen'
 import { useWorkspaces } from './api'
 import { selectedWorkspaceId, switchWorkspaceHref } from './navigation'
 import { WorkspaceContext } from './workspaceContext'
+import { LoadingScreen } from '../../components/ui/LoadingScreen'
 const preferenceKey = 'orbit:selected_workspace'
 const emptyWorkspaces: WorkspaceRecord[] = []
 
@@ -29,7 +30,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     selectWorkspace: (id: string) => navigate(switchWorkspaceHref(location.pathname, location.search, id)),
   } : null, [location.pathname, location.search, navigate, workspace, workspaces])
 
-  if (query.isPending) return <WorkspaceMessage title="Loading workspace" detail="Loading your workspace access." />
+  if (query.isPending) return <LoadingScreen />
   if (query.isError) return <WorkspaceMessage title="Orbit is unavailable" detail="Your workspaces could not be loaded." />
   if (!value) return <WorkspaceMessage title="No workspace access" detail="Ask an owner for an invitation to a workspace." />
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>

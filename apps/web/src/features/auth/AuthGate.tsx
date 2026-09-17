@@ -16,6 +16,7 @@ import {
   useSetupStatus,
 } from './api'
 import { consumeQueryToken } from './authFlow'
+import { LoadingScreen } from '../../components/ui/LoadingScreen'
 
 export function AuthGate() {
   const setup = useSetupStatus()
@@ -32,7 +33,7 @@ export function AuthGate() {
   if (state === 'setup') return <Navigate to="/setup" replace />
   if (state === 'login') return <Navigate to="/login" replace />
   if (state === 'authenticated') return <Outlet />
-  return <AuthMessage title="Loading Orbit" detail="Checking the installation and session." />
+  return <LoadingScreen />
 }
 
 function useConsumedToken() {
