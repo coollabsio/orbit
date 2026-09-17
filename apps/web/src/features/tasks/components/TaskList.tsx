@@ -241,12 +241,12 @@ function BulkBar({
         )}
       </Dropdown>
       <Dropdown direction="up" align="right" trigger={() => <button className="button button-ghost">Assignee</button>}>
-        {() => (
+        {(close) => (
           <>
             {users.map((u) => {
               const everyone = tasks.every((t) => t.assigneeIds.includes(u.id))
               return (
-                <button key={u.id} className="popover-option" data-selected={everyone || undefined} onClick={() => bulkAssign(u.id)}>
+                <button key={u.id} className="popover-option" data-selected={everyone || undefined} onClick={() => { bulkAssign(u.id); close() }}>
                   <Avatar user={u} size={16} />
                   {u.name}
                   {everyone ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}

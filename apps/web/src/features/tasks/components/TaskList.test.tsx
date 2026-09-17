@@ -133,6 +133,8 @@ test('task list assignee opens the assignment dropdown and updates without openi
   fireEvent.click(view.getByRole('button', { name: 'Assignees: Ada Lovelace' }))
   fireEvent.click(view.getByRole('button', { pressed: true }))
 
+  expect(view.queryByRole('status')).toBeNull()
   await waitFor(() => expect(body).toEqual({ expected_version: 1, assignee_ids: [] }))
+  expect(view.queryByText('Assignees')).toBeNull()
   expect(opened).toBe(0)
 })

@@ -168,7 +168,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                   </>
                 )}
               </Dropdown>
-              {/* multi-assignee: options toggle and stay open; active ones show an × at the end */}
+              {/* Multi-assignee options toggle individually; active ones show an × at the end. */}
               <Dropdown
                 trigger={() => (
                   <button className="button button-ghost tasks-side-prop">
@@ -186,7 +186,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                   </button>
                 )}
               >
-                {() => (
+                {(close) => (
                   <>
                     <div className="popover-heading">Assignees</div>
                     {users.map((u) => {
@@ -197,7 +197,10 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                           className="popover-option"
                           data-selected={active || undefined}
                           aria-pressed={active}
-                          onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
+                          onClick={() => {
+                            updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })
+                            close()
+                          }}
                         >
                           <Avatar user={u} size={16} />
                           {u.name}

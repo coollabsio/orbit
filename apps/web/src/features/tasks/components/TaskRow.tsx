@@ -109,7 +109,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
             </button>
           )}
         >
-          {() => (
+          {(close) => (
             <>
               <div className="popover-heading">Assignees</div>
               {users.map((user) => {
@@ -120,15 +120,18 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
                     className="popover-option"
                     data-selected={active || undefined}
                     aria-pressed={active}
-                    onClick={() => updateTask.mutate({
-                      taskId: task.id,
-                      body: {
-                        expected_version: task.version,
-                        assignee_ids: active
-                          ? task.assigneeIds.filter((id) => id !== user.id)
-                          : [...task.assigneeIds, user.id],
-                      },
-                    })}
+                    onClick={() => {
+                      updateTask.mutate({
+                        taskId: task.id,
+                        body: {
+                          expected_version: task.version,
+                          assignee_ids: active
+                            ? task.assigneeIds.filter((id) => id !== user.id)
+                            : [...task.assigneeIds, user.id],
+                        },
+                      })
+                      close()
+                    }}
                   >
                     <Avatar user={user} size={16} />
                     {user.name}
@@ -141,7 +144,6 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
         </Dropdown>
       </div>
       <span className="tasks-row-date">{shortDate(task.createdAt)}</span>
-      {updateTask.isPending ? <span role="status" className="text-faint text-xs">Saving status…</span> : null}
       {updateTask.isError ? <span role="alert" className="text-danger text-xs">Status update failed. <button className="button button-ghost" onClick={(event) => { event.stopPropagation(); if (updateTask.variables) updateTask.mutate(updateTask.variables) }}>Retry</button></span> : null}
     </div>
   )
