@@ -15,11 +15,43 @@ function task(version: number, title: string, description: string): Task {
 test('authoritative conflict refresh replaces visible controlled title and description drafts', () => {
   const onUpdate = mock(() => {})
   const view = render(<TaskTextFields task={task(1, 'Original', 'Old description')} onUpdate={onUpdate} />)
+  fireEvent.click(view.getByText('Original'))
   fireEvent.change(view.getByLabelText('Task title'), { target: { value: 'Rejected title' } })
+  fireEvent.click(view.getByText('Old description'))
   fireEvent.change(view.getByLabelText('Description'), { target: { value: 'Rejected description' } })
 
   view.rerender(<TaskTextFields task={task(2, 'Server title', 'Server description')} onUpdate={onUpdate} />)
 
-  expect((view.getByLabelText('Task title') as HTMLInputElement).value).toBe('Server title')
-  expect((view.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('Server description')
+  expect(view.getByText('Server title')).toBeTruthy()
+  expect(view.getByText('Server description')).toBeTruthy()
+})
+
+test('web addresses in task titles and descriptions become safe links', () => {
+  const view = render(
+    <TaskTextFields
+      task={task(1, 'Review https://example.com/change', 'Details at https://example.com/docs.')}
+      onUpdate={() => {}}
+    />,
+  )
+
+  const links = view.getAllByRole('link') as HTMLAnchorElement[]
+  expect(links.map((link) => link.textContent)).toEqual([
+    'https://example.com/change',
+    'https://example.com/docs',
+  ])
+  expect(links.map((link) => link.href)).toEqual([
+    'https://example.com/change',
+    'https://example.com/docs',
+  ])
+  expect(links.every((link) => link.target === '_blank')).toBe(true)
+  expect(links.every((link) => link.rel === 'noreferrer')).toBe(true)
+})
+
+test('plain task text stays editable when clicked', () => {
+  const view = render(<TaskTextFields task={task(1, 'Editable title', 'Editable description')} onUpdate={() => {}} />)
+
+  fireEvent.click(view.getByText('Editable title'))
+  expect(view.getByLabelText('Task title')).toBeTruthy()
+  fireEvent.click(view.getByText('Editable description'))
+  expect(view.getByLabelText('Description')).toBeTruthy()
 })

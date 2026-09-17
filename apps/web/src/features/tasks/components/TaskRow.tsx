@@ -8,6 +8,7 @@ import type { LabelRecord } from '../../../api/generated/types.gen'
 import { useUpdateTask } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { PriorityPicker } from './PriorityPicker'
+import { LinkifiedText } from './LinkifiedText'
 
 interface TaskRowProps {
   task: Task
@@ -84,7 +85,7 @@ export function TaskRow({ task, statuses, labels, assignees, selected, dragging,
           )}
         </Dropdown>
       </div>
-      <span className="tasks-row-title truncate">{task.title || 'Untitled'}</span>
+      <span className="tasks-row-title truncate"><LinkifiedText text={task.title || 'Untitled'} /></span>
       {task.labels.length > 0 ? (
         <span className="tasks-row-labels">
           {task.labels.map((labelId) => {

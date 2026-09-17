@@ -33,8 +33,8 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider>
 }
 
-function viewFor(tasks: Task[]) {
-  return render(<TaskList tasks={tasks} users={[]} labels={[]} statuses={[status]} groups={groups} sort="manual" onOpen={() => {}} onAdd={() => {}} />, { wrapper })
+function viewFor(tasks: Task[], onOpen = () => {}) {
+  return render(<TaskList tasks={tasks} users={[]} labels={[]} statuses={[status]} groups={groups} sort="manual" onOpen={onOpen} onAdd={() => {}} />, { wrapper })
 }
 
 function chooseUrgent(view: ReturnType<typeof render>) {
@@ -100,4 +100,17 @@ test('bulk toolbar treats an unchanged priority as a local no-op', async () => {
   expect(requests).toBe(0)
   expect(view.queryByRole('alert')).toBeNull()
   expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
+})
+
+test('task list titles link web addresses without opening the task row', () => {
+  let opened = 0
+  const linkedTask = task(1)
+  linkedTask.title = 'Review https://example.com/pull/1'
+  const view = viewFor([linkedTask], () => { opened += 1 })
+
+  const link = view.getByRole('link', { name: 'https://example.com/pull/1' }) as HTMLAnchorElement
+  expect(link.href).toBe('https://example.com/pull/1')
+  expect(link.target).toBe('_blank')
+  fireEvent.click(link)
+  expect(opened).toBe(0)
 })

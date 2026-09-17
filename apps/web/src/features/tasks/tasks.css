@@ -475,6 +475,24 @@
   color: var(--control-placeholder);
 }
 
+.tasks-text-display {
+  cursor: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tasks-text-display[data-muted='true'] {
+  color: var(--control-placeholder);
+}
+
+.tasks-text-display a,
+.tasks-row-title a {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* description block: drop target for files, attachment grid + attach button below the text */
 .tasks-desc-wrap {
   margin-top: 16px;
