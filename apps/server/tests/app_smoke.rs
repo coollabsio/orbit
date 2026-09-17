@@ -86,12 +86,24 @@ async fn embedded_spa_uses_safe_cache_policies_and_never_masks_api_404s() {
         spa.headers()[header::CONTENT_TYPE],
         "text/html; charset=utf-8"
     );
-    assert_eq!(spa.headers()[header::CACHE_CONTROL], "no-cache");
+    assert_eq!(spa.headers()[header::CACHE_CONTROL], "no-store");
     assert!(
         String::from_utf8(spa.into_body().collect().await.unwrap().to_bytes().to_vec())
             .unwrap()
             .contains("<title>Orbit</title>")
     );
+
+    let manifest = router
+        .clone()
+        .oneshot(
+            Request::get("/manifest.webmanifest")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(manifest.status(), StatusCode::OK);
+    assert_eq!(manifest.headers()[header::CACHE_CONTROL], "no-store");
 
     let asset_path = assets
         .immutable_asset_path()

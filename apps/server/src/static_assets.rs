@@ -155,8 +155,11 @@ fn asset_response(path: &str, immutable: bool) -> Option<Response<Body>> {
             .first_or_octet_stream()
             .to_string()
     };
-    let cache = if path == "index.html" || path == "orbit-build.json" {
-        "no-cache"
+    let cache = if matches!(
+        path,
+        "index.html" | "orbit-build.json" | "manifest.webmanifest"
+    ) {
+        "no-store"
     } else if immutable {
         "public, max-age=31536000, immutable"
     } else {
