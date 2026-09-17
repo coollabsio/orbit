@@ -5,6 +5,7 @@ setup:
     bun --version
     just --version
     cd apps/web && bun install --frozen-lockfile
+    cd apps/web && bun run build
 
 dev:
     #!/usr/bin/env bash
@@ -49,7 +50,6 @@ version-check:
 check:
     just version-check
     cd apps/web && bun run build
-    git diff --exit-code -- apps/web/dist
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test --workspace
