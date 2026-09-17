@@ -1,5 +1,7 @@
 # Orbit
 
+> PRETTY ALPHA, DO NOT USE IT IN PROD.
+
 Orbit is a self-hosted workspace application for projects, tasks, documents,
 mail, and team chat. It uses a Rust server, a React web client, and SQLite. The
 production binary serves both the API and the embedded web application.
