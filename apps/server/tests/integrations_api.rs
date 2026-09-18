@@ -106,12 +106,45 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
         .bind(&task_id).bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(counts, (1, 1, 1));
 
-    let conflict = fixture.app.oneshot(request(Some(&issued.token), json!({ "event_id": "discord-message-123", "message": "Changed", "message_url": "https://discord.com/channels/1/2/3" }))).await.unwrap();
+    let conflict = fixture.app.clone().oneshot(request(Some(&issued.token), json!({ "event_id": "discord-message-123", "message": "Changed", "message_url": "https://discord.com/channels/1/2/3" }))).await.unwrap();
     assert_eq!(conflict.status(), StatusCode::CONFLICT);
     assert_eq!(
         response_json(conflict).await["code"],
         "integration_event_conflict"
     );
+
+    sqlx::query("UPDATE tasks SET deleted_at = ?, version = version + 1 WHERE id = ?")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(&task_id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    let recreated = fixture
+        .app
+        .oneshot(request(Some(&issued.token), body))
+        .await
+        .unwrap();
+    assert_eq!(recreated.status(), StatusCode::CREATED);
+    let recreated = response_json(recreated).await;
+    assert_eq!(recreated["duplicate"], false);
+    assert_ne!(recreated["task"]["id"], task_id);
+    assert_eq!(
+        recreated["task"]["creator_service_account_id"],
+        issued.api_token.service_account_id.unwrap().to_string()
+    );
+    assert_eq!(recreated["task"]["creator_service_account_name"], "Discord");
+    assert_eq!(recreated["task"]["creator_id"], Value::Null);
+
+    let replacement_id = recreated["task"]["id"].as_str().unwrap();
+    let mapped_task_id: String = sqlx::query_scalar(
+        "SELECT task_id FROM integration_events WHERE workspace_id = ? AND provider = 'discord' AND external_event_id = 'discord-message-123'",
+    )
+    .bind(fixture.workspace_id.to_string())
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(mapped_task_id, replacement_id);
 }
 
 #[tokio::test]

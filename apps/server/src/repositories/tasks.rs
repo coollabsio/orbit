@@ -1247,20 +1247,33 @@ impl TaskRepository {
         }
 
         if let Some(row) = sqlx::query(
-            "SELECT task_id, payload_hash FROM integration_events WHERE workspace_id = ? AND provider = 'discord' AND external_event_id = ?",
+            "SELECT integration_events.task_id, integration_events.payload_hash, tasks.deleted_at \
+             FROM integration_events \
+             JOIN tasks ON tasks.id = integration_events.task_id \
+             WHERE integration_events.workspace_id = ? AND integration_events.provider = 'discord' AND integration_events.external_event_id = ?",
         )
         .bind(workspace_id.to_string())
         .bind(&input.event_id)
         .fetch_optional(&mut *tx)
         .await?
         {
-            if row.get::<Vec<u8>, _>("payload_hash") != input.payload_hash {
-                return Err(TaskError::IntegrationConflict);
-            }
             let task_id = parse_id(row.get("task_id"))?;
-            let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
-            tx.commit().await?;
-            return Ok((task, false));
+            if row.get::<Option<i64>, _>("deleted_at").is_some() {
+                sqlx::query(
+                    "DELETE FROM integration_events WHERE workspace_id = ? AND provider = 'discord' AND external_event_id = ?",
+                )
+                .bind(workspace_id.to_string())
+                .bind(&input.event_id)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                if row.get::<Vec<u8>, _>("payload_hash") != input.payload_hash {
+                    return Err(TaskError::IntegrationConflict);
+                }
+                let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
+                tx.commit().await?;
+                return Ok((task, false));
+            }
         }
 
         project_in_tx(&mut tx, workspace_id, input.project_id, false).await?;
