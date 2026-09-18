@@ -312,15 +312,26 @@ impl TaskRepository {
         let project_id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        // A deleted project's key can be reclaimed while its tasks keep their numbers, so start
+        // past anything already issued under this key or the identifier index will fire.
+        let next_task_number: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(number), 0) + 1 FROM tasks \
+             WHERE workspace_id = ? AND identifier_key = ?",
+        )
+        .bind(workspace_id.to_string())
+        .bind(&key)
+        .fetch_one(&mut *tx)
+        .await?;
         let inserted = sqlx::query(
-            "INSERT INTO projects (id, workspace_id, name, project_key, color, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO projects (id, workspace_id, name, project_key, color, next_task_number, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
         )
         .bind(project_id.to_string())
         .bind(workspace_id.to_string())
         .bind(&name)
         .bind(&key)
         .bind(&color)
+        .bind(next_task_number)
         .bind(now.as_millis())
         .bind(now.as_millis())
         .execute(&mut *tx)
@@ -390,6 +401,33 @@ impl TaskRepository {
         }
         if updated?.rows_affected() != 1 {
             return Err(TaskError::Conflict);
+        }
+        // Renaming a key rewrites the identifiers it issued, like Linear. Kept in this
+        // transaction so a collision with numbers left by a deleted project rolls the rename back.
+        if key != current.key {
+            let rewritten = sqlx::query(
+                "UPDATE tasks SET identifier_key = ? WHERE workspace_id = ? AND identifier_key = ?",
+            )
+            .bind(&key)
+            .bind(workspace_id.to_string())
+            .bind(&current.key)
+            .execute(&mut *tx)
+            .await;
+            if is_unique_violation(&rewritten) {
+                return Err(TaskError::Conflict);
+            }
+            rewritten?;
+            sqlx::query(
+                "UPDATE projects SET next_task_number = MAX(next_task_number, 1 + COALESCE(\
+                    (SELECT MAX(number) FROM tasks WHERE workspace_id = ? AND identifier_key = ?), 0)) \
+                 WHERE id = ? AND workspace_id = ?",
+            )
+            .bind(workspace_id.to_string())
+            .bind(&key)
+            .bind(project_id.to_string())
+            .bind(workspace_id.to_string())
+            .execute(&mut *tx)
+            .await?;
         }
         record_mutation(
             &mut tx,

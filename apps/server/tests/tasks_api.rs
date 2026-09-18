@@ -2010,3 +2010,51 @@ async fn tasks_receive_sequential_identifiers_that_survive_a_project_move() {
     assert_eq!(created.status(), StatusCode::CREATED);
     assert_eq!(response_json(created).await["identifier"], "MOB-1");
 }
+
+#[tokio::test]
+async fn renaming_a_project_key_rewrites_the_identifiers_it_issued() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("First").await;
+    assert_eq!(task["identifier"], "GEN-1");
+
+    let renamed = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/projects/{}",
+                fixture.workspace_id, fixture.project_id
+            ),
+            &fixture.owner_cookie,
+            json!({"expected_version": 0, "name": "General", "key": "CORE", "color": "#5e6ad2"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(renamed.status(), StatusCode::OK);
+
+    let reread = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}",
+                fixture.workspace_id,
+                task["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!(null),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reread.status(), StatusCode::OK);
+    let reread = response_json(reread).await;
+    assert_eq!(reread["identifier"], "CORE-1");
+    assert_eq!(reread["identifier_key"], "CORE");
+    assert_eq!(reread["number"], 1);
+
+    // The counter must keep climbing under the new key rather than restarting at 1.
+    let next = fixture.create_task("Second").await;
+    assert_eq!(next["identifier"], "CORE-2");
+}
