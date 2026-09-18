@@ -17,6 +17,9 @@ interface ListboxProps<T extends string> {
   placeholder?: string
   disabled?: boolean
   className?: string
+  selectedValues?: T[]
+  displayValue?: string
+  closeOnSelect?: boolean
   'aria-label'?: string
 }
 
@@ -29,6 +32,9 @@ export function Listbox<T extends string>({
   placeholder = 'Select…',
   disabled,
   className,
+  selectedValues,
+  displayValue,
+  closeOnSelect = true,
   'aria-label': ariaLabel,
 }: ListboxProps<T>) {
   const [open, setOpen] = useState(false)
@@ -89,10 +95,10 @@ export function Listbox<T extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        title={current?.label}
+        title={displayValue ?? current?.label}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="listbox-trigger-label">{current?.label ?? placeholder}</span>
+        <span className="listbox-trigger-label">{displayValue ?? current?.label ?? placeholder}</span>
         <svg
           className="listbox-trigger-chevron"
           viewBox="0 0 24 24"
@@ -105,10 +111,10 @@ export function Listbox<T extends string>({
         </svg>
       </button>
       {open ? createPortal(
-        <div ref={panelRef} className="listbox-panel" role="listbox" style={{ ...position, position: 'fixed', minWidth: 0, zIndex: 200, visibility: position ? 'visible' : 'hidden' }}>
+        <div ref={panelRef} className="listbox-panel" role="listbox" aria-multiselectable={selectedValues ? true : undefined} style={{ ...position, position: 'fixed', minWidth: 0, zIndex: 200, visibility: position ? 'visible' : 'hidden' }}>
           {options.length === 0 ? <div className="listbox-empty">No options available.</div> : null}
           {options.map((option) => {
-            const selected = option.value === value
+            const selected = selectedValues?.includes(option.value) ?? option.value === value
             return (
               <button
                 key={option.value}
@@ -118,8 +124,8 @@ export function Listbox<T extends string>({
                 className={cx('listbox-option', option.disabled && 'listbox-option-disabled')}
                 onClick={() => {
                   if (option.disabled) return
-                  setOpen(false)
-                  if (!selected) onChange(option.value)
+                  if (closeOnSelect) setOpen(false)
+                  if (!selected || !closeOnSelect) onChange(option.value)
                 }}
               >
                 <span className="truncate">{option.label}</span>

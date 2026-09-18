@@ -19,8 +19,8 @@ export function useApiTokens(workspaceId: string, enabled = true) {
 export function useCreateApiToken(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ name, projectId, scopes }: { name: string; projectId: string; scopes: ApiTokenScope[] }) => {
-      const { data } = await createApiToken({ client: apiClient, path: { workspace_id: workspaceId }, body: { name, project_id: projectId, scopes }, throwOnError: true })
+    mutationFn: async ({ name, projectIds, scopes }: { name: string; projectIds: string[]; scopes: ApiTokenScope[] }) => {
+      const { data } = await createApiToken({ client: apiClient, path: { workspace_id: workspaceId }, body: { name, project_ids: projectIds, scopes }, throwOnError: true })
       if (!data) throw new Error('API token response was empty.')
       return data
     },

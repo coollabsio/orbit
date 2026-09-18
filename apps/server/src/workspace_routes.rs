@@ -354,7 +354,9 @@ enum ApiTokenScope {
 #[serde(deny_unknown_fields)]
 struct CreateApiTokenBody {
     name: String,
-    project_id: String,
+    #[serde(default)]
+    project_ids: Vec<String>,
+    project_id: Option<String>,
     scopes: Vec<ApiTokenScope>,
 }
 
@@ -388,13 +390,27 @@ async fn create_api_token(
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
     let name = body.name.trim();
-    let project_id = parse_id(&body.project_id, &instance, request_id.as_ref())?;
-    if name.is_empty() || name.chars().count() > 100 || body.scopes.is_empty() {
+    let mut requested_project_ids = body.project_ids;
+    if let Some(project_id) = body.project_id {
+        requested_project_ids.push(project_id);
+    }
+    let mut project_ids = Vec::new();
+    for id in requested_project_ids {
+        let id = parse_id(&id, &instance, request_id.as_ref())?;
+        if !project_ids.contains(&id) {
+            project_ids.push(id);
+        }
+    }
+    if name.is_empty()
+        || name.chars().count() > 100
+        || project_ids.is_empty()
+        || body.scopes.is_empty()
+    {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_api_token",
             "Invalid API token",
-            "Token names must contain 1 to 100 characters and at least one scope is required.",
+            "Token names must contain 1 to 100 characters, and at least one project and scope are required.",
             instance,
             request_id.as_ref(),
         ));
@@ -413,7 +429,7 @@ async fn create_api_token(
             workspace_id,
             session.user.id,
             name.to_owned(),
-            project_id,
+            project_ids,
             can_read,
             can_write,
             request_id_value(request_id.as_ref()),

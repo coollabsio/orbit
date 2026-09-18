@@ -71,6 +71,7 @@ pub struct DiscordEventBody {
     event_id: String,
     message: String,
     message_url: String,
+    project_id: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -109,6 +110,15 @@ pub(crate) async fn create_discord_event(
         .authenticate(token, ApiTokenScope::Write, TimestampMillis::now())
         .await
         .map_err(|error| token_problem(error, request_id.as_ref().map(|value| &value.0)))?;
+    let project_id = match body.project_id.as_deref() {
+        Some(value) => value
+            .parse()
+            .ok()
+            .filter(|id| principal.project_ids.contains(id)),
+        None if principal.project_ids.len() == 1 => principal.project_ids.first().copied(),
+        None => None,
+    }
+    .ok_or_else(|| validation("project_id", request_id.as_ref().map(|value| &value.0)))?;
     let event_id = body.event_id.trim();
     let message = body.message.as_str();
     let message_url = body.message_url.trim();
@@ -151,7 +161,7 @@ pub(crate) async fn create_discord_event(
             DiscordTask {
                 event_id: event_id.to_owned(),
                 payload_hash,
-                project_id: principal.project_id,
+                project_id,
                 title: discord_title(message),
                 description,
             },

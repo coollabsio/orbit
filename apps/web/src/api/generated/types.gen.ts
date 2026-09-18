@@ -24,6 +24,7 @@ export type ApiTokenRecord = {
     last_used_at?: string | null;
     name: string;
     project_id: string;
+    project_ids: Array<string>;
     scopes: Array<string>;
     token_prefix: string;
 };
@@ -160,7 +161,8 @@ export type ConflictMetadata = {
 
 export type CreateApiTokenBody = {
     name: string;
-    project_id: string;
+    project_id?: string | null;
+    project_ids?: Array<string>;
     scopes: Array<ApiTokenScope>;
 };
 
@@ -186,6 +188,7 @@ export type DiscordEventBody = {
     event_id: string;
     message: string;
     message_url: string;
+    project_id?: string | null;
 };
 
 export type DiscordEventResponse = {

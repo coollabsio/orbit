@@ -16,6 +16,8 @@ pub struct ApiTokenRecord {
     pub scopes: Vec<String>,
     #[schema(value_type = String)]
     pub project_id: Id,
+    #[schema(value_type = Vec<String>)]
+    pub project_ids: Vec<Id>,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     #[schema(value_type = Option<String>, format = DateTime)]
@@ -39,7 +41,7 @@ pub enum ApiTokenScope {
 pub struct ApiTokenPrincipal {
     pub token_id: Id,
     pub workspace_id: Id,
-    pub project_id: Id,
+    pub project_ids: Vec<Id>,
     pub creator_id: Id,
     pub scopes: Vec<ApiTokenScope>,
 }
@@ -75,7 +77,12 @@ impl ApiTokenRepository {
         self.require_manager(workspace_id, actor_id).await?;
         let rows = sqlx::query("SELECT id, name, token_prefix, can_read, can_write, project_id, created_at, last_used_at FROM api_tokens WHERE workspace_id = ? AND revoked_at IS NULL ORDER BY created_at DESC, id DESC")
             .bind(workspace_id.to_string()).fetch_all(self.database.pool()).await?;
-        rows.into_iter().map(decode).collect()
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id = parse_id(&row, "id")?;
+            records.push(decode(row, self.project_ids(id).await?)?);
+        }
+        Ok(records)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -84,7 +91,7 @@ impl ApiTokenRepository {
         workspace_id: Id,
         actor_id: Id,
         name: String,
-        project_id: Id,
+        project_ids: Vec<Id>,
         can_read: bool,
         can_write: bool,
         request_id: &str,
@@ -92,15 +99,27 @@ impl ApiTokenRepository {
     ) -> Result<IssuedApiToken, ApiTokenError> {
         let mut transaction = self.database.immediate_transaction().await?;
         require_manager_in(&mut transaction, workspace_id, actor_id).await?;
-        require_active_project(&mut transaction, workspace_id, project_id).await?;
+        if project_ids.is_empty() {
+            return Err(ApiTokenError::NotFound);
+        }
+        for project_id in &project_ids {
+            require_active_project(&mut transaction, workspace_id, *project_id).await?;
+        }
         let id = Id::new_v7();
         let token = format!("orb_{}", generate_opaque_token());
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let prefix: String = token.chars().take(12).collect();
         sqlx::query("INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, can_read, can_write, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(&name).bind(hash.to_vec()).bind(&prefix)
+            .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_ids[0].to_string()).bind(&name).bind(hash.to_vec()).bind(&prefix)
             .bind(i64::from(can_read)).bind(i64::from(can_write)).bind(actor_id.to_string()).bind(now.as_millis())
             .execute(&mut *transaction).await?;
+        for project_id in &project_ids {
+            sqlx::query("INSERT INTO api_token_projects (token_id, project_id) VALUES (?, ?)")
+                .bind(id.to_string())
+                .bind(project_id.to_string())
+                .execute(&mut *transaction)
+                .await?;
+        }
         audit::record(
             &mut transaction,
             workspace_id,
@@ -110,7 +129,7 @@ impl ApiTokenRepository {
             "api_token",
             Some(id),
             request_id,
-            serde_json::json!({"scopes": scopes(can_read, can_write), "project_id": project_id}),
+            serde_json::json!({"scopes": scopes(can_read, can_write), "project_ids": project_ids}),
             now,
         )
         .await?;
@@ -121,7 +140,8 @@ impl ApiTokenRepository {
                 name,
                 token_prefix: prefix,
                 scopes: scopes(can_read, can_write),
-                project_id,
+                project_id: project_ids[0],
+                project_ids,
                 created_at: now,
                 last_used_at: None,
             },
@@ -137,12 +157,11 @@ impl ApiTokenRepository {
     ) -> Result<ApiTokenPrincipal, ApiTokenError> {
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let row = sqlx::query(
-            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.project_id, api_tokens.created_by, api_tokens.can_read, api_tokens.can_write \
+            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.can_read, api_tokens.can_write \
              FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
-             JOIN projects ON projects.id = api_tokens.project_id AND projects.workspace_id = api_tokens.workspace_id \
              JOIN users ON users.id = api_tokens.created_by AND users.suspended_at IS NULL \
              JOIN memberships ON memberships.workspace_id = api_tokens.workspace_id AND memberships.user_id = api_tokens.created_by \
-             WHERE api_tokens.token_hash = ? AND api_tokens.revoked_at IS NULL AND workspaces.deleted_at IS NULL AND projects.deleted_at IS NULL",
+             WHERE api_tokens.token_hash = ? AND api_tokens.revoked_at IS NULL AND workspaces.deleted_at IS NULL",
         )
         .bind(hash.to_vec())
         .fetch_optional(self.database.pool())
@@ -165,10 +184,10 @@ impl ApiTokenRepository {
             .get::<String, _>("workspace_id")
             .parse()
             .map_err(|_| ApiTokenError::InvalidIdentifier)?;
-        let project_id = row
-            .get::<String, _>("project_id")
-            .parse()
-            .map_err(|_| ApiTokenError::InvalidIdentifier)?;
+        let project_ids = self.project_ids(token_id).await?;
+        if project_ids.is_empty() {
+            return Err(ApiTokenError::NotFound);
+        }
         let creator_id = row
             .get::<String, _>("created_by")
             .parse()
@@ -181,7 +200,7 @@ impl ApiTokenRepository {
         Ok(ApiTokenPrincipal {
             token_id,
             workspace_id,
-            project_id,
+            project_ids,
             creator_id,
             scopes: [
                 (can_read, ApiTokenScope::Read),
@@ -192,6 +211,19 @@ impl ApiTokenRepository {
             .map(|(_, scope)| scope)
             .collect(),
         })
+    }
+
+    async fn project_ids(&self, token_id: Id) -> Result<Vec<Id>, ApiTokenError> {
+        let values = sqlx::query_scalar::<_, String>(
+            "SELECT api_token_projects.project_id FROM api_token_projects JOIN projects ON projects.id = api_token_projects.project_id WHERE api_token_projects.token_id = ? AND projects.deleted_at IS NULL ORDER BY projects.created_at, projects.id",
+        )
+        .bind(token_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        values
+            .into_iter()
+            .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
+            .collect()
     }
 
     pub async fn revoke(
@@ -271,11 +303,17 @@ async fn require_active_project(
     }
 }
 
-fn decode(row: sqlx::sqlite::SqliteRow) -> Result<ApiTokenRecord, ApiTokenError> {
-    let id = row
-        .get::<String, _>("id")
+fn parse_id(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<Id, ApiTokenError> {
+    row.get::<String, _>(column)
         .parse()
-        .map_err(|_| ApiTokenError::InvalidIdentifier)?;
+        .map_err(|_| ApiTokenError::InvalidIdentifier)
+}
+
+fn decode(
+    row: sqlx::sqlite::SqliteRow,
+    project_ids: Vec<Id>,
+) -> Result<ApiTokenRecord, ApiTokenError> {
+    let id = parse_id(&row, "id")?;
     let can_read = row.get::<i64, _>("can_read") != 0;
     let can_write = row.get::<i64, _>("can_write") != 0;
     Ok(ApiTokenRecord {
@@ -283,10 +321,8 @@ fn decode(row: sqlx::sqlite::SqliteRow) -> Result<ApiTokenRecord, ApiTokenError>
         name: row.get("name"),
         token_prefix: row.get("token_prefix"),
         scopes: scopes(can_read, can_write),
-        project_id: row
-            .get::<String, _>("project_id")
-            .parse()
-            .map_err(|_| ApiTokenError::InvalidIdentifier)?,
+        project_id: parse_id(&row, "project_id")?,
+        project_ids,
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         last_used_at: row
             .get::<Option<i64>, _>("last_used_at")

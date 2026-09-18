@@ -1767,7 +1767,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
             "POST",
             &path,
             &member.1,
-            json!({"name":"Discord", "project_id": project_id, "scopes":["write"]}),
+            json!({"name":"Discord", "project_ids": [project_id], "scopes":["write"]}),
         ))
         .await
         .unwrap();
@@ -1777,7 +1777,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
         "POST",
         &path,
         &owner_cookie,
-        json!({"name":"Invalid project", "project_id": Id::new_v7().to_string(), "scopes":["write"]}),
+        json!({"name":"Invalid project", "project_ids": [Id::new_v7().to_string()], "scopes":["write"]}),
     )).await.unwrap();
     assert_eq!(invalid_project.status(), StatusCode::NOT_FOUND);
 
@@ -1787,7 +1787,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
             "POST",
             &path,
             &owner_cookie,
-            json!({"name":"Discord bot", "project_id": project_id, "scopes":["read", "write"]}),
+            json!({"name":"Discord bot", "project_ids": [project_id], "scopes":["read", "write"]}),
         ))
         .await
         .unwrap();
@@ -1801,7 +1801,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     let token_id = created["id"].as_str().unwrap();
     assert!(token.starts_with("orb_"));
     assert_eq!(created["scopes"], json!(["read", "write"]));
-    assert_eq!(created["project_id"], project_id);
+    assert_eq!(created["project_ids"], json!([project_id]));
 
     let stored: Vec<u8> = sqlx::query_scalar("SELECT token_hash FROM api_tokens WHERE id = ?")
         .bind(token_id)
@@ -1815,7 +1815,14 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
         .await
         .unwrap();
     assert_eq!(principal.workspace_id.to_string(), setup.0);
-    assert_eq!(principal.project_id.to_string(), project_id);
+    assert_eq!(
+        principal
+            .project_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        vec![project_id]
+    );
     let listed = app
         .clone()
         .oneshot(cookie_request("GET", &path, &owner_cookie))

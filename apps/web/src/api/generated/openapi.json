@@ -10372,6 +10372,7 @@
           "token_prefix",
           "scopes",
           "project_id",
+          "project_ids",
           "created_at"
         ],
         "properties": {
@@ -10394,6 +10395,12 @@
           },
           "project_id": {
             "type": "string"
+          },
+          "project_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "scopes": {
             "type": "array",
@@ -10914,7 +10921,6 @@
         "type": "object",
         "required": [
           "name",
-          "project_id",
           "scopes"
         ],
         "properties": {
@@ -10922,7 +10928,16 @@
             "type": "string"
           },
           "project_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "scopes": {
             "type": "array",
@@ -11020,6 +11035,12 @@
           },
           "message_url": {
             "type": "string"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false

@@ -21,7 +21,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
             fixture.workspace_id,
             fixture.user_id,
             "Discord".to_owned(),
-            fixture.project_id,
+            vec![fixture.project_id],
             true,
             true,
             "create-token",
@@ -98,7 +98,7 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             fixture.workspace_id,
             fixture.user_id,
             "Read".to_owned(),
-            fixture.project_id,
+            vec![fixture.project_id],
             true,
             false,
             "read-token",
@@ -124,7 +124,7 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             fixture.workspace_id,
             fixture.user_id,
             "Revoked".to_owned(),
-            fixture.project_id,
+            vec![fixture.project_id],
             false,
             true,
             "revoked-token",
@@ -161,7 +161,7 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             fixture.workspace_id,
             fixture.user_id,
             "Write".to_owned(),
-            fixture.project_id,
+            vec![fixture.project_id],
             false,
             true,
             "write-token",
@@ -172,6 +172,64 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
     let invalid = fixture.app.oneshot(request(Some(&write.token), json!({ "event_id": "bad-url", "message": "Message", "message_url": "https://example.com/message" }))).await.unwrap();
     assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(response_json(invalid).await["code"], "validation_failed");
+}
+
+#[tokio::test]
+async fn discord_events_select_one_project_allowed_by_a_multi_project_token() {
+    let fixture = fixture().await;
+    let second_project = TaskRepository::new((*fixture.database).clone())
+        .create_project(
+            fixture.workspace_id,
+            fixture.user_id,
+            "Platform".to_owned(),
+            "PLAT".to_owned(),
+            "#7c3aed".to_owned(),
+            "create-project",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let issued = fixture
+        .tokens
+        .create(
+            fixture.workspace_id,
+            fixture.user_id,
+            "Multi-project".to_owned(),
+            vec![fixture.project_id, second_project.id],
+            false,
+            true,
+            "create-token",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+
+    let selected = fixture
+        .app
+        .clone()
+        .oneshot(request(
+            Some(&issued.token),
+            json!({
+                "event_id": "selected-project",
+                "message": "Discord message",
+                "message_url": "https://discord.com/channels/1/2/3",
+                "project_id": second_project.id,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(selected.status(), StatusCode::CREATED);
+    assert_eq!(
+        response_json(selected).await["task"]["project_id"],
+        second_project.id.to_string()
+    );
+
+    let missing = fixture
+        .app
+        .oneshot(request(Some(&issued.token), valid_body("missing-project")))
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 struct Fixture {
