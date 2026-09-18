@@ -11688,6 +11688,7 @@
                 "sub_issue_total",
                 "sub_issue_done",
                 "duplicate_ids",
+                "referenced_by",
                 "assignee_ids",
                 "label_ids",
                 "version",
@@ -11777,6 +11778,13 @@
                 },
                 "project_id": {
                   "type": "string"
+                },
+                "referenced_by": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskReferenceRecord"
+                  },
+                  "description": "Live tasks and comments whose rich text mentions this task, capped at 50.\nDetail reads only; `[]` elsewhere."
                 },
                 "status_id": {
                   "type": "string"
@@ -12470,6 +12478,7 @@
           "sub_issue_total",
           "sub_issue_done",
           "duplicate_ids",
+          "referenced_by",
           "assignee_ids",
           "label_ids",
           "version",
@@ -12560,6 +12569,13 @@
           "project_id": {
             "type": "string"
           },
+          "referenced_by": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskReferenceRecord"
+            },
+            "description": "Live tasks and comments whose rich text mentions this task, capped at 50.\nDetail reads only; `[]` elsewhere."
+          },
           "status_id": {
             "type": "string"
           },
@@ -12587,6 +12603,38 @@
           },
           "workspace_id": {
             "type": "string"
+          }
+        }
+      },
+      "TaskReferenceRecord": {
+        "type": "object",
+        "description": "A derived backlink: a task description or comment that mentions a task.",
+        "required": [
+          "source_type",
+          "source_id",
+          "source_task_id",
+          "source_task_identifier",
+          "source_task_title"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "description": "The task id for a description, the comment id for a comment."
+          },
+          "source_task_id": {
+            "type": "string",
+            "description": "The task to navigate to: the source task itself, or a comment's task."
+          },
+          "source_task_identifier": {
+            "type": "string",
+            "description": "Identifier of `source_task_id`, so a backlink renders without a lookup."
+          },
+          "source_task_title": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string",
+            "description": "`task` or `comment`."
           }
         }
       },

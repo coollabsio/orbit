@@ -417,6 +417,11 @@ export type PageTaskRecord = {
         position: number;
         priority: string;
         project_id: string;
+        /**
+         * Live tasks and comments whose rich text mentions this task, capped at 50.
+         * Detail reads only; `[]` elsewhere.
+         */
+        referenced_by: Array<TaskReferenceRecord>;
         status_id: string;
         /**
          * Live sub-issues in a completed or cancelled status.
@@ -639,6 +644,11 @@ export type TaskRecord = {
     position: number;
     priority: string;
     project_id: string;
+    /**
+     * Live tasks and comments whose rich text mentions this task, capped at 50.
+     * Detail reads only; `[]` elsewhere.
+     */
+    referenced_by: Array<TaskReferenceRecord>;
     status_id: string;
     /**
      * Live sub-issues in a completed or cancelled status.
@@ -652,6 +662,29 @@ export type TaskRecord = {
     updated_at: string;
     version: number;
     workspace_id: string;
+};
+
+/**
+ * A derived backlink: a task description or comment that mentions a task.
+ */
+export type TaskReferenceRecord = {
+    /**
+     * The task id for a description, the comment id for a comment.
+     */
+    source_id: string;
+    /**
+     * The task to navigate to: the source task itself, or a comment's task.
+     */
+    source_task_id: string;
+    /**
+     * Identifier of `source_task_id`, so a backlink renders without a lookup.
+     */
+    source_task_identifier: string;
+    source_task_title: string;
+    /**
+     * `task` or `comment`.
+     */
+    source_type: string;
 };
 
 export type TaskUpdateBody = {

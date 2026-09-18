@@ -92,6 +92,9 @@ pub struct TaskRecord {
     /// Tasks marked as duplicates of this one. Detail reads only; `[]` elsewhere.
     #[schema(value_type = Vec<String>)]
     pub duplicate_ids: Vec<Id>,
+    /// Live tasks and comments whose rich text mentions this task, capped at 50.
+    /// Detail reads only; `[]` elsewhere.
+    pub referenced_by: Vec<TaskReferenceRecord>,
     #[schema(value_type = Vec<String>)]
     pub assignee_ids: Vec<Id>,
     #[schema(value_type = Vec<String>)]
@@ -105,6 +108,22 @@ pub struct TaskRecord {
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
+}
+
+/// A derived backlink: a task description or comment that mentions a task.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TaskReferenceRecord {
+    /// `task` or `comment`.
+    pub source_type: String,
+    /// The task id for a description, the comment id for a comment.
+    #[schema(value_type = String)]
+    pub source_id: Id,
+    /// The task to navigate to: the source task itself, or a comment's task.
+    #[schema(value_type = String)]
+    pub source_task_id: Id,
+    /// Identifier of `source_task_id`, so a backlink renders without a lookup.
+    pub source_task_identifier: String,
+    pub source_task_title: String,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1232,6 +1251,36 @@ impl TaskRepository {
         .into_iter()
         .map(parse_id)
         .collect::<Result<_, _>>()?;
+        // Detail-only backlinks: one capped query. A source whose task is in the
+        // trash is hidden, and a comment on this task mentioning this task is
+        // not a backlink.
+        record.referenced_by = sqlx::query_as::<_, (String, String, String, String, i64, String)>(
+            "SELECT task_references.source_type, task_references.source_id, source.id, \
+             source.identifier_key, source.number, source.title \
+             FROM task_references \
+             LEFT JOIN task_comments ON task_references.source_type = 'comment' \
+             AND task_comments.id = task_references.source_id \
+             JOIN tasks AS source ON source.id = COALESCE(task_comments.task_id, task_references.source_id) \
+             WHERE task_references.workspace_id = ? AND task_references.target_task_id = ? \
+             AND source.deleted_at IS NULL AND source.id <> task_references.target_task_id \
+             ORDER BY task_references.source_type DESC, source.identifier_key, source.number, task_references.source_id \
+             LIMIT 50",
+        )
+        .bind(workspace_id.to_string())
+        .bind(task_id.to_string())
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .map(|(source_type, source_id, source_task_id, key, number, title)| {
+            Ok(TaskReferenceRecord {
+                source_type,
+                source_id: parse_id(source_id)?,
+                source_task_id: parse_id(source_task_id)?,
+                source_task_identifier: format!("{key}-{number}"),
+                source_task_title: title,
+            })
+        })
+        .collect::<Result<Vec<_>, TaskError>>()?;
         Ok(record)
     }
 
@@ -1343,6 +1392,7 @@ impl TaskRepository {
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
         replace_labels(&mut tx, id, &input.label_ids).await?;
+        rebuild_task_references(&mut tx, workspace_id, "task", id, &input.description_json).await?;
         sync_task_search(
             &mut tx,
             workspace_id,
@@ -1397,6 +1447,7 @@ impl TaskRepository {
             sub_issue_done: 0,
             duplicate_of_task_id: None,
             duplicate_ids: Vec::new(),
+            referenced_by: Vec::new(),
             assignee_ids: input.assignee_ids,
             label_ids: input.label_ids,
             due_at: input.due_at,
@@ -1882,6 +1933,7 @@ impl TaskRepository {
         let recipients = rich_text::extract_user_ids(&body_json);
         sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body_json, body_text, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)")
             .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body_column).bind(&body_text).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
+        rebuild_task_references(&mut tx, workspace_id, "comment", id, &body_json).await?;
         notify_users(
             &mut tx,
             workspace_id,
@@ -1944,6 +1996,7 @@ impl TaskRepository {
         let (body_column, body_text) = document_columns(&body_json, "body_json")?;
         sqlx::query("UPDATE task_comments SET body_json = ?, body_text = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?")
             .bind(&body_column).bind(&body_text).bind(now.as_millis()).bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        rebuild_task_references(&mut tx, workspace_id, "comment", comment_id, &body_json).await?;
         // Editing in a new mention notifies that person. dedupe_key is
         // workspace:recipient:kind:comment, inserted with OR IGNORE, so anyone
         // already notified for this comment is not notified twice.
@@ -2186,6 +2239,9 @@ async fn update_task_in_tx(
     }
     if let Some(labels) = &update.changes.label_ids {
         replace_labels(tx, update.id, labels).await?;
+    }
+    if update.changes.description_json.is_some() {
+        rebuild_task_references(tx, workspace_id, "task", update.id, &description).await?;
     }
     // Unconditional: a title- or description-only edit must reindex too.
     sync_task_search(
@@ -2811,6 +2867,47 @@ async fn replace_labels(
     Ok(())
 }
 
+/// Replaces every reference row owned by this source with the task mentions in
+/// its document. Derived, never hand-maintained.
+///
+/// DELIBERATELY writes no audit row: `audit_workspace_realtime` in
+/// apps/server/migrations/0011_realtime.sql fires an outbox event on every
+/// successful audit insert, so an audited rebuild would fan a second realtime
+/// event out to every connected client on every debounced description save.
+async fn rebuild_task_references(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    source_type: &str,
+    source_id: Id,
+    document: &Value,
+) -> Result<(), TaskError> {
+    sqlx::query("DELETE FROM task_references WHERE source_type = ? AND source_id = ?")
+        .bind(source_type)
+        .bind(source_id.to_string())
+        .execute(&mut **tx)
+        .await?;
+    // extract_task_ids is already deduplicated, in document order.
+    for target in rich_text::extract_task_ids(document) {
+        if target == source_id {
+            continue;
+        }
+        // The SELECT source silently drops unknown or foreign targets, so a
+        // stale mention can never abort the user's save via the scope trigger.
+        sqlx::query(
+            "INSERT OR IGNORE INTO task_references (workspace_id, source_type, source_id, target_task_id) \
+             SELECT ?, ?, ?, tasks.id FROM tasks WHERE tasks.id = ? AND tasks.workspace_id = ?",
+        )
+        .bind(workspace_id.to_string())
+        .bind(source_type)
+        .bind(source_id.to_string())
+        .bind(target.to_string())
+        .bind(workspace_id.to_string())
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 async fn insert_default_statuses(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
@@ -3148,6 +3245,7 @@ fn task_record_from_row(
         sub_issue_done: 0,
         duplicate_of_task_id: None,
         duplicate_ids: Vec::new(),
+        referenced_by: Vec::new(),
         assignee_ids,
         label_ids,
         due_at: row

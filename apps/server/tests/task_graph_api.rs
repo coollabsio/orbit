@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use orbit_platform::{Id, PasswordService, TestDatabase, TimestampMillis};
+use orbit_platform::{
+    Database, DatabaseConfig, Id, PasswordService, TestDatabase, TimestampMillis,
+};
 use orbit_server::auth_routes::CookieMode;
+use orbit_server::migrations::migration_runner;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::task_routes::{TaskState, task_router};
 use serde_json::{Value, json};
@@ -178,7 +181,7 @@ async fn migration_0016_adds_parent_column_indexes_and_graph_tables() {
 
 /// Seeds a workspace with one owner, one project and one status. Returns
 /// `(workspace_id, project_id, status_id, user_id)`.
-async fn seed_workspace(database: &TestDatabase, key: &str) -> (String, String, String, String) {
+async fn seed_workspace(database: &Database, key: &str) -> (String, String, String, String) {
     let workspace_id = Id::new_v7().to_string();
     let project_id = Id::new_v7().to_string();
     let status_id = Id::new_v7().to_string();
@@ -206,7 +209,7 @@ async fn seed_workspace(database: &TestDatabase, key: &str) -> (String, String, 
 }
 
 async fn seed_task(
-    database: &TestDatabase,
+    database: &Database,
     scope: &(String, String, String, String),
     key: &str,
     number: i64,
@@ -663,4 +666,234 @@ async fn marking_a_duplicate_cancels_it_once_and_is_reversible() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let detail = response_json(fixture.get(&fixture.task_path(&duplicate)).await).await;
     assert!(detail["duplicate_of_task_id"].is_null());
+}
+
+#[tokio::test]
+async fn migration_0016_backfills_references_from_existing_documents() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("orbit.sqlite")))
+        .await
+        .unwrap();
+    let runner = migration_runner();
+    runner.run_through(&database, 15).await.unwrap();
+
+    let scope = seed_workspace(&database, "GEN").await;
+    let target = seed_task(&database, &scope, "GEN", 1).await;
+    let source = seed_task(&database, &scope, "GEN", 2).await;
+    let other = seed_workspace(&database, "OTH").await;
+    let foreign = seed_task(&database, &other, "OTH", 1).await;
+    let mention = |id: &str| {
+        json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [
+                {"type": "taskMention", "attrs": {"id": id, "identifier": "X-1"}}
+            ]}]
+        })
+        .to_string()
+    };
+    // a real mention, a self-mention and a cross-workspace mention
+    sqlx::query("UPDATE tasks SET description_json = ? WHERE id = ?")
+        .bind(mention(&target))
+        .bind(&source)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tasks SET description_json = ? WHERE id = ?")
+        .bind(mention(&target))
+        .bind(&target)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tasks SET description_json = ? WHERE id = ?")
+        .bind(mention(&target))
+        .bind(&foreign)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let comment = Id::new_v7().to_string();
+    sqlx::query(
+        "INSERT INTO task_comments (id, workspace_id, task_id, author_id, body_json, body_text, version, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, '', 0, 1, 1)",
+    )
+    .bind(&comment)
+    .bind(&scope.0)
+    .bind(&source)
+    .bind(&scope.3)
+    .bind(mention(&target))
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    runner.run(&database).await.unwrap();
+
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT source_type, source_id, target_task_id FROM task_references ORDER BY source_type",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("comment".to_owned(), comment, target.clone()),
+            ("task".to_owned(), source, target),
+        ]
+    );
+}
+
+fn mention_document(task: &Value) -> Value {
+    json!({
+        "type": "doc",
+        "content": [{
+            "type": "paragraph",
+            "content": [{
+                "type": "taskMention",
+                "attrs": {"id": task["id"], "identifier": task["identifier"]}
+            }]
+        }]
+    })
+}
+
+async fn count(fixture: &Fixture, sql: &str) -> i64 {
+    sqlx::query_scalar(sql)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn reference_rebuild_writes_no_audit_row_and_no_extra_outbox_event() {
+    let fixture = Fixture::new().await;
+    let target = fixture.create_task("Target").await;
+    let source = fixture.create_task("Source").await;
+
+    let audits_before = count(&fixture, "SELECT COUNT(*) FROM audit_events").await;
+    let outbox_before = count(&fixture, "SELECT COUNT(*) FROM outbox_events").await;
+
+    let response = fixture
+        .patch(
+            &source,
+            json!({"expected_version": 0, "description_json": mention_document(&target)}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // exactly one task.updated row — the reference rebuild must be silent,
+    // or 0011_realtime.sql line 6 fans a second event out to every client.
+    assert_eq!(
+        count(&fixture, "SELECT COUNT(*) FROM audit_events").await - audits_before,
+        1
+    );
+    assert_eq!(
+        count(&fixture, "SELECT COUNT(*) FROM outbox_events").await - outbox_before,
+        1
+    );
+    assert_eq!(
+        count(
+            &fixture,
+            "SELECT COUNT(*) FROM task_references WHERE source_type = 'task'"
+        )
+        .await,
+        1
+    );
+
+    // the target lists its backlink; the source's own read does not
+    let detail = response_json(fixture.get(&fixture.task_path(&target)).await).await;
+    assert_eq!(detail["referenced_by"][0]["source_type"], "task");
+    assert_eq!(detail["referenced_by"][0]["source_id"], source["id"]);
+    assert_eq!(detail["referenced_by"][0]["source_task_id"], source["id"]);
+    assert_eq!(
+        detail["referenced_by"][0]["source_task_identifier"],
+        source["identifier"]
+    );
+    let own = response_json(fixture.get(&fixture.task_path(&source)).await).await;
+    assert_eq!(own["referenced_by"], json!([]));
+
+    // rewriting with an empty document replaces (not appends) the rows
+    let response = fixture
+        .patch(
+            &source,
+            json!({"expected_version": 1, "description_json": {"type": "doc", "content": []}}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        count(&fixture, "SELECT COUNT(*) FROM task_references").await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn comment_mentions_become_backlinks_and_leave_with_the_comment() {
+    let fixture = Fixture::new().await;
+    let target = fixture.create_task("Target").await;
+    let host = fixture.create_task("Host").await;
+    let comments = format!("{}/comments", fixture.task_path(&host));
+
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &comments,
+            &fixture.owner_cookie,
+            json!({"body_json": mention_document(&target)}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let comment = response_json(response).await;
+
+    let detail = response_json(fixture.get(&fixture.task_path(&target)).await).await;
+    assert_eq!(detail["referenced_by"][0]["source_type"], "comment");
+    assert_eq!(detail["referenced_by"][0]["source_id"], comment["id"]);
+    assert_eq!(detail["referenced_by"][0]["source_task_id"], host["id"]);
+
+    // a task created with a mention is a backlink from the start
+    let creator = fixture
+        .create_task_with(
+            json!({"title": "Creator", "description_json": mention_document(&target)}),
+        )
+        .await;
+    let detail = response_json(fixture.get(&fixture.task_path(&target)).await).await;
+    assert_eq!(detail["referenced_by"].as_array().unwrap().len(), 2);
+
+    // trashing the source hides its backlink
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!("{}?expected_version=0", fixture.task_path(&creator)),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let detail = response_json(fixture.get(&fixture.task_path(&target)).await).await;
+    assert_eq!(detail["referenced_by"].as_array().unwrap().len(), 1);
+
+    // deleting the comment removes its rows
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!(
+                "{comments}/{}?expected_version=0",
+                comment["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        count(
+            &fixture,
+            "SELECT COUNT(*) FROM task_references WHERE source_type = 'comment'"
+        )
+        .await,
+        0
+    );
 }

@@ -92,3 +92,28 @@ AFTER DELETE ON task_comments
 BEGIN
     DELETE FROM task_references WHERE source_type = 'comment' AND source_id = OLD.id;
 END;
+
+-- Backfill: documents written since 0014 may already mention tasks. Harvest
+-- those mentions once here; from now on the server rebuilds a source's rows on
+-- every write. Only same-workspace, existing targets qualify, and a task never
+-- references itself.
+INSERT OR IGNORE INTO task_references (workspace_id, source_type, source_id, target_task_id)
+SELECT source.workspace_id, 'task', source.id, target.id
+FROM tasks AS source,
+     json_tree(CASE WHEN json_valid(source.description_json) THEN source.description_json ELSE '{}' END) AS node
+JOIN tasks AS target
+  ON target.id = json_extract(node.value, '$.attrs.id')
+ AND target.workspace_id = source.workspace_id
+WHERE node.type = 'object'
+  AND json_extract(node.value, '$.type') = 'taskMention'
+  AND target.id <> source.id;
+
+INSERT OR IGNORE INTO task_references (workspace_id, source_type, source_id, target_task_id)
+SELECT comment.workspace_id, 'comment', comment.id, target.id
+FROM task_comments AS comment,
+     json_tree(CASE WHEN json_valid(comment.body_json) THEN comment.body_json ELSE '{}' END) AS node
+JOIN tasks AS target
+  ON target.id = json_extract(node.value, '$.attrs.id')
+ AND target.workspace_id = comment.workspace_id
+WHERE node.type = 'object'
+  AND json_extract(node.value, '$.type') = 'taskMention';
