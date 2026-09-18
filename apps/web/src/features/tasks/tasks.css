@@ -673,15 +673,9 @@
   font-size: 13px;
   line-height: 20px;
   color: var(--text-primary);
-  resize: none;
   outline: none;
-  field-sizing: content;
   min-height: 60px;
   margin-top: 16px;
-}
-
-.tasks-desc::placeholder {
-  color: var(--control-placeholder);
 }
 
 /* Read-only description: the same metrics as the editor it turns into, so a
@@ -884,61 +878,13 @@
   background: var(--danger-bg);
 }
 
+/* Formatting comes from components/editor/editor.css; this only sets the frame. */
 .tasks-comment-text {
   margin-top: 2px;
   font-size: 13px;
-  font-weight: 400;
   line-height: 19px;
   color: var(--text-primary);
   overflow-wrap: anywhere;
-}
-
-.tasks-comment-text .fc-md-p {
-  min-height: 19px;
-}
-
-.tasks-comment-text .fc-md-blank {
-  height: 8px;
-}
-
-.tasks-comment-text .fc-md-heading {
-  margin-top: 4px;
-  font-weight: 600;
-}
-
-.tasks-comment-text .fc-md-quote {
-  margin: 4px 0;
-  border-left: 3px solid var(--line);
-  padding-left: 10px;
-  color: var(--text-muted);
-}
-
-.tasks-comment-text .fc-md-list {
-  margin: 4px 0 4px 16px;
-  list-style: disc;
-}
-
-.tasks-comment-text .fc-md-list[data-ordered='true'] {
-  list-style: decimal;
-}
-
-.tasks-comment-text .fc-code {
-  border-radius: 4px;
-  background: var(--fill);
-  padding: 1px 5px;
-  font-size: 12px;
-}
-
-.tasks-comment-text .fc-mention {
-  border-radius: 4px;
-  padding: 0 2px;
-  font-weight: 600;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.tasks-comment-text .fc-link {
-  color: var(--accent);
 }
 
 .tasks-comment .fc-attachment-grid {
@@ -966,11 +912,6 @@
   margin-top: 6px;
 }
 
-.tasks-comment-edit textarea.input {
-  min-height: 52px;
-  font-size: 13px;
-}
-
 .tasks-comment-edit-hint {
   margin-top: 4px;
   font-size: 11px;
@@ -994,16 +935,6 @@
   position: relative;
   display: grid;
   gap: 8px;
-}
-
-.tasks-native-composer textarea {
-  resize: vertical;
-}
-
-.tasks-native-composer[data-compact] textarea.input {
-  min-height: 44px;
-  font-size: 13px;
-  line-height: 18px;
 }
 
 /* The comment editors sit in an input-like frame; the ring follows the whole
@@ -1058,26 +989,20 @@
   flex-wrap: wrap;
 }
 
+.tasks-composer-hint {
+  white-space: nowrap;
+}
+
+@media (max-width: 899px) {
+  .tasks-composer-hint {
+    display: none;
+  }
+}
+
 .tasks-native-files .pill button {
   display: inline-flex;
   margin-left: 4px;
   color: inherit;
-}
-
-.tasks-mention-list {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  right: 0;
-  z-index: 5;
-  margin-bottom: 6px;
-  max-height: 200px;
-  overflow: auto;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--elevated);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
 .tasks-load-more {
