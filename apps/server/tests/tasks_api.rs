@@ -2058,3 +2058,62 @@ async fn renaming_a_project_key_rewrites_the_identifiers_it_issued() {
     let next = fixture.create_task("Second").await;
     assert_eq!(next["identifier"], "CORE-2");
 }
+
+#[tokio::test]
+async fn tasks_can_be_filtered_and_searched_by_identifier() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+
+    let filtered = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks?identifier=GEN-1",
+                fixture.workspace_id
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(filtered.status(), StatusCode::OK);
+    let filtered = response_json(filtered).await;
+    assert_eq!(filtered["items"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["items"][0]["id"], first["id"]);
+
+    // The command palette sends its query to the server, so search must match the identifier too.
+    let searched = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks?search=gen-2",
+                fixture.workspace_id
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(searched.status(), StatusCode::OK);
+    let searched = response_json(searched).await;
+    assert_eq!(searched["items"].as_array().unwrap().len(), 1);
+    assert_eq!(searched["items"][0]["id"], second["id"]);
+
+    let malformed = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks?identifier=nonsense",
+                fixture.workspace_id
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}

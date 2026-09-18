@@ -767,6 +767,7 @@ struct TaskQuery {
     status_id: Option<String>,
     assignee_id: Option<String>,
     label_id: Option<String>,
+    identifier: Option<String>,
     priority: Option<String>,
     search: Option<String>,
     view: Option<String>,
@@ -858,6 +859,11 @@ async fn list_tasks(
         status_id: optional_id(query.status_id, &instance, request_id.as_ref())?,
         assignee_id: optional_id(query.assignee_id, &instance, request_id.as_ref())?,
         label_id: optional_id(query.label_id, &instance, request_id.as_ref())?,
+        identifier: query
+            .identifier
+            .as_deref()
+            .map(|value| parse_identifier(value, &instance, request_id.as_ref()))
+            .transpose()?,
         priority: query
             .priority
             .map(|value| priority(value, &instance, request_id.as_ref()))
@@ -1667,6 +1673,24 @@ fn project_key(
     } else {
         Ok(value)
     }
+}
+
+/// `ORB-12` -> `("ORB", 12)`. The key may contain hyphens; only the final segment is the number.
+fn parse_identifier(
+    value: &str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<(String, i64), ApiError> {
+    let invalid = || validation("identifier", instance, request_id);
+    let (key, number) = value.rsplit_once('-').ok_or_else(invalid)?;
+    if key.is_empty() {
+        return Err(invalid());
+    }
+    let number: i64 = number.parse().map_err(|_| invalid())?;
+    if number < 0 {
+        return Err(invalid());
+    }
+    Ok((key.to_owned(), number))
 }
 
 fn color(

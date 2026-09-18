@@ -184,6 +184,8 @@ pub struct TaskFilter {
     pub status_id: Option<Id>,
     pub assignee_id: Option<Id>,
     pub label_id: Option<Id>,
+    /// Exact `(identifier_key, number)` seek against the `tasks_identifier` unique index.
+    pub identifier: Option<(String, i64)>,
     pub priority: Option<String>,
     pub search: Option<String>,
     pub view: Option<String>,
@@ -1057,12 +1059,21 @@ impl TaskRepository {
                 .push_bind(label_id.to_string())
                 .push(")");
         }
+        if let Some((identifier_key, number)) = &filter.identifier {
+            query
+                .push(" AND tasks.identifier_key = ")
+                .push_bind(identifier_key.clone())
+                .push(" AND tasks.number = ")
+                .push_bind(*number);
+        }
         if let Some(search) = &filter.search {
             let pattern = format!("%{}%", escape_like(&search.to_lowercase()));
             query
                 .push(" AND (LOWER(tasks.title) LIKE ")
                 .push_bind(pattern.clone())
                 .push(" ESCAPE '\\' OR LOWER(tasks.description) LIKE ")
+                .push_bind(pattern.clone())
+                .push(" ESCAPE '\\' OR LOWER(tasks.identifier_key || '-' || tasks.number) LIKE ")
                 .push_bind(pattern)
                 .push(" ESCAPE '\\')");
         }
@@ -1938,7 +1949,7 @@ fn cursor_i64_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(i64
 
 fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
     format!(
-        "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:r={}:q={}:v={}:sort={:?}:order={:?}",
+        "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:n={}:r={}:q={}:v={}:sort={:?}:order={:?}",
         filter
             .project_id
             .map_or_else(String::new, |id| id.to_string()),
@@ -1951,6 +1962,10 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
         filter
             .label_id
             .map_or_else(String::new, |id| id.to_string()),
+        filter
+            .identifier
+            .as_ref()
+            .map_or_else(String::new, |(key, number)| format!("{key}-{number}")),
         filter.priority.as_deref().unwrap_or(""),
         filter.search.as_deref().unwrap_or(""),
         filter.view.as_deref().unwrap_or(""),
