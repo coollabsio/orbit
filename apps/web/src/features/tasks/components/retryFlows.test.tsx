@@ -7,6 +7,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import type { WorkspaceRecord } from '../../../api/generated/types.gen'
 import { WorkspaceSwitcher } from '../../../components/shell/WorkspaceSwitcher'
+import { TopbarSlotProvider, useTopbarSlotTarget } from '../../../components/shell/TopbarSlot'
 import { WorkspaceContext } from '../../workspaces/workspaceContext'
 import type { Task, TaskViewState } from '../api/models'
 import { ProjectRail } from './ProjectRail'
@@ -22,6 +23,18 @@ afterEach(() => {
 
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
 
+/** Stands in for the shell chrome: pages publish their topbar controls into these containers. */
+function TopbarSlotHost() {
+  const left = useTopbarSlotTarget('left')
+  const right = useTopbarSlotTarget('right')
+  return (
+    <>
+      <div data-testid="topbar-left" ref={left} />
+      <div data-testid="topbar-right" ref={right} />
+    </>
+  )
+}
+
 function wrapper(selectWorkspace = mock(() => {})) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return {
@@ -30,7 +43,10 @@ function wrapper(selectWorkspace = mock(() => {})) {
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace }}>
-            {children}
+            <TopbarSlotProvider>
+              <TopbarSlotHost />
+              {children}
+            </TopbarSlotProvider>
             <ConfirmationModalHost />
           </WorkspaceContext.Provider>
         </MemoryRouter>
@@ -110,12 +126,18 @@ test('task deletion retry returns to the task list after success', async () => {
   const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }
   const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={onBack} />, { wrapper: Wrapper })
 
-  const deleteButton = view.getByRole('button', { name: 'Delete' })
-  expect(deleteButton.classList.contains('button-danger')).toBe(true)
+  // Delete now lives behind the topbar overflow menu, so each attempt reopens it.
+  const openDelete = () => {
+    fireEvent.click(view.getByRole('button', { name: 'More task actions' }))
+    return view.getByRole('button', { name: 'Delete' })
+  }
+
+  const deleteButton = openDelete()
+  expect(deleteButton.dataset.tone).toBe('danger')
   fireEvent.click(deleteButton)
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
   expect(calls).toBe(0)
-  fireEvent.click(view.getByRole('button', { name: 'Delete' }))
+  fireEvent.click(openDelete())
   fireEvent.click(view.getByRole('button', { name: 'Move to trash' }))
   await view.findByRole('alert')
   fireEvent.click(view.getByRole('button', { name: 'Retry' }))

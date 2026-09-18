@@ -1,10 +1,12 @@
 import { useRef } from 'react'
 import { confirmAction } from '../../../components/ui/confirmAction'
-import { ArrowLeft, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
+import { Calendar, MoreH, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
+import { TopbarBreadcrumb } from '../../../components/shell/TopbarBreadcrumb'
+import { TopbarSlot } from '../../../components/shell/TopbarSlot'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../components/workspace/taskMeta'
@@ -62,20 +64,35 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
   return (
     <section className="pane tasks-detail-pane">
-      <div className="pane-header">
-        <button className="icon-button" onClick={onBack} aria-label="Back to tasks">
-          <ArrowLeft size={16} />
-        </button>
-        <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
-        <div className="spacer" />
-        {task ? <button type="button" className="button button-danger" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
-          if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
-          void deleteAndClose({ taskId: task.id, version: task.version })
-        }}>Delete</button> : null}
+      <TopbarSlot side="left">
+        <TopbarBreadcrumb crumbs={[{ label: task?.identifier ?? 'Task' }]} />
+        {task ? (
+          <span className="topbar-status">
+            <TaskStatusIcon status={status} size={12} />
+            {status?.name ?? 'No status'}
+          </span>
+        ) : null}
+      </TopbarSlot>
+      <TopbarSlot side="right">
+        {task ? (
+          <Dropdown align="right" trigger={(open) => (
+            <button type="button" className="icon-button" data-open={open || undefined} aria-label="More task actions">
+              <MoreH size={16} />
+            </button>
+          )}>
+            {(close) => (
+              <button type="button" className="popover-option" data-tone="danger" disabled={deleteTask.isPending} onClick={async () => {
+                close()
+                if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
+                void deleteAndClose({ taskId: task.id, version: task.version })
+              }}>Delete</button>
+            )}
+          </Dropdown>
+        ) : null}
         <button className="icon-button" onClick={onBack} aria-label="Close task">
           <Xmark size={16} />
         </button>
-      </div>
+      </TopbarSlot>
       {!task ? (
         <div className="pane-body">
           <EmptyState
