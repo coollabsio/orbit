@@ -182,6 +182,14 @@ export type CreateWorkspaceBody = {
 
 export type DeliveryBody = 'manual' | 'smtp';
 
+export type DuplicateBody = {
+    expected_version: number;
+    /**
+     * The canonical task this one duplicates.
+     */
+    target_task_id: string;
+};
+
 export type InvitationBody = {
     delivery: DeliveryBody;
     email: string;
@@ -4899,6 +4907,128 @@ export type DownloadCommentAttachmentResponses = {
 };
 
 export type DownloadCommentAttachmentResponse = DownloadCommentAttachmentResponses[keyof DownloadCommentAttachmentResponses];
+
+export type UnmarkTaskDuplicateData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/duplicate-of';
+};
+
+export type UnmarkTaskDuplicateErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UnmarkTaskDuplicateError = UnmarkTaskDuplicateErrors[keyof UnmarkTaskDuplicateErrors];
+
+export type UnmarkTaskDuplicateResponses = {
+    204: void;
+};
+
+export type UnmarkTaskDuplicateResponse = UnmarkTaskDuplicateResponses[keyof UnmarkTaskDuplicateResponses];
+
+export type MarkTaskDuplicateData = {
+    body: DuplicateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/duplicate-of';
+};
+
+export type MarkTaskDuplicateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MarkTaskDuplicateError = MarkTaskDuplicateErrors[keyof MarkTaskDuplicateErrors];
+
+export type MarkTaskDuplicateResponses = {
+    200: TaskRecord;
+};
+
+export type MarkTaskDuplicateResponse = MarkTaskDuplicateResponses[keyof MarkTaskDuplicateResponses];
 
 export type RestoreTaskData = {
     body: RestoreBody;

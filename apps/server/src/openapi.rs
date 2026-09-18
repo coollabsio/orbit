@@ -76,6 +76,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::reorder_tasks,
         crate::task_routes::delete_task,
         crate::task_routes::restore_task,
+        crate::task_routes::mark_task_duplicate,
+        crate::task_routes::unmark_task_duplicate,
         crate::task_routes::list_task_trash,
         crate::task_routes::list_comments,
         crate::task_routes::create_comment,
@@ -360,6 +362,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "reorder_tasks"
             | "delete_task"
             | "restore_task"
+            | "mark_task_duplicate"
             | "list_task_trash"
             | "list_comments"
             | "create_comment"
@@ -422,6 +425,8 @@ fn task_operation(operation_id: &str) -> bool {
             | "reorder_tasks"
             | "delete_task"
             | "restore_task"
+            | "mark_task_duplicate"
+            | "unmark_task_duplicate"
             | "list_task_trash"
             | "list_comments"
             | "create_comment"
@@ -458,6 +463,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "bulk_tasks"
             | "resolve_tasks"
             | "reorder_tasks"
+            | "mark_task_duplicate"
             | "create_comment"
             | "update_comment"
     ) || operation_id == "list_tasks"
@@ -483,6 +489,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "bulk_tasks"
             | "reorder_tasks"
             | "delete_task"
+            | "mark_task_duplicate"
             | "update_comment"
             | "delete_comment"
     ) {
