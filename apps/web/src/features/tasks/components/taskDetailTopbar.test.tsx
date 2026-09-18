@@ -43,7 +43,7 @@ function renderDetail() {
         <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
           <TopbarSlotProvider>
             <SlotHost />
-            <TaskDetail task={task} project={undefined} state={state} onBack={() => {}} />
+            <TaskDetail task={task} project={undefined} projects={[]} state={state} onBack={() => {}} onOpenTask={() => {}} />
           </TopbarSlotProvider>
         </WorkspaceContext.Provider>
       </MemoryRouter>

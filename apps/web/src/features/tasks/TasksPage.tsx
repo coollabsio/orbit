@@ -174,7 +174,7 @@ export function TasksPage() {
   return (
     <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
       {taskId ? (
-        <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} />
+        <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} projects={projects} state={state} onBack={closeTask} onOpenTask={openTask} />
       ) : (
         <section className="pane tasks-list-pane">
           <TopbarSlot side="left">

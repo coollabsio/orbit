@@ -15,6 +15,7 @@ import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdate
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { Attachments } from '../../chat/components/Attachments'
 import { ActivityFeed } from './ActivityFeed'
+import { SubIssues } from './SubIssues'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
@@ -33,12 +34,16 @@ function dueDateLabel(value: string | null) {
 interface TaskDetailProps {
   task: Task | undefined
   project: Project | undefined
+  /** Every workspace project: sub-issues may live in another project. */
+  projects: Project[]
   state: TaskViewState
   onBack: () => void
+  /** Navigate to another task (sub-issues, duplicates, backlinks). */
+  onOpenTask: (taskId: string) => void
 }
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
-export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
+export function TaskDetail({ task, project, projects, state, onBack, onOpenTask }: TaskDetailProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const uploadAttachments = useUploadTaskAttachments(workspace.id, task?.id ?? '')
@@ -128,6 +133,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
             {updateTask.isError ? <p role="alert" className="text-danger text-xs">Task update failed. <button type="button" className="button button-ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</button></p> : null}
             {deleteAttachment.isError ? <p role="alert" className="text-danger text-xs">Attachment removal failed. <button type="button" className="button button-ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</button></p> : null}
             {deleteTask.isError ? <p role="alert" className="text-danger text-xs">Task deletion failed. <button type="button" className="button button-ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</button></p> : null}
+            <SubIssues task={task} projects={projects} state={state} onOpen={onOpenTask} />
 
           </div>
 

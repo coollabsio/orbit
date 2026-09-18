@@ -46,7 +46,7 @@ test('task due date uses the custom picker and can clear the saved value', async
     comments: [], activity: [], version: 1,
   }
   const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }
-  const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={() => {}} />, { wrapper: Wrapper })
+  const view = render(<TaskDetail task={task} project={undefined} projects={[]} state={state} onBack={() => {}} onOpenTask={() => {}} />, { wrapper: Wrapper })
 
   expect(view.container.querySelector('input[type="datetime-local"]')).toBeNull()
   fireEvent.click(view.getByRole('button', { name: 'Due date' }))

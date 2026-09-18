@@ -124,7 +124,7 @@ test('task deletion retry returns to the task list after success', async () => {
     labels: [], attachments: [], dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
   }
   const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }
-  const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={onBack} />, { wrapper: Wrapper })
+  const view = render(<TaskDetail task={task} project={undefined} projects={[]} state={state} onBack={onBack} onOpenTask={() => {}} />, { wrapper: Wrapper })
 
   // Delete now lives behind the topbar overflow menu, so each attempt reopens it.
   const openDelete = () => {

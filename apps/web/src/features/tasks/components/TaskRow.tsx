@@ -23,10 +23,14 @@ interface TaskRowProps {
   onToggleSelect: (taskId: string) => void
   onDragStart: (taskId: string) => void
   onDragEnd: () => void
+  /** One notch smaller, no selection or drag: the sub-issue group's rows. */
+  compact?: boolean
+  /** A project colour dot, for rows whose project differs from their context. */
+  projectColor?: string
 }
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
-export function TaskRow({ task, statuses, labels, users, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+export function TaskRow({ task, statuses, labels, users, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd, compact = false, projectColor }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
@@ -36,9 +40,10 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
       className="list-row tasks-row"
       data-selected={selected || undefined}
       data-dragging={dragging || undefined}
+      data-compact={compact || undefined}
       role="button"
       tabIndex={0}
-      draggable
+      draggable={!compact}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData('text/task-id', task.id)
@@ -50,13 +55,16 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
         if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(task.id)
       }}
     >
-      <label className="checkbox-box tasks-row-check" onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" checked={selected} aria-label={`Select ${task.identifier}`} onChange={() => onToggleSelect(task.id)} />
-        <span className="checkbox-box-visual" />
-        <svg className="checkbox-box-tick" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-          <path d="M2.5 6.5 5 9l4.5-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </label>
+      {compact ? null : (
+        <label className="checkbox-box tasks-row-check" onClick={(e) => e.stopPropagation()}>
+          <input type="checkbox" checked={selected} aria-label={`Select ${task.identifier}`} onChange={() => onToggleSelect(task.id)} />
+          <span className="checkbox-box-visual" />
+          <svg className="checkbox-box-tick" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2.5 6.5 5 9l4.5-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </label>
+      )}
+      {projectColor ? <span className="pill-dot tasks-row-project" style={{ background: projectColor }} aria-hidden="true" /> : null}
       <PriorityPicker task={task} />
       <span className="tasks-row-id">{task.identifier}</span>
       <div onClick={(e) => e.stopPropagation()}>

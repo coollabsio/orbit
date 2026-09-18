@@ -108,6 +108,21 @@ export function useTasks(workspaceId: string, filters: TaskFilters = {}, exhaust
   })
 }
 
+/**
+ * Direct sub-issues of one task, in one exhaustive request (the server caps a
+ * page at 100). Disabled until the parent reports any, so a leaf task's detail
+ * never pays for an empty list request.
+ */
+export function useSubIssues(workspaceId: string, parentId: string, enabled: boolean) {
+  return useQuery({
+    // Under tasks.all, so every task mutation's invalidation and the optimistic
+    // patch/reconcile helpers (which understand the `{ items }` page shape) reach it.
+    queryKey: [...queryKeys.tasks.all(workspaceId), 'sub-issues', parentId] as const,
+    enabled,
+    queryFn: () => taskListAllPages(apiClient, workspaceId, { parent_id: parentId, nesting: 'all', limit: 100 }),
+  })
+}
+
 export function useTask(workspaceId: string, taskId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.tasks.detail(workspaceId, taskId ?? ''),
