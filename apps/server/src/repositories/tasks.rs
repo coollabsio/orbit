@@ -1,6 +1,8 @@
 use orbit_domain::{DomainError, MAX_PARENT_DEPTH, StatusCategory, check_parent_edge, rich_text};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
 use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
@@ -83,6 +85,13 @@ pub struct TaskRecord {
     pub sub_issue_total: i64,
     /// Live sub-issues in a completed or cancelled status.
     pub sub_issue_done: i64,
+    /// Set when this task was marked as a duplicate of another. Nothing moved:
+    /// both tasks stay fully readable.
+    #[schema(value_type = Option<String>)]
+    pub duplicate_of_task_id: Option<Id>,
+    /// Tasks marked as duplicates of this one. Detail reads only; `[]` elsewhere.
+    #[schema(value_type = Vec<String>)]
+    pub duplicate_ids: Vec<Id>,
     #[schema(value_type = Vec<String>)]
     pub assignee_ids: Vec<Id>,
     #[schema(value_type = Vec<String>)]
@@ -1161,7 +1170,12 @@ impl TaskRepository {
         }
         let has_more = tasks.len() > limit;
         tasks.truncate(limit);
-        apply_sub_issue_rollup(self.database.pool(), workspace_id, &mut tasks).await?;
+        apply_task_graph(
+            &mut *self.database.pool().acquire().await?,
+            workspace_id,
+            &mut tasks,
+        )
+        .await?;
         let next_cursor = if has_more {
             tasks
                 .last()
@@ -1196,12 +1210,28 @@ impl TaskRepository {
         .await?
         .ok_or(TaskError::NotFound)?;
         let mut record = task_from_row(self.database.pool(), row).await?;
-        apply_sub_issue_rollup(
-            self.database.pool(),
+        let mut connection = self.database.pool().acquire().await?;
+        apply_task_graph(
+            &mut connection,
             workspace_id,
             std::slice::from_mut(&mut record),
         )
         .await?;
+        // Detail-only: the canonical side of the duplicate relation.
+        record.duplicate_ids = sqlx::query_scalar::<_, String>(
+            "SELECT task_relations.source_task_id FROM task_relations \
+             JOIN tasks ON tasks.id = task_relations.source_task_id \
+             WHERE task_relations.workspace_id = ? AND task_relations.target_task_id = ? \
+             AND task_relations.kind = 'duplicate_of' AND tasks.deleted_at IS NULL \
+             ORDER BY task_relations.created_at, task_relations.source_task_id",
+        )
+        .bind(workspace_id.to_string())
+        .bind(task_id.to_string())
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect::<Result<_, _>>()?;
         Ok(record)
     }
 
@@ -1235,7 +1265,12 @@ impl TaskRepository {
                 records.push(task_from_row(self.database.pool(), row).await?);
             }
         }
-        apply_sub_issue_rollup(self.database.pool(), workspace_id, &mut records).await?;
+        apply_task_graph(
+            &mut *self.database.pool().acquire().await?,
+            workspace_id,
+            &mut records,
+        )
+        .await?;
         Ok(records)
     }
 
@@ -1360,6 +1395,8 @@ impl TaskRepository {
             parent_id: input.parent_id,
             sub_issue_total: 0,
             sub_issue_done: 0,
+            duplicate_of_task_id: None,
+            duplicate_ids: Vec::new(),
             assignee_ids: input.assignee_ids,
             label_ids: input.label_ids,
             due_at: input.due_at,
@@ -1381,7 +1418,7 @@ impl TaskRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let mut task = update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?;
-        apply_sub_issue_rollup(&mut *tx, workspace_id, std::slice::from_mut(&mut task)).await?;
+        apply_task_graph(&mut tx, workspace_id, std::slice::from_mut(&mut task)).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1431,7 +1468,7 @@ impl TaskRepository {
         for update in updates {
             records.push(update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?);
         }
-        apply_sub_issue_rollup(&mut *tx, workspace_id, &mut records).await?;
+        apply_task_graph(&mut tx, workspace_id, &mut records).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1557,9 +1594,166 @@ impl TaskRepository {
             updated_at: now,
             ..current
         };
-        apply_sub_issue_rollup(&mut *tx, workspace_id, std::slice::from_mut(&mut record)).await?;
+        apply_task_graph(&mut tx, workspace_id, std::slice::from_mut(&mut record)).await?;
         tx.commit().await?;
         Ok(record)
+    }
+
+    /// Linear-style "mark as duplicate": a relation row plus a move to the
+    /// project's Cancelled-category status. NOTHING else moves, so it is fully
+    /// reversible with `unmark_duplicate`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn mark_duplicate(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        target_task_id: Id,
+        actor_id: Id,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskRecord, TaskError> {
+        if task_id == target_task_id {
+            return Err(TaskError::Invalid {
+                field: "target_task_id",
+            });
+        }
+        let mut tx = self.database.immediate_transaction().await?;
+        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let current = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
+        check_version(expected_version, current.version, &current)?;
+        let target = match task_in_tx(&mut tx, workspace_id, target_task_id, false).await {
+            Err(TaskError::NotFound) => {
+                return Err(TaskError::Invalid {
+                    field: "target_task_id",
+                });
+            }
+            other => other?,
+        };
+        // Two tasks marked as duplicates of each other would leave no canonical one.
+        let target_is_duplicate_of_source: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM task_relations WHERE workspace_id = ? AND kind = 'duplicate_of' \
+             AND source_task_id = ? AND target_task_id = ?",
+        )
+        .bind(workspace_id.to_string())
+        .bind(target.id.to_string())
+        .bind(task_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        if target_is_duplicate_of_source > 0 {
+            return Err(TaskError::Invalid {
+                field: "target_task_id",
+            });
+        }
+        let current_category: String =
+            sqlx::query_scalar("SELECT category FROM task_statuses WHERE id = ?")
+                .bind(current.status_id.to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+        // Already cancelled stays where it is; otherwise the project's first
+        // Cancelled-category status.
+        let status_id = if current_category == "cancelled" {
+            current.status_id
+        } else {
+            let cancelled: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? \
+                 AND category = 'cancelled' ORDER BY position, id LIMIT 1",
+            )
+            .bind(workspace_id.to_string())
+            .bind(current.project_id.to_string())
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(cancelled) = cancelled else {
+                return Err(TaskError::Invalid { field: "status_id" });
+            };
+            parse_id(cancelled)?
+        };
+        let inserted = sqlx::query(
+            "INSERT INTO task_relations (id, workspace_id, kind, source_task_id, target_task_id, created_by, created_at) \
+             VALUES (?, ?, 'duplicate_of', ?, ?, ?, ?)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(workspace_id.to_string())
+        .bind(task_id.to_string())
+        .bind(target_task_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(now.as_millis())
+        .execute(&mut *tx)
+        .await;
+        // task_relations_one_duplicate: a task is a duplicate of at most one task.
+        if is_unique_violation(&inserted) {
+            return Err(TaskError::Conflict);
+        }
+        inserted?;
+        sqlx::query(
+            "UPDATE tasks SET status_id = ?, version = version + 1, updated_at = ? \
+             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
+        )
+        .bind(status_id.to_string())
+        .bind(now.as_millis())
+        .bind(task_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(expected_version as i64)
+        .execute(&mut *tx)
+        .await?;
+        record_mutation(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            "task.duplicate_marked",
+            "task",
+            task_id,
+            request_id,
+            now,
+        )
+        .await?;
+        let mut record = TaskRecord {
+            status_id,
+            version: current.version + 1,
+            updated_at: now,
+            ..current
+        };
+        apply_task_graph(&mut tx, workspace_id, std::slice::from_mut(&mut record)).await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    /// Removes the duplicate relation. Deliberately does NOT restore the
+    /// previous status: the user picks one if they want it back.
+    pub async fn unmark_duplicate(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        let removed = sqlx::query(
+            "DELETE FROM task_relations WHERE workspace_id = ? AND source_task_id = ? AND kind = 'duplicate_of'",
+        )
+        .bind(workspace_id.to_string())
+        .bind(task_id.to_string())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if removed == 0 {
+            return Err(TaskError::NotFound);
+        }
+        record_mutation(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            "task.duplicate_unmarked",
+            "task",
+            task_id,
+            request_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn task_trash(
@@ -2800,16 +2994,22 @@ fn sub_issue_rollup_sql(parent_count: usize) -> String {
     )
 }
 
-/// ONE aggregate query for the whole page. Never call this per row. Takes any
-/// executor so the same code serves pool reads and in-transaction writes.
-async fn apply_sub_issue_rollup<'e, E>(
-    executor: E,
+fn duplicate_of_sql(task_count: usize) -> String {
+    let placeholders = vec!["?"; task_count].join(", ");
+    format!(
+        "SELECT source_task_id, target_task_id FROM task_relations \
+         WHERE workspace_id = ? AND kind = 'duplicate_of' AND source_task_id IN ({placeholders})"
+    )
+}
+
+/// The per-page graph summary: the sub-issue rollup and the duplicate marker.
+/// Exactly two queries for the whole page, whatever its size. Never call this
+/// per row.
+async fn apply_task_graph(
+    connection: &mut sqlx::SqliteConnection,
     workspace_id: Id,
     records: &mut [TaskRecord],
-) -> Result<(), TaskError>
-where
-    E: sqlx::Executor<'e, Database = Sqlite>,
-{
+) -> Result<(), TaskError> {
     if records.is_empty() {
         return Ok(());
     }
@@ -2818,19 +3018,30 @@ where
     for record in records.iter() {
         query = query.bind(record.id.to_string());
     }
-    let rollup: std::collections::HashMap<String, (i64, i64)> = query
-        .fetch_all(executor)
+    let rollup: HashMap<String, (i64, i64)> = query
+        .fetch_all(&mut *connection)
         .await?
         .into_iter()
         .map(|(parent, total, done)| (parent, (total, done)))
         .collect();
+
+    let sql = duplicate_of_sql(records.len());
+    let mut query = sqlx::query_as::<_, (String, String)>(&sql).bind(workspace_id.to_string());
+    for record in records.iter() {
+        query = query.bind(record.id.to_string());
+    }
+    let duplicate_of: HashMap<String, String> = query
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .collect();
+
     for record in records.iter_mut() {
-        let (total, done) = rollup
-            .get(&record.id.to_string())
-            .copied()
-            .unwrap_or((0, 0));
+        let key = record.id.to_string();
+        let (total, done) = rollup.get(&key).copied().unwrap_or((0, 0));
         record.sub_issue_total = total;
         record.sub_issue_done = done;
+        record.duplicate_of_task_id = duplicate_of.get(&key).cloned().map(parse_id).transpose()?;
     }
     Ok(())
 }
@@ -2932,9 +3143,11 @@ fn task_record_from_row(
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)
             .transpose()?,
-        // Filled in by one batch pass per page; see `apply_sub_issue_rollup`.
+        // Filled in by one batch pass per page; see `apply_task_graph`.
         sub_issue_total: 0,
         sub_issue_done: 0,
+        duplicate_of_task_id: None,
+        duplicate_ids: Vec::new(),
         assignee_ids,
         label_ids,
         due_at: row

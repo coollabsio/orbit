@@ -122,6 +122,10 @@ pub fn task_router(state: TaskState) -> Router {
             post(restore_task),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/duplicate-of",
+            post(mark_task_duplicate).delete(unmark_task_duplicate),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments",
             get(list_comments).post(create_comment),
         )
@@ -1239,6 +1243,71 @@ async fn restore_task(
         )
         .await
         .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct DuplicateBody {
+    /// The canonical task this one duplicates.
+    target_task_id: String,
+    expected_version: u64,
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/duplicate-of", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = DuplicateBody, responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
+async fn mark_task_duplicate(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<DuplicateBody>,
+) -> Result<Json<TaskRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/duplicate-of");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    let target_task_id = body
+        .target_task_id
+        .parse()
+        .map_err(|_| validation("target_task_id", &instance, request_id.as_ref()))?;
+    state
+        .tasks
+        .mark_duplicate(
+            workspace_id,
+            task_id,
+            target_task_id,
+            actor_id,
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/duplicate-of", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 204)))]
+async fn unmark_task_duplicate(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/duplicate-of");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .unmark_duplicate(
+            workspace_id,
+            task_id,
+            actor_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 

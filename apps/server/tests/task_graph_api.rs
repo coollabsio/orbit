@@ -551,3 +551,116 @@ async fn sub_issue_progress_rolls_up_for_a_whole_page() {
     assert_eq!(leaf["sub_issue_total"], 0);
     assert_eq!(leaf["sub_issue_done"], 0);
 }
+
+#[tokio::test]
+async fn marking_a_duplicate_cancels_it_once_and_is_reversible() {
+    let fixture = Fixture::new().await;
+    let canonical = fixture.create_task("Canonical").await;
+    let duplicate = fixture.create_task("Duplicate").await;
+    let other = fixture.create_task("Other").await;
+    let path = format!("{}/duplicate-of", fixture.task_path(&duplicate));
+    let mark = |target: &Value, version: u64| {
+        json_request(
+            "POST",
+            &path,
+            &fixture.owner_cookie,
+            json!({"target_task_id": target["id"], "expected_version": version}),
+        )
+    };
+
+    // a task cannot duplicate itself
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(mark(&duplicate, 0))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(mark(&canonical, 0))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let marked = response_json(response).await;
+    assert_eq!(marked["duplicate_of_task_id"], canonical["id"]);
+    assert_eq!(marked["version"], 1);
+    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses WHERE id = ?")
+        .bind(marked["status_id"].as_str().unwrap())
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(category, "cancelled", "marking moves it to Cancelled");
+
+    // nothing moved: the canonical task is untouched and lists its duplicate
+    let detail = response_json(fixture.get(&fixture.task_path(&canonical)).await).await;
+    assert_eq!(detail["version"], 0);
+    assert_eq!(detail["duplicate_ids"], json!([duplicate["id"]]));
+    assert!(detail["duplicate_of_task_id"].is_null());
+
+    // the list carries the marker for every row in one batch
+    let page = response_json(
+        fixture
+            .get(&format!(
+                "/api/v1/workspaces/{}/tasks",
+                fixture.workspace_id
+            ))
+            .await,
+    )
+    .await;
+    let listed = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == duplicate["id"])
+        .unwrap()
+        .clone();
+    assert_eq!(listed["duplicate_of_task_id"], canonical["id"]);
+    assert_eq!(listed["duplicate_ids"], json!([]));
+
+    // the canonical task cannot in turn be marked a duplicate of its duplicate
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("{}/duplicate-of", fixture.task_path(&canonical)),
+            &fixture.owner_cookie,
+            json!({"target_task_id": duplicate["id"], "expected_version": 0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // the partial unique index: a task cannot be a duplicate of two tasks
+    let response = fixture.app.clone().oneshot(mark(&other, 1)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response_json(response).await["code"], "task_conflict");
+
+    // fully reversible
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("DELETE", &path, &fixture.owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_relations")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+
+    // unmarking twice is a 404, not a silent success
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("DELETE", &path, &fixture.owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let detail = response_json(fixture.get(&fixture.task_path(&duplicate)).await).await;
+    assert!(detail["duplicate_of_task_id"].is_null());
+}

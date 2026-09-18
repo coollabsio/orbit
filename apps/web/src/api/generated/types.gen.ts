@@ -388,6 +388,15 @@ export type PageTaskRecord = {
         };
         description_text: string;
         due_at?: string | null;
+        /**
+         * Tasks marked as duplicates of this one. Detail reads only; `[]` elsewhere.
+         */
+        duplicate_ids: Array<string>;
+        /**
+         * Set when this task was marked as a duplicate of another. Nothing moved:
+         * both tasks stay fully readable.
+         */
+        duplicate_of_task_id?: string | null;
         id: string;
         identifier: string;
         identifier_key: string;
@@ -601,6 +610,15 @@ export type TaskRecord = {
     };
     description_text: string;
     due_at?: string | null;
+    /**
+     * Tasks marked as duplicates of this one. Detail reads only; `[]` elsewhere.
+     */
+    duplicate_ids: Array<string>;
+    /**
+     * Set when this task was marked as a duplicate of another. Nothing moved:
+     * both tasks stay fully readable.
+     */
+    duplicate_of_task_id?: string | null;
     id: string;
     identifier: string;
     identifier_key: string;

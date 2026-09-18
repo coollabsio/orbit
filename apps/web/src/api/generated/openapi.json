@@ -11393,6 +11393,7 @@
                 "creator_id",
                 "sub_issue_total",
                 "sub_issue_done",
+                "duplicate_ids",
                 "assignee_ids",
                 "label_ids",
                 "version",
@@ -11432,6 +11433,20 @@
                     "null"
                   ],
                   "format": "date-time"
+                },
+                "duplicate_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tasks marked as duplicates of this one. Detail reads only; `[]` elsewhere."
+                },
+                "duplicate_of_task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Set when this task was marked as a duplicate of another. Nothing moved:\nboth tasks stay fully readable."
                 },
                 "id": {
                   "type": "string"
@@ -12160,6 +12175,7 @@
           "creator_id",
           "sub_issue_total",
           "sub_issue_done",
+          "duplicate_ids",
           "assignee_ids",
           "label_ids",
           "version",
@@ -12199,6 +12215,20 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "duplicate_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tasks marked as duplicates of this one. Detail reads only; `[]` elsewhere."
+          },
+          "duplicate_of_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set when this task was marked as a duplicate of another. Nothing moved:\nboth tasks stay fully readable."
           },
           "id": {
             "type": "string"
