@@ -363,6 +363,245 @@ fn walk_ids(node: &Value, node_type: &str, found: &mut Vec<Id>) {
     }
 }
 
+/// Converts legacy Markdown to a TipTap document for the 0014 backfill.
+///
+/// Headings deeper than 3 clamp to 3 because the allowlist stops there. Images,
+/// tables, footnotes and raw HTML are dropped - the old renderer never produced
+/// them from user input. `@Name` mentions survive as plain text: the old mention
+/// ids were never persisted, so there is nothing to convert them to.
+#[must_use]
+pub fn markdown_to_document(markdown: &str) -> Value {
+    use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+
+    type Frame = (String, serde_json::Map<String, Value>, Vec<Value>);
+
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TABLES);
+
+    // Stack of open block nodes; index 0 is the doc.
+    let mut stack: Vec<Frame> = vec![("doc".to_owned(), serde_json::Map::new(), Vec::new())];
+    let mut marks: Vec<Value> = Vec::new();
+    let mut code_text = String::new();
+    let mut in_code_block = false;
+    let mut skipped_depth = 0usize;
+
+    fn open(stack: &mut Vec<Frame>, name: &str, attrs: serde_json::Map<String, Value>) {
+        stack.push((name.to_owned(), attrs, Vec::new()));
+    }
+    /// A tight Markdown list puts text straight inside the item, but TipTap's
+    /// `listItem` schema is `paragraph block*`. Wrap each run of inline nodes so
+    /// the document stays valid and `extract_text` still sees the words.
+    fn wrap_inline_runs(children: Vec<Value>) -> Vec<Value> {
+        let is_inline = |node: &Value| {
+            matches!(
+                node.get("type").and_then(Value::as_str),
+                Some("text" | "hardBreak" | "mention" | "taskMention")
+            )
+        };
+        if !children.iter().any(is_inline) {
+            return children;
+        }
+        let mut wrapped: Vec<Value> = Vec::with_capacity(children.len());
+        let mut run: Vec<Value> = Vec::new();
+        for child in children {
+            if is_inline(&child) {
+                run.push(child);
+            } else {
+                if !run.is_empty() {
+                    wrapped.push(serde_json::json!({
+                        "type": "paragraph",
+                        "content": std::mem::take(&mut run)
+                    }));
+                }
+                wrapped.push(child);
+            }
+        }
+        if !run.is_empty() {
+            wrapped.push(serde_json::json!({ "type": "paragraph", "content": run }));
+        }
+        wrapped
+    }
+
+    fn close(stack: &mut Vec<Frame>) {
+        let Some((name, attrs, children)) = stack.pop() else {
+            return;
+        };
+        let children = if name == "listItem" || name == "taskItem" {
+            wrap_inline_runs(children)
+        } else {
+            children
+        };
+        let mut node = serde_json::Map::new();
+        node.insert("type".to_owned(), Value::String(name.clone()));
+        if !attrs.is_empty() {
+            node.insert("attrs".to_owned(), Value::Object(attrs));
+        }
+        if !children.is_empty() {
+            node.insert("content".to_owned(), Value::Array(children));
+        }
+        if name == "paragraph" && !node.contains_key("content") {
+            return;
+        }
+        if let Some(parent) = stack.last_mut() {
+            parent.2.push(Value::Object(node));
+        }
+    }
+    fn push_text(stack: &mut [Frame], marks: &[Value], text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let mut node = serde_json::Map::new();
+        node.insert("type".to_owned(), Value::String("text".to_owned()));
+        node.insert("text".to_owned(), Value::String(text.to_owned()));
+        if !marks.is_empty() {
+            node.insert("marks".to_owned(), Value::Array(marks.to_vec()));
+        }
+        if let Some(parent) = stack.last_mut() {
+            parent.2.push(Value::Object(node));
+        }
+    }
+    fn mark(name: &str) -> Value {
+        serde_json::json!({ "type": name })
+    }
+    fn active_marks(marks: &[Value]) -> Vec<Value> {
+        marks
+            .iter()
+            .filter(|mark| !mark.is_null())
+            .cloned()
+            .collect()
+    }
+
+    for event in Parser::new_ext(markdown, options) {
+        if skipped_depth > 0 {
+            match event {
+                Event::Start(_) => skipped_depth += 1,
+                Event::End(_) => skipped_depth -= 1,
+                _ => {}
+            }
+            continue;
+        }
+        match event {
+            Event::Start(Tag::Paragraph) => open(&mut stack, "paragraph", serde_json::Map::new()),
+            Event::End(TagEnd::Paragraph) => close(&mut stack),
+            Event::Start(Tag::Heading { level, .. }) => {
+                let level = match level {
+                    HeadingLevel::H1 => 1u64,
+                    HeadingLevel::H2 => 2,
+                    _ => 3,
+                };
+                let mut attrs = serde_json::Map::new();
+                attrs.insert("level".to_owned(), Value::from(level));
+                open(&mut stack, "heading", attrs);
+            }
+            Event::End(TagEnd::Heading(_)) => close(&mut stack),
+            Event::Start(Tag::BlockQuote(_)) => {
+                open(&mut stack, "blockquote", serde_json::Map::new());
+            }
+            Event::End(TagEnd::BlockQuote(_)) => close(&mut stack),
+            Event::Start(Tag::List(start)) => {
+                let mut attrs = serde_json::Map::new();
+                let name = if let Some(start) = start {
+                    if start != 1 {
+                        attrs.insert("start".to_owned(), Value::from(start.max(1)));
+                    }
+                    "orderedList"
+                } else {
+                    "bulletList"
+                };
+                open(&mut stack, name, attrs);
+            }
+            Event::End(TagEnd::List(_)) => close(&mut stack),
+            Event::Start(Tag::Item) => open(&mut stack, "listItem", serde_json::Map::new()),
+            Event::End(TagEnd::Item) => close(&mut stack),
+            Event::Start(Tag::CodeBlock(kind)) => {
+                let mut attrs = serde_json::Map::new();
+                if let CodeBlockKind::Fenced(language) = kind
+                    && !language.is_empty()
+                {
+                    attrs.insert(
+                        "language".to_owned(),
+                        Value::String(language.chars().take(40).collect()),
+                    );
+                }
+                open(&mut stack, "codeBlock", attrs);
+                in_code_block = true;
+                code_text.clear();
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                let text = code_text.trim_end_matches('\n').to_owned();
+                push_text(&mut stack, &[], &text);
+                code_text.clear();
+                in_code_block = false;
+                close(&mut stack);
+            }
+            Event::Start(Tag::Emphasis) => marks.push(mark("italic")),
+            Event::End(TagEnd::Emphasis) => {
+                marks.pop();
+            }
+            Event::Start(Tag::Strong) => marks.push(mark("bold")),
+            Event::End(TagEnd::Strong) => {
+                marks.pop();
+            }
+            Event::Start(Tag::Strikethrough) => marks.push(mark("strike")),
+            Event::End(TagEnd::Strikethrough) => {
+                marks.pop();
+            }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                if dest_url.starts_with("http://") || dest_url.starts_with("https://") {
+                    marks.push(serde_json::json!({
+                        "type": "link",
+                        "attrs": { "href": dest_url.chars().take(2_000).collect::<String>() }
+                    }));
+                } else {
+                    marks.push(Value::Null);
+                }
+            }
+            Event::End(TagEnd::Link) => {
+                marks.pop();
+            }
+            Event::Start(Tag::Image { .. }) => skipped_depth = 1,
+            Event::Start(Tag::Table(_) | Tag::FootnoteDefinition(_) | Tag::MetadataBlock(_)) => {
+                skipped_depth = 1;
+            }
+            Event::Text(text) | Event::InlineHtml(text) => {
+                if in_code_block {
+                    code_text.push_str(&text);
+                } else {
+                    push_text(&mut stack, &active_marks(&marks), &text);
+                }
+            }
+            Event::Code(text) => {
+                let mut active = active_marks(&marks);
+                active.push(mark("code"));
+                push_text(&mut stack, &active, &text);
+            }
+            Event::SoftBreak => {
+                push_text(&mut stack, &active_marks(&marks), " ");
+            }
+            Event::HardBreak => {
+                if let Some(parent) = stack.last_mut() {
+                    parent.2.push(serde_json::json!({ "type": "hardBreak" }));
+                }
+            }
+            Event::Rule => {
+                if let Some(parent) = stack.last_mut() {
+                    parent
+                        .2
+                        .push(serde_json::json!({ "type": "horizontalRule" }));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    while stack.len() > 1 {
+        close(&mut stack);
+    }
+    let (_, _, content) = stack.pop().expect("the doc frame is never popped");
+    serde_json::json!({ "type": "doc", "content": content })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -629,5 +868,96 @@ mod tests {
             { "type": "paragraph", "content": [{ "type": "text", "text": "x" }] }
         ] })));
         assert_eq!(validate(&empty_document()), Ok(()));
+    }
+
+    #[test]
+    fn converts_headings_lists_quotes_and_code_from_markdown() {
+        let markdown = "# Title\n\n## Sub\n\nParagraph text.\n\n- one\n- two\n\n1. first\n2. second\n\n> quoted\n\n```rust\nfn main() {}\n```\n\n---\n";
+
+        let document = markdown_to_document(markdown);
+
+        assert_eq!(validate(&document), Ok(()));
+        let content = document["content"].as_array().unwrap();
+        assert_eq!(content[0], heading(1, "Title"));
+        assert_eq!(content[1], heading(2, "Sub"));
+        assert_eq!(content[2]["type"], "paragraph");
+        assert_eq!(content[3]["type"], "bulletList");
+        assert_eq!(
+            content[3]["content"][1]["content"][0]["content"][0]["text"],
+            "two"
+        );
+        assert_eq!(content[4]["type"], "orderedList");
+        assert_eq!(content[5]["type"], "blockquote");
+        assert_eq!(
+            content[6],
+            json!({
+                "type": "codeBlock",
+                "attrs": { "language": "rust" },
+                "content": [{ "type": "text", "text": "fn main() {}" }]
+            })
+        );
+        assert_eq!(content[7], json!({ "type": "horizontalRule" }));
+    }
+
+    #[test]
+    fn converts_inline_marks_and_links_from_markdown() {
+        let document =
+            markdown_to_document("**bold** _italic_ ~~gone~~ `code` [site](https://example.com)");
+
+        assert_eq!(validate(&document), Ok(()));
+        let inline = document["content"][0]["content"].as_array().unwrap();
+        assert_eq!(
+            inline[0],
+            json!({ "type": "text", "text": "bold", "marks": [{ "type": "bold" }] })
+        );
+        assert_eq!(
+            inline[2],
+            json!({ "type": "text", "text": "italic", "marks": [{ "type": "italic" }] })
+        );
+        assert_eq!(
+            inline[4],
+            json!({ "type": "text", "text": "gone", "marks": [{ "type": "strike" }] })
+        );
+        assert_eq!(
+            inline[6],
+            json!({ "type": "text", "text": "code", "marks": [{ "type": "code" }] })
+        );
+        assert_eq!(
+            inline[8],
+            json!({
+                "type": "text",
+                "text": "site",
+                "marks": [{ "type": "link", "attrs": { "href": "https://example.com" } }]
+            })
+        );
+    }
+
+    #[test]
+    fn clamps_deep_headings_and_drops_unsupported_constructs() {
+        let document = markdown_to_document(
+            "###### deep\n\n![alt](https://example.com/a.png)\n\n| a | b |\n| - | - |\n| 1 | 2 |\n",
+        );
+
+        assert_eq!(validate(&document), Ok(()));
+        assert_eq!(document["content"][0]["attrs"]["level"], 3);
+        let text = extract_text(&document);
+        assert!(text.starts_with("deep"));
+        assert!(!text.contains("https://example.com/a.png"));
+    }
+
+    #[test]
+    fn preserves_at_mentions_as_plain_text_because_ids_were_never_stored() {
+        let document = markdown_to_document("ping @Ada Lovelace about this");
+
+        assert_eq!(validate(&document), Ok(()));
+        assert!(extract_user_ids(&document).is_empty());
+        assert_eq!(extract_text(&document), "ping @Ada Lovelace about this");
+    }
+
+    #[test]
+    fn converts_empty_markdown_to_an_empty_document() {
+        assert_eq!(markdown_to_document(""), empty_document());
+        assert_eq!(markdown_to_document("   \n\n  "), empty_document());
+        assert!(is_empty(&markdown_to_document("")));
     }
 }
