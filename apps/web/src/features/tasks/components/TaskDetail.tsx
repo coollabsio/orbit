@@ -16,6 +16,7 @@ import { taskCrumbs } from '../taskCrumbs'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { Attachments } from '../../chat/components/Attachments'
 import { ActivityFeed } from './ActivityFeed'
+import { ReferencedBy } from './ReferencedBy'
 import { SubIssues } from './SubIssues'
 import { DuplicateBanner, DuplicateErrors, DuplicateMenuItems, DuplicatesGroup, MarkDuplicateDialog, useDuplicateFlow } from './TaskDuplicates'
 import { TaskCommentComposer } from './TaskCommentComposer'
@@ -273,6 +274,7 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
             </div>
 
             <DuplicatesGroup task={task} tasks={state.tasks} onOpen={onOpenTask} />
+            <ReferencedBy task={task} onOpen={onOpenTask} />
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Due date</h4>
