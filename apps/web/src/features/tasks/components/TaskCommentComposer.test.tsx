@@ -13,14 +13,15 @@ test('comment writes announce progress and keep a visible retry after failure', 
 })
 
 test('at-mentions resolve to workspace member ids', async () => {
-  const sent: Array<{ body: string; ids: string[] }> = []
+  const sent: Array<{ body: string; mentions: { id: string; label: string }[] }> = []
   const view = render(<TaskCommentComposer placeholder="Reply" pending={false} members={[{
     id: 'user-2', membershipId: 'm2', name: 'Ada', handle: 'ada', email: 'ada@orbit.test',
     role: 'Member', color: '#000', online: false, title: '', roleIds: [], version: 1,
-  }]} onSend={async (body, _files, mentionedUserIds) => { sent.push({ body, ids: mentionedUserIds }) }} />)
+  }]} onSend={async (body, _files, mentions) => { sent.push({ body, mentions }) }} />)
   await userEvent.type(view.getByPlaceholderText('Reply'), 'Hey @')
   fireEvent.mouseDown(await view.findByRole('button', { name: '@Ada' }))
   fireEvent.click(view.getByRole('button', { name: 'Send' }))
-  expect(sent[0]?.ids).toEqual(['user-2'])
+  // The label travels with the id so the document can carry a real mention node.
+  expect(sent[0]?.mentions).toEqual([{ id: 'user-2', label: 'Ada' }])
   expect(sent[0]?.body).toContain('@Ada')
 })

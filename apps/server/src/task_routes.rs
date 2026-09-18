@@ -1246,8 +1246,6 @@ struct CommentBody {
     #[schema(value_type = Object)]
     body_json: Value,
     parent_id: Option<String>,
-    #[serde(default)]
-    mentioned_user_ids: Vec<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1297,7 +1295,6 @@ async fn create_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let parent_id = optional_id(body.parent_id, &instance, request_id.as_ref())?;
-    let mentioned_user_ids = parse_ids(body.mentioned_user_ids, &instance, request_id.as_ref())?;
     state
         .tasks
         .create_comment(
@@ -1306,7 +1303,6 @@ async fn create_comment(
             actor_id,
             parent_id,
             body.body_json,
-            mentioned_user_ids,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )

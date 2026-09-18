@@ -143,10 +143,7 @@ async fn mentions_notify_named_members_and_rolled_back_writes_do_not() {
                 task["id"].as_str().unwrap()
             ),
             &fixture.owner_cookie,
-            json!({
-                "body_json": doc("please look @member"),
-                "mentioned_user_ids": [member_id.to_string()]
-            }),
+            json!({ "body_json": doc_mentioning("please look ", &member_id.to_string()) }),
         ))
         .await
         .unwrap();
@@ -169,10 +166,7 @@ async fn mentions_notify_named_members_and_rolled_back_writes_do_not() {
                 task["id"].as_str().unwrap()
             ),
             &fixture.owner_cookie,
-            json!({
-                "body_json": doc("please look @member"),
-                "mentioned_user_ids": [member_id.to_string()]
-            }),
+            json!({ "body_json": doc_mentioning("please look ", &member_id.to_string()) }),
         ))
         .await
         .unwrap();
@@ -372,4 +366,81 @@ fn doc(text: &str) -> serde_json::Value {
     json!({ "type": "doc", "content": [
         { "type": "paragraph", "content": [{ "type": "text", "text": text }] }
     ] })
+}
+
+/// A document containing an id-based mention, which is now the only way to notify.
+fn doc_mentioning(text: &str, user_id: &str) -> serde_json::Value {
+    json!({ "type": "doc", "content": [
+        { "type": "paragraph", "content": [
+            { "type": "text", "text": text },
+            { "type": "mention", "attrs": { "id": user_id, "label": "member" } }
+        ] }
+    ] })
+}
+
+#[tokio::test]
+async fn mentions_come_from_the_document_so_text_and_notifications_cannot_disagree() {
+    let fixture = Fixture::new().await;
+    let (member_id, member_cookie) = add_member(&fixture, "member@example.com").await;
+    let task = create_task(&fixture).await;
+    let comments_uri = format!(
+        "/api/v1/workspaces/{}/tasks/{}/comments",
+        fixture.workspace_id,
+        task["id"].as_str().unwrap()
+    );
+
+    // Typing "@member" as plain text is not a mention and notifies nobody. Under the
+    // old client-supplied list this was the opposite: the text highlighted but never
+    // notified, and a deleted mention still did.
+    let typed = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &comments_uri,
+            &fixture.owner_cookie,
+            json!({ "body_json": doc("please look @member") }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(typed.status(), StatusCode::CREATED);
+    assert_eq!(
+        list_notifications(&fixture, &member_cookie, false).await["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    // Editing a comment to add a real mention notifies the newly named person.
+    let comment = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &comments_uri,
+            &fixture.owner_cookie,
+            json!({ "body_json": doc("no mention yet") }),
+        ))
+        .await
+        .unwrap();
+    let comment = response_json(comment).await;
+    let edited = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("{comments_uri}/{}", comment["id"].as_str().unwrap()),
+            &fixture.owner_cookie,
+            json!({
+                "body_json": doc_mentioning("now ", &member_id.to_string()),
+                "expected_version": 0
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(edited.status(), StatusCode::OK);
+    let inbox = list_notifications(&fixture, &member_cookie, false).await;
+    assert_eq!(inbox["items"].as_array().unwrap().len(), 1);
+    assert_eq!(inbox["items"][0]["kind"], "comment_mentioned");
 }

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Paperclip2, Xmark } from 'reicon-react'
 import type { User } from '../api/models'
+import type { MentionTarget } from '../api/richText'
 
-export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], compact, onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; members?: User[]; compact?: boolean; onSend: (body: string, files: File[], mentionedUserIds: string[]) => Promise<unknown> }) {
+export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], compact, onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; members?: User[]; compact?: boolean; onSend: (body: string, files: File[], mentions: MentionTarget[]) => Promise<unknown> }) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
-  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([])
+  // Carries the label too: the server derives recipients from mention nodes in the document.
+  const [mentions, setMentions] = useState<MentionTarget[]>([])
   const input = useRef<HTMLInputElement>(null)
   const mentionQuery = useMemo(() => {
     const match = body.match(/(?:^|\s)@([^\s@]*)$/)
@@ -19,14 +21,14 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
   }, [files.length])
   const send = async () => {
     if (!body.trim() && files.length === 0) return
-    await onSend(body, files, mentionedUserIds)
+    await onSend(body, files, mentions)
     setBody((current) => current === body ? '' : current)
     setFiles((current) => current === files ? [] : current)
-    setMentionedUserIds((current) => current === mentionedUserIds ? [] : current)
+    setMentions((current) => current === mentions ? [] : current)
   }
   const insertMention = (member: User) => {
     setBody((current) => current.replace(/@([^\s@]*)$/, `@${member.name} `))
-    setMentionedUserIds((current) => current.includes(member.id) ? current : [...current, member.id])
+    setMentions((current) => current.some((mention) => mention.id === member.id) ? current : [...current, { id: member.id, label: member.name }])
   }
   return (
     <div className="tasks-native-composer" data-compact={compact || undefined} onDrop={(event) => { event.preventDefault(); setFiles((current) => [...current, ...event.dataTransfer.files]) }} onDragOver={(event) => event.preventDefault()}>

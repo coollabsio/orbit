@@ -1282,6 +1282,7 @@ impl TaskRepository {
             actor_id,
             NotificationRequest {
                 kind: "task_assigned",
+                skip_unknown: false,
                 task_id: id,
                 comment_id: None,
                 recipients: &input.assignee_ids,
@@ -1618,7 +1619,6 @@ impl TaskRepository {
         actor_id: Id,
         parent_id: Option<Id>,
         body_json: Value,
-        mentioned_user_ids: Vec<Id>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<CommentRecord, TaskError> {
@@ -1635,6 +1635,9 @@ impl TaskRepository {
             return Err(TaskError::Invalid { field: "body_json" });
         }
         let (body_column, body_text) = document_columns(&body_json, "body_json")?;
+        // Derived from the stored document, so the highlighted text and the
+        // notified people can never disagree.
+        let recipients = rich_text::extract_user_ids(&body_json);
         sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body_json, body_text, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)")
             .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body_column).bind(&body_text).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
         notify_users(
@@ -1645,7 +1648,8 @@ impl TaskRepository {
                 kind: "comment_mentioned",
                 task_id,
                 comment_id: Some(id),
-                recipients: &mentioned_user_ids,
+                recipients: &recipients,
+                skip_unknown: true,
             },
             now,
         )
@@ -1698,6 +1702,24 @@ impl TaskRepository {
         let (body_column, body_text) = document_columns(&body_json, "body_json")?;
         sqlx::query("UPDATE task_comments SET body_json = ?, body_text = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?")
             .bind(&body_column).bind(&body_text).bind(now.as_millis()).bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        // Editing in a new mention notifies that person. dedupe_key is
+        // workspace:recipient:kind:comment, inserted with OR IGNORE, so anyone
+        // already notified for this comment is not notified twice.
+        let recipients = rich_text::extract_user_ids(&body_json);
+        notify_users(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            NotificationRequest {
+                kind: "comment_mentioned",
+                task_id,
+                comment_id: Some(comment_id),
+                recipients: &recipients,
+                skip_unknown: true,
+            },
+            now,
+        )
+        .await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1905,6 +1927,7 @@ async fn update_task_in_tx(
             actor_id,
             NotificationRequest {
                 kind: "task_assigned",
+                skip_unknown: false,
                 task_id: update.id,
                 comment_id: None,
                 recipients: &added,
@@ -2352,6 +2375,10 @@ struct NotificationRequest<'a> {
     task_id: Id,
     comment_id: Option<Id>,
     recipients: &'a [Id],
+    /// Assignees are a client-supplied list, so an unknown id is a caller error.
+    /// Mention recipients are derived from the document, so an id that is no
+    /// longer a member is simply skipped - the author cannot fix history.
+    skip_unknown: bool,
 }
 
 async fn notify_users(
@@ -2369,7 +2396,7 @@ async fn notify_users(
     let mut unique = request.recipients.to_vec();
     unique.sort_unstable();
     unique.dedup();
-    if unique.len() != request.recipients.len() {
+    if !request.skip_unknown && unique.len() != request.recipients.len() {
         return Err(TaskError::Invalid { field });
     }
     for recipient in request
@@ -2387,6 +2414,9 @@ async fn notify_users(
         .fetch_one(&mut **tx)
         .await?;
         if exists != 1 {
+            if request.skip_unknown {
+                continue;
+            }
             return Err(TaskError::Invalid { field });
         }
         let dedupe_key = format!(

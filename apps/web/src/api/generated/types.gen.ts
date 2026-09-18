@@ -124,7 +124,6 @@ export type CommentBody = {
     body_json: {
         [key: string]: unknown;
     };
-    mentioned_user_ids?: Array<string>;
     parent_id?: string | null;
 };
 

@@ -10394,12 +10394,6 @@
           "body_json": {
             "type": "object"
           },
-          "mentioned_user_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "parent_id": {
             "type": [
               "string",
