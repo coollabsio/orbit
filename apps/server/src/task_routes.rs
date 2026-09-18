@@ -765,13 +765,13 @@ async fn delete_label(
 
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ResolveBody {
+struct ResolveBody {
     identifiers: Vec<String>,
 }
 
 /// Batch identifier lookup so a rich-text document resolves all of its task chips in one request.
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/resolve", params(("workspace_id" = String, Path)), request_body = ResolveBody, responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
-pub async fn resolve_tasks(
+async fn resolve_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
     headers: HeaderMap,
