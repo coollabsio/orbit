@@ -26,3 +26,13 @@ test('collapsed state is still keyboard reachable and still persisted under the 
   expect(source).toContain("window.localStorage.getItem('orbit:sidebar_collapsed')")
   expect(source).toContain("window.localStorage.setItem('orbit:sidebar_collapsed', String(sidebarCollapsed))")
 })
+
+test('the UI conventions describe the new collapse placement and the shared topbar', async () => {
+  const conventions = await Bun.file(new URL('../../../../../.ai/UI_CONVENTIONS.md', import.meta.url)).text()
+
+  expect(conventions).not.toContain('Collapse control is at the bottom beside the user menu.')
+  expect(conventions).toContain('Collapse control sits in the 48px brand row')
+  expect(conventions).toContain('`[`')
+  expect(conventions).not.toContain('feature-owned headers replace the global topbar')
+  expect(conventions).toContain('One 48px topbar renders on every route at every width')
+})

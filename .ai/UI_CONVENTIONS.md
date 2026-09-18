@@ -14,7 +14,7 @@
 
 - First sidebar groups Workspace, Personal, Manage.
 - Personal order is Inbox, then Direct messages.
-- Collapse control is at the bottom beside the user menu.
+- Collapse control sits in the 48px brand row to the right of the workspace switcher. It is hidden until the sidebar is hovered and always visible on `:focus-visible`; on the collapsed rail it swaps in place with the workspace initial. `[` toggles it from anywhere outside text entry.
 - Collapsed state is a 56px icon rail with section separators.
 - Feature sidebars may be resizable from 220–420px; persist widths in local storage and hide resizers on mobile.
 - Second sidebar content starts below a 48px header with internal padding; never flush against the top border.
@@ -49,8 +49,8 @@
 
 ## Mobile navigation
 
-- The bottom dock is the primary global navigation; feature-owned headers replace the global topbar on Tasks, Docs, Mail, Chat, DMs, and Inbox.
-- Home keeps only Home, search, theme, and settings in its header. It intentionally has no New menu.
+- The bottom dock is the primary global navigation. One 48px topbar renders on every route at every width (compact, wrapping variant under 899px); pages supply their breadcrumb and controls through `TopbarSlot` portals rather than the shell branching on the route.
+- The topbar carries no global actions. Search is `Cmd/Ctrl+K` plus the sidebar Search row, theme lives in the user menu, and Settings lives in the sidebar Manage group and the mobile dock. `c` starts a new task from any route.
 - Dense list headers should use compact icon controls; the Tasks title doubles as the project picker.
 
 ## Attachments
