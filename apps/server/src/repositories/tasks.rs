@@ -1,4 +1,4 @@
-use orbit_domain::StatusCategory;
+use orbit_domain::{DomainError, StatusCategory, rich_text};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -69,7 +69,9 @@ pub struct TaskRecord {
     pub identifier_key: String,
     pub number: i64,
     pub title: String,
-    pub description: String,
+    #[schema(value_type = Object)]
+    pub description_json: Value,
+    pub description_text: String,
     pub priority: String,
     pub position: i64,
     #[schema(value_type = String)]
@@ -101,7 +103,9 @@ pub struct CommentRecord {
     pub author_id: Id,
     #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
-    pub body: String,
+    #[schema(value_type = Object)]
+    pub body_json: Value,
+    pub body_text: String,
     pub version: u64,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
@@ -135,7 +139,7 @@ pub struct CreateTask {
     pub project_id: Id,
     pub status_id: Id,
     pub title: String,
-    pub description: String,
+    pub description_json: Value,
     pub priority: String,
     pub position: Option<i64>,
     pub assignee_ids: Vec<Id>,
@@ -148,7 +152,7 @@ pub struct TaskChanges {
     pub project_id: Option<Id>,
     pub status_id: Option<Id>,
     pub title: Option<String>,
-    pub description: Option<String>,
+    pub description_json: Option<Value>,
     pub priority: Option<String>,
     pub position: Option<i64>,
     pub assignee_ids: Option<Vec<Id>>,
@@ -205,6 +209,11 @@ pub enum TaskError {
     NotFound,
     #[error("task input is invalid: {field}")]
     Invalid { field: &'static str },
+    #[error("rich text document is invalid: {reason}")]
+    InvalidDocument {
+        field: &'static str,
+        reason: &'static str,
+    },
     #[error("task operation conflicts with current state")]
     Conflict,
     #[error("restore conflicts with the current {field}")]
@@ -1002,7 +1011,7 @@ impl TaskRepository {
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
-             tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
+             tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
              JOIN projects ON projects.id = tasks.project_id \
              WHERE tasks.workspace_id = ",
@@ -1071,7 +1080,7 @@ impl TaskRepository {
             query
                 .push(" AND (LOWER(tasks.title) LIKE ")
                 .push_bind(pattern.clone())
-                .push(" ESCAPE '\\' OR LOWER(tasks.description) LIKE ")
+                .push(" ESCAPE '\\' OR LOWER(tasks.description_text) LIKE ")
                 .push_bind(pattern.clone())
                 .push(" ESCAPE '\\' OR LOWER(tasks.identifier_key || '-' || tasks.number) LIKE ")
                 .push_bind(pattern)
@@ -1143,7 +1152,7 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let row = sqlx::query(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
-             tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
+             tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
              JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
@@ -1171,7 +1180,7 @@ impl TaskRepository {
             let row = sqlx::query(
                 "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, \
                  tasks.identifier_key, tasks.number, tasks.title, \
-                 tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
+                 tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
                  tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
                  JOIN projects ON projects.id = tasks.project_id \
                  WHERE tasks.workspace_id = ? AND tasks.identifier_key = ? AND tasks.number = ? \
@@ -1218,6 +1227,8 @@ impl TaskRepository {
         .ok_or(TaskError::NotFound)?;
         let identifier_key: String = allocation.get("project_key");
         let number: i64 = allocation.get("number");
+        let (description_json, description_text) =
+            document_columns(&input.description_json, "description_json")?;
         let position = match input.position {
             Some(position) => position,
             None => sqlx::query_scalar::<_, i64>(
@@ -1230,8 +1241,8 @@ impl TaskRepository {
             .await?,
         };
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, identifier_key, number, title, description, priority, position, creator_id, due_at, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, identifier_key, number, title, description_json, description_text, priority, position, creator_id, due_at, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -1240,7 +1251,8 @@ impl TaskRepository {
         .bind(&identifier_key)
         .bind(number)
         .bind(&input.title)
-        .bind(&input.description)
+        .bind(&description_json)
+        .bind(&description_text)
         .bind(&input.priority)
         .bind(position)
         .bind(actor_id.to_string())
@@ -1285,7 +1297,8 @@ impl TaskRepository {
             identifier_key,
             number,
             title: input.title,
-            description: input.description,
+            description_json: input.description_json,
+            description_text,
             priority: input.priority,
             position,
             creator_id: actor_id,
@@ -1488,7 +1501,7 @@ impl TaskRepository {
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
              FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
         );
         query
@@ -1537,7 +1550,7 @@ impl TaskRepository {
         let fingerprint = format!("comments:{task_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at \
+            "SELECT id, workspace_id, task_id, author_id, parent_id, body_json, body_text, version, created_at, updated_at \
              FROM task_comments WHERE workspace_id = ",
         );
         query
@@ -1580,7 +1593,7 @@ impl TaskRepository {
         task_id: Id,
         actor_id: Id,
         parent_id: Option<Id>,
-        body: String,
+        body_json: Value,
         mentioned_user_ids: Vec<Id>,
         request_id: &str,
         now: TimestampMillis,
@@ -1594,8 +1607,12 @@ impl TaskRepository {
                 return Err(TaskError::NotFound);
             }
         }
-        sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
+        if rich_text::is_empty(&body_json) {
+            return Err(TaskError::Invalid { field: "body_json" });
+        }
+        let (body_column, body_text) = document_columns(&body_json, "body_json")?;
+        sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body_json, body_text, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)")
+            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body_column).bind(&body_text).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
         notify_users(
             &mut tx,
             workspace_id,
@@ -1627,7 +1644,8 @@ impl TaskRepository {
             task_id,
             author_id: actor_id,
             parent_id,
-            body,
+            body_json,
+            body_text,
             version: 0,
             created_at: now,
             updated_at: now,
@@ -1641,7 +1659,7 @@ impl TaskRepository {
         task_id: Id,
         comment_id: Id,
         actor_id: Id,
-        body: String,
+        body_json: Value,
         expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
@@ -1650,8 +1668,12 @@ impl TaskRepository {
         require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
         let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id).await?;
         check_version(expected_version, current.version, &current)?;
-        sqlx::query("UPDATE task_comments SET body = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?")
-            .bind(&body).bind(now.as_millis()).bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        if rich_text::is_empty(&body_json) {
+            return Err(TaskError::Invalid { field: "body_json" });
+        }
+        let (body_column, body_text) = document_columns(&body_json, "body_json")?;
+        sqlx::query("UPDATE task_comments SET body_json = ?, body_text = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?")
+            .bind(&body_column).bind(&body_text).bind(now.as_millis()).bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1665,7 +1687,8 @@ impl TaskRepository {
         .await?;
         tx.commit().await?;
         Ok(CommentRecord {
-            body,
+            body_json,
+            body_text,
             version: current.version + 1,
             updated_at: now,
             ..current
@@ -1832,9 +1855,10 @@ async fn update_task_in_tx(
         .unwrap_or(current.title.clone());
     let description = update
         .changes
-        .description
+        .description_json
         .clone()
-        .unwrap_or(current.description.clone());
+        .unwrap_or_else(|| current.description_json.clone());
+    let (description_json, description_text) = document_columns(&description, "description_json")?;
     let priority = update
         .changes
         .priority
@@ -1842,8 +1866,8 @@ async fn update_task_in_tx(
         .unwrap_or(current.priority.clone());
     let position = update.changes.position.unwrap_or(current.position);
     let due_at = update.changes.due_at.unwrap_or(current.due_at);
-    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, priority = ?, position = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
-        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&priority).bind(position).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description_json = ?, description_text = ?, priority = ?, position = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
+        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description_json).bind(&description_text).bind(&priority).bind(position).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
     if let Some(assignees) = &update.changes.assignee_ids {
         let added: Vec<Id> = assignees
             .iter()
@@ -1872,7 +1896,8 @@ async fn update_task_in_tx(
         project_id,
         status_id,
         title,
-        description,
+        description_json: description,
+        description_text,
         priority,
         position,
         due_at,
@@ -2054,6 +2079,22 @@ fn priority_rank(priority: &str) -> i64 {
         "low" => 3,
         _ => 4,
     }
+}
+
+/// Validates a client document and derives its stored columns. The server never
+/// trusts a client-supplied text field: `description_text` / `body_text` and the
+/// fts5 body always come from `extract_text` on the document that was stored.
+fn document_columns(document: &Value, field: &'static str) -> Result<(String, String), TaskError> {
+    rich_text::validate(document).map_err(|error| match error {
+        DomainError::InvalidDocument { reason } => TaskError::InvalidDocument { field, reason },
+        _ => TaskError::Invalid { field },
+    })?;
+    let text = rich_text::extract_text(document);
+    let json = serde_json::to_string(document).map_err(|_| TaskError::InvalidDocument {
+        field,
+        reason: "document is not encodable",
+    })?;
+    Ok((json, text))
 }
 
 fn escape_like(value: &str) -> String {
@@ -2454,7 +2495,7 @@ async fn task_in_tx(
     deleted: bool,
 ) -> Result<TaskRecord, TaskError> {
     let row = sqlx::query(
-        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
          FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
          AND ((? = 1 AND tasks.deleted_at IS NOT NULL) OR (? = 0 AND tasks.deleted_at IS NULL)) AND (? = 1 OR projects.deleted_at IS NULL)",
     )
@@ -2469,7 +2510,7 @@ async fn comment_in_tx(
     task_id: Id,
     comment_id: Id,
 ) -> Result<CommentRecord, TaskError> {
-    let row = sqlx::query("SELECT id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?")
+    let row = sqlx::query("SELECT id, workspace_id, task_id, author_id, parent_id, body_json, body_text, version, created_at, updated_at FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?")
         .bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     comment_from_row(row)
 }
@@ -2601,7 +2642,9 @@ fn task_record_from_row(
         identifier_key,
         number,
         title: row.get("title"),
-        description: row.get("description"),
+        description_json: serde_json::from_str(&row.get::<String, _>("description_json"))
+            .unwrap_or_else(|_| rich_text::empty_document()),
+        description_text: row.get("description_text"),
         priority: row.get("priority"),
         position: row.get("position"),
         creator_id: parse_id(row.get("creator_id"))?,
@@ -2648,7 +2691,9 @@ fn comment_from_row(row: sqlx::sqlite::SqliteRow) -> Result<CommentRecord, TaskE
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)
             .transpose()?,
-        body: row.get("body"),
+        body_json: serde_json::from_str(&row.get::<String, _>("body_json"))
+            .unwrap_or_else(|_| rich_text::empty_document()),
+        body_text: row.get("body_text"),
         version: parse_version(row.get("version"))?,
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),

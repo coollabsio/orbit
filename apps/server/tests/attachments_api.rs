@@ -948,7 +948,8 @@ async fn deleting_last_reference_quarantines_blob_and_attachment_only_comment_is
         .unwrap();
     assert_eq!(comment.status(), StatusCode::CREATED);
     let comment = response_json(comment).await;
-    assert_eq!(comment["comment"]["body"], "");
+    assert_eq!(comment["comment"]["body_text"], "");
+    assert_eq!(comment["comment"]["body_json"]["type"], "doc");
     assert_eq!(comment["attachments"].as_array().unwrap().len(), 1);
 }
 

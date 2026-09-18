@@ -834,8 +834,9 @@ struct CreateTaskBody {
     project_id: String,
     status_id: String,
     title: String,
-    #[serde(default)]
-    description: String,
+    #[serde(default = "rich_text_default")]
+    #[schema(value_type = Object)]
+    description_json: Value,
     #[serde(default = "default_priority")]
     priority: String,
     position: Option<i64>,
@@ -854,7 +855,8 @@ struct TaskUpdateBody {
     project_id: Option<String>,
     status_id: Option<String>,
     title: Option<String>,
-    description: Option<String>,
+    #[schema(value_type = Option<Object>)]
+    description_json: Option<Value>,
     priority: Option<String>,
     position: Option<i64>,
     assignee_ids: Option<Vec<String>>,
@@ -878,7 +880,8 @@ struct BulkItem {
     project_id: Option<String>,
     status_id: Option<String>,
     title: Option<String>,
-    description: Option<String>,
+    #[schema(value_type = Option<Object>)]
+    description_json: Option<Value>,
     priority: Option<String>,
     position: Option<i64>,
     assignee_ids: Option<Vec<String>>,
@@ -1017,14 +1020,7 @@ async fn create_task(
             &instance,
             request_id.as_ref(),
         )?,
-        description: bounded(
-            body.description,
-            100_000,
-            100_000,
-            "description",
-            &instance,
-            request_id.as_ref(),
-        )?,
+        description_json: body.description_json,
         priority: priority(body.priority, &instance, request_id.as_ref())?,
         position: body.position,
         assignee_ids: parse_ids(body.assignee_ids, &instance, request_id.as_ref())?,
@@ -1096,7 +1092,7 @@ async fn bulk_tasks(
                     project_id: item.project_id,
                     status_id: item.status_id,
                     title: item.title,
-                    description: item.description,
+                    description_json: item.description_json,
                     priority: item.priority,
                     position: item.position,
                     assignee_ids: item.assignee_ids,
@@ -1246,7 +1242,8 @@ async fn list_task_trash(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
-    body: String,
+    #[schema(value_type = Object)]
+    body_json: Value,
     parent_id: Option<String>,
     #[serde(default)]
     mentioned_user_ids: Vec<String>,
@@ -1255,7 +1252,8 @@ struct CommentBody {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentUpdateBody {
-    body: String,
+    #[schema(value_type = Object)]
+    body_json: Value,
     expected_version: u64,
 }
 
@@ -1299,14 +1297,6 @@ async fn create_comment(
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let parent_id = optional_id(body.parent_id, &instance, request_id.as_ref())?;
     let mentioned_user_ids = parse_ids(body.mentioned_user_ids, &instance, request_id.as_ref())?;
-    let body = message(
-        body.body,
-        100_000,
-        100_000,
-        "body",
-        &instance,
-        request_id.as_ref(),
-    )?;
     state
         .tasks
         .create_comment(
@@ -1314,7 +1304,7 @@ async fn create_comment(
             task_id,
             actor_id,
             parent_id,
-            body,
+            body.body_json,
             mentioned_user_ids,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -1337,14 +1327,6 @@ async fn update_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
-    let body_text = message(
-        body.body,
-        100_000,
-        100_000,
-        "body",
-        &instance,
-        request_id.as_ref(),
-    )?;
     state
         .tasks
         .update_comment(
@@ -1352,7 +1334,7 @@ async fn update_comment(
             task_id,
             comment_id,
             actor_id,
-            body_text,
+            body.body_json,
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -1491,10 +1473,7 @@ fn task_update(
                 .title
                 .map(|value| text(value, 500, 500, "title", instance, request_id))
                 .transpose()?,
-            description: body
-                .description
-                .map(|value| bounded(value, 100_000, 100_000, "description", instance, request_id))
-                .transpose()?,
+            description_json: body.description_json,
             priority: body
                 .priority
                 .map(|value| priority(value, instance, request_id))
@@ -1687,21 +1666,6 @@ fn bounded(
     }
 }
 
-fn message(
-    value: String,
-    max_chars: usize,
-    max_bytes: usize,
-    field: &'static str,
-    instance: &str,
-    request_id: Option<&Extension<RequestId>>,
-) -> Result<String, ApiError> {
-    if value.trim().is_empty() || value.chars().count() > max_chars || value.len() > max_bytes {
-        Err(validation(field, instance, request_id))
-    } else {
-        Ok(value)
-    }
-}
-
 fn project_key(
     value: String,
     instance: &str,
@@ -1814,6 +1778,14 @@ fn task_problem(
             request_id,
         ),
         TaskError::Invalid { field } => validation(field, &instance, request_id),
+        TaskError::InvalidDocument { field: _, reason } => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+            "Validation failed",
+            reason,
+            &instance,
+            request_id,
+        ),
         TaskError::Conflict => ApiError::new(
             StatusCode::CONFLICT,
             "task_conflict",
@@ -1853,6 +1825,11 @@ fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
 const fn default_limit() -> usize {
     50
 }
+/// TipTap's empty document, so a create body may omit the description entirely.
+fn rich_text_default() -> Value {
+    orbit_domain::rich_text::empty_document()
+}
+
 fn default_priority() -> String {
     "none".to_owned()
 }

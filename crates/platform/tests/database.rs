@@ -151,7 +151,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 14
+            binary_version: 15
         }
     ));
 }
@@ -438,9 +438,10 @@ async fn task_identity_schema_requires_a_key_and_number() {
 
     let error = db
         .execute(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description,\
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title,\
+                description_json, description_text,\
                 priority, position, creator_id, version, created_at, updated_at)\
-             VALUES ('task-1', 'workspace-1', 'project-1', 'status-1', 'No identity', '',\
+             VALUES ('task-1', 'workspace-1', 'project-1', 'status-1', 'No identity', '', '',\
                 'none', 0, 'user-1', 0, 1, 1);",
         )
         .await

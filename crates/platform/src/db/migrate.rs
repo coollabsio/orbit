@@ -195,6 +195,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0014_rich_text.sql"),
                     true,
                 ),
+                Migration::new(
+                    15,
+                    include_str!("../../../../apps/server/migrations/0015_drop_markdown.sql"),
+                    true,
+                ),
             ],
         )
     }

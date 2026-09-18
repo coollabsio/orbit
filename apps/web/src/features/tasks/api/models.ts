@@ -108,7 +108,7 @@ export function taskFromRecord(
     id: record.id,
     identifier: record.identifier,
     title: record.title,
-    description: record.description,
+    description: record.description_text,
     statusId: record.status_id,
     position: record.position,
     priority,
@@ -123,7 +123,7 @@ export function taskFromRecord(
     comments: comments.map((comment) => ({
       id: comment.id,
       authorId: comment.author_id,
-      body: comment.body,
+      body: comment.body_text,
       createdAt: comment.created_at,
       parentId: comment.parent_id ?? undefined,
       editedAt: comment.updated_at === comment.created_at ? null : comment.updated_at,

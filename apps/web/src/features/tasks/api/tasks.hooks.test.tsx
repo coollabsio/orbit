@@ -19,7 +19,7 @@ function withClient(client: QueryClient) {
 
 const task = (id: string, position: number): TaskRecord => ({
   id, workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', identifier: 'GEN-1', identifier_key: 'GEN', number: 1, title: id,
-  description: '', position, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
+  description_json: { type: 'doc', content: [] }, description_text: '', position, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 1,
 })
 
@@ -81,7 +81,7 @@ test('comment attachment retry resumes the created comment instead of duplicatin
       commentCreates += 1
       return Response.json({
         id: 'comment-1', workspace_id: 'workspace-1', task_id: 'task-1', author_id: 'user-1',
-        body: 'Persist once', created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
+        body_json: { type: 'doc', content: [] }, body_text: 'Persist once', created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
       }, { status: 201 })
     }
     return calls === 3 ? failure() : Response.json(attachment, { status: 201 })

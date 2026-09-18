@@ -6,7 +6,7 @@ import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks } fro
 
 const task = (workspaceId: string, version = 1): TaskRecord => ({
   id: 'task-1', workspace_id: workspaceId, project_id: 'project-1', status_id: 'todo', identifier: 'GEN-1', identifier_key: 'GEN', number: 1, title: 'Before',
-  description: '', position: 1, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
+  description_json: { type: 'doc', content: [] }, description_text: '', position: 1, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T10:00:00Z', version,
 })
 

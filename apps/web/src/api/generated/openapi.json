@@ -10305,9 +10305,9 @@
               "type": "string"
             }
           },
-          "description": {
+          "description_json": {
             "type": [
-              "string",
+              "object",
               "null"
             ]
           },
@@ -10388,11 +10388,11 @@
       "CommentBody": {
         "type": "object",
         "required": [
-          "body"
+          "body_json"
         ],
         "properties": {
-          "body": {
-            "type": "string"
+          "body_json": {
+            "type": "object"
           },
           "mentioned_user_ids": {
             "type": "array",
@@ -10416,7 +10416,8 @@
           "workspace_id",
           "task_id",
           "author_id",
-          "body",
+          "body_json",
+          "body_text",
           "version",
           "created_at",
           "updated_at"
@@ -10425,7 +10426,10 @@
           "author_id": {
             "type": "string"
           },
-          "body": {
+          "body_json": {
+            "type": "object"
+          },
+          "body_text": {
             "type": "string"
           },
           "created_at": {
@@ -10461,12 +10465,12 @@
       "CommentUpdateBody": {
         "type": "object",
         "required": [
-          "body",
+          "body_json",
           "expected_version"
         ],
         "properties": {
-          "body": {
-            "type": "string"
+          "body_json": {
+            "type": "object"
           },
           "expected_version": {
             "type": "integer",
@@ -10508,8 +10512,8 @@
               "type": "string"
             }
           },
-          "description": {
-            "type": "string"
+          "description_json": {
+            "type": "object"
           },
           "due_at": {
             "type": [
@@ -10927,7 +10931,8 @@
                 "workspace_id",
                 "task_id",
                 "author_id",
-                "body",
+                "body_json",
+                "body_text",
                 "version",
                 "created_at",
                 "updated_at"
@@ -10936,7 +10941,10 @@
                 "author_id": {
                   "type": "string"
                 },
-                "body": {
+                "body_json": {
+                  "type": "object"
+                },
+                "body_text": {
                   "type": "string"
                 },
                 "created_at": {
@@ -11352,7 +11360,8 @@
                 "identifier_key",
                 "number",
                 "title",
-                "description",
+                "description_json",
+                "description_text",
                 "priority",
                 "position",
                 "creator_id",
@@ -11383,7 +11392,10 @@
                   ],
                   "format": "date-time"
                 },
-                "description": {
+                "description_json": {
+                  "type": "object"
+                },
+                "description_text": {
                   "type": "string"
                 },
                 "due_at": {
@@ -12096,7 +12108,8 @@
           "identifier_key",
           "number",
           "title",
-          "description",
+          "description_json",
+          "description_text",
           "priority",
           "position",
           "creator_id",
@@ -12127,7 +12140,10 @@
             ],
             "format": "date-time"
           },
-          "description": {
+          "description_json": {
+            "type": "object"
+          },
+          "description_text": {
             "type": "string"
           },
           "due_at": {
@@ -12201,9 +12217,9 @@
               "type": "string"
             }
           },
-          "description": {
+          "description_json": {
             "type": [
-              "string",
+              "object",
               "null"
             ]
           },

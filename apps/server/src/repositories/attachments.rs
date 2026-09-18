@@ -450,8 +450,9 @@ impl AttachmentRepository {
         let comment = if create_comment {
             let id = Id::new_v7();
             sqlx::query(
-                "INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, \
-                 version, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, '', 0, ?, ?)",
+                "INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, \
+                 body_json, body_text, version, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, NULL, '{\"type\":\"doc\",\"content\":[]}', '', 0, ?, ?)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -480,7 +481,8 @@ impl AttachmentRepository {
                 task_id,
                 author_id: session.user.id,
                 parent_id: None,
-                body: String::new(),
+                body_json: orbit_domain::rich_text::empty_document(),
+                body_text: String::new(),
                 version: 0,
                 created_at: now,
                 updated_at: now,

@@ -144,7 +144,7 @@ async fn mentions_notify_named_members_and_rolled_back_writes_do_not() {
             ),
             &fixture.owner_cookie,
             json!({
-                "body": "please look @member",
+                "body_json": doc("please look @member"),
                 "mentioned_user_ids": [member_id.to_string()]
             }),
         ))
@@ -170,7 +170,7 @@ async fn mentions_notify_named_members_and_rolled_back_writes_do_not() {
             ),
             &fixture.owner_cookie,
             json!({
-                "body": "please look @member",
+                "body_json": doc("please look @member"),
                 "mentioned_user_ids": [member_id.to_string()]
             }),
         ))
@@ -365,4 +365,11 @@ fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {
 
 async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+/// A minimal TipTap document, so tests can post prose without hand-writing JSON.
+fn doc(text: &str) -> serde_json::Value {
+    json!({ "type": "doc", "content": [
+        { "type": "paragraph", "content": [{ "type": "text", "text": text }] }
+    ] })
 }

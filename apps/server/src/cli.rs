@@ -603,7 +603,9 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
                     project_id,
                     status_id: status_id.parse().map_err(operation)?,
                     title: TASK_TITLE.to_owned(),
-                    description: TASK_DESCRIPTION.to_owned(),
+                    description_json: orbit_domain::rich_text::markdown_to_document(
+                        TASK_DESCRIPTION,
+                    ),
                     priority: "medium".to_owned(),
                     position: None,
                     assignee_ids: vec![user_id],
@@ -1246,7 +1248,7 @@ mod tests {
                 .await
                 .unwrap();
         sqlx::query(
-            "UPDATE tasks SET title = 'Edited task title', description = 'Edited description', \
+            "UPDATE tasks SET title = 'Edited task title', description_text = 'Edited description', \
              priority = 'urgent', position = 47, status_id = ?",
         )
         .bind(edited_status)
@@ -1307,7 +1309,7 @@ mod tests {
         assert_eq!(
             database
                 .scalar::<String>(
-                    "SELECT title || '|' || description || '|' || priority || '|' || position \
+                    "SELECT title || '|' || description_text || '|' || priority || '|' || position \
                      FROM tasks",
                 )
                 .await

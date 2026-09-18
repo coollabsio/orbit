@@ -101,7 +101,9 @@ export type BulkBody = {
 
 export type BulkItem = {
     assignee_ids?: Array<string> | null;
-    description?: string | null;
+    description_json?: {
+        [key: string]: unknown;
+    } | null;
     due_at?: string | null;
     expected_version: number;
     id: string;
@@ -119,14 +121,19 @@ export type ChangePasswordBody = {
 };
 
 export type CommentBody = {
-    body: string;
+    body_json: {
+        [key: string]: unknown;
+    };
     mentioned_user_ids?: Array<string>;
     parent_id?: string | null;
 };
 
 export type CommentRecord = {
     author_id: string;
-    body: string;
+    body_json: {
+        [key: string]: unknown;
+    };
+    body_text: string;
     created_at: string;
     id: string;
     parent_id?: string | null;
@@ -137,7 +144,9 @@ export type CommentRecord = {
 };
 
 export type CommentUpdateBody = {
-    body: string;
+    body_json: {
+        [key: string]: unknown;
+    };
     expected_version: number;
 };
 
@@ -148,7 +157,9 @@ export type ConflictMetadata = {
 
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
-    description?: string;
+    description_json?: {
+        [key: string]: unknown;
+    };
     due_at?: string | null;
     label_ids?: Array<string>;
     position?: number | null;
@@ -261,7 +272,10 @@ export type PageAuditEvent = {
 export type PageCommentRecord = {
     items: Array<{
         author_id: string;
-        body: string;
+        body_json: {
+            [key: string]: unknown;
+        };
+        body_text: string;
         created_at: string;
         id: string;
         parent_id?: string | null;
@@ -362,7 +376,10 @@ export type PageTaskRecord = {
         created_at: string;
         creator_id: string;
         deleted_at?: string | null;
-        description: string;
+        description_json: {
+            [key: string]: unknown;
+        };
+        description_text: string;
         due_at?: string | null;
         id: string;
         identifier: string;
@@ -560,7 +577,10 @@ export type TaskRecord = {
     created_at: string;
     creator_id: string;
     deleted_at?: string | null;
-    description: string;
+    description_json: {
+        [key: string]: unknown;
+    };
+    description_text: string;
     due_at?: string | null;
     id: string;
     identifier: string;
@@ -579,7 +599,9 @@ export type TaskRecord = {
 
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
-    description?: string | null;
+    description_json?: {
+        [key: string]: unknown;
+    } | null;
     due_at?: string | null;
     expected_version: number;
     label_ids?: Array<string> | null;

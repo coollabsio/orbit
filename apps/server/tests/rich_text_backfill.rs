@@ -84,10 +84,7 @@ async fn the_backfill_converts_markdown_before_the_columns_are_dropped() {
     // The one-way loss: an old @Name cannot become an id-based mention.
     assert!(orbit_domain::rich_text::extract_user_ids(&document).is_empty());
 
-    // The Markdown source is still present. 0015_drop_markdown.sql exists but is deliberately
-    // NOT registered yet: the repository still reads these columns, and a column must not be
-    // dropped before the code stops using it. It is registered once the repository writes
-    // documents instead.
+    // 0015 has dropped the Markdown source now that nothing reads it.
     for (table, column) in [("tasks", "description"), ("task_comments", "body")] {
         let count: i64 = database
             .scalar(&format!(
@@ -95,6 +92,6 @@ async fn the_backfill_converts_markdown_before_the_columns_are_dropped() {
             ))
             .await
             .unwrap();
-        assert_eq!(count, 1, "{table}.{column} is still read by the repository");
+        assert_eq!(count, 0, "{table}.{column} should be dropped");
     }
 }

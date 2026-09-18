@@ -340,7 +340,7 @@ async fn members_can_crud_all_task_area_resources_and_unknown_fields_are_rejecte
             "POST",
             &comment_uri,
             &member_cookie,
-            json!({"body":"Member comment"}),
+            json!({"body_json": doc("Member comment")}),
         ))
         .await
         .unwrap();
@@ -665,7 +665,11 @@ async fn stale_versions_return_current_safe_records() {
     assert_eq!(stale["code"], "conflict");
     assert_eq!(stale["conflict"]["current_version"], 1);
     assert_eq!(stale["conflict"]["current"]["title"], "First");
-    assert!(stale["conflict"]["current"].get("description").is_some());
+    assert!(
+        stale["conflict"]["current"]
+            .get("description_json")
+            .is_some()
+    );
 }
 
 #[tokio::test]
@@ -1069,7 +1073,7 @@ async fn comments_are_scoped_versioned_and_hard_deleted() {
             "POST",
             &uri,
             &fixture.owner_cookie,
-            json!({"body":"First"}),
+            json!({"body_json": doc("First")}),
         ))
         .await
         .unwrap();
@@ -1083,7 +1087,7 @@ async fn comments_are_scoped_versioned_and_hard_deleted() {
             "PATCH",
             &comment_uri,
             &fixture.owner_cookie,
-            json!({"body":"Edited", "expected_version":0}),
+            json!({"body_json": doc("Edited"), "expected_version":0}),
         ))
         .await
         .unwrap();
@@ -1180,7 +1184,7 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
                     task["id"].as_str().unwrap()
                 ),
                 &fixture.owner_cookie,
-                json!({"body":"parent"}),
+                json!({"body_json": doc("parent")}),
             ))
             .await
             .unwrap(),
@@ -1197,7 +1201,7 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
                 task["id"].as_str().unwrap()
             ),
             &fixture.owner_cookie,
-            json!({"body":"reply", "parent_id":parent["id"]}),
+            json!({"body_json": doc("reply"), "parent_id":parent["id"]}),
         ))
         .await
         .unwrap();
@@ -1461,15 +1465,18 @@ async fn patch_preserves_status_description_and_text_limits_preserve_source() {
                 task["id"].as_str().unwrap()
             ),
             &fixture.owner_cookie,
-            json!({"body":"  exact comment source  \n"}),
+            json!({"body_json": doc("  exact comment source  \n")}),
         ))
         .await
         .unwrap();
     assert_eq!(comment.status(), StatusCode::CREATED);
+    // The document round-trips exactly; the derived text is what search sees.
+    let comment = response_json(comment).await;
     assert_eq!(
-        response_json(comment).await["body"],
+        comment["body_json"]["content"][0]["content"][0]["text"],
         "  exact comment source  \n"
     );
+    assert_eq!(comment["body_text"], "  exact comment source  \n");
 
     let oversized_bytes = "😀".repeat(300);
     let rejected = fixture
@@ -2159,4 +2166,11 @@ async fn identifiers_resolve_in_one_batch_request() {
             .unwrap();
         assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
+}
+
+/// A minimal TipTap document, so tests can post prose without hand-writing JSON.
+fn doc(text: &str) -> serde_json::Value {
+    json!({ "type": "doc", "content": [
+        { "type": "paragraph", "content": [{ "type": "text", "text": text }] }
+    ] })
 }

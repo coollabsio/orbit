@@ -1,4 +1,5 @@
 import { confirmAction } from '../../../components/ui/confirmAction'
+import { documentFromText } from './richText'
 import { keepPreviousData, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { apiClient } from '../../../api/client'
@@ -353,7 +354,7 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
         setRemainingCount(files.length)
         const mode = commentUploadMode(body, files.length)
         if (mode === 'text') {
-          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId, mentioned_user_ids: mentionedUserIds }, throwOnError: true })
+          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body_json: documentFromText(body), parent_id: parentId, mentioned_user_ids: mentionedUserIds }, throwOnError: true })
           comment = required(response.data, 'Create comment response was empty.')
         } else if (mode === 'attachment-only') {
           const [first, ...rest] = files
@@ -401,7 +402,7 @@ export function useUpdateTaskComment(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async ({ commentId, body, version }: { commentId: string; body: string; version: number }) => {
-      const { data } = await updateComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { body, expected_version: version }, throwOnError: true })
+      const { data } = await updateComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { body_json: documentFromText(body), expected_version: version }, throwOnError: true })
       return required(data, 'Update comment response was empty.')
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) }),
