@@ -113,6 +113,25 @@ export interface TaskViewState {
   tasks: Task[]
 }
 
+/** Audit actions whose resource/verb split would not read as a sentence. */
+const ACTIVITY_LABELS: Record<string, string> = {
+  'task.bulk_updated': 'Updated task',
+  'task.duplicate_marked': 'Marked as duplicate',
+  'task.duplicate_unmarked': 'Unmarked as duplicate',
+}
+
+/** `task.updated` -> "Updated task". Underscores never reach the activity feed. */
+export function activityText(action: string): string {
+  const label = ACTIVITY_LABELS[action]
+  if (label) return label
+  return action
+    .split('.')
+    .reverse()
+    .join(' ')
+    .replace(/_/g, ' ')
+    .replace(/^./, (letter) => letter.toUpperCase())
+}
+
 export function taskFromRecord(
   record: TaskRecord,
   comments: CommentRecord[] = [],
@@ -178,7 +197,7 @@ export function taskFromRecord(
     activity: activity.map((event) => ({
       id: event.id,
       actorId: event.actor_id ?? '',
-      text: event.action.split('.').map((part, index) => index === 0 ? part : part).reverse().join(' ').replace(/^./, (letter) => letter.toUpperCase()),
+      text: activityText(event.action),
       createdAt: event.occurred_at,
     })),
     version: record.version,
