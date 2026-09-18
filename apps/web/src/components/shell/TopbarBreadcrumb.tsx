@@ -4,6 +4,8 @@ import { Link } from 'react-router'
 export interface Crumb {
   label: string
   to?: string
+  /** A placeholder rather than a place, e.g. a sub-issue's parent that is in the trash. */
+  muted?: boolean
 }
 
 /**
@@ -22,7 +24,7 @@ export function TopbarBreadcrumb({ crumbs }: { crumbs: Crumb[] }) {
             {crumb.to && !isLast ? (
               <Link className="topbar-crumb" to={crumb.to}>{crumb.label}</Link>
             ) : (
-              <span className="topbar-crumb" data-current={isLast}>{crumb.label}</span>
+              <span className="topbar-crumb" data-current={isLast} data-muted={crumb.muted || undefined}>{crumb.label}</span>
             )}
           </Fragment>
         )

@@ -10,8 +10,9 @@ import { TopbarSlot } from '../../../components/shell/TopbarSlot'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../components/workspace/taskMeta'
-import type { Project, Task, TaskViewState } from '../api/models'
-import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '../api/tasks'
+import { taskFromRecord, type Project, type Task, type TaskViewState } from '../api/models'
+import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useTask, useUpdateTask, useUploadTaskAttachments } from '../api/tasks'
+import { taskCrumbs } from '../taskCrumbs'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { Attachments } from '../../chat/components/Attachments'
 import { ActivityFeed } from './ActivityFeed'
@@ -50,6 +51,12 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
   const deleteAttachment = useDeleteTaskAttachment(workspace.id, task?.id ?? '')
   const createComment = useCreateTaskComment(workspace.id, task?.id ?? '')
   const deleteTask = useDeleteTask(workspace.id)
+  // The parent is usually on the loaded list page; a deeper sub-issue's parent
+  // may not be (the list hides sub-issues), so fetch just that one on demand.
+  // A trashed parent answers 404, which the crumb renders as "In trash".
+  const parentOnPage = task?.parentId ? state.tasks.find((candidate) => candidate.id === task.parentId) : undefined
+  const parentQuery = useTask(workspace.id, task?.parentId && !parentOnPage ? task.parentId : undefined)
+  const knownTasks = parentQuery.data ? [...state.tasks, taskFromRecord(parentQuery.data)] : state.tasks
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attach = (files: FileList | File[] | null) => {
@@ -70,7 +77,7 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
   return (
     <section className="pane tasks-detail-pane">
       <TopbarSlot side="left">
-        <TopbarBreadcrumb crumbs={[{ label: task?.identifier ?? 'Task' }]} />
+        <TopbarBreadcrumb crumbs={task ? taskCrumbs(task, knownTasks, parentQuery.isLoading) : [{ label: 'Task' }]} />
         {task ? (
           <span className="topbar-status">
             <TaskStatusIcon status={status} size={12} />

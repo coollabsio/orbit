@@ -469,6 +469,11 @@ a.topbar-crumb:hover {
   max-width: 40vw;
 }
 
+.topbar-crumb[data-muted='true'] {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
 .topbar-crumb-sep {
   color: var(--text-faint);
   font-size: 13px;
