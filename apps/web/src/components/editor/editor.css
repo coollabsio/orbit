@@ -1,0 +1,90 @@
+/* Read-only rendering and chips. Editing styles live further down this file. */
+.editor-view {
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.editor-view > * + * {
+  margin-top: 8px;
+}
+
+.editor-view h1,
+.editor-view h2,
+.editor-view h3 {
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.editor-view h1 { font-size: 17px; line-height: 24px; }
+.editor-view h2 { font-size: 15px; line-height: 22px; }
+.editor-view h3 { font-size: 13px; line-height: 20px; }
+
+.editor-view ul,
+.editor-view ol {
+  margin-left: 18px;
+}
+
+.editor-view ul { list-style: disc; }
+.editor-view ol { list-style: decimal; }
+
+.editor-view .editor-task-list {
+  margin-left: 0;
+  list-style: none;
+}
+
+.editor-view .editor-task-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.editor-view .editor-task-item[data-checked] > div {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.editor-view blockquote {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+
+.editor-view pre {
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--recessed);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.editor-view code {
+  border-radius: 4px;
+  background: var(--fill);
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.editor-view pre code {
+  background: none;
+  padding: 0;
+}
+
+.editor-view hr {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.editor-view a {
+  color: var(--accent);
+}
+
+.editor-mention {
+  border-radius: 4px;
+  padding: 0 3px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
