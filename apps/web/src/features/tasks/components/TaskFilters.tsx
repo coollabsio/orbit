@@ -1,4 +1,4 @@
-import { Filter, Kanban, List, SearchNormal, Setting4, Sort } from 'reicon-react'
+import { Filter, Hierarchy, Kanban, List, SearchNormal, Setting4, Sort } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
@@ -18,6 +18,9 @@ interface TaskFiltersProps {
   onSortChange: (sort: SortKey) => void
   onLayoutChange: (layout: 'list' | 'board') => void
   onSearchChange: (search: string) => void
+  /** Sub-issues are hidden from the list unless this is on. */
+  showSubIssues: boolean
+  onShowSubIssuesChange: (value: boolean) => void
 }
 
 /** Header dropdowns: "Filter" (status + assignee), "Sort" (order inside groups) and "Display" (layout). */
@@ -34,6 +37,8 @@ export function TaskFilters({
   onLayoutChange,
   search,
   onSearchChange,
+  showSubIssues,
+  onShowSubIssuesChange,
 }: TaskFiltersProps) {
   const activeCount = (statusKey ? 1 : 0) + (assigneeId ? 1 : 0)
   const sortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label ?? 'Sort'
@@ -168,6 +173,21 @@ export function TaskFilters({
             >
               <Kanban size={15} />
               Board
+            </button>
+            <div className="popover-separator" />
+            <div className="popover-heading">Sub-issues</div>
+            <button
+              className="popover-option"
+              role="menuitemcheckbox"
+              aria-checked={showSubIssues}
+              data-selected={showSubIssues || undefined}
+              onClick={() => {
+                onShowSubIssuesChange(!showSubIssues)
+                close()
+              }}
+            >
+              <Hierarchy size={15} />
+              Show sub-issues
             </button>
           </>
         )}

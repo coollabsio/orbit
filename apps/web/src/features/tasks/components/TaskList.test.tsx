@@ -138,3 +138,23 @@ test('task list assignee opens the assignment dropdown and updates without openi
   expect(view.queryByText('Assignees')).toBeNull()
   expect(opened).toBe(0)
 })
+
+test('with "Show sub-issues" on, children nest under a disclosure that collapses them', () => {
+  const parent = task(1)
+  const child = { ...task(2), parentId: parent.id }
+  const flat = viewFor([parent, child])
+  // off: flat rows, no disclosure
+  expect(flat.queryByRole('button', { name: 'Collapse sub-issues of ORB-1' })).toBeNull()
+  flat.unmount()
+
+  const view = render(<TaskList tasks={[parent, child]} users={[]} labels={[]} statuses={[status]} groups={groups} sort="manual" onOpen={() => {}} onAdd={() => {}} showSubIssues />, { wrapper })
+  const childRow = view.getByText('ORB-2').closest('.tasks-row')
+  expect(childRow?.getAttribute('data-depth')).toBe('1')
+  const disclosure = view.getByRole('button', { name: 'Collapse sub-issues of ORB-1' })
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+
+  fireEvent.click(disclosure)
+  expect(view.queryByText('ORB-2')).toBeNull()
+  fireEvent.click(view.getByRole('button', { name: 'Expand sub-issues of ORB-1' }))
+  expect(view.getByText('ORB-2')).toBeTruthy()
+})

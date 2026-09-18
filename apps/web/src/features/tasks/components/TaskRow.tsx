@@ -1,4 +1,5 @@
-import { Xmark } from 'reicon-react'
+import type { CSSProperties } from 'react'
+import { ChevronRight, Xmark } from 'reicon-react'
 import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
@@ -27,10 +28,16 @@ interface TaskRowProps {
   compact?: boolean
   /** A project colour dot, for rows whose project differs from their context. */
   projectColor?: string
+  /** Nesting level in the list's "Show sub-issues" mode (0 = root). */
+  depth?: number
+  hasChildren?: boolean
+  expanded?: boolean
+  /** Present in nesting mode: every row then reserves the disclosure slot so ids stay aligned. */
+  onToggleExpand?: () => void
 }
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
-export function TaskRow({ task, statuses, labels, users, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd, compact = false, projectColor }: TaskRowProps) {
+export function TaskRow({ task, statuses, labels, users, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd, compact = false, projectColor, depth = 0, hasChildren = false, expanded = true, onToggleExpand }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
@@ -41,6 +48,8 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
       data-selected={selected || undefined}
       data-dragging={dragging || undefined}
       data-compact={compact || undefined}
+      data-depth={depth || undefined}
+      style={depth ? { '--tasks-row-depth': depth } as CSSProperties : undefined}
       role="button"
       tabIndex={0}
       draggable={!compact}
@@ -64,6 +73,22 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
           </svg>
         </label>
       )}
+      {onToggleExpand ? (
+        hasChildren ? (
+          <button
+            type="button"
+            className="tasks-row-disclosure"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse sub-issues of ${task.identifier}` : `Expand sub-issues of ${task.identifier}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleExpand()
+            }}
+          >
+            <ChevronRight size={12} />
+          </button>
+        ) : <span className="tasks-row-disclosure" aria-hidden="true" />
+      ) : null}
       {projectColor ? <span className="pill-dot tasks-row-project" style={{ background: projectColor }} aria-hidden="true" /> : null}
       <PriorityPicker task={task} />
       <span className="tasks-row-id">{task.identifier}</span>

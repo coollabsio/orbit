@@ -11,6 +11,7 @@ import type { LabelRecord } from '../../../api/generated/types.gen'
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks, useUpdateTask } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { groupTasksByStatus, resolveStatusId, type SortKey, type StatusGroup } from '../tasksLib'
+import { nestTasks, type NestedTask } from './taskNesting'
 import { TaskRow } from './TaskRow'
 
 interface TaskListProps {
@@ -22,10 +23,12 @@ interface TaskListProps {
   sort: SortKey
   onOpen: (taskId: string) => void
   onAdd: (statusKey: string) => void
+  /** Display-menu "Show sub-issues": nest children one level under their parent. */
+  showSubIssues?: boolean
 }
 
 /** Status groups: collapsible headers that also accept dropped rows (moves the task to that status). */
-export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen, onAdd }: TaskListProps) {
+export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen, onAdd, showSubIssues = false }: TaskListProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const taskGroups = groupTasksByStatus(tasks, groups, sort)
@@ -33,6 +36,9 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
   const [selected, setSelected] = useState<string[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
+  const [collapsedParents, setCollapsedParents] = useState<string[]>([])
+  const toggleParent = (taskId: string) =>
+    setCollapsedParents((prev) => (prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]))
 
   const toggle = (key: string) => setCollapsed((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
   const toggleSelect = (taskId: string) =>
@@ -112,22 +118,30 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
               </button>
             </div>
             {!isCollapsed
-              ? group.tasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    labels={labels}
-                    statuses={statuses}
-                    users={users}
-                    assignees={users.filter((u) => task.assigneeIds.includes(u.id))}
-                    selected={selected.includes(task.id)}
-                    dragging={task.id === draggingId}
-                    onOpen={onOpen}
-                    onToggleSelect={toggleSelect}
-                    onDragStart={setDraggingId}
-                    onDragEnd={endDrag}
-                  />
-                ))
+              ? (showSubIssues ? nestTasks(group.tasks) : group.tasks.map((task): NestedTask => ({ root: task, children: [] }))).flatMap((entry) => {
+                  const open = !collapsedParents.includes(entry.root.id)
+                  const row = (task: Task, depth: number) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      labels={labels}
+                      statuses={statuses}
+                      users={users}
+                      assignees={users.filter((u) => task.assigneeIds.includes(u.id))}
+                      selected={selected.includes(task.id)}
+                      dragging={task.id === draggingId}
+                      depth={depth}
+                      hasChildren={depth === 0 && entry.children.length > 0}
+                      expanded={open}
+                      onToggleExpand={showSubIssues ? () => toggleParent(entry.root.id) : undefined}
+                      onOpen={onOpen}
+                      onToggleSelect={toggleSelect}
+                      onDragStart={setDraggingId}
+                      onDragEnd={endDrag}
+                    />
+                  )
+                  return [row(entry.root, 0), ...(open ? entry.children.map((child) => row(child, 1)) : [])]
+                })
               : null}
           </section>
         )

@@ -48,6 +48,8 @@ export function TasksPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const [searchFilter, setSearchFilter] = useState('')
+  // Sub-issues are hidden from the list by default; the Display menu nests them.
+  const [showSubIssues, setShowSubIssues] = useState(false)
   const projectFilter = searchParams.get('project')
   const viewFilter = ['mine', 'overdue', 'due_soon'].includes(searchParams.get('view') ?? '')
     ? searchParams.get('view') ?? undefined
@@ -58,6 +60,7 @@ export function TasksPage() {
     status_id: statusFilter ? apiStatus : undefined,
     assignee_id: assigneeFilter ?? undefined,
     view: viewFilter,
+    nesting: showSubIssues ? 'all' : 'roots',
     ...taskApiSort(sort),
     limit: 50,
   }, true)
@@ -198,7 +201,7 @@ export function TasksPage() {
             </Dropdown>
           </TopbarSlot>
           <TopbarSlot side="right">
-            <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
+            <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} showSubIssues={showSubIssues} onShowSubIssuesChange={setShowSubIssues} />
             <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
             {createTask.isError ? <span role="alert" className="text-danger text-xs">Task creation failed.</span> : null}
             {createProject.isError ? <span role="alert" className="text-danger text-xs">Project creation failed.</span> : null}
@@ -206,7 +209,7 @@ export function TasksPage() {
           <div className="pane-body">
             {layout === 'board'
               ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
-              : <TaskList tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
+              : <TaskList tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} showSubIssues={showSubIssues} />}
             {tasksQuery.hasNextPage ? <div className="tasks-load-more"><button className="button" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</button></div> : null}
           </div>
         </section>
