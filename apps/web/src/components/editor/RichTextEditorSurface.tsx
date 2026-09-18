@@ -87,6 +87,9 @@ export default function RichTextEditorSurface(props: RichTextEditorProps) {
 
   const editor = useEditor({
     extensions,
+    // TipTap would append a <style> element here, which the app's `style-src 'self'`
+    // CSP blocks on every mount. editor.css ships the same base rules instead.
+    injectCSS: false,
     content: editableDocument(value),
     autofocus: autofocus ? 'end' : false,
     editorProps: {

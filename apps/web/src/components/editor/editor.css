@@ -243,8 +243,9 @@ a.editor-chip:hover {
   max-height: 240px;
   box-shadow: none;
 }
-/* ProseMirror base rules. prosemirror-view injects these as a <style> element at
-   runtime, which the app's `style-src 'self'` CSP blocks, so they ship here. */
+/* ProseMirror base rules. TipTap core would inject these as a <style> element
+   (its `injectCSS` option), which the app's `style-src 'self'` CSP blocks, so the
+   editor turns injection off and they ship here instead. */
 .ProseMirror {
   position: relative;
   white-space: pre-wrap;
@@ -265,6 +266,15 @@ a.editor-chip:hover {
 
 .ProseMirror pre {
   white-space: pre-wrap;
+}
+
+/* ProseMirror's zero-size placeholder image around inline nodes such as chips. */
+img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .ProseMirror li {

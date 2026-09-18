@@ -58,3 +58,16 @@ test('the empty-editor placeholder is styled through a data attribute, not injec
 
   expect(css).toContain('attr(data-placeholder)')
 })
+
+test('the editor never tries to inject its stylesheet, because CSP would block it', async () => {
+  // TipTap core defaults injectCSS to true and appends a <style> element on every
+  // mount. Under `style-src 'self'` that is a CSP violation per editor instance.
+  // editor.css ships the same rules instead.
+  const [surface, css] = await Promise.all([
+    Bun.file(new URL('./RichTextEditorSurface.tsx', import.meta.url)).text(),
+    Bun.file(new URL('./editor.css', import.meta.url)).text(),
+  ])
+
+  expect(surface).toContain('injectCSS: false')
+  expect(css).toContain('img.ProseMirror-separator')
+})
