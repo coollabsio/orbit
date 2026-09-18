@@ -69,8 +69,8 @@ pub struct TaskRecord {
     pub description: String,
     pub priority: String,
     pub position: i64,
-    #[schema(value_type = String)]
-    pub creator_id: Id,
+    #[schema(value_type = Option<String>)]
+    pub creator_id: Option<Id>,
     #[schema(value_type = Option<String>)]
     pub creator_service_account_id: Option<Id>,
     pub creator_service_account_name: Option<String>,
@@ -1208,7 +1208,7 @@ impl TaskRepository {
             description: input.description,
             priority: input.priority,
             position,
-            creator_id: actor_id,
+            creator_id: Some(actor_id),
             creator_service_account_id: None,
             creator_service_account_name: None,
             assignee_ids: input.assignee_ids,
@@ -2617,6 +2617,10 @@ fn task_record_from_row(
     assignee_ids: Vec<Id>,
     label_ids: Vec<Id>,
 ) -> Result<TaskRecord, TaskError> {
+    let creator_service_account_id = row
+        .get::<Option<String>, _>("creator_service_account_id")
+        .map(parse_id)
+        .transpose()?;
     Ok(TaskRecord {
         id,
         workspace_id: parse_id(row.get("workspace_id"))?,
@@ -2626,11 +2630,12 @@ fn task_record_from_row(
         description: row.get("description"),
         priority: row.get("priority"),
         position: row.get("position"),
-        creator_id: parse_id(row.get("creator_id"))?,
-        creator_service_account_id: row
-            .get::<Option<String>, _>("creator_service_account_id")
-            .map(parse_id)
-            .transpose()?,
+        creator_id: if creator_service_account_id.is_some() {
+            None
+        } else {
+            Some(parse_id(row.get("creator_id"))?)
+        },
+        creator_service_account_id,
         creator_service_account_name: row.get("creator_service_account_name"),
         assignee_ids,
         label_ids,

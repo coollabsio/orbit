@@ -77,7 +77,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
         issued.api_token.service_account_id.unwrap().to_string()
     );
     assert_eq!(created["task"]["creator_service_account_name"], "Discord");
-    assert_eq!(created["task"]["creator_id"], fixture.user_id.to_string());
+    assert_eq!(created["task"]["creator_id"], Value::Null);
     assert_eq!(
         created["task"]["title"],
         "A very long Discord message title tha..."

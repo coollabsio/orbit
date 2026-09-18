@@ -11895,7 +11895,6 @@
                 "description",
                 "priority",
                 "position",
-                "creator_id",
                 "assignee_ids",
                 "label_ids",
                 "version",
@@ -11914,7 +11913,10 @@
                   "format": "date-time"
                 },
                 "creator_id": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "creator_service_account_id": {
                   "type": [
@@ -12623,7 +12625,6 @@
           "description",
           "priority",
           "position",
-          "creator_id",
           "assignee_ids",
           "label_ids",
           "version",
@@ -12642,7 +12643,10 @@
             "format": "date-time"
           },
           "creator_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "creator_service_account_id": {
             "type": [

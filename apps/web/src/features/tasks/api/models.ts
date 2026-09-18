@@ -66,7 +66,7 @@ export interface Task {
   position: number
   priority: TaskPriority
   assigneeIds: string[]
-  creatorId: string
+  creatorId?: string
   creatorServiceAccountId?: string
   creatorServiceAccountName?: string
   projectId: string
@@ -116,7 +116,7 @@ export function taskFromRecord(
     position: record.position,
     priority,
     assigneeIds: record.assignee_ids,
-    creatorId: record.creator_id,
+    creatorId: record.creator_id ?? undefined,
     creatorServiceAccountId: record.creator_service_account_id ?? undefined,
     creatorServiceAccountName: record.creator_service_account_name ?? undefined,
     projectId: record.project_id,

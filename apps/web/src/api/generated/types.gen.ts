@@ -401,7 +401,7 @@ export type PageTaskRecord = {
     items: Array<{
         assignee_ids: Array<string>;
         created_at: string;
-        creator_id: string;
+        creator_id?: string | null;
         creator_service_account_id?: string | null;
         creator_service_account_name?: string | null;
         deleted_at?: string | null;
@@ -594,7 +594,7 @@ export type TaskProblem = {
 export type TaskRecord = {
     assignee_ids: Array<string>;
     created_at: string;
-    creator_id: string;
+    creator_id?: string | null;
     creator_service_account_id?: string | null;
     creator_service_account_name?: string | null;
     deleted_at?: string | null;
