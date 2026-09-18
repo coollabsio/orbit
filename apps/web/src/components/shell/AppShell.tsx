@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '../../features/realtime/useWorkspaceEvents'
 import { Outlet } from 'react-router'
-import { SidebarLeft } from 'reicon-react'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
-import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
+import { SidebarBrand } from './SidebarBrand'
 import { SidebarNav } from './SidebarNav'
+import { useSidebarToggleShortcut } from './sidebarShortcut'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import './shell.css'
@@ -64,24 +64,17 @@ export function AppShell() {
     window.localStorage.setItem('orbit:sidebar_collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
 
+  const toggleSidebar = useCallback(() => setSidebarCollapsed((collapsed) => !collapsed), [])
+  useSidebarToggleShortcut(toggleSidebar)
+
   return (
     <div className="app-shell">
       {!live ? <div className="connection-status" role="status">Connecting to live updates…</div> : null}
       <aside className="app-sidebar" data-collapsed={sidebarCollapsed || undefined}>
-        <div className="app-sidebar-brand">
-          <WorkspaceSwitcher collapsed={sidebarCollapsed} />
-        </div>
+        <SidebarBrand collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
         <SidebarNav collapsed={sidebarCollapsed} />
         <div className="app-sidebar-footer">
           <UserMenu collapsed={sidebarCollapsed} />
-          <button
-            type="button"
-            className="icon-button app-sidebar-collapse"
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-          >
-            <SidebarLeft size={17} />
-          </button>
         </div>
       </aside>
 
@@ -97,9 +90,7 @@ export function AppShell() {
         <>
           <div className="mobile-drawer-backdrop" onClick={() => setDrawerOpen(false)} />
           <aside className="mobile-drawer">
-            <div className="app-sidebar-brand">
-              <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
-            </div>
+            <SidebarBrand onSelectWorkspace={() => setDrawerOpen(false)} />
             <SidebarNav onNavigate={() => setDrawerOpen(false)} />
             <div className="app-sidebar-footer">
               <UserMenu />
