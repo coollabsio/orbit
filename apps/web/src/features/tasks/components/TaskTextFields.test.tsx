@@ -114,6 +114,8 @@ test('following a link in the description does not open the editor', () => {
   }
   const view = render(<TaskTextFields task={linked} workspaceId="w" members={[]} onUpdate={() => {}} />, { wrapper })
 
+  // Keep happy-dom from actually opening the page; propagation is what is under test.
+  view.container.addEventListener('click', (event) => event.preventDefault(), true)
   fireEvent.click(view.getByRole('link', { name: 'docs' }))
 
   expect(view.container.querySelector('.editor-view')).toBeTruthy()
