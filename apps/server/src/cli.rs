@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use fs2::FileExt;
 use orbit_platform::{
     BackupService, Config, ConfigOverride, ConfigSources, Database, DatabaseConfig,
-    EnvironmentMode, MigrationRunner, TimestampMillis, run_guarded_migrations,
+    EnvironmentMode, TimestampMillis, run_guarded_migrations,
 };
 use orbit_server::app::App;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -292,7 +292,7 @@ async fn migrate(cli: &Cli, command: &MigrateCommand) -> Result<String, CliError
     let (reset, seed, yes) = match command {
         MigrateCommand::Status => {
             let database = open_database(&config.data.database).await?;
-            let runner = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
+            let runner = orbit_server::migrations::migration_runner();
             let pending = runner.pending(&database).await.map_err(operation)?;
             return Ok(if pending.is_empty() {
                 "database schema is current".to_owned()
@@ -322,7 +322,7 @@ async fn migrate(cli: &Cli, command: &MigrateCommand) -> Result<String, CliError
     }
 
     let database = open_database(&config.data.database).await?;
-    let runner = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
+    let runner = orbit_server::migrations::migration_runner();
     let count = run_guarded_migrations(&config, &database, &runner)
         .await
         .map_err(operation)?;
@@ -459,7 +459,7 @@ async fn migrate_implicitly(config: &Config, database: &Database) -> Result<(), 
     run_guarded_migrations(
         config,
         database,
-        &MigrationRunner::embedded(env!("CARGO_PKG_VERSION")),
+        &orbit_server::migrations::migration_runner(),
     )
     .await
     .map(|_| ())
@@ -1011,7 +1011,7 @@ mod tests {
         let database = Database::open(&DatabaseConfig::new(&database_path))
             .await
             .unwrap();
-        MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+        orbit_server::migrations::migration_runner()
             .run(&database)
             .await
             .unwrap();
@@ -1218,7 +1218,7 @@ mod tests {
         let prepared = Database::open(&DatabaseConfig::new(&database))
             .await
             .unwrap();
-        MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+        orbit_server::migrations::migration_runner()
             .run(&prepared)
             .await
             .unwrap();
@@ -1323,7 +1323,7 @@ mod tests {
         let database = Database::open(&DatabaseConfig::new(&database_path))
             .await
             .unwrap();
-        MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+        orbit_server::migrations::migration_runner()
             .run(&database)
             .await
             .unwrap();

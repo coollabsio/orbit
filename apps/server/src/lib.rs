@@ -3,6 +3,7 @@ pub mod attachment_routes;
 pub mod audit;
 pub mod auth_routes;
 pub mod metrics;
+pub mod migrations;
 pub mod openapi;
 pub mod repositories;
 pub mod router;

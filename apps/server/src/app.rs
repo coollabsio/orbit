@@ -8,9 +8,9 @@ use std::time::Duration;
 use axum::Router;
 use orbit_platform::{
     BackupService, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry, HttpLimits,
-    IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, MigrationRunner, OriginPolicy,
-    RecurringSchedule, Scheduler, TimestampMillis, UploadLimits, UploadService, Worker,
-    WorkerConfig, run_guarded_migrations,
+    IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, OriginPolicy, RecurringSchedule,
+    Scheduler, TimestampMillis, UploadLimits, UploadService, Worker, WorkerConfig,
+    run_guarded_migrations,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -114,7 +114,7 @@ impl App {
         let database = Database::open(&DatabaseConfig::new(&config.data.database))
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
-        let migrations = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
+        let migrations = crate::migrations::migration_runner();
         run_guarded_migrations(&config, &database, &migrations)
             .await
             .map_err(|error| AppError::Migration(error.to_string()))?;
@@ -463,7 +463,7 @@ fn health_registry(
     let mut health = HealthRegistry::new().with_check(HealthCheck::Migrations, move || {
         let database = migrations_database.clone();
         async move {
-            let pending = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+            let pending = crate::migrations::migration_runner()
                 .pending(&database)
                 .await
                 .map_err(|error| error.to_string())?;
