@@ -527,6 +527,19 @@
   max-width: 520px;
 }
 
+/* Keep image grids inside the task column. A max-width alone lets a single
+   image's intrinsic width enlarge the grid track. */
+.tasks-desc-wrap .fc-attachment-grid,
+.tasks-comment .fc-attachment-grid {
+  width: 100%;
+  max-width: 520px;
+}
+
+.tasks-desc-wrap .fc-attachment-image[data-single],
+.tasks-comment .fc-attachment-image[data-single] {
+  width: 100%;
+}
+
 /* non-image files: compact chips instead of full-width cards */
 .tasks-desc-wrap .fc-file-cards,
 .tasks-comment .fc-file-cards {
