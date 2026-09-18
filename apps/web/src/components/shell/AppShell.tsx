@@ -7,6 +7,7 @@ import { SidebarBrand } from './SidebarBrand'
 import { SidebarNav } from './SidebarNav'
 import { useSidebarToggleShortcut } from './sidebarShortcut'
 import { Topbar } from './Topbar'
+import { TopbarSlotProvider } from './TopbarSlot'
 import { UserMenu } from './UserMenu'
 import './shell.css'
 import { MobileDock } from './MobileDock'
@@ -79,10 +80,12 @@ export function AppShell() {
       </aside>
 
       <div className="app-main">
-        <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />
-        <div className="app-content">
-          <Outlet />
-        </div>
+        <TopbarSlotProvider>
+          <Topbar onOpenDrawer={() => setDrawerOpen(true)} />
+          <div className="app-content">
+            <Outlet />
+          </div>
+        </TopbarSlotProvider>
         <MobileDock />
       </div>
 
