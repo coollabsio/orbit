@@ -200,6 +200,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0015_drop_markdown.sql"),
                     true,
                 ),
+                Migration::new(
+                    16,
+                    include_str!("../../../../apps/server/migrations/0016_task_graph.sql"),
+                    false,
+                ),
             ],
         )
     }
