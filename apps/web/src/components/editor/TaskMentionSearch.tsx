@@ -19,18 +19,21 @@ export function TaskMentionSearch({
   onPick: (taskId: string) => void
 }) {
   const [query, setQuery] = useState('')
-  const [items, setItems] = useState<MentionItem[]>([])
+  const [results, setResults] = useState<MentionItem[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
+  // An empty query shows nothing without waiting on (or re-rendering for) a lookup.
+  const items = query.trim() === '' ? [] : results
   // One lookup per workspace so the 150ms debounce timer is shared across keystrokes.
   const lookup = useMemo(() => createTaskLookup(workspaceId), [workspaceId])
 
   useEffect(() => {
     let cancelled = false
     void lookup(query).then((tasks) => {
-      if (cancelled) return
+      // An empty query resolves at once to nothing; there is nothing to store.
+      if (cancelled || query.trim() === '') return
       // Exclude BEFORE buildMentionItems so the 8-result cap is not silently shortened.
       const candidates = tasks.filter((task) => task.id !== excludeTaskId)
-      setItems(buildMentionItems({ query, members: [], tasks: candidates }))
+      setResults(buildMentionItems({ query, members: [], tasks: candidates }))
       setActiveIndex(0)
     })
     return () => {
@@ -42,7 +45,7 @@ export function TaskMentionSearch({
     if (event.key === 'Escape') {
       event.preventDefault()
       setQuery('')
-      setItems([])
+      setResults([])
       return
     }
     if (items.length === 0) return

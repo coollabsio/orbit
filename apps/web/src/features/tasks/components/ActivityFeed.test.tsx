@@ -2,6 +2,7 @@ import { expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import type { WorkspaceRecord } from '../../../api/generated/types.gen'
 import { WorkspaceContext } from '../../workspaces/workspaceContext'
 import type { Task, TaskViewState } from '../api/models'
@@ -12,9 +13,11 @@ const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'ow
 function Wrapper({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={new QueryClient()}>
-      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: mock(() => {}) }}>
-        {children}
-      </WorkspaceContext.Provider>
+      <MemoryRouter>
+        <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: mock(() => {}) }}>
+          {children}
+        </WorkspaceContext.Provider>
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
@@ -53,4 +56,30 @@ test('shows the latest three activities and expands the full list', () => {
 
   expect(view.getByText(/Activity 1/)).toBeTruthy()
   expect(view.getByRole('button', { name: 'Show fewer activities' }).getAttribute('aria-expanded')).toBe('true')
+})
+
+test('the reply composer is a rich text surface with the @ menu, like the top-level composer', () => {
+  const threaded: Task = {
+    ...task,
+    activity: [],
+    comments: [{
+      id: 'comment-1', authorId: 'user-1', createdAt: '2026-09-17T10:00:00.000Z', version: 0,
+      bodyJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Root comment' }] }] },
+      bodyText: 'Root comment',
+    }],
+  }
+  const view = render(<ActivityFeed task={threaded} state={{ ...state, tasks: [threaded] }} />, { wrapper: Wrapper })
+
+  expect(view.getByText('Root comment')).toBeTruthy()
+  const composer = view.container.querySelector('.tasks-thread-composer')
+  expect(composer?.querySelector('.editor-shell')).toBeTruthy()
+  expect(composer?.querySelector('textarea')).toBeNull()
+  expect(view.getAllByLabelText('Leave a reply…').length).toBeGreaterThan(0)
+})
+
+test('the reply composer is handed the workspace members for mentions', async () => {
+  const source = await Bun.file(new URL('./ActivityFeed.tsx', import.meta.url)).text()
+  const reply = source.slice(source.indexOf('placeholder="Leave a reply…"'))
+
+  expect(reply.slice(0, reply.indexOf('/>'))).toContain('members={state.users}')
 })

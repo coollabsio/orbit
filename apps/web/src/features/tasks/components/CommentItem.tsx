@@ -1,40 +1,43 @@
-import { useEffect, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Copy, Edit, Trash } from 'reicon-react'
+import { RichTextEditor } from '../../../components/editor/RichTextEditor'
+import { RichTextView } from '../../../components/editor/RichTextView'
+import { isEmptyDocument, sameDocument, taskIdentifiersInDocument, type RichTextDocument } from '../../../components/editor/document'
+import { useTaskChips } from '../../../components/editor/useTaskChips'
 import { Avatar } from '../../../components/ui/Avatar'
 import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
 import { Attachments } from '../../chat/components/Attachments'
-import type { MentionToken } from '../../chat/chatLib'
-import { renderMarkdownBlocks } from '../../chat/markdown'
-import type { TaskComment, TaskViewState } from '../api/models'
+import type { TaskComment, TaskStatusDef, TaskViewState } from '../api/models'
 import { useDeleteTaskComment, useUpdateTaskComment } from '../api/tasks'
-import { useWorkspace } from '../../workspaces/workspaceContext'
 import { agoLabel } from '../tasksLib'
-import { documentFromText } from '../api/richText'
-import { asDocument } from '../../../components/editor/document'
 
 interface CommentItemProps {
   state: TaskViewState
   taskId: string
+  workspaceId: string
+  statuses: TaskStatusDef[]
   comment: TaskComment
-  mentionTokens: MentionToken[]
   reply?: boolean
 }
 
-/** A task comment with author, timestamp, body, and a compact hover action row. */
-export function CommentItem({ state, taskId, comment, mentionTokens, reply }: CommentItemProps) {
-  const { workspace } = useWorkspace()
-  const updateComment = useUpdateTaskComment(workspace.id, taskId)
-  const deleteComment = useDeleteTaskComment(workspace.id, taskId)
+/** A task comment with author, timestamp, rich text body, and a compact hover action row. */
+export function CommentItem({ state, taskId, workspaceId, statuses, comment, reply }: CommentItemProps) {
+  const updateComment = useUpdateTaskComment(workspaceId, taskId)
+  const deleteComment = useDeleteTaskComment(workspaceId, taskId)
   const [editing, setEditing] = useState(false)
-  const [editText, setEditText] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const identifiers = useMemo(() => taskIdentifiersInDocument(comment.bodyJson), [comment.bodyJson])
+  const chips = useTaskChips(workspaceId, identifiers, statuses)
   const author = state.users.find((u) => u.id === comment.authorId)
   const isAuthor = comment.authorId === state.currentUserId
   const name = author?.name ?? 'Someone'
+  const hasText = !isEmptyDocument(comment.bodyJson)
 
-  const commitEdit = () => {
-    const trimmed = editText.trim()
-    if (trimmed && trimmed !== comment.bodyText) updateComment.mutate({ commentId: comment.id, bodyJson: asDocument(documentFromText(trimmed)), version: comment.version })
+  const commitEdit = (document: RichTextDocument) => {
+    // Clearing the text is not a delete; that has its own confirmed action.
+    if (!isEmptyDocument(document) && !sameDocument(document, comment.bodyJson)) {
+      updateComment.mutate({ commentId: comment.id, bodyJson: document, version: comment.version })
+    }
     setEditing(false)
   }
 
@@ -57,16 +60,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
                 </button>
                 {isAuthor ? (
                   <>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label="Edit comment"
-                      title="Edit comment"
-                      onClick={() => {
-                        setEditText(comment.bodyText)
-                        setEditing(true)
-                      }}
-                    >
+                    <button type="button" className="icon-button" aria-label="Edit comment" title="Edit comment" onClick={() => setEditing(true)}>
                       <Edit size={14} />
                     </button>
                     <button type="button" className="icon-button" data-danger="true" aria-label="Delete comment" title="Delete comment" onClick={() => setConfirmDelete(true)}>
@@ -78,12 +72,30 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
             ) : null}
           </div>
           {editing ? (
-            <EditingTextarea value={editText} onChange={setEditText} onCommit={commitEdit} onCancel={() => setEditing(false)} />
-          ) : comment.bodyText.trim() ? (
-            <div className="tasks-comment-text">{renderMarkdownBlocks(comment.bodyText, comment.id, mentionTokens)}</div>
+            <div className="tasks-comment-edit">
+              <RichTextEditor
+                value={comment.bodyJson}
+                placeholder="Edit comment…"
+                ariaLabel="Edit comment"
+                compact
+                autofocus
+                workspaceId={workspaceId}
+                members={state.users}
+                statuses={statuses}
+                onSubmit={commitEdit}
+                onCancel={() => setEditing(false)}
+              />
+              <div className="tasks-comment-edit-hint">
+                escape to <b>cancel</b> · ⌘/Ctrl + enter to <b>save</b>
+              </div>
+            </div>
+          ) : hasText ? (
+            <div className="tasks-comment-text">
+              <RichTextView document={comment.bodyJson} chips={chips} />
+            </div>
           ) : null}
           {comment.attachments && comment.attachments.length > 0 ? (
-            <Attachments attachments={comment.attachments} hasTextContent={!!comment.bodyText.trim()} />
+            <Attachments attachments={comment.attachments} hasTextContent={hasText} />
           ) : null}
         </div>
       </article>
@@ -102,55 +114,5 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
       {updateComment.isError ? <p role="alert" className="text-danger text-xs">Comment update failed. <button className="button button-ghost" onClick={() => updateComment.variables && updateComment.mutate(updateComment.variables)}>Retry</button></p> : null}
       {deleteComment.isError ? <p role="alert" className="text-danger text-xs">Comment deletion failed. <button className="button button-ghost" onClick={() => deleteComment.variables && deleteComment.mutate(deleteComment.variables)}>Retry</button></p> : null}
     </>
-  )
-}
-
-function EditingTextarea({
-  value,
-  onChange,
-  onCommit,
-  onCancel,
-}: {
-  value: string
-  onChange: (value: string) => void
-  onCommit: () => void
-  onCancel: () => void
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [])
-
-  return (
-    <div className="tasks-comment-edit">
-      <textarea
-        ref={ref}
-        className="input"
-        value={value}
-        rows={2}
-        aria-label="Edit comment"
-        onChange={(e) => {
-          onChange(e.target.value)
-          e.target.style.height = 'auto'
-          e.target.style.height = `${e.target.scrollHeight}px`
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            onCommit()
-          }
-          if (e.key === 'Escape') onCancel()
-        }}
-      />
-      <div className="tasks-comment-edit-hint">
-        escape to <b>cancel</b> · enter to <b>save</b>
-      </div>
-    </div>
   )
 }

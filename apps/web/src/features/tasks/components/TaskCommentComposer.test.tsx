@@ -1,27 +1,94 @@
 import { expect, mock, test } from 'bun:test'
-import { fireEvent, render } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { act, fireEvent, render } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { TaskCommentComposer } from './TaskCommentComposer'
 
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return (
+    <QueryClientProvider client={client}>
+      <MemoryRouter>{children}</MemoryRouter>
+    </QueryClientProvider>
+  )
+}
+
 test('comment writes announce progress and keep a visible retry after failure', () => {
-  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} progress={50} error="Upload failed." onSend={mock(async () => {})} />)
-  fireEvent.change(view.getByPlaceholderText('Reply'), { target: { value: 'Keep this draft' } })
+  const view = render(
+    <TaskCommentComposer
+      placeholder="Reply"
+      pending={false}
+      progress={50}
+      error="Upload failed."
+      workspaceId="w"
+      members={[]}
+      onSend={mock(async () => {})}
+    />,
+    { wrapper },
+  )
 
   expect(view.getByRole('alert').textContent).toContain('Upload failed.')
   expect(view.getByRole('status').textContent).toContain('50%')
   expect(view.getByRole('button', { name: 'Retry' })).toBeTruthy()
 })
 
-test('at-mentions resolve to workspace member ids', async () => {
-  const sent: Array<{ body: string; mentions: { id: string; label: string }[] }> = []
-  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} members={[{
-    id: 'user-2', membershipId: 'm2', name: 'Ada', handle: 'ada', email: 'ada@orbit.test',
-    role: 'Member', color: '#000', online: false, title: '', roleIds: [], version: 1,
-  }]} onSend={async (body, _files, mentions) => { sent.push({ body, mentions }) }} />)
-  await userEvent.type(view.getByPlaceholderText('Reply'), 'Hey @')
-  fireEvent.mouseDown(await view.findByRole('button', { name: '@Ada' }))
-  fireEvent.click(view.getByRole('button', { name: 'Send' }))
-  // The label travels with the id so the document can carry a real mention node.
-  expect(sent[0]?.mentions).toEqual([{ id: 'user-2', label: 'Ada' }])
-  expect(sent[0]?.body).toContain('@Ada')
+test('the composer is a rich text surface, not a textarea', () => {
+  const view = render(
+    <TaskCommentComposer placeholder="Reply" pending={false} workspaceId="w" members={[]} onSend={mock(async () => {})} />,
+    { wrapper },
+  )
+
+  expect(view.container.querySelector('textarea')).toBeNull()
+  expect(view.getByLabelText('Reply')).toBeTruthy()
+})
+
+test('the send hint names the Cmd/Ctrl+Enter shortcut', () => {
+  const view = render(
+    <TaskCommentComposer placeholder="Reply" pending={false} workspaceId="w" members={[]} onSend={mock(async () => {})} />,
+    { wrapper },
+  )
+
+  expect(view.getByText(/enter to/i).textContent?.toLowerCase()).toContain('send')
+})
+
+test('attachment-only comments can still be sent with an empty document', async () => {
+  const sent: { document: unknown; files: File[] }[] = []
+  const view = render(
+    <TaskCommentComposer
+      placeholder="Reply"
+      pending={false}
+      workspaceId="w"
+      members={[]}
+      onSend={async (bodyJson, files) => {
+        sent.push({ document: bodyJson, files })
+      }}
+    />,
+    { wrapper },
+  )
+
+  const input = view.getByLabelText('Attach comment files') as HTMLInputElement
+  const file = new File(['x'], 'shot.png', { type: 'image/png' })
+  fireEvent.change(input, { target: { files: [file] } })
+  // Sending resolves asynchronously and then clears the composer.
+  await act(async () => {
+    fireEvent.click(view.getByRole('button', { name: 'Send' }))
+  })
+
+  expect(sent).toHaveLength(1)
+  expect(sent[0].files[0].name).toBe('shot.png')
+  expect(view.queryByText('shot.png')).toBeNull()
+})
+
+test('an empty composer with no files cannot send', () => {
+  const onSend = mock(async () => {})
+  const view = render(
+    <TaskCommentComposer placeholder="Reply" pending={false} workspaceId="w" members={[]} onSend={onSend} />,
+    { wrapper },
+  )
+
+  const send = view.getByRole('button', { name: 'Send' }) as HTMLButtonElement
+  expect(send.disabled).toBe(true)
+  fireEvent.click(send)
+  expect(onSend).not.toHaveBeenCalled()
 })

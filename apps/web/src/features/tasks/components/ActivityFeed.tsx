@@ -1,16 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown } from 'reicon-react'
 import { Avatar } from '../../../components/ui/Avatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { Task, TaskActivity, TaskViewState } from '../api/models'
 import { useCreateTaskComment } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
-import { buildMentionTokens } from '../../chat/chatLib'
 import { agoLabel, buildFeed, type CommentThread } from '../tasksLib'
 import { CommentItem } from './CommentItem'
 import { TaskCommentComposer } from './TaskCommentComposer'
-import { documentFromText } from '../api/richText'
-import { asDocument } from '../../../components/editor/document'
 
 interface ActivityFeedProps {
   task: Task
@@ -25,7 +22,6 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
   const [expanded, setExpanded] = useState(false)
   const { workspace } = useWorkspace()
   const createComment = useCreateTaskComment(workspace.id, task.id)
-  const mentionTokens = useMemo(() => buildMentionTokens(state.users, []), [state.users])
   const userById = (id: string) => state.users.find((u) => u.id === id)
   const hasMoreActivity = task.activity.length > 3
   const visibleActivity = expanded || !hasMoreActivity
@@ -56,12 +52,23 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
 
   const renderThread = (thread: CommentThread) => (
     <div key={thread.root.id} className="tasks-thread">
-      <CommentItem state={state} taskId={task.id} comment={thread.root} mentionTokens={mentionTokens} />
+      <CommentItem state={state} taskId={task.id} workspaceId={workspace.id} statuses={state.statuses} comment={thread.root} />
       {thread.replies.map((reply) => (
-        <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
+        <CommentItem key={reply.id} state={state} taskId={task.id} workspaceId={workspace.id} statuses={state.statuses} comment={reply} reply />
       ))}
       <div className="tasks-thread-composer">
-        <TaskCommentComposer compact placeholder="Leave a reply…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ bodyJson: asDocument(documentFromText(body)), files, parentId: thread.root.id })} />
+        {/* Replies get the same people-and-issues @ menu as top-level comments. */}
+        <TaskCommentComposer
+          compact
+          placeholder="Leave a reply…"
+          pending={createComment.isPending}
+          progress={createComment.progress}
+          error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined}
+          workspaceId={workspace.id}
+          members={state.users}
+          statuses={state.statuses}
+          onSend={(bodyJson, files) => createComment.mutateAsync({ bodyJson, files, parentId: thread.root.id })}
+        />
       </div>
     </div>
   )

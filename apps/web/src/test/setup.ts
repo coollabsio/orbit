@@ -11,5 +11,11 @@ GlobalRegistrator.register()
 ;(window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost/')
 
 const { cleanup } = await import('@testing-library/react')
+const { warmRichTextEditor } = await import('./warmRichTextEditor')
+
+// The rich text editor is a React.lazy boundary, which suspends on its first
+// render in the process. Resolve it once here, inside act(), so no test sees
+// that suspension settle outside act().
+await warmRichTextEditor()
 
 afterEach(() => cleanup())
