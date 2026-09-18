@@ -24,6 +24,7 @@ import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
 import { TaskList } from './components/TaskList'
+import { shouldCloseTaskOnKey } from './closeOnEscape'
 import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from './tasksLib'
 import './tasks.css'
 
@@ -127,9 +128,7 @@ export function TasksPage() {
   useEffect(() => {
     if (!taskId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      // A dialog (picker, confirmation) owns Escape while it is open.
-      const dialogOpen = document.querySelector('[role="dialog"][aria-modal="true"]') !== null
-      if (event.key === 'Escape' && !dialogOpen) navigate(`/tasks${closeSearchSuffix}`)
+      if (shouldCloseTaskOnKey(event)) navigate(`/tasks${closeSearchSuffix}`)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
