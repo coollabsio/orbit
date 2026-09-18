@@ -147,6 +147,21 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0012_notifications.sql"),
                     false,
                 ),
+                Migration::new(
+                    13,
+                    include_str!("../../../../apps/server/migrations/0013_api_tokens.sql"),
+                    false,
+                ),
+                Migration::new(
+                    14,
+                    include_str!("../../../../apps/server/migrations/0014_api_token_projects.sql"),
+                    false,
+                ),
+                Migration::new(
+                    15,
+                    include_str!("../../../../apps/server/migrations/0015_discord_integration.sql"),
+                    false,
+                ),
             ],
         )
     }

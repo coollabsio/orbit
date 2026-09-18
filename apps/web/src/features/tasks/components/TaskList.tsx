@@ -24,17 +24,32 @@ interface TaskListProps {
   onAdd: (statusKey: string) => void
 }
 
+const collapsedStorageKey = (workspaceId: string) => `orbit:task_list_collapsed:${workspaceId}`
+
+function storedCollapsedGroups(workspaceId: string): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(collapsedStorageKey(workspaceId)) ?? '[]')
+    return Array.isArray(value) ? value.filter((key): key is string => typeof key === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 /** Status groups: collapsible headers that also accept dropped rows (moves the task to that status). */
 export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen, onAdd }: TaskListProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const taskGroups = groupTasksByStatus(tasks, groups, sort)
-  const [collapsed, setCollapsed] = useState<string[]>([])
+  const [collapsed, setCollapsed] = useState<string[]>(() => storedCollapsedGroups(workspace.id))
   const [selected, setSelected] = useState<string[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
 
-  const toggle = (key: string) => setCollapsed((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
+  const toggle = (key: string) => setCollapsed((prev) => {
+    const next = prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    window.localStorage.setItem(collapsedStorageKey(workspace.id), JSON.stringify(next))
+    return next
+  })
   const toggleSelect = (taskId: string) =>
     setSelected((prev) => (prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]))
 

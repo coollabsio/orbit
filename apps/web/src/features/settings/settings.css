@@ -379,3 +379,15 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---------- API tokens ---------- */
+.api-token-form { width: 100%; }
+.api-token-form .button-primary { justify-self: start; }
+.api-token-scopes { display: flex; gap: 18px; padding: 0; border: 0; }
+.api-token-scopes legend { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.api-token-scopes label { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.api-token-secret { display: grid; gap: 10px; margin-top: 18px; padding: 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); font-size: 12px; }
+.api-token-secret > div { display: flex; align-items: center; gap: 8px; }
+.api-token-secret code { min-width: 0; flex: 1; overflow-wrap: anywhere; user-select: all; }
+.api-token-scope-list { display: flex; gap: 4px; }
+.settings-notice { margin: 0; color: var(--text-secondary); }

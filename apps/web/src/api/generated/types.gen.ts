@@ -18,6 +18,18 @@ export type AcceptanceRecord = {
     workspace_id: string;
 };
 
+export type ApiTokenRecord = {
+    created_at: string;
+    id: string;
+    last_used_at?: string | null;
+    name: string;
+    project_id: string;
+    scopes: Array<string>;
+    token_prefix: string;
+};
+
+export type ApiTokenScope = 'read' | 'write';
+
 export type AttachmentComment = {
     attachments: Array<AttachmentRecord>;
     comment: CommentRecord;
@@ -146,6 +158,12 @@ export type ConflictMetadata = {
     refresh?: string | null;
 };
 
+export type CreateApiTokenBody = {
+    name: string;
+    project_id: string;
+    scopes: Array<ApiTokenScope>;
+};
+
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
     description?: string;
@@ -163,6 +181,17 @@ export type CreateWorkspaceBody = {
 };
 
 export type DeliveryBody = 'manual' | 'smtp';
+
+export type DiscordEventBody = {
+    event_id: string;
+    message: string;
+    message_url: string;
+};
+
+export type DiscordEventResponse = {
+    duplicate: boolean;
+    task: TaskRecord;
+};
 
 export type InvitationBody = {
     delivery: DeliveryBody;
@@ -189,6 +218,10 @@ export type InvitationRecord = {
 export type InvitationResponse = {
     invitation: InvitationRecord;
     url?: string | null;
+};
+
+export type IssuedApiToken = ApiTokenRecord & {
+    token: string;
 };
 
 export type LabelBody = {
@@ -1312,6 +1345,69 @@ export type RevokeSessionResponses = {
 
 export type RevokeSessionResponse = RevokeSessionResponses[keyof RevokeSessionResponses];
 
+export type CreateDiscordEventData = {
+    body: DiscordEventBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/integrations/discord/events';
+};
+
+export type CreateDiscordEventErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * api_token_required, invalid_api_token
+     */
+    401: TaskProblem;
+    /**
+     * api_token_scope_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch, integration_event_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, integration_project_unavailable
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateDiscordEventError = CreateDiscordEventErrors[keyof CreateDiscordEventErrors];
+
+export type CreateDiscordEventResponses = {
+    /**
+     * Existing task returned for a repeated event
+     */
+    200: DiscordEventResponse;
+    /**
+     * Task created
+     */
+    201: DiscordEventResponse;
+};
+
+export type CreateDiscordEventResponse = CreateDiscordEventResponses[keyof CreateDiscordEventResponses];
+
 export type SetupCompleteData = {
     body: SetupBody;
     headers?: {
@@ -1856,6 +1952,181 @@ export type RenameWorkspaceResponses = {
 };
 
 export type RenameWorkspaceResponse = RenameWorkspaceResponses[keyof RenameWorkspaceResponses];
+
+export type ListApiTokensData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/api-tokens';
+};
+
+export type ListApiTokensErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListApiTokensError = ListApiTokensErrors[keyof ListApiTokensErrors];
+
+export type ListApiTokensResponses = {
+    200: Array<ApiTokenRecord>;
+};
+
+export type ListApiTokensResponse = ListApiTokensResponses[keyof ListApiTokensResponses];
+
+export type CreateApiTokenData = {
+    body: CreateApiTokenBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/api-tokens';
+};
+
+export type CreateApiTokenErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateApiTokenError = CreateApiTokenErrors[keyof CreateApiTokenErrors];
+
+export type CreateApiTokenResponses = {
+    201: IssuedApiToken;
+};
+
+export type CreateApiTokenResponse = CreateApiTokenResponses[keyof CreateApiTokenResponses];
+
+export type RevokeApiTokenData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        token_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/api-tokens/{token_id}';
+};
+
+export type RevokeApiTokenErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type RevokeApiTokenError = RevokeApiTokenErrors[keyof RevokeApiTokenErrors];
+
+export type RevokeApiTokenResponses = {
+    204: void;
+};
+
+export type RevokeApiTokenResponse = RevokeApiTokenResponses[keyof RevokeApiTokenResponses];
 
 export type ListAuditData = {
     body?: never;

@@ -80,7 +80,10 @@ impl OriginPolicy {
             .any(|network| network.contains(&ip))
     }
 
-    pub(crate) fn permits(&self, method: &Method, headers: &HeaderMap) -> bool {
+    pub(crate) fn permits(&self, method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
+        if uri.path() == "/api/v1/integrations/discord/events" {
+            return true;
+        }
         if matches!(
             *method,
             Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE

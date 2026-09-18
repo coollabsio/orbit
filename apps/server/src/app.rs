@@ -19,8 +19,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
+use crate::integration_routes::IntegrationState;
 use crate::metrics::Metrics;
+use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
+use crate::repositories::tasks::TaskRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
 use crate::router::{ApiRoutes, production_router};
 use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
@@ -206,8 +209,12 @@ impl App {
                     cookie_mode,
                     backups.clone(),
                 ),
-                tasks: TaskState::new(identity, cookie_mode),
+                tasks: TaskState::new(Arc::clone(&identity), cookie_mode),
                 attachments: attachment_state.clone(),
+                integrations: IntegrationState::new(
+                    Arc::new(ApiTokenRepository::new(database.clone())),
+                    Arc::new(TaskRepository::new(database.clone())),
+                ),
             },
             health,
             assets,

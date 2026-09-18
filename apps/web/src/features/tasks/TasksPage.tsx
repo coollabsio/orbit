@@ -48,7 +48,7 @@ export function TasksPage() {
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
   const [searchFilter, setSearchFilter] = useState('')
   const projectFilter = searchParams.get('project')
-  const viewFilter = ['mine', 'overdue', 'due_soon'].includes(searchParams.get('view') ?? '')
+  const viewFilter = ['mine', 'overdue', 'due_soon', 'current_week'].includes(searchParams.get('view') ?? '')
     ? searchParams.get('view') ?? undefined
     : undefined
   const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
@@ -154,6 +154,15 @@ export function TasksPage() {
 
   const groups = statusGroups(statusesQuery.data, projectFilter)
   const activeProject = projects.find((project) => project.id === projectFilter)
+  const viewTitle = viewFilter === 'mine'
+    ? 'My tasks'
+    : viewFilter === 'overdue'
+      ? 'Overdue'
+      : viewFilter === 'due_soon'
+        ? 'Due soon'
+        : viewFilter === 'current_week'
+          ? 'This week'
+          : 'All tasks'
   const visibleTasks = filterTasks(tasks, {
     currentUserId: state.currentUserId,
     projectId: projectFilter,
@@ -197,7 +206,7 @@ export function TasksPage() {
                 }}><Setting2 size={15} />{projectSettingsLabel()}</button> : null}
                 </>}
             </Dropdown>
-            <span className="pane-title">All tasks</span>
+            <span className="pane-title">{viewTitle}</span>
             <div className="spacer" />
             <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
@@ -207,7 +216,7 @@ export function TasksPage() {
           <div className="pane-body">
             {layout === 'board'
               ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
-              : <TaskList tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
+              : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
             {tasksQuery.hasNextPage ? <div className="tasks-load-more"><button className="button" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</button></div> : null}
           </div>
         </section>

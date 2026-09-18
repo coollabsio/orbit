@@ -11,6 +11,7 @@ import { GeneralPage } from './features/settings/GeneralPage'
 import { DangerZonePage } from './features/settings/DangerZonePage'
 import { MembersPage } from './features/settings/MembersPage'
 import { SessionsPage } from './features/settings/SessionsPage'
+import { ApiTokensPage } from './features/settings/ApiTokensPage'
 import { ProfilePage } from './features/profile/ProfilePage'
 import { InboxPage } from './features/inbox/InboxPage'
 import { AcceptInvitationPage, AuthGate, LoginPage, RecoveryPage, SetupPage } from './features/auth/AuthGate'
@@ -56,6 +57,7 @@ export default function App() {
                 <Route path="members" element={<MembersPage />} />
                 <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
                 <Route path="sessions" element={<SessionsPage />} />
+                <Route path="api-tokens" element={<ApiTokensPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/tasks" replace />} />
             </Route>

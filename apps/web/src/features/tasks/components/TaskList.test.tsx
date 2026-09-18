@@ -9,7 +9,10 @@ import type { StatusGroup } from '../tasksLib'
 import { TaskList } from './TaskList'
 
 const originalFetch = globalThis.fetch
-afterEach(() => { globalThis.fetch = originalFetch })
+afterEach(() => {
+  globalThis.fetch = originalFetch
+  window.localStorage.clear()
+})
 
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
 const status: TaskStatusDef = {
@@ -137,4 +140,15 @@ test('task list assignee opens the assignment dropdown and updates without openi
   await waitFor(() => expect(body).toEqual({ expected_version: 1, assignee_ids: [] }))
   expect(view.queryByText('Assignees')).toBeNull()
   expect(opened).toBe(0)
+})
+
+test('remembers collapsed groups after the task list reloads', () => {
+  const firstView = viewFor([task(1)])
+  fireEvent.click(firstView.getByRole('button', { name: 'Collapse Todo' }))
+  expect(firstView.getByRole('button', { name: 'Expand Todo' }).getAttribute('aria-expanded')).toBe('false')
+  firstView.unmount()
+
+  const reloadedView = viewFor([task(1)])
+  expect(reloadedView.getByRole('button', { name: 'Expand Todo' }).getAttribute('aria-expanded')).toBe('false')
+  expect(reloadedView.queryByText('Task 1')).toBeNull()
 })

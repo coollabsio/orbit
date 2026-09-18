@@ -49,9 +49,10 @@ export function statusFromRecord(status: StatusRecord): TaskStatusDef {
   }
 }
 
-export function useProjects(workspaceId: string) {
+export function useProjects(workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.projects(workspaceId),
+    enabled,
     queryFn: async () => {
       const page = await fetchAllPages(async (cursor) => {
         const { data } = await listProjects({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })

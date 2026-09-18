@@ -140,6 +140,15 @@ pub struct CreateTask {
     pub due_at: Option<TimestampMillis>,
 }
 
+#[derive(Clone, Debug)]
+pub struct DiscordTask {
+    pub event_id: String,
+    pub payload_hash: [u8; 32],
+    pub project_id: Id,
+    pub title: String,
+    pub description: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TaskChanges {
     pub project_id: Option<Id>,
@@ -202,6 +211,8 @@ pub enum TaskError {
     Invalid { field: &'static str },
     #[error("task operation conflicts with current state")]
     Conflict,
+    #[error("integration event conflicts with its original payload")]
+    IntegrationConflict,
     #[error("restore conflicts with the current {field}")]
     RestoreConflict { field: &'static str },
     #[error("the supplied cursor is invalid")]
@@ -992,7 +1003,10 @@ impl TaskRepository {
                 .push_bind(assignee_id.to_string())
                 .push(")");
         }
-        if matches!(filter.view.as_deref(), Some("overdue") | Some("due_soon")) {
+        if matches!(
+            filter.view.as_deref(),
+            Some("overdue") | Some("due_soon") | Some("current_week")
+        ) {
             let day_ms = 86_400_000;
             let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;
             query.push(
@@ -1002,12 +1016,20 @@ impl TaskRepository {
                 query
                     .push(" AND tasks.due_at < ")
                     .push_bind(start_of_utc_day);
-            } else {
+            } else if filter.view.as_deref() == Some("due_soon") {
                 query
                     .push(" AND tasks.due_at >= ")
                     .push_bind(start_of_utc_day)
                     .push(" AND tasks.due_at < ")
                     .push_bind(start_of_utc_day + 7 * day_ms);
+            } else {
+                let days_since_epoch = start_of_utc_day / day_ms;
+                let monday = start_of_utc_day - (days_since_epoch + 3).rem_euclid(7) * day_ms;
+                query
+                    .push(" AND tasks.due_at >= ")
+                    .push_bind(monday)
+                    .push(" AND tasks.due_at < ")
+                    .push_bind(monday + 7 * day_ms);
             }
         }
         if let Some(label_id) = filter.label_id {
@@ -1192,6 +1214,107 @@ impl TaskRepository {
             created_at: now,
             updated_at: now,
         })
+    }
+
+    pub async fn create_discord_task(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        input: DiscordTask,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(TaskRecord, bool), TaskError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+
+        if let Some(row) = sqlx::query(
+            "SELECT task_id, payload_hash FROM integration_events WHERE workspace_id = ? AND provider = 'discord' AND external_event_id = ?",
+        )
+        .bind(workspace_id.to_string())
+        .bind(&input.event_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            if row.get::<Vec<u8>, _>("payload_hash") != input.payload_hash {
+                return Err(TaskError::IntegrationConflict);
+            }
+            let task_id = parse_id(row.get("task_id"))?;
+            let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
+            tx.commit().await?;
+            return Ok((task, false));
+        }
+
+        project_in_tx(&mut tx, workspace_id, input.project_id, false).await?;
+        let status_id = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
+        )
+        .bind(workspace_id.to_string())
+        .bind(input.project_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(TaskError::NotFound)
+        .and_then(parse_id)?;
+
+        let existing_label = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM labels WHERE workspace_id = ? AND lower(name) = 'discord' ORDER BY id LIMIT 1",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let label_id = if let Some(id) = existing_label {
+            parse_id(id)?
+        } else {
+            let id = Id::new_v7();
+            sqlx::query("INSERT INTO labels (id, workspace_id, name, color, version, created_at, updated_at) VALUES (?, ?, 'Discord', '#5865F2', 0, ?, ?)")
+                .bind(id.to_string()).bind(workspace_id.to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
+            record_mutation(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                "label.created",
+                "label",
+                id,
+                request_id,
+                now,
+            )
+            .await?;
+            id
+        };
+
+        let task_id = Id::new_v7();
+        let position = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM tasks WHERE workspace_id = ? AND project_id = ? AND status_id = ? AND deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string()).bind(input.project_id.to_string()).bind(status_id.to_string())
+        .fetch_one(&mut *tx).await?;
+        sqlx::query(
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, priority, position, creator_id, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'none', ?, ?, 0, ?, ?)",
+        )
+        .bind(task_id.to_string()).bind(workspace_id.to_string()).bind(input.project_id.to_string()).bind(status_id.to_string())
+        .bind(&input.title).bind(&input.description).bind(position).bind(actor_id.to_string()).bind(now.as_millis()).bind(now.as_millis())
+        .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)")
+            .bind(task_id.to_string())
+            .bind(label_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO integration_events (workspace_id, provider, external_event_id, payload_hash, task_id, created_at) VALUES (?, 'discord', ?, ?, ?, ?)")
+            .bind(workspace_id.to_string()).bind(&input.event_id).bind(input.payload_hash.to_vec()).bind(task_id.to_string()).bind(now.as_millis())
+            .execute(&mut *tx).await?;
+        record_mutation(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            "task.created",
+            "task",
+            task_id,
+            request_id,
+            now,
+        )
+        .await?;
+        let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
+        tx.commit().await?;
+        Ok((task, true))
     }
 
     pub async fn update_task(

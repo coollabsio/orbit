@@ -868,7 +868,7 @@ async fn list_tasks(
             .transpose()?,
         view: match query.view.as_deref() {
             None | Some("") => None,
-            Some("mine") | Some("overdue") | Some("due_soon") => query.view,
+            Some("mine") | Some("overdue") | Some("due_soon") | Some("current_week") => query.view,
             _ => return Err(validation("view", &instance, request_id.as_ref())),
         },
         sort: match query.sort.as_str() {
@@ -1745,7 +1745,7 @@ fn task_problem(
             request_id,
         ),
         TaskError::Invalid { field } => validation(field, &instance, request_id),
-        TaskError::Conflict => ApiError::new(
+        TaskError::Conflict | TaskError::IntegrationConflict => ApiError::new(
             StatusCode::CONFLICT,
             "task_conflict",
             "Task conflict",

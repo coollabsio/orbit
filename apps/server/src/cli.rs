@@ -478,6 +478,7 @@ fn require_development(config: &Config) -> Result<(), CliError> {
 
 async fn install_seed_data(database: Database) -> Result<String, CliError> {
     const EMAIL: &str = "test@example.com";
+    const SECOND_EMAIL: &str = "member@example.com";
     const PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$WUH9bzy7j6QyIqQ+iO+WUA$E+J7gy74Md7ZnwnccCH7oMqGdoj/u2SDc5QLvOzKMpA";
     const TASK_TITLE: &str = "Review the Orbit foundation";
     const TASK_DESCRIPTION: &str = "A safe, idempotent development seed record.";
@@ -577,6 +578,44 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
         .parse()
         .map_err(operation)?,
     };
+    let member_id = match identity
+        .find_by_email(SECOND_EMAIL)
+        .await
+        .map_err(operation)?
+    {
+        Some(member) => member.id,
+        None => {
+            let member_id = orbit_platform::Id::new_v7();
+            sqlx::query(
+                "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+                 installation_admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
+            )
+            .bind(member_id.to_string())
+            .bind(SECOND_EMAIL)
+            .bind(SECOND_EMAIL)
+            .bind("Orbit Member")
+            .bind(PASSWORD_HASH)
+            .bind(now.as_millis())
+            .bind(now.as_millis())
+            .execute(database.pool())
+            .await
+            .map_err(operation)?;
+            member_id
+        }
+    };
+    sqlx::query(
+        "INSERT OR IGNORE INTO memberships \
+         (id, workspace_id, user_id, role, created_at, updated_at) \
+         VALUES (?, ?, ?, 'member', ?, ?)",
+    )
+    .bind(orbit_platform::Id::new_v7().to_string())
+    .bind(workspace_id.to_string())
+    .bind(member_id.to_string())
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(database.pool())
+    .await
+    .map_err(operation)?;
     let already_seeded: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM tasks \
          JOIN audit_events ON audit_events.resource_id = tasks.id \
@@ -616,7 +655,10 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
             .await
             .map_err(operation)?;
     }
-    Ok("development seed data installed\nemail: test@example.com\npassword: password".to_owned())
+    Ok(
+        "development seed data installed\nusers: test@example.com, member@example.com\npassword: password"
+            .to_owned(),
+    )
 }
 
 fn load_config_file(cli: &Cli) -> Result<Config, CliError> {
@@ -1236,10 +1278,13 @@ mod tests {
         let prepared = Database::open(&DatabaseConfig::new(&database))
             .await
             .unwrap();
-        sqlx::query("UPDATE users SET display_name = 'Edited Developer'")
-            .execute(prepared.pool())
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE users SET display_name = 'Edited Developer' \
+             WHERE normalized_email = 'test@example.com'",
+        )
+        .execute(prepared.pool())
+        .await
+        .unwrap();
         let edited_status: String =
             sqlx::query_scalar("SELECT id FROM task_statuses ORDER BY position DESC LIMIT 1")
                 .fetch_one(prepared.pool())
@@ -1266,7 +1311,14 @@ mod tests {
                 .scalar::<i64>("SELECT COUNT(*) FROM users")
                 .await
                 .unwrap(),
-            1
+            2
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM memberships")
+                .await
+                .unwrap(),
+            2
         );
         assert_eq!(
             database
@@ -1303,6 +1355,26 @@ mod tests {
                 .verify("password", &developer.password_hash)
                 .unwrap()
                 .valid
+        );
+        let member = IdentityRepository::new(database.clone())
+            .find_by_email("member@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(member.display_name, "Orbit Member");
+        assert!(
+            orbit_platform::PasswordService::default()
+                .verify("password", &member.password_hash)
+                .unwrap()
+                .valid
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT role FROM memberships WHERE user_id = ?")
+                .bind(member.id.to_string())
+                .fetch_one(database.pool())
+                .await
+                .unwrap(),
+            "member"
         );
         assert_eq!(
             database
@@ -1390,7 +1462,7 @@ mod tests {
                 .scalar::<i64>("SELECT COUNT(*) FROM users")
                 .await
                 .unwrap(),
-            2
+            3
         );
         assert_eq!(
             database
@@ -1507,11 +1579,12 @@ mod tests {
         assert_eq!(
             database
                 .scalar::<i64>(
-                    "SELECT COUNT(*) FROM users WHERE normalized_email = 'test@example.com'"
+                    "SELECT COUNT(*) FROM users WHERE normalized_email IN \
+                     ('test@example.com', 'member@example.com')"
                 )
                 .await
                 .unwrap(),
-            1
+            2
         );
         assert_eq!(
             database

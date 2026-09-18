@@ -11,6 +11,7 @@ use orbit_platform::{
 
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
+use crate::integration_routes::{IntegrationState, integration_router};
 use crate::static_assets::StaticAssets;
 use crate::task_routes::{TaskState, task_router};
 use crate::workspace_routes::{WorkspaceState, workspace_router};
@@ -20,6 +21,7 @@ pub struct ApiRoutes {
     pub workspaces: WorkspaceState,
     pub tasks: TaskState,
     pub attachments: AttachmentState,
+    pub integrations: IntegrationState,
 }
 
 pub fn production_router(
@@ -38,6 +40,7 @@ pub fn production_router(
         .merge(workspace_router(api.workspaces))
         .merge(task_router(api.tasks))
         .merge(attachment_router(api.attachments))
+        .merge(integration_router(api.integrations))
         .merge(
             Router::new()
                 .route("/health/live", get(liveness))
