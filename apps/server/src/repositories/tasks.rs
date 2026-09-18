@@ -79,6 +79,10 @@ pub struct TaskRecord {
     /// The task this one is a sub-issue of. Any depth, any project, same workspace.
     #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
+    /// Live sub-issues of this task.
+    pub sub_issue_total: i64,
+    /// Live sub-issues in a completed or cancelled status.
+    pub sub_issue_done: i64,
     #[schema(value_type = Vec<String>)]
     pub assignee_ids: Vec<Id>,
     #[schema(value_type = Vec<String>)]
@@ -1157,6 +1161,7 @@ impl TaskRepository {
         }
         let has_more = tasks.len() > limit;
         tasks.truncate(limit);
+        apply_sub_issue_rollup(self.database.pool(), workspace_id, &mut tasks).await?;
         let next_cursor = if has_more {
             tasks
                 .last()
@@ -1190,7 +1195,14 @@ impl TaskRepository {
         .fetch_optional(self.database.pool())
         .await?
         .ok_or(TaskError::NotFound)?;
-        task_from_row(self.database.pool(), row).await
+        let mut record = task_from_row(self.database.pool(), row).await?;
+        apply_sub_issue_rollup(
+            self.database.pool(),
+            workspace_id,
+            std::slice::from_mut(&mut record),
+        )
+        .await?;
+        Ok(record)
     }
 
     /// Batch identifier lookup for rich-text task chips: one request, never N+1. Each entry is an
@@ -1223,6 +1235,7 @@ impl TaskRepository {
                 records.push(task_from_row(self.database.pool(), row).await?);
             }
         }
+        apply_sub_issue_rollup(self.database.pool(), workspace_id, &mut records).await?;
         Ok(records)
     }
 
@@ -1345,6 +1358,8 @@ impl TaskRepository {
             position,
             creator_id: actor_id,
             parent_id: input.parent_id,
+            sub_issue_total: 0,
+            sub_issue_done: 0,
             assignee_ids: input.assignee_ids,
             label_ids: input.label_ids,
             due_at: input.due_at,
@@ -1365,7 +1380,8 @@ impl TaskRepository {
     ) -> Result<TaskRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let task = update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?;
+        let mut task = update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?;
+        apply_sub_issue_rollup(&mut *tx, workspace_id, std::slice::from_mut(&mut task)).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1415,6 +1431,7 @@ impl TaskRepository {
         for update in updates {
             records.push(update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?);
         }
+        apply_sub_issue_rollup(&mut *tx, workspace_id, &mut records).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1534,13 +1551,15 @@ impl TaskRepository {
             now,
         )
         .await?;
-        tx.commit().await?;
-        Ok(TaskRecord {
+        let mut record = TaskRecord {
             version: current.version + 1,
             deleted_at: None,
             updated_at: now,
             ..current
-        })
+        };
+        apply_sub_issue_rollup(&mut *tx, workspace_id, std::slice::from_mut(&mut record)).await?;
+        tx.commit().await?;
+        Ok(record)
     }
 
     pub async fn task_trash(
@@ -2768,6 +2787,54 @@ fn label_from_row(row: sqlx::sqlite::SqliteRow) -> Result<LabelRecord, TaskError
     })
 }
 
+/// One grouped aggregate over `tasks_parent_rollup` for a whole page of
+/// parents: one placeholder per parent, never a correlated subquery per row.
+fn sub_issue_rollup_sql(parent_count: usize) -> String {
+    let placeholders = vec!["?"; parent_count].join(", ");
+    format!(
+        "SELECT tasks.parent_id AS parent_id, COUNT(*) AS total, \
+         SUM(CASE WHEN task_statuses.category IN ('completed', 'cancelled') THEN 1 ELSE 0 END) AS done \
+         FROM tasks JOIN task_statuses ON task_statuses.id = tasks.status_id \
+         WHERE tasks.workspace_id = ? AND tasks.deleted_at IS NULL \
+         AND tasks.parent_id IN ({placeholders}) GROUP BY tasks.parent_id"
+    )
+}
+
+/// ONE aggregate query for the whole page. Never call this per row. Takes any
+/// executor so the same code serves pool reads and in-transaction writes.
+async fn apply_sub_issue_rollup<'e, E>(
+    executor: E,
+    workspace_id: Id,
+    records: &mut [TaskRecord],
+) -> Result<(), TaskError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    if records.is_empty() {
+        return Ok(());
+    }
+    let sql = sub_issue_rollup_sql(records.len());
+    let mut query = sqlx::query_as::<_, (String, i64, i64)>(&sql).bind(workspace_id.to_string());
+    for record in records.iter() {
+        query = query.bind(record.id.to_string());
+    }
+    let rollup: std::collections::HashMap<String, (i64, i64)> = query
+        .fetch_all(executor)
+        .await?
+        .into_iter()
+        .map(|(parent, total, done)| (parent, (total, done)))
+        .collect();
+    for record in records.iter_mut() {
+        let (total, done) = rollup
+            .get(&record.id.to_string())
+            .copied()
+            .unwrap_or((0, 0));
+        record.sub_issue_total = total;
+        record.sub_issue_done = done;
+    }
+    Ok(())
+}
+
 async fn task_from_row(
     pool: &sqlx::SqlitePool,
     row: sqlx::sqlite::SqliteRow,
@@ -2865,6 +2932,9 @@ fn task_record_from_row(
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)
             .transpose()?,
+        // Filled in by one batch pass per page; see `apply_sub_issue_rollup`.
+        sub_issue_total: 0,
+        sub_issue_done: 0,
         assignee_ids,
         label_ids,
         due_at: row
@@ -2922,4 +2992,19 @@ fn parse_id(value: String) -> Result<Id, TaskError> {
 }
 fn parse_version(value: i64) -> Result<u64, TaskError> {
     u64::try_from(value).map_err(|_| TaskError::Conflict)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sub_issue_rollup_sql;
+
+    #[test]
+    fn rollup_is_one_grouped_statement_with_one_placeholder_per_parent() {
+        let sql = sub_issue_rollup_sql(3);
+        assert_eq!(sql.matches(';').count(), 0, "one statement only");
+        assert_eq!(sql.matches("SELECT").count(), 1, "no correlated subquery");
+        assert!(sql.contains("GROUP BY tasks.parent_id"));
+        assert!(sql.contains("IN (?, ?, ?)"));
+        assert!(sql.contains("tasks.deleted_at IS NULL"));
+    }
 }

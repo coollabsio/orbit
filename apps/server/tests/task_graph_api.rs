@@ -464,3 +464,90 @@ async fn parent_filter_changes_the_cursor_fingerprint_and_hides_sub_issues() {
     let response = list(format!("?limit=1&cursor={cursor}")).await;
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn sub_issue_progress_rolls_up_for_a_whole_page() {
+    let fixture = Fixture::new().await;
+    let done_status: String = sqlx::query_scalar(
+        "SELECT id FROM task_statuses WHERE project_id = ? AND category = 'completed' LIMIT 1",
+    )
+    .bind(&fixture.project_id)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+
+    let mut parents = Vec::new();
+    let mut trashed = None;
+    for index in 0..3 {
+        let parent = fixture.create_task(&format!("Parent {index}")).await;
+        for child_index in 0..5 {
+            let child = fixture
+                .create_task(&format!("Child {index}-{child_index}"))
+                .await;
+            let body = if child_index < 2 {
+                json!({"expected_version": 0, "parent_id": parent["id"], "status_id": done_status})
+            } else {
+                json!({"expected_version": 0, "parent_id": parent["id"]})
+            };
+            let response = fixture.patch(&child, body).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            if child_index == 4 {
+                trashed = Some(child);
+            }
+        }
+        // the fifth child goes to the trash and must drop out of the rollup
+        let child = trashed.take().unwrap();
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "DELETE",
+                &format!("{}?expected_version=1", fixture.task_path(&child)),
+                &fixture.owner_cookie,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        parents.push(parent["id"].as_str().unwrap().to_owned());
+    }
+
+    let page = response_json(
+        fixture
+            .get(&format!(
+                "/api/v1/workspaces/{}/tasks?nesting=roots&limit=50",
+                fixture.workspace_id
+            ))
+            .await,
+    )
+    .await;
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    for item in items {
+        assert!(parents.contains(&item["id"].as_str().unwrap().to_owned()));
+        assert_eq!(item["sub_issue_total"], 4);
+        assert_eq!(item["sub_issue_done"], 2);
+    }
+
+    let detail = response_json(
+        fixture
+            .get(&format!(
+                "/api/v1/workspaces/{}/tasks/{}",
+                fixture.workspace_id, parents[0]
+            ))
+            .await,
+    )
+    .await;
+    assert_eq!(detail["sub_issue_total"], 4);
+    assert_eq!(detail["sub_issue_done"], 2);
+
+    // a leaf reports zero, and an update response carries the rollup too
+    let response = fixture
+        .patch(&detail, json!({"expected_version": 0, "title": "Renamed"}))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["sub_issue_total"], 4);
+    let leaf = fixture.create_task("Leaf").await;
+    assert_eq!(leaf["sub_issue_total"], 0);
+    assert_eq!(leaf["sub_issue_done"], 0);
+}

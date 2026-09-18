@@ -11391,6 +11391,8 @@
                 "priority",
                 "position",
                 "creator_id",
+                "sub_issue_total",
+                "sub_issue_done",
                 "assignee_ids",
                 "label_ids",
                 "version",
@@ -11469,6 +11471,16 @@
                 },
                 "status_id": {
                   "type": "string"
+                },
+                "sub_issue_done": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Live sub-issues in a completed or cancelled status."
+                },
+                "sub_issue_total": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Live sub-issues of this task."
                 },
                 "title": {
                   "type": "string"
@@ -12146,6 +12158,8 @@
           "priority",
           "position",
           "creator_id",
+          "sub_issue_total",
+          "sub_issue_done",
           "assignee_ids",
           "label_ids",
           "version",
@@ -12224,6 +12238,16 @@
           },
           "status_id": {
             "type": "string"
+          },
+          "sub_issue_done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Live sub-issues in a completed or cancelled status."
+          },
+          "sub_issue_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Live sub-issues of this task."
           },
           "title": {
             "type": "string"

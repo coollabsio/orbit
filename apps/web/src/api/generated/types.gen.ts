@@ -401,6 +401,14 @@ export type PageTaskRecord = {
         priority: string;
         project_id: string;
         status_id: string;
+        /**
+         * Live sub-issues in a completed or cancelled status.
+         */
+        sub_issue_done: number;
+        /**
+         * Live sub-issues of this task.
+         */
+        sub_issue_total: number;
         title: string;
         updated_at: string;
         version: number;
@@ -606,6 +614,14 @@ export type TaskRecord = {
     priority: string;
     project_id: string;
     status_id: string;
+    /**
+     * Live sub-issues in a completed or cancelled status.
+     */
+    sub_issue_done: number;
+    /**
+     * Live sub-issues of this task.
+     */
+    sub_issue_total: number;
     title: string;
     updated_at: string;
     version: number;

@@ -12,6 +12,7 @@ const record: TaskRecord = {
   status_id: 'status-1', identifier: 'LCH-12', identifier_key: 'LCH', number: 12, title: 'Ship it', description_json: { type: 'doc', content: [] }, description_text: 'Ready', position: 4, priority: 'high',
   assignee_ids: ['user-1'], creator_id: 'user-1', label_ids: ['label-1'],
   due_at: '2030-01-02T12:30:00.000Z',
+  sub_issue_total: 0, sub_issue_done: 0,
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', version: 7,
 }
 const comment: CommentRecord = {
