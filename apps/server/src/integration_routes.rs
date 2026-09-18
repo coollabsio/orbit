@@ -158,6 +158,7 @@ pub(crate) async fn create_discord_event(
         .create_discord_task(
             principal.workspace_id,
             principal.creator_id,
+            principal.service_account_id,
             DiscordTask {
                 event_id: event_id.to_owned(),
                 payload_hash,

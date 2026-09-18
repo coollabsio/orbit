@@ -27,7 +27,7 @@ test('admins can create a token and see its secret once', async () => {
   globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
     requests.push(request)
-    if (request.method === 'POST') return Response.json({ id: 'token-1', name: 'Discord bot', project_ids: ['project-1', 'project-2'], token_prefix: 'orb_12345678', scopes: ['read', 'write'], created_at: '2026-09-18T10:00:00Z', last_used_at: null, token: 'orb_123456789-secret' }, { status: 201 })
+    if (request.method === 'POST') return Response.json({ id: 'token-1', name: 'Discord bot', project_ids: ['project-1', 'project-2'], service_account_id: 'service-1', service_account_name: 'Discord bot', token_prefix: 'orb_12345678', scopes: ['read', 'write'], created_at: '2026-09-18T10:00:00Z', last_used_at: null, token: 'orb_123456789-secret' }, { status: 201 })
     if (request.url.includes('/projects')) return Response.json({ items: [{ id: 'project-1', workspace_id: 'workspace-1', name: 'Support', project_key: 'SUP', color: '#ffffff', version: 0 }, { id: 'project-2', workspace_id: 'workspace-1', name: 'Platform', project_key: 'PLAT', color: '#ffffff', version: 0 }], next_cursor: null })
     return Response.json([])
   }) as unknown as typeof fetch
@@ -37,11 +37,17 @@ test('admins can create a token and see its secret once', async () => {
   await userEvent.click(view.getByRole('option', { name: 'Support' }))
   await userEvent.click(view.getByRole('option', { name: 'Platform' }))
   expect(view.getByLabelText('Projects').textContent).toContain('2 projects selected')
+  expect(view.getByLabelText('Expiration').textContent).toContain('Never expires')
+  await userEvent.click(view.getByLabelText('Expiration'))
+  await userEvent.click(view.getByRole('option', { name: '30 days' }))
   await userEvent.type(view.getByPlaceholderText('Discord bot'), 'Discord bot')
+  const serviceAccount = view.getByRole('checkbox', { name: /Use a service account/ }) as HTMLInputElement
+  expect(serviceAccount.checked).toBe(false)
+  await userEvent.click(serviceAccount)
   await userEvent.click(view.getByRole('button', { name: 'Create token' }))
   await waitFor(() => expect(view.getByText('orb_123456789-secret')).toBeTruthy())
   const request = requests.find((item) => item.method === 'POST')
   expect(request).toBeTruthy()
-  expect(await request!.json()).toEqual({ name: 'Discord bot', project_ids: ['project-1', 'project-2'], scopes: ['read', 'write'] })
+  expect(await request!.json()).toEqual({ name: 'Discord bot', project_ids: ['project-1', 'project-2'], scopes: ['read', 'write'], service_account: true, expires_in_days: 30 })
   expect(view.getByText('Copy this token now. You cannot see it again.')).toBeTruthy()
 })

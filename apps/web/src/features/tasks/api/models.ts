@@ -67,6 +67,8 @@ export interface Task {
   priority: TaskPriority
   assigneeIds: string[]
   creatorId: string
+  creatorServiceAccountId?: string
+  creatorServiceAccountName?: string
   projectId: string
   labels: string[]
   attachments: Attachment[]
@@ -115,6 +117,8 @@ export function taskFromRecord(
     priority,
     assigneeIds: record.assignee_ids,
     creatorId: record.creator_id,
+    creatorServiceAccountId: record.creator_service_account_id ?? undefined,
+    creatorServiceAccountName: record.creator_service_account_name ?? undefined,
     projectId: record.project_id,
     labels: record.label_ids,
     attachments: attachments.filter((attachment) => !attachment.comment_id).map(attachmentView),

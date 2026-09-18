@@ -20,12 +20,15 @@ export type AcceptanceRecord = {
 
 export type ApiTokenRecord = {
     created_at: string;
+    expires_at?: string | null;
     id: string;
     last_used_at?: string | null;
     name: string;
     project_id: string;
     project_ids: Array<string>;
     scopes: Array<string>;
+    service_account_id?: string | null;
+    service_account_name?: string | null;
     token_prefix: string;
 };
 
@@ -160,10 +163,12 @@ export type ConflictMetadata = {
 };
 
 export type CreateApiTokenBody = {
+    expires_in_days?: number | null;
     name: string;
     project_id?: string | null;
     project_ids?: Array<string>;
     scopes: Array<ApiTokenScope>;
+    service_account?: boolean;
 };
 
 export type CreateTaskBody = {
@@ -397,6 +402,8 @@ export type PageTaskRecord = {
         assignee_ids: Array<string>;
         created_at: string;
         creator_id: string;
+        creator_service_account_id?: string | null;
+        creator_service_account_name?: string | null;
         deleted_at?: string | null;
         description: string;
         due_at?: string | null;
@@ -588,6 +595,8 @@ export type TaskRecord = {
     assignee_ids: Array<string>;
     created_at: string;
     creator_id: string;
+    creator_service_account_id?: string | null;
+    creator_service_account_name?: string | null;
     deleted_at?: string | null;
     description: string;
     due_at?: string | null;

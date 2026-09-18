@@ -24,9 +24,37 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
             vec![fixture.project_id],
             true,
             true,
+            true,
+            None,
             "create-token",
             TimestampMillis::now(),
         )
+        .await
+        .unwrap();
+    let rotated = fixture
+        .tokens
+        .create(
+            fixture.workspace_id,
+            fixture.user_id,
+            "discord".to_owned(),
+            vec![fixture.project_id],
+            true,
+            true,
+            true,
+            None,
+            "rotate-token",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        issued.api_token.service_account_id,
+        rotated.api_token.service_account_id
+    );
+    sqlx::query("UPDATE users SET suspended_at = ? WHERE id = ?")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(fixture.user_id.to_string())
+        .execute(fixture.database.pool())
         .await
         .unwrap();
     let body = json!({
@@ -44,6 +72,12 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
     assert_eq!(created.status(), StatusCode::CREATED);
     let created = response_json(created).await;
     assert_eq!(created["duplicate"], false);
+    assert_eq!(
+        created["task"]["creator_service_account_id"],
+        issued.api_token.service_account_id.unwrap().to_string()
+    );
+    assert_eq!(created["task"]["creator_service_account_name"], "Discord");
+    assert_eq!(created["task"]["creator_id"], fixture.user_id.to_string());
     assert_eq!(
         created["task"]["title"],
         "A very long Discord message title tha..."
@@ -92,6 +126,35 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
     assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(response_json(missing).await["code"], "api_token_required");
 
+    let now = TimestampMillis::now();
+    let expired = fixture
+        .tokens
+        .create(
+            fixture.workspace_id,
+            fixture.user_id,
+            "Expired".to_owned(),
+            vec![fixture.project_id],
+            false,
+            true,
+            false,
+            Some(now),
+            "expired-token",
+            now,
+        )
+        .await
+        .unwrap();
+    let expired_response = fixture
+        .app
+        .clone()
+        .oneshot(request(Some(&expired.token), valid_body("expired")))
+        .await
+        .unwrap();
+    assert_eq!(expired_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response_json(expired_response).await["code"],
+        "invalid_api_token"
+    );
+
     let read_only = fixture
         .tokens
         .create(
@@ -101,6 +164,8 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             vec![fixture.project_id],
             true,
             false,
+            false,
+            None,
             "read-token",
             TimestampMillis::now(),
         )
@@ -127,6 +192,8 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             vec![fixture.project_id],
             false,
             true,
+            false,
+            None,
             "revoked-token",
             TimestampMillis::now(),
         )
@@ -164,6 +231,8 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             vec![fixture.project_id],
             false,
             true,
+            false,
+            None,
             "write-token",
             TimestampMillis::now(),
         )
@@ -198,6 +267,8 @@ async fn discord_events_select_one_project_allowed_by_a_multi_project_token() {
             vec![fixture.project_id, second_project.id],
             false,
             true,
+            false,
+            None,
             "create-token",
             TimestampMillis::now(),
         )

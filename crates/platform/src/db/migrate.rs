@@ -169,6 +169,18 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    17,
+                    include_str!("../../../../apps/server/migrations/0017_service_accounts.sql"),
+                    false,
+                ),
+                Migration::new(
+                    18,
+                    include_str!(
+                        "../../../../apps/server/migrations/0018_api_token_expiration.sql"
+                    ),
+                    false,
+                ),
             ],
         )
     }

@@ -10380,6 +10380,13 @@
             "type": "string",
             "format": "date-time"
           },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "id": {
             "type": "string"
           },
@@ -10407,6 +10414,18 @@
             "items": {
               "type": "string"
             }
+          },
+          "service_account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_account_name": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "token_prefix": {
             "type": "string"
@@ -10924,6 +10943,14 @@
           "scopes"
         ],
         "properties": {
+          "expires_in_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
           "name": {
             "type": "string"
           },
@@ -10944,6 +10971,9 @@
             "items": {
               "$ref": "#/components/schemas/ApiTokenScope"
             }
+          },
+          "service_account": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -11886,6 +11916,18 @@
                 "creator_id": {
                   "type": "string"
                 },
+                "creator_service_account_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "creator_service_account_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "deleted_at": {
                   "type": [
                     "string",
@@ -12601,6 +12643,18 @@
           },
           "creator_id": {
             "type": "string"
+          },
+          "creator_service_account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "creator_service_account_name": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deleted_at": {
             "type": [

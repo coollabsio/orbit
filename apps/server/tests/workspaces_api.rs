@@ -1781,6 +1781,17 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     )).await.unwrap();
     assert_eq!(invalid_project.status(), StatusCode::NOT_FOUND);
 
+    let invalid_expiration = app.clone().oneshot(json_request(
+        "POST",
+        &path,
+        &owner_cookie,
+        json!({"name":"Invalid expiration", "project_ids": [project_id], "scopes":["write"], "expires_in_days": 14}),
+    )).await.unwrap();
+    assert_eq!(
+        invalid_expiration.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
     let created = app
         .clone()
         .oneshot(json_request(
@@ -1802,6 +1813,9 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     assert!(token.starts_with("orb_"));
     assert_eq!(created["scopes"], json!(["read", "write"]));
     assert_eq!(created["project_ids"], json!([project_id]));
+    assert_eq!(created["service_account_id"], Value::Null);
+    assert_eq!(created["service_account_name"], Value::Null);
+    assert_eq!(created["expires_at"], Value::Null);
 
     let stored: Vec<u8> = sqlx::query_scalar("SELECT token_hash FROM api_tokens WHERE id = ?")
         .bind(token_id)
@@ -1815,6 +1829,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
         .await
         .unwrap();
     assert_eq!(principal.workspace_id.to_string(), setup.0);
+    assert_eq!(principal.service_account_id, None);
     assert_eq!(
         principal
             .project_ids

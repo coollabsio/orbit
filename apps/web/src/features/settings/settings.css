@@ -386,6 +386,13 @@
 .api-token-scopes { display: flex; gap: 18px; padding: 0; border: 0; }
 .api-token-scopes legend { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
 .api-token-scopes label { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.api-token-service-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--recessed); cursor: pointer; transition: border-color 0.15s, background-color 0.15s; }
+.api-token-service-option:hover { border-color: var(--line); }
+.api-token-service-option[data-selected='true'] { border-color: var(--accent); background: var(--accent-soft); }
+.api-token-service-option > input { width: 16px; height: 16px; margin: 1px 0 0; flex: 0 0 auto; }
+.api-token-service-option > span { display: grid; gap: 3px; min-width: 0; }
+.api-token-service-option strong { font-size: 13px; line-height: 16px; font-weight: 600; color: var(--text-primary); }
+.api-token-service-option strong + span { font-size: 12px; line-height: 16px; color: var(--text-muted); }
 .api-token-secret { display: grid; gap: 10px; margin-top: 18px; padding: 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); font-size: 12px; }
 .api-token-secret > div { display: flex; align-items: center; gap: 8px; }
 .api-token-secret code { min-width: 0; flex: 1; overflow-wrap: anywhere; user-select: all; }

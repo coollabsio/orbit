@@ -355,6 +355,9 @@ enum ApiTokenScope {
 struct CreateApiTokenBody {
     name: String,
     #[serde(default)]
+    service_account: bool,
+    expires_in_days: Option<u16>,
+    #[serde(default)]
     project_ids: Vec<String>,
     project_id: Option<String>,
     scopes: Vec<ApiTokenScope>,
@@ -423,6 +426,23 @@ async fn create_api_token(
         .scopes
         .iter()
         .any(|scope| matches!(scope, ApiTokenScope::Write));
+    let now = TimestampMillis::now();
+    let expires_at = match body.expires_in_days {
+        None => None,
+        Some(days @ (7 | 30 | 90 | 365)) => Some(TimestampMillis::from_millis(
+            now.as_millis() + i64::from(days) * 24 * 60 * 60 * 1_000,
+        )),
+        Some(_) => {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_api_token",
+                "Invalid API token",
+                "Token expiration must be 7, 30, 90, or 365 days, or omitted for no expiration.",
+                instance,
+                request_id.as_ref(),
+            ));
+        }
+    };
     let issued = state
         .api_tokens
         .create(
@@ -432,8 +452,10 @@ async fn create_api_token(
             project_ids,
             can_read,
             can_write,
+            body.service_account,
+            expires_at,
             request_id_value(request_id.as_ref()),
-            TimestampMillis::now(),
+            now,
         )
         .await
         .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;
