@@ -16,7 +16,7 @@ function task(version: number, title: string, text: string): Task {
     id: 'task-1', version, title, descriptionJson: doc(text), descriptionText: text,
     statusId: 'todo', position: 0, projectId: 'project-1', identifier: 'ORB-1',
     priority: 'none', assigneeIds: [], creatorId: 'user-1', labels: [], attachments: [],
-    dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [],
+    dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], activity: [],
   }
 }
 

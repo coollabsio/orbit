@@ -6,7 +6,7 @@ function task(id: string, statusId: string, position: number, version: number): 
   return {
     id, statusId, position, version, projectId: 'project-1', title: id, descriptionJson: { type: 'doc', content: [] }, descriptionText: '',
     identifier: id, priority: 'none', assigneeIds: [], creatorId: 'user-1', labels: [],
-    attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [],
+    attachments: [], dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], activity: [],
   }
 }
 

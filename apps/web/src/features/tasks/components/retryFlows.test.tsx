@@ -121,7 +121,7 @@ test('task deletion retry returns to the task list after success', async () => {
   const task: Task = {
     id: 'task-1', identifier: 'ORB-1', title: 'Delete me', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', statusId: 'todo',
     position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
-    labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
+    labels: [], attachments: [], dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
   }
   const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }
   const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={onBack} />, { wrapper: Wrapper })

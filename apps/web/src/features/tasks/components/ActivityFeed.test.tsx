@@ -25,7 +25,7 @@ function Wrapper({ children }: { children: ReactNode }) {
 const task: Task = {
   id: 'task-1', identifier: 'ORB-1', title: 'Activity test', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', statusId: 'todo',
   position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
-  labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], version: 1,
+  labels: [], attachments: [], dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], version: 1,
   activity: Array.from({ length: 5 }, (_, index) => ({
     id: `activity-${index + 1}`,
     actorId: 'user-1',

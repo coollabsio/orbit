@@ -13,7 +13,7 @@ const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'ow
 const task: Task = {
   id: 'task-1', identifier: 'ORB-1', title: 'Ship it', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', statusId: 'todo',
   position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
-  labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
+  labels: [], attachments: [], dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
 }
 
 const state: TaskViewState = {

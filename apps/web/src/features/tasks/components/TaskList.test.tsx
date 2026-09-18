@@ -28,7 +28,7 @@ function task(index: number): Task {
   return {
     id: `task-${index}`, statusId: status.id, position: index, version: 1, projectId: 'project-1',
     title: `Task ${index}`, descriptionJson: { type: 'doc', content: [] }, descriptionText: '', identifier: `ORB-${index}`, priority: 'none', assigneeIds: [],
-    creatorId: 'user-1', labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [],
+    creatorId: 'user-1', labels: [], attachments: [], dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], activity: [],
   }
 }
 

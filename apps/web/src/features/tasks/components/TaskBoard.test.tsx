@@ -15,7 +15,7 @@ function task(id: string, statusId: string, position: number): Task {
   return {
     id, statusId, position, version: 1, projectId: 'project-1', title: id === 'moving' ? 'Moving' : id,
     descriptionJson: { type: 'doc', content: [] }, descriptionText: '', identifier: `ORB-${position}`, priority: 'none', assigneeIds: [], creatorId: 'user-1',
-    labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [],
+    labels: [], attachments: [], dueAt: null, parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '', comments: [], activity: [],
   }
 }
 

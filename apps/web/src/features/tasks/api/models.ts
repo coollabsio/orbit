@@ -61,6 +61,15 @@ export interface TaskActivity {
   statusId?: string
 }
 
+export interface TaskReference {
+  sourceType: 'task' | 'comment'
+  sourceId: string
+  /** Where clicking the backlink navigates: the source task, or a comment's task. */
+  sourceTaskId: string
+  sourceTaskIdentifier: string
+  sourceTaskTitle: string
+}
+
 export interface Task {
   id: string
   identifier: string
@@ -78,6 +87,17 @@ export interface Task {
   labels: string[]
   attachments: Attachment[]
   dueAt: string | null
+  /** The task this one is a sub-issue of (any project, same workspace). */
+  parentId: string | null
+  /** Live sub-issues, and how many of them are completed or cancelled. */
+  subIssueTotal: number
+  subIssueDone: number
+  /** Set when this task is marked as a duplicate of another. */
+  duplicateOfTaskId: string | null
+  /** Tasks marked as duplicates of this one. Filled on detail reads only. */
+  duplicateIds: string[]
+  /** Tasks and comments whose rich text mentions this task. Detail reads only. */
+  referencedBy: TaskReference[]
   createdAt: string
   updatedAt: string
   comments: TaskComment[]
@@ -126,6 +146,20 @@ export function taskFromRecord(
     labels: record.label_ids,
     attachments: attachments.filter((attachment) => !attachment.comment_id).map(attachmentView),
     dueAt: record.due_at ?? null,
+    // The graph fields are tolerated missing: optimistic and partial records
+    // (and payloads cached before the field existed) must still map.
+    parentId: record.parent_id ?? null,
+    subIssueTotal: record.sub_issue_total ?? 0,
+    subIssueDone: record.sub_issue_done ?? 0,
+    duplicateOfTaskId: record.duplicate_of_task_id ?? null,
+    duplicateIds: record.duplicate_ids ?? [],
+    referencedBy: (record.referenced_by ?? []).map((reference) => ({
+      sourceType: reference.source_type === 'comment' ? 'comment' : 'task',
+      sourceId: reference.source_id,
+      sourceTaskId: reference.source_task_id,
+      sourceTaskIdentifier: reference.source_task_identifier,
+      sourceTaskTitle: reference.source_task_title,
+    })),
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     comments: comments.map((comment) => ({

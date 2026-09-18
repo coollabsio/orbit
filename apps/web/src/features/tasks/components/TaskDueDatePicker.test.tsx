@@ -42,7 +42,7 @@ test('task due date uses the custom picker and can clear the saved value', async
   const task: Task = {
     id: 'task-1', identifier: 'ORB-1', title: 'Schedule me', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', statusId: 'todo',
     position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
-    labels: [], attachments: [], dueAt: '2030-01-02T12:30:00.000Z', createdAt: '', updatedAt: '',
+    labels: [], attachments: [], dueAt: '2030-01-02T12:30:00.000Z', parentId: null, subIssueTotal: 0, subIssueDone: 0, duplicateOfTaskId: null, duplicateIds: [], referencedBy: [], createdAt: '', updatedAt: '',
     comments: [], activity: [], version: 1,
   }
   const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }

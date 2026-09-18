@@ -76,3 +76,35 @@ test('a comment carries its document and derived text', () => {
   expect(task.comments[0].bodyText).toBe('Ship it')
   expect('body' in task.comments[0]).toBe(false)
 })
+
+test('taskFromRecord carries the task graph fields', () => {
+  const graph: TaskRecord = {
+    ...record,
+    parent_id: 'task-0', sub_issue_total: 5, sub_issue_done: 3,
+    duplicate_of_task_id: 'task-9', duplicate_ids: ['task-7'],
+    referenced_by: [{
+      source_type: 'comment', source_id: 'c-1', source_task_id: 'task-4',
+      source_task_identifier: 'LCH-4', source_task_title: 'Plan',
+    }],
+  }
+
+  const task = taskFromRecord(graph)
+
+  expect(task.parentId).toBe('task-0')
+  expect(task.subIssueTotal).toBe(5)
+  expect(task.subIssueDone).toBe(3)
+  expect(task.duplicateOfTaskId).toBe('task-9')
+  expect(task.duplicateIds).toEqual(['task-7'])
+  expect(task.referencedBy).toEqual([{
+    sourceType: 'comment', sourceId: 'c-1', sourceTaskId: 'task-4',
+    sourceTaskIdentifier: 'LCH-4', sourceTaskTitle: 'Plan',
+  }])
+})
+
+test('taskFromRecord defaults the graph fields for a plain task', () => {
+  const task = taskFromRecord(record)
+  expect(task.parentId).toBeNull()
+  expect(task.duplicateOfTaskId).toBeNull()
+  expect(task.duplicateIds).toEqual([])
+  expect(task.referencedBy).toEqual([])
+})
