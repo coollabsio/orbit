@@ -227,3 +227,17 @@ a.editor-chip:hover {
     transition: none;
   }
 }
+.editor-mention-search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 320px;
+}
+
+/* Inside the picker the list is inline, not a floating popover. */
+.editor-mention-search .editor-mention-popover {
+  position: static;
+  min-width: 0;
+  max-height: 240px;
+  box-shadow: none;
+}
