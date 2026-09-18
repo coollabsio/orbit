@@ -15,7 +15,7 @@ pub use ports::{
     ProjectRepository, RepositoryError, TaskRepository, TaskStatusRepository, UserRepository,
     WorkspaceRepository,
 };
-pub use tasks::{AttachmentRef, Comment, Task, TaskPriority};
+pub use tasks::{AttachmentRef, Comment, MAX_PARENT_DEPTH, Task, TaskPriority, check_parent_edge};
 pub use workspace::{
     DomainError, ExpectedVersion, Project, RestoreAvailability, StatusCategory, TaskStatus,
     Workspace, WorkspaceDefaults,

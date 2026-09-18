@@ -102,3 +102,44 @@ fn new_task() -> Task {
         Id::new_v7(),
     )
 }
+
+#[test]
+fn parent_edge_rejects_self_direct_and_three_task_cycles() {
+    use orbit_domain::{MAX_PARENT_DEPTH, check_parent_edge};
+
+    let a = Id::new_v7();
+    let b = Id::new_v7();
+    let c = Id::new_v7();
+
+    // self-parenting: the walk seeds with the proposed parent
+    assert_eq!(check_parent_edge(a, a, &[a]), Err(DomainError::ParentCycle));
+
+    // direct cycle: b is already a child of a, so a -> b closes the loop
+    assert_eq!(
+        check_parent_edge(a, b, &[b, a]),
+        Err(DomainError::ParentCycle)
+    );
+
+    // three-task cycle: a -> b -> c, now asking for c -> a
+    assert_eq!(
+        check_parent_edge(c, a, &[a, c, b]),
+        Err(DomainError::ParentCycle)
+    );
+
+    // legal edge in an unrelated chain
+    assert_eq!(check_parent_edge(c, a, &[a, b]), Ok(()));
+
+    // the walk is bounded: ten ancestors without terminating is refused
+    let chain: Vec<Id> = (0..MAX_PARENT_DEPTH).map(|_| Id::new_v7()).collect();
+    assert_eq!(
+        check_parent_edge(c, chain[0], &chain),
+        Err(DomainError::ParentDepthExceeded {
+            limit: MAX_PARENT_DEPTH
+        })
+    );
+    // one short of the bound is still provably acyclic
+    assert_eq!(
+        check_parent_edge(c, chain[0], &chain[..MAX_PARENT_DEPTH - 1]),
+        Ok(())
+    );
+}

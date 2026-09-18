@@ -22,6 +22,8 @@ pub enum DomainError {
     ParentMismatch,
     NotDeleted,
     InvalidDocument { reason: &'static str },
+    ParentCycle,
+    ParentDepthExceeded { limit: usize },
 }
 
 impl fmt::Display for DomainError {
@@ -45,6 +47,12 @@ impl fmt::Display for DomainError {
             Self::WorkspaceMismatch => formatter.write_str("resource belongs to another workspace"),
             Self::ParentMismatch => formatter.write_str("resource does not belong to that parent"),
             Self::NotDeleted => formatter.write_str("resource is not deleted"),
+            Self::ParentCycle => {
+                formatter.write_str("that parent would create a cycle of sub-issues")
+            }
+            Self::ParentDepthExceeded { limit } => {
+                write!(formatter, "sub-issue nesting is limited to {limit} levels")
+            }
         }
     }
 }

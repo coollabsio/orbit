@@ -102,6 +102,35 @@ impl Task {
     }
 }
 
+/// How far the parent walk is allowed to climb before the edge is refused.
+///
+/// Acyclicity can only be proved inside this bound, so an ancestor chain that
+/// still has not terminated after `MAX_PARENT_DEPTH` hops is treated as unsafe.
+pub const MAX_PARENT_DEPTH: usize = 10;
+
+/// Decide whether `child` may be re-parented under `parent`.
+///
+/// `ancestors` is the parent chain produced by a bounded walk, closest first:
+/// `ancestors[0]` is `parent` itself, `ancestors[1]` its parent, and so on, with
+/// at most `MAX_PARENT_DEPTH` entries. The caller owns the SQL; this function
+/// owns the rule.
+///
+/// # Errors
+///
+/// `ParentCycle` when the edge would close a loop, `ParentDepthExceeded` when
+/// the walk could not prove the chain terminates within `MAX_PARENT_DEPTH`.
+pub fn check_parent_edge(child: Id, parent: Id, ancestors: &[Id]) -> Result<(), DomainError> {
+    if child == parent || ancestors.contains(&child) {
+        return Err(DomainError::ParentCycle);
+    }
+    if ancestors.len() >= MAX_PARENT_DEPTH {
+        return Err(DomainError::ParentDepthExceeded {
+            limit: MAX_PARENT_DEPTH,
+        });
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Comment {
     pub id: Id,
