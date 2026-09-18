@@ -684,6 +684,22 @@
   color: var(--control-placeholder);
 }
 
+/* Read-only description: the same metrics as the editor it turns into, so a
+   click to edit never shifts the layout. */
+.tasks-desc-view {
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+
+.tasks-desc-view[data-muted='true'] {
+  color: var(--control-placeholder);
+}
+
+.tasks-desc-wrap .editor-surface {
+  min-height: 60px;
+  padding: 0;
+}
+
 /* activity: timeline of events, then comment threads */
 .tasks-activity-heading {
   display: flex;

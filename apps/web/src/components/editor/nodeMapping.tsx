@@ -67,7 +67,8 @@ export const markMapping = {
   code: ({ children }: MarkProps) => <code>{children}</code>,
   underline: ({ children }: MarkProps) => <u>{children}</u>,
   link: ({ mark, children }: MarkProps) => (
-    <a href={safeHref(mark.attrs?.href)} target="_blank" rel="noopener noreferrer">
+    // Following a link must not also open a click-to-edit surface around it.
+    <a href={safeHref(mark.attrs?.href)} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>
       {children}
     </a>
   ),

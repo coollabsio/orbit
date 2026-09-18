@@ -1,6 +1,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { EditorContent, ReactNodeViewRenderer, useEditor } from '@tiptap/react'
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useLatest } from '../../lib/useLatest'
 import { queryKeys } from '../../api/queryKeys'
 import { editableDocument, sameDocument, taskIdentifiersInDocument, toServerDocument } from './document'
 import { buildEditorExtensions } from './extensions/editorExtensions'
@@ -20,22 +21,6 @@ const TaskMentionWithView = TaskMention.extend({
 
 /** Reads the newest props, for handlers that outlive the render that created them. */
 type Latest = () => RichTextEditorProps
-
-/**
- * Holds the props of the latest commit. The editor and its extensions are built
- * once, so their handlers read callbacks and members through this at event time
- * instead of closing over the render that created them.
- */
-class PropsBridge {
-  #props: RichTextEditorProps
-  constructor(props: RichTextEditorProps) {
-    this.#props = props
-  }
-  update(props: RichTextEditorProps) {
-    this.#props = props
-  }
-  read: Latest = () => this.#props
-}
 
 /**
  * Built once per editor. Everything that can change between renders — members,
@@ -90,9 +75,7 @@ export default function RichTextEditorSurface(props: RichTextEditorProps) {
   const { value, placeholder, ariaLabel, compact, autofocus, workspaceId, statuses = [] } = props
   // Callbacks and members are read at event time, so the editor is built once
   // and never torn down because a parent re-rendered with new closures.
-  const [bridge] = useState(() => new PropsBridge(props))
-  useLayoutEffect(() => bridge.update(props))
-  const latest = bridge.read
+  const latest = useLatest(props)
 
   const queryClient = useQueryClient()
   const identifiers = useMemo(() => taskIdentifiersInDocument(value), [value])

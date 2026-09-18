@@ -108,7 +108,10 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
           <div className="tasks-detail-main">
             <TaskTextFields
               task={task}
-              onUpdate={(body) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...body } })}
+              workspaceId={workspace.id}
+              members={users}
+              statuses={state.statuses}
+              onUpdate={(update) => updateTask.mutateAsync({ taskId: task.id, body: { expected_version: task.version, ...update } })}
               onAttachFiles={attach}
             >
               {task.attachments.length > 0 ? (
