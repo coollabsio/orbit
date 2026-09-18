@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { TaskMentionChip } from './TaskChip'
 
-export type { TaskChipLookup } from './taskChipContext'
+export type { ResolvedChip, TaskChipLookup } from './taskChipContext'
 
 type Attrs = Record<string, unknown> | undefined
 interface NodeProps {

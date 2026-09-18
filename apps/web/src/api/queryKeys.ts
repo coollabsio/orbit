@@ -22,6 +22,8 @@ export const queryKeys = {
   labels: (workspaceId: string) => [...workspace(workspaceId), 'labels'] as const,
   commentAttachments: (workspaceId: string, taskId: string, commentId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments', commentId, 'attachments'] as const,
+  taskChips: (workspaceId: string, identifier: string) =>
+    [...workspace(workspaceId), 'tasks', 'chip', identifier] as const,
   taskTrash: (workspaceId: string) => [...workspace(workspaceId), 'tasks', 'trash'] as const,
   projectTrash: (workspaceId: string) => [...workspace(workspaceId), 'projects', 'trash'] as const,
   workspaceTrash: (workspaceId: string) => [...workspace(workspaceId), 'trash'] as const,
