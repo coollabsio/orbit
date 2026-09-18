@@ -68,9 +68,9 @@ export function TasksPage() {
   const commentAttachments = useCommentAttachments(workspace.id, taskId, commentsQuery.data ?? [])
 
   const records = useMemo(() => tasksQuery.data?.pages.flatMap((page) => page.items) ?? [], [tasksQuery.data])
-  const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
+  const tasks = useMemo(() => records.map((record) => taskFromRecord(record)), [records])
   const activeTask = detailQuery.data
-    ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data)
+    ? taskFromRecord(detailQuery.data, commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data)
     : undefined
   const users = membersQuery.data ?? []
   const state = {

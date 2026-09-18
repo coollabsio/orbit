@@ -52,7 +52,7 @@ export function HomePage() {
   const tasks = useTasks(workspace.id, { assignee_id: me.data?.id, limit: 100 })
   const firstName = me.data?.display_name.split(' ')[0] ?? 'there'
 
-  const myOpenTasks = (tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [])
+  const myOpenTasks = (tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record))) ?? [])
     .filter(
       (t) =>
         t.assigneeIds.includes(me.data?.id ?? '') &&

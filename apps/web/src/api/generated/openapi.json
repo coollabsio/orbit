@@ -6303,6 +6303,14 @@
             }
           },
           {
+            "name": "identifier",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "priority",
             "in": "query",
             "required": false,
@@ -6850,6 +6858,151 @@
           },
           "409": {
             "description": "contract_mismatch, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/tasks/resolve": {
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Batch identifier lookup so a rich-text document resolves all of its task chips in one request.",
+        "operationId": "resolve_tasks",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TaskRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11195,6 +11348,9 @@
                 "workspace_id",
                 "project_id",
                 "status_id",
+                "identifier",
+                "identifier_key",
+                "number",
                 "title",
                 "description",
                 "priority",
@@ -11240,11 +11396,21 @@
                 "id": {
                   "type": "string"
                 },
+                "identifier": {
+                  "type": "string"
+                },
+                "identifier_key": {
+                  "type": "string"
+                },
                 "label_ids": {
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
+                },
+                "number": {
+                  "type": "integer",
+                  "format": "int64"
                 },
                 "position": {
                   "type": "integer",
@@ -11560,6 +11726,21 @@
           "position": {
             "type": "integer",
             "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResolveBody": {
+        "type": "object",
+        "required": [
+          "identifiers"
+        ],
+        "properties": {
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false
@@ -11911,6 +12092,9 @@
           "workspace_id",
           "project_id",
           "status_id",
+          "identifier",
+          "identifier_key",
+          "number",
           "title",
           "description",
           "priority",
@@ -11956,11 +12140,21 @@
           "id": {
             "type": "string"
           },
+          "identifier": {
+            "type": "string"
+          },
+          "identifier_key": {
+            "type": "string"
+          },
           "label_ids": {
             "type": "array",
             "items": {
               "type": "string"
             }
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64"
           },
           "position": {
             "type": "integer",

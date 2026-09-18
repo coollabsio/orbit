@@ -46,7 +46,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_sessions', icon: ShieldTick, title: 'Go to Sessions', meta: 'Navigation', to: '/settings/sessions', keywords: 'sessions devices' },
       { id: 'nav_trash', icon: Trash, title: 'Go to Task trash', meta: 'Navigation', to: '/tasks-trash', keywords: 'trash deleted tasks' },
     ]
-    const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
+    const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record)).map((t) => ({
       id: t.id,
       icon: TaskSquare,
       title: t.title,

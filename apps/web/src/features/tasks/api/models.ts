@@ -88,7 +88,6 @@ export interface TaskViewState {
 
 export function taskFromRecord(
   record: TaskRecord,
-  project: ProjectRecord | undefined,
   comments: CommentRecord[] = [],
   attachments: AttachmentRecord[] = [],
   activity: AuditEvent[] = [],
@@ -107,7 +106,7 @@ export function taskFromRecord(
     : 'none'
   return {
     id: record.id,
-    identifier: `${project?.key ?? 'TASK'}-${record.id.slice(-4).toUpperCase()}`,
+    identifier: record.identifier,
     title: record.title,
     description: record.description,
     statusId: record.status_id,

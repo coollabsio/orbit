@@ -8,7 +8,7 @@ const project: ProjectRecord = {
 }
 const record: TaskRecord = {
   id: '01HZYTASK000000000000001', workspace_id: 'workspace-1', project_id: project.id,
-  status_id: 'status-1', title: 'Ship it', description: 'Ready', position: 4, priority: 'high',
+  status_id: 'status-1', identifier: 'LCH-12', identifier_key: 'LCH', number: 12, title: 'Ship it', description: 'Ready', position: 4, priority: 'high',
   assignee_ids: ['user-1'], creator_id: 'user-1', label_ids: ['label-1'],
   due_at: '2030-01-02T12:30:00.000Z',
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', version: 7,
@@ -29,11 +29,11 @@ const activity: AuditEvent = {
 }
 
 test('generated task records become the existing task view model without mock fallback', () => {
-  const task = taskFromRecord(record, project, [comment], [attachment], [activity])
+  const task = taskFromRecord(record, [comment], [attachment], [activity])
 
   expect(task).toMatchObject({
     id: record.id,
-    identifier: 'LCH-0001',
+    identifier: 'LCH-12',
     projectId: project.id,
     statusId: 'status-1',
     priority: 'high',

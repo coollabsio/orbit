@@ -5,7 +5,7 @@ import type { PageTaskRecord, TaskRecord } from '../../../api/generated/types.ge
 import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks } from './optimistic'
 
 const task = (workspaceId: string, version = 1): TaskRecord => ({
-  id: 'task-1', workspace_id: workspaceId, project_id: 'project-1', status_id: 'todo', title: 'Before',
+  id: 'task-1', workspace_id: workspaceId, project_id: 'project-1', status_id: 'todo', identifier: 'GEN-1', identifier_key: 'GEN', number: 1, title: 'Before',
   description: '', position: 1, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T10:00:00Z', version,
 })

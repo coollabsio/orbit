@@ -365,7 +365,10 @@ export type PageTaskRecord = {
         description: string;
         due_at?: string | null;
         id: string;
+        identifier: string;
+        identifier_key: string;
         label_ids: Array<string>;
+        number: number;
         position: number;
         priority: string;
         project_id: string;
@@ -454,6 +457,10 @@ export type ReorderItem = {
     expected_version: number;
     id: string;
     position: number;
+};
+
+export type ResolveBody = {
+    identifiers: Array<string>;
 };
 
 export type RestoreBody = {
@@ -556,7 +563,10 @@ export type TaskRecord = {
     description: string;
     due_at?: string | null;
     id: string;
+    identifier: string;
+    identifier_key: string;
     label_ids: Array<string>;
+    number: number;
     position: number;
     priority: string;
     project_id: string;
@@ -3426,6 +3436,7 @@ export type ListTasksData = {
         status_id?: string;
         assignee_id?: string;
         label_id?: string;
+        identifier?: string;
         priority?: string;
         search?: string;
         view?: string;
@@ -3665,6 +3676,68 @@ export type ReorderTasksResponses = {
 };
 
 export type ReorderTasksResponse = ReorderTasksResponses[keyof ReorderTasksResponses];
+
+export type ResolveTasksData = {
+    body: ResolveBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/resolve';
+};
+
+export type ResolveTasksErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ResolveTasksError = ResolveTasksErrors[keyof ResolveTasksErrors];
+
+export type ResolveTasksResponses = {
+    200: PageTaskRecord;
+};
+
+export type ResolveTasksResponse = ResolveTasksResponses[keyof ResolveTasksResponses];
 
 export type ListTaskTrashData = {
     body?: never;
