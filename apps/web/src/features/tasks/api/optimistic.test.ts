@@ -41,3 +41,21 @@ test('successful optimistic updates reconcile the authoritative server version',
 
   expect(client.getQueryData<PageTaskRecord>(key)?.items[0]).toMatchObject({ title: 'Server title', version: 2 })
 })
+
+test('reconciling a mutation response keeps the detail-only graph fields', () => {
+  const client = new QueryClient()
+  const detailKey = queryKeys.tasks.detail('workspace-a', 'task-1')
+  const reference = {
+    source_type: 'task', source_id: 'task-4', source_task_id: 'task-4',
+    source_task_identifier: 'GEN-4', source_task_title: 'Plan',
+  }
+  client.setQueryData(detailKey, { ...task('workspace-a'), duplicate_ids: ['task-7'], referenced_by: [reference] })
+
+  reconcileWorkspaceTask(client, 'workspace-a', { ...task('workspace-a', 2), title: 'After' })
+
+  const cached = client.getQueryData<TaskRecord>(detailKey)
+  expect(cached?.title).toBe('After')
+  expect(cached?.version).toBe(2)
+  expect(cached?.duplicate_ids).toEqual(['task-7'])
+  expect(cached?.referenced_by).toEqual([reference])
+})

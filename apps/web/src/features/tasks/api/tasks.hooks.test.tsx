@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '../../../api/queryKeys'
 import type { PageTaskRecord, TaskRecord } from '../../../api/generated/types.gen'
-import { useBulkTasks, useCreateTaskComment, useTasks, useUploadTaskAttachments } from './tasks'
+import { useBulkTasks, useCreateTaskComment, useMarkDuplicate, useTasks, useUnmarkDuplicate, useUploadTaskAttachments } from './tasks'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -174,4 +174,43 @@ test('rejected bulk hook request rolls back list and detail caches', async () =>
 
   expect(client.getQueryData<PageTaskRecord>(listKey)?.items[0]).toEqual(original)
   expect(client.getQueryData<TaskRecord>(detailKey)).toEqual(original)
+})
+
+test('useMarkDuplicate posts the target and version', async () => {
+  const requests: { url: string; method: string; body: unknown }[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    requests.push({ url: request.url, method: request.method, body: request.method === 'POST' ? await request.json() : null })
+    return Response.json({ ...task('task-1', 0), duplicate_of_task_id: 'task-9', version: 2 }, { status: 200 })
+  }) as unknown as typeof fetch
+
+  const { result } = renderHook(() => useMarkDuplicate('workspace-1'), { wrapper })
+  await act(async () => {
+    await result.current.mutateAsync({ taskId: 'task-1', targetTaskId: 'task-9', version: 1 })
+  })
+
+  expect(requests[0].method).toBe('POST')
+  expect(requests[0].url).toContain('/api/v1/workspaces/workspace-1/tasks/task-1/duplicate-of')
+  expect(requests[0].body).toEqual({ target_task_id: 'task-9', expected_version: 1 })
+})
+
+test('useUnmarkDuplicate deletes the relation and clears the cached marker', async () => {
+  const methods: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    methods.push((input as Request).method)
+    return new Response(null, { status: 204 })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
+  const detailKey = queryKeys.tasks.detail('workspace-1', 'task-1')
+  client.setQueryData(detailKey, { ...task('task-1', 0), duplicate_of_task_id: 'task-9' })
+
+  const { result } = renderHook(() => useUnmarkDuplicate('workspace-1'), {
+    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
+  await act(async () => {
+    await result.current.mutateAsync({ taskId: 'task-1' })
+  })
+
+  expect(methods).toEqual(['DELETE'])
+  expect(client.getQueryData<TaskRecord>(detailKey)?.duplicate_of_task_id).toBeNull()
 })

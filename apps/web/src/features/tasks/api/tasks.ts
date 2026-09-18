@@ -20,8 +20,10 @@ import {
   listTaskAttachments,
   listTaskTrash,
   listTasks,
+  markTaskDuplicate,
   reorderTasks,
   restoreTask,
+  unmarkTaskDuplicate,
   updateComment,
   updateTask,
   uploadCommentAttachments,
@@ -339,6 +341,44 @@ export function useRestoreTask(workspaceId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.taskTrash(workspaceId) })
     },
+  })
+}
+
+/** Linear-style "Mark as duplicate": a relation plus a move to Cancelled. Nothing else moves. */
+export function useMarkDuplicate(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ taskId, targetTaskId, version }: { taskId: string; targetTaskId: string; version: number }) => {
+      const { data } = await markTaskDuplicate({
+        client: apiClient,
+        path: { workspace_id: workspaceId, task_id: taskId },
+        body: { target_task_id: targetTaskId, expected_version: version },
+        throwOnError: true,
+      })
+      return required(data, 'Mark duplicate response was empty.')
+    },
+    onError: (error) => promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })),
+    onSuccess: (record) => reconcileWorkspaceTask(queryClient, workspaceId, record),
+    // Both sides changed: the duplicate's status and marker, the canonical task's Duplicates group,
+    // and any chip that renders the duplicate struck through.
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
+  })
+}
+
+/** Removes the duplicate relation. The status is deliberately left as it is. */
+export function useUnmarkDuplicate(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ taskId }: { taskId: string }) => {
+      await unmarkTaskDuplicate({
+        client: apiClient,
+        path: { workspace_id: workspaceId, task_id: taskId },
+        throwOnError: true,
+      })
+      return taskId
+    },
+    onSuccess: (taskId) => patchWorkspaceTask(queryClient, workspaceId, taskId, { duplicate_of_task_id: null }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
   })
 }
 

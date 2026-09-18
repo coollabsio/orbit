@@ -35,6 +35,12 @@ export function restoreWorkspaceTasks(queryClient: QueryClient, snapshot: Worksp
   for (const [key, data] of snapshot.entries) queryClient.setQueryData(key, data)
 }
 
+/**
+ * Replaces the cached task with a mutation response. `duplicate_ids` and
+ * `referenced_by` are detail-read-only (mutation responses always carry `[]`),
+ * so the cached values are kept until the follow-up refetch replaces them;
+ * otherwise every autosave would blink the Duplicates and Referenced by groups.
+ */
 export function reconcileWorkspaceTask(
   queryClient: QueryClient,
   workspaceId: string,
@@ -42,7 +48,11 @@ export function reconcileWorkspaceTask(
 ): void {
   queryClient.setQueriesData(
     { queryKey: queryKeys.tasks.all(workspaceId) },
-    (data) => mapTaskData(data, record.id, () => record),
+    (data) => mapTaskData(data, record.id, (cached) => ({
+      ...record,
+      duplicate_ids: cached.duplicate_ids ?? record.duplicate_ids,
+      referenced_by: cached.referenced_by ?? record.referenced_by,
+    })),
   )
 }
 
