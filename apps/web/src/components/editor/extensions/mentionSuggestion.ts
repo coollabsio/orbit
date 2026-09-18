@@ -19,6 +19,8 @@ export type { MentionItem } from './mentionItems'
 export interface MentionContext {
   workspaceId: string
   members: () => User[]
+  /** Called with the full record when an issue is picked, before it is inserted. */
+  onPickTask?: (task: TaskRecord) => void
 }
 
 /**
@@ -72,13 +74,20 @@ export function createMentionSuggestion(
       let tasks: TaskRecord[] = []
       let items: MentionItem[] = []
       let activeIndex = 0
-      let command: ((item: MentionItem) => void) | undefined
+      let insert: ((item: MentionItem) => void) | undefined
+      const command = (item: MentionItem) => {
+        if (item.kind === 'task') {
+          const task = tasks.find((candidate) => candidate.id === item.id)
+          if (task) context.onPickTask?.(task)
+        }
+        insert?.(item)
+      }
 
       const paint = () => {
         renderer?.updateProps({
           items,
           activeIndex,
-          onSelect: (item: MentionItem) => command?.(item),
+          onSelect: command,
           onHover: (index: number) => {
             activeIndex = index
             paint()
@@ -107,7 +116,7 @@ export function createMentionSuggestion(
 
       return {
         onStart: (props: MenuProps) => {
-          command = props.command
+          insert = props.command
           renderer = new ReactRenderer(MentionList, {
             props: { items: [], activeIndex: 0, onSelect: () => {}, onHover: () => {} },
             editor: props.editor,
@@ -117,7 +126,7 @@ export function createMentionSuggestion(
           search(props.query)
         },
         onUpdate: (props: MenuProps) => {
-          command = props.command
+          insert = props.command
           if (props.query !== query) search(props.query)
         },
         onKeyDown: ({ event }) => {
@@ -134,7 +143,7 @@ export function createMentionSuggestion(
             return true
           }
           if (event.key === 'Enter' || event.key === 'Tab') {
-            command?.(items[activeIndex])
+            command(items[activeIndex])
             return true
           }
           return false

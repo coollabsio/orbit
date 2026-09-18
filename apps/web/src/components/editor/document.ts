@@ -85,3 +85,109 @@ export function taskIdentifiersInDocument(document: unknown): string[] {
   if (isNode(document)) walk(document)
   return found
 }
+
+const ALLOWED_NODES = new Set([
+  'doc', 'paragraph', 'text', 'heading', 'bulletList', 'orderedList', 'listItem', 'taskList', 'taskItem',
+  'blockquote', 'codeBlock', 'horizontalRule', 'hardBreak', 'mention', 'taskMention',
+])
+const ALLOWED_MARKS = new Set(['bold', 'italic', 'strike', 'code', 'underline', 'link'])
+
+const isHttpUrl = (value: unknown): value is string =>
+  typeof value === 'string' && /^https?:\/\//.test(value) && value.length <= 2_000
+const nonEmptyLabel = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 200
+
+/** The allowlisted attrs of one node, or `null` when a required one is unusable (the node is dropped). */
+function allowedAttrs(node: RichTextNode): Record<string, unknown> | undefined | null {
+  const attrs = node.attrs ?? {}
+  switch (node.type) {
+    case 'heading': {
+      const level = Number(attrs.level)
+      return { level: Number.isInteger(level) ? Math.min(Math.max(level, 1), 3) : 1 }
+    }
+    case 'orderedList': {
+      const start = attrs.start
+      return typeof start === 'number' && Number.isInteger(start) && start > 1 ? { start } : undefined
+    }
+    case 'codeBlock':
+      return typeof attrs.language === 'string' && attrs.language.length > 0 && attrs.language.length <= 40
+        ? { language: attrs.language }
+        : undefined
+    case 'taskItem':
+      return { checked: attrs.checked === true }
+    case 'mention':
+      return typeof attrs.id === 'string' && nonEmptyLabel(attrs.label) ? { id: attrs.id, label: attrs.label } : null
+    case 'taskMention':
+      return typeof attrs.id === 'string' && nonEmptyLabel(attrs.identifier)
+        ? { id: attrs.id, identifier: attrs.identifier }
+        : null
+    default:
+      return undefined
+  }
+}
+
+function allowedMarks(node: RichTextNode): RichTextNode['marks'] {
+  const marks: NonNullable<RichTextNode['marks']> = []
+  for (const mark of node.marks ?? []) {
+    if (!mark || !ALLOWED_MARKS.has(mark.type)) continue
+    if (mark.type !== 'link') {
+      marks.push({ type: mark.type })
+      continue
+    }
+    const href = mark.attrs?.href
+    // A link the server would reject keeps its text and loses the link.
+    if (!isHttpUrl(href)) continue
+    // Only the href is stored: every renderer opens links in a new tab with
+    // `noopener noreferrer`, and TipTap's per-mark target/rel defaults would
+    // otherwise make an untouched document look edited.
+    marks.push({ type: 'link', attrs: { href } })
+  }
+  return marks.length > 0 ? marks : undefined
+}
+
+function sanitizeNode(node: RichTextNode): RichTextNode | null {
+  if (!isNode(node) || !ALLOWED_NODES.has(node.type) || node.type === 'doc') return null
+  if (node.type === 'text') {
+    if (typeof node.text !== 'string' || node.text.length === 0) return null
+    const marks = allowedMarks(node)
+    return marks ? { type: 'text', text: node.text, marks } : { type: 'text', text: node.text }
+  }
+  const attrs = allowedAttrs(node)
+  if (attrs === null) return null
+  const content = children(node)
+    .map(sanitizeNode)
+    .filter((child): child is RichTextNode => child !== null)
+  const clean: RichTextNode = { type: node.type }
+  if (attrs) clean.attrs = attrs
+  if (content.length > 0) clean.content = content
+  return clean
+}
+
+const isBlankParagraph = (node: RichTextNode) => node.type === 'paragraph' && (node.content ?? []).length === 0
+
+/**
+ * The document exactly as the server's allowlist accepts it
+ * (`crates/orbit/src/rich_text.rs::validate`). TipTap serialises attributes the
+ * server rejects with a 422 — `orderedList.type`, the link mark's `class` and
+ * `title`, the stock mention's `mentionSuggestionChar` — so every document
+ * leaves the editor through here. Trailing blank paragraphs (the editor's
+ * trailing node) are dropped so an untouched document compares equal.
+ */
+export function toServerDocument(document: unknown): RichTextDocument {
+  const content = children(asDocument(document))
+    .map(sanitizeNode)
+    .filter((child): child is RichTextNode => child !== null)
+  while (content.length > 0 && isBlankParagraph(content[content.length - 1])) content.pop()
+  return { type: 'doc', content }
+}
+
+/** Structural equality of two documents as the server would store them. */
+export function sameDocument(a: unknown, b: unknown): boolean {
+  return JSON.stringify(toServerDocument(a)) === JSON.stringify(toServerDocument(b))
+}
+
+/** What an editor instance can load: ProseMirror needs at least one block. */
+export function editableDocument(document: unknown): RichTextDocument {
+  const clean = toServerDocument(document)
+  return clean.content && clean.content.length > 0 ? clean : { type: 'doc', content: [{ type: 'paragraph' }] }
+}

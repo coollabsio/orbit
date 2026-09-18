@@ -241,3 +241,190 @@ a.editor-chip:hover {
   max-height: 240px;
   box-shadow: none;
 }
+/* ProseMirror base rules. prosemirror-view injects these as a <style> element at
+   runtime, which the app's `style-src 'self'` CSP blocks, so they ship here. */
+.ProseMirror {
+  position: relative;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  -webkit-font-variant-ligatures: none;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0;
+  outline: none;
+}
+
+.ProseMirror [contenteditable='false'] {
+  white-space: normal;
+}
+
+.ProseMirror [contenteditable='false'] [contenteditable='true'] {
+  white-space: pre-wrap;
+}
+
+.ProseMirror pre {
+  white-space: pre-wrap;
+}
+
+.ProseMirror li {
+  position: relative;
+}
+
+.ProseMirror-hideselection *::selection {
+  background: transparent;
+}
+
+.ProseMirror-hideselection *::-moz-selection {
+  background: transparent;
+}
+
+.ProseMirror-hideselection {
+  caret-color: transparent;
+}
+
+.ProseMirror .ProseMirror-selectednode {
+  outline: 2px solid var(--accent-ring);
+}
+
+.ProseMirror-gapcursor {
+  display: none;
+  position: absolute;
+  pointer-events: none;
+}
+
+.ProseMirror-gapcursor::after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 1px solid var(--text-primary);
+}
+
+.ProseMirror-focused .ProseMirror-gapcursor {
+  display: block;
+}
+
+/* Orbit editing surface */
+.editor-shell {
+  position: relative;
+}
+
+.editor-shell-loading {
+  min-height: 72px;
+}
+
+.editor-shell-loading[data-compact] {
+  min-height: 44px;
+}
+
+.editor-surface {
+  min-height: 72px;
+  border-radius: var(--radius-md);
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text-primary);
+  transition: background 120ms ease;
+}
+
+.editor-shell[data-compact] .editor-surface {
+  min-height: 44px;
+}
+
+.editor-surface > * + * {
+  margin-top: 8px;
+}
+
+.editor-surface h1 { font-size: 17px; line-height: 24px; font-weight: 600; }
+.editor-surface h2 { font-size: 15px; line-height: 22px; font-weight: 600; }
+.editor-surface h3 { font-size: 13px; line-height: 20px; font-weight: 600; }
+
+.editor-surface ul,
+.editor-surface ol {
+  margin-left: 18px;
+}
+
+.editor-surface ul { list-style: disc; }
+.editor-surface ol { list-style: decimal; }
+
+.editor-surface ul[data-type='taskList'] {
+  margin-left: 0;
+  list-style: none;
+}
+
+.editor-surface ul[data-type='taskList'] li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.editor-surface ul[data-type='taskList'] li > label {
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.editor-surface ul[data-type='taskList'] li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-surface ul[data-type='taskList'] li[data-checked='true'] > div {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.editor-surface input[type='checkbox'],
+.editor-view input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+.editor-surface blockquote {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+
+.editor-surface pre {
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--recessed);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.editor-surface code {
+  border-radius: 4px;
+  background: var(--fill);
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.editor-surface hr {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.editor-surface a {
+  color: var(--accent);
+}
+
+/* A person mention inside the editor matches the read-only one. */
+.editor-surface .editor-mention {
+  cursor: default;
+}
+
+/* Placeholder: TipTap sets data-placeholder on the first empty node. */
+.editor-surface p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--control-placeholder);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-surface {
+    transition: none;
+  }
+}

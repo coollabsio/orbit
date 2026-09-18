@@ -4,8 +4,11 @@ import {
   IDENTIFIER_PATTERN,
   asDocument,
   documentText,
+  editableDocument,
   isEmptyDocument,
+  sameDocument,
   taskIdentifiersInDocument,
+  toServerDocument,
 } from './document'
 
 const doc = {
@@ -76,4 +79,68 @@ test('IDENTIFIER_PATTERN matches project keys and numbers, not arbitrary words',
   expect('lowercase-12'.match(IDENTIFIER_PATTERN)).toBeNull()
   expect('ORB-'.match(IDENTIFIER_PATTERN)).toBeNull()
   expect('WORD-WORD'.match(IDENTIFIER_PATTERN)).toBeNull()
+})
+
+test('toServerDocument strips the attributes TipTap emits that the server rejects', () => {
+  const fromEditor = {
+    type: 'doc',
+    content: [
+      { type: 'orderedList', attrs: { start: 1, type: null }, content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x', marks: [{ type: 'link', attrs: { href: 'https://a.test', target: '_blank', rel: 'noopener noreferrer nofollow', class: null, title: null } }] }] }] }] },
+      { type: 'orderedList', attrs: { start: 3, type: null }, content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }] },
+      { type: 'paragraph', content: [{ type: 'mention', attrs: { id: 'u1', label: 'Ada', mentionSuggestionChar: '@' } }] },
+      { type: 'codeBlock', attrs: { language: null }, content: [{ type: 'text', text: 'fn' }] },
+      { type: 'heading', attrs: { level: 5 }, content: [{ type: 'text', text: 'h' }] },
+      { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph' }] }] },
+      { type: 'paragraph' },
+      { type: 'paragraph' },
+    ],
+  }
+
+  expect(toServerDocument(fromEditor)).toEqual({
+    type: 'doc',
+    content: [
+      { type: 'orderedList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x', marks: [{ type: 'link', attrs: { href: 'https://a.test' } }] }] }] }] },
+      { type: 'orderedList', attrs: { start: 3 }, content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }] },
+      { type: 'paragraph', content: [{ type: 'mention', attrs: { id: 'u1', label: 'Ada' } }] },
+      { type: 'codeBlock', content: [{ type: 'text', text: 'fn' }] },
+      { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'h' }] },
+      { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph' }] }] },
+    ],
+  })
+})
+
+test('toServerDocument drops what cannot be made valid instead of sending it', () => {
+  const junk = {
+    type: 'doc',
+    content: [
+      { type: 'image', attrs: { src: 'x' } },
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'mail', marks: [{ type: 'link', attrs: { href: 'mailto:a@b.c' } }, { type: 'highlight' }] },
+          { type: 'mention', attrs: { label: 'no id' } },
+          { type: 'text', text: '' },
+        ],
+      },
+    ],
+  }
+
+  expect(toServerDocument(junk)).toEqual({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'mail' }] }],
+  })
+  expect(toServerDocument(null)).toEqual({ type: 'doc', content: [] })
+})
+
+test('an editor round trip with only a trailing blank line is the same document', () => {
+  const stored = { type: 'doc', content: [{ type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }] }] }] }
+  const edited = { ...stored, content: [...stored.content, { type: 'paragraph' }] }
+
+  expect(sameDocument(stored, edited)).toBe(true)
+  expect(sameDocument(stored, EMPTY_DOCUMENT)).toBe(false)
+})
+
+test('an editor always gets at least one block to put the caret in', () => {
+  expect(editableDocument(EMPTY_DOCUMENT)).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+  expect(editableDocument(doc)).toEqual(toServerDocument(doc))
 })
