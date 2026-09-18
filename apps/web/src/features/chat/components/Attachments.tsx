@@ -5,6 +5,7 @@ import { Download, Paperclip2, Xmark } from 'reicon-react'
 import type { Attachment } from '../../../mock/types'
 import { formatSize, isImage } from '../attachmentLib'
 import { ImageViewer } from './ImageViewer'
+import './Attachments.css'
 
 export function Attachments({
   attachments,

@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 56);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 59);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 76);
+    assert_eq!(operation_count, 80);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -52,6 +52,9 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/duplicate-of",
         "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments",
         "/api/v1/workspaces/{workspace_id}/notifications",
+        "/api/v1/workspaces/{workspace_id}/api-tokens",
+        "/api/v1/workspaces/{workspace_id}/api-tokens/{token_id}",
+        "/api/v1/integrations/discord/events",
     ] {
         assert!(document["paths"].get(path).is_some(), "missing {path}");
     }
@@ -59,6 +62,15 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         document["paths"]["/api/v1/workspaces/{workspace_id}/tasks"]["get"]["responses"]["default"]
             ["content"]["application/problem+json"]["schema"]["$ref"],
         "#/components/schemas/TaskProblem"
+    );
+
+    let discord = operation(&document, "/api/v1/integrations/discord/events", "post");
+    assert_eq!(discord["security"], serde_json::json!([{"bearerAuth": []}]));
+    assert!(
+        discord["responses"]["401"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("invalid_api_token")
     );
 
     let preview = operation(&document, "/api/v1/workspaces/invitations/preview", "post");

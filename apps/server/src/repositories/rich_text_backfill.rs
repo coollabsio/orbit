@@ -10,7 +10,7 @@ use orbit_platform::{DataMigration, DataMigrationFuture, Database};
 use sqlx::Row;
 
 pub const RICH_TEXT_BACKFILL: DataMigration = DataMigration {
-    after_version: 14,
+    after_version: 20,
     run: backfill,
 };
 
@@ -27,8 +27,28 @@ fn backfill(database: &Database) -> DataMigrationFuture<'_> {
             "SELECT id, body FROM task_comments WHERE body_json = ''",
             "UPDATE task_comments SET body_json = ?, body_text = ? WHERE id = ?",
         )
-        .await
+        .await?;
+        index_existing_tasks(database).await
     })
+}
+
+/// Search reads only `task_search`, which the repository fills on each write. Tasks
+/// that existed before this upgrade have never been written since, so without this
+/// they would be invisible to search until someone happened to edit each one. The
+/// workspace token matches `search_workspace_token` (the UUID without hyphens).
+/// `NOT IN` keeps a re-run from indexing a task twice.
+async fn index_existing_tasks(database: &Database) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO task_search (task_id, workspace_id, identifier, title, body) \
+         SELECT id, replace(workspace_id, '-', ''), identifier_key || '-' || number, \
+                title, description_text \
+         FROM tasks \
+         WHERE deleted_at IS NULL AND id NOT IN (SELECT task_id FROM task_search)",
+    )
+    .execute(database.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 async fn convert(database: &Database, select: &str, update: &str) -> Result<(), String> {

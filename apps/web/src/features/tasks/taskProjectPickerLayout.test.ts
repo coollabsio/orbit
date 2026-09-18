@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-test('the project picker is the terminal breadcrumb segment in the topbar', async () => {
+test('the topbar reads scope then view: project picker, then the active view title', async () => {
   const source = await Bun.file(new URL('./TasksPage.tsx', import.meta.url)).text()
 
   expect(source).not.toContain('<ProjectRail')
@@ -8,8 +8,18 @@ test('the project picker is the terminal breadcrumb segment in the topbar', asyn
 
   const left = source.slice(source.indexOf('<TopbarSlot side="left">'), source.indexOf('<TopbarSlot side="right">'))
   expect(left).toContain('tasks-project-picker')
-  expect(left).toContain("{activeProject?.name ?? 'All tasks'}")
+  expect(left).toContain("{activeProject?.name ?? 'All projects'}")
+  // The view (My tasks, Overdue, This week, ...) is the current crumb, after the picker.
+  expect(left.indexOf('tasks-project-picker')).toBeLessThan(left.indexOf('>{viewTitle}</span>'))
   expect(left.indexOf('>New project</button>')).toBeLessThan(left.indexOf('{projectSettingsLabel()}</button>'))
+})
+
+test('new projects are created in a modal rather than a browser prompt', async () => {
+  const source = await Bun.file(new URL('./TasksPage.tsx', import.meta.url)).text()
+
+  expect(source).toContain('setShowNewProject(true)')
+  expect(source).toContain('<NewProjectModal')
+  expect(source).not.toContain('window.prompt')
 })
 
 test('filters and the create action live in the right-hand topbar slot', async () => {
@@ -19,7 +29,6 @@ test('filters and the create action live in the right-hand topbar slot', async (
   expect(right).toContain('<TaskFilters')
   expect(right).toContain('aria-label="New task"')
   expect(right).toContain('Task creation failed.')
-  expect(right).toContain('Project creation failed.')
 })
 
 test('the page-local hamburger is gone now the topbar is global', async () => {

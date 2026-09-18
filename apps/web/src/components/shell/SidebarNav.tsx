@@ -6,10 +6,8 @@ import {
   Message,
   Messages2,
   Note2,
-  People,
   SearchNormal,
   Setting2,
-  ShieldTick,
   Sms,
   TaskSquare,
   Timer,
@@ -85,6 +83,16 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <span className="menu-item-label">My tasks</span>
         </NavLink>
         <NavLink
+          to="/tasks?view=current_week"
+          className={() => taskViewClass('current_week')}
+          aria-label="This week"
+          title={collapsed ? 'This week' : undefined}
+          onClick={onNavigate}
+        >
+          <Calendar size={18} />
+          <span className="menu-item-label">This week</span>
+        </NavLink>
+        <NavLink
           to="/tasks?view=overdue"
           className={() => taskViewClass('overdue')}
           aria-label="Overdue"
@@ -119,12 +127,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
         >
           <Setting2 size={18} />
           <span className="menu-item-label">Settings</span>
-        </NavLink>
-        <NavLink to="/settings/members" className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')} aria-label="Members" title={collapsed ? 'Members' : undefined} onClick={onNavigate}>
-          <People size={18} /><span className="menu-item-label">Members</span>
-        </NavLink>
-        <NavLink to="/settings/sessions" className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')} aria-label="Sessions" title={collapsed ? 'Sessions' : undefined} onClick={onNavigate}>
-          <ShieldTick size={18} /><span className="menu-item-label">Sessions</span>
         </NavLink>
       </div>
     </>

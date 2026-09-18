@@ -7,6 +7,7 @@ use orbit_platform::{
     PasswordService, TestDatabase, TimestampMillis, WorkerConfig, WorkerError,
 };
 use orbit_server::auth_routes::CookieMode;
+use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::workspaces::{RetentionServiceError, WorkspaceRepository};
 use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
@@ -1736,6 +1737,138 @@ async fn retention_service_installs_a_recurring_schedule_and_runs_it() {
     );
     shutdown.cancel();
     task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let setup = setup_owner(&identity).await;
+    let owner_cookie = format!("__Host-orbit_session={}", setup.1);
+    let project_id: String = sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at LIMIT 1").bind(&setup.0).fetch_one(database.pool()).await.unwrap();
+    let member = create_user(&database, &identity, "token-member@example.com", "Member").await;
+    let now = TimestampMillis::now().as_millis();
+    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'member', ?, ?)")
+        .bind(Id::new_v7().to_string()).bind(&setup.0).bind(member.0.to_string()).bind(now).bind(now)
+        .execute(database.pool()).await.unwrap();
+    let app = workspace_router(WorkspaceState::new(
+        Arc::clone(&identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ))
+    .layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    let path = format!("/api/v1/workspaces/{}/api-tokens", setup.0);
+
+    let forbidden = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &path,
+            &member.1,
+            json!({"name":"Discord", "project_ids": [project_id], "scopes":["write"]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    let invalid_project = app.clone().oneshot(json_request(
+        "POST",
+        &path,
+        &owner_cookie,
+        json!({"name":"Invalid project", "project_ids": [Id::new_v7().to_string()], "scopes":["write"]}),
+    )).await.unwrap();
+    assert_eq!(invalid_project.status(), StatusCode::NOT_FOUND);
+
+    let invalid_expiration = app.clone().oneshot(json_request(
+        "POST",
+        &path,
+        &owner_cookie,
+        json!({"name":"Invalid expiration", "project_ids": [project_id], "scopes":["write"], "expires_in_days": 14}),
+    )).await.unwrap();
+    assert_eq!(
+        invalid_expiration.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    let created = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &path,
+            &owner_cookie,
+            json!({"name":"Discord bot", "project_ids": [project_id], "scopes":["read", "write"]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    assert_eq!(
+        created.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    let created = response_json(created).await;
+    let token = created["token"].as_str().unwrap();
+    let token_id = created["id"].as_str().unwrap();
+    assert!(token.starts_with("orb_"));
+    assert_eq!(created["scopes"], json!(["read", "write"]));
+    assert_eq!(created["project_ids"], json!([project_id]));
+    assert_eq!(created["service_account_id"], Value::Null);
+    assert_eq!(created["service_account_name"], Value::Null);
+    assert_eq!(created["expires_at"], Value::Null);
+
+    let stored: Vec<u8> = sqlx::query_scalar("SELECT token_hash FROM api_tokens WHERE id = ?")
+        .bind(token_id)
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_ne!(stored, token.as_bytes());
+    let token_repository = ApiTokenRepository::new((*database).clone());
+    let principal = token_repository
+        .authenticate(token, ApiTokenScope::Write, TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(principal.workspace_id.to_string(), setup.0);
+    assert_eq!(principal.service_account_id, None);
+    assert_eq!(
+        principal
+            .project_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        vec![project_id]
+    );
+    let listed = app
+        .clone()
+        .oneshot(cookie_request("GET", &path, &owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed = response_json(listed).await;
+    assert_eq!(listed[0]["name"], "Discord bot");
+    assert!(listed[0].get("token").is_none());
+
+    let revoked = app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!("{path}/{token_id}"),
+            &owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+    assert!(matches!(
+        token_repository
+            .authenticate(token, ApiTokenScope::Read, TimestampMillis::now())
+            .await,
+        Err(ApiTokenError::NotFound)
+    ));
+    let listed = app
+        .oneshot(cookie_request("GET", &path, &owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(response_json(listed).await, json!([]));
 }
 
 #[tokio::test]

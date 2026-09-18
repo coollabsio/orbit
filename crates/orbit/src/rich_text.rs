@@ -576,10 +576,9 @@ pub fn markdown_to_document(markdown: &str) -> Value {
                 active.push(mark("code"));
                 push_text(&mut stack, &active, &text);
             }
-            Event::SoftBreak => {
-                push_text(&mut stack, &active_marks(&marks), " ");
-            }
-            Event::HardBreak => {
+            // CommonMark would render a lone newline as a space. Both sources we convert
+            // treat it as a line break (Orbit's old renderer and Discord), so keep it.
+            Event::SoftBreak | Event::HardBreak => {
                 if let Some(parent) = stack.last_mut() {
                     parent.2.push(serde_json::json!({ "type": "hardBreak" }));
                 }
@@ -959,5 +958,23 @@ mod tests {
         assert_eq!(markdown_to_document(""), empty_document());
         assert_eq!(markdown_to_document("   \n\n  "), empty_document());
         assert!(is_empty(&markdown_to_document("")));
+    }
+
+    #[test]
+    fn a_single_newline_stays_a_line_break_rather_than_becoming_a_space() {
+        // CommonMark renders a lone newline as a space, but both sources we convert
+        // treat it as a line break: Orbit's old renderer put every line in its own
+        // paragraph, and Discord shows every newline.
+        let document = markdown_to_document("first line\nsecond line\n\nnew paragraph");
+
+        assert_eq!(validate(&document), Ok(()));
+        assert_eq!(
+            document["content"][0]["content"][1],
+            json!({ "type": "hardBreak" })
+        );
+        assert_eq!(
+            extract_text(&document),
+            "first line\nsecond line\nnew paragraph"
+        );
     }
 }

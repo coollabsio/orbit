@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, Xmark } from 'reicon-react'
 import type { Attachment } from '../../../mock/types'
+import './ImageViewer.css'
 
 export function ImageViewer({ attachment, onClose }: { attachment: Attachment; onClose: () => void }) {
   const [zoom, setZoom] = useState(1)

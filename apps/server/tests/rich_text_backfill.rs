@@ -42,7 +42,7 @@ async fn the_backfill_converts_markdown_before_the_columns_are_dropped() {
     let runner = migration_runner();
 
     // Stop at 13: the Markdown columns still exist and the rich text ones do not.
-    runner.run_through(&database, 13).await.unwrap();
+    runner.run_through(&database, 19).await.unwrap();
     seed(&database).await;
 
     runner.run(&database).await.unwrap();

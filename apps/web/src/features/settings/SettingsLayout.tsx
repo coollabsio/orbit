@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router'
-import { Danger, People, Setting2, ShieldTick, Trash } from 'reicon-react'
+import { Danger, Key, People, Setting2, ShieldTick, Trash } from 'reicon-react'
+import { useWorkspace } from '../workspaces/workspaceContext'
 import '../shared/cards.css'
 import './settings.css'
 
@@ -16,6 +17,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: '/settings', label: 'General', icon: Setting2, end: true },
       { to: '/settings/sessions', label: 'Sessions', icon: ShieldTick },
+      { to: '/settings/api-tokens', label: 'API tokens', icon: Key },
       { to: '/tasks-trash', label: 'Trash', icon: Trash },
     ],
   },
@@ -33,6 +35,8 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
 
 /** Coolify `x-settings.layout`: sticky sub-navigation (210px) + content column. */
 export function SettingsLayout() {
+  const { workspace } = useWorkspace()
+  const canManageTokens = workspace.role === 'owner' || workspace.role === 'admin'
   return (
     <div className="page">
       <div className="pane" style={{ flex: 1, position: 'relative' }}>
@@ -47,7 +51,7 @@ export function SettingsLayout() {
                 {SECTIONS.map((section) => (
                   <div key={section.label} style={{ display: 'contents' }}>
                     <div className="nav-section">{section.label}</div>
-                    {section.items.map((item) => (
+                    {section.items.filter((item) => item.to !== '/settings/api-tokens' || canManageTokens).map((item) => (
                       <NavLink
                         key={item.to}
                         to={item.to}

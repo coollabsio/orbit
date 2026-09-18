@@ -14,11 +14,8 @@ import { ProjectRail } from './ProjectRail'
 import { TaskDetail } from './TaskDetail'
 
 const originalFetch = globalThis.fetch
-const originalPrompt = window.prompt
-
 afterEach(() => {
   globalThis.fetch = originalFetch
-  window.prompt = originalPrompt
 })
 
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
@@ -98,14 +95,15 @@ test('project creation retry selects the created project', async () => {
       created_at: '', updated_at: '', version: 0,
     }, { status: 201 })
   }) as unknown as typeof fetch
-  window.prompt = () => 'Second'
   const onSelect = mock(() => {})
   const { Wrapper } = wrapper()
   const view = render(<ProjectRail projects={[]} projectId={null} onSelect={onSelect} />, { wrapper: Wrapper })
 
-  fireEvent.click(view.getByRole('button', { name: 'New project' }))
+  await userEvent.click(view.getByRole('button', { name: 'New project' }))
+  await userEvent.type(view.getByLabelText('Project name *'), 'Second')
+  await userEvent.click(view.getByRole('button', { name: 'Create project' }))
   await view.findByRole('alert')
-  fireEvent.click(view.getByRole('button', { name: 'Retry' }))
+  await userEvent.click(view.getByRole('button', { name: 'Create project' }))
 
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith('project-2'))
 })

@@ -212,7 +212,7 @@ where
                 ));
             }
 
-            if !policy.permits(request.method(), request.headers()) {
+            if !policy.permits(request.method(), request.uri(), request.headers()) {
                 return Ok(finish_response(
                     problem_response(
                         StatusCode::FORBIDDEN,

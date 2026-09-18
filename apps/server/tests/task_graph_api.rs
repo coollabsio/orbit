@@ -675,7 +675,7 @@ async fn migration_0016_backfills_references_from_existing_documents() {
         .await
         .unwrap();
     let runner = migration_runner();
-    runner.run_through(&database, 15).await.unwrap();
+    runner.run_through(&database, 21).await.unwrap();
 
     let scope = seed_workspace(&database, "GEN").await;
     let target = seed_task(&database, &scope, "GEN", 1).await;

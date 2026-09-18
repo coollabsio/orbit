@@ -1739,15 +1739,23 @@ async fn duplicate_batches_are_rejected_and_conflicts_link_to_readable_resources
 }
 
 #[tokio::test]
-async fn mine_overdue_and_due_soon_views_use_the_authenticated_user_and_utc_day() {
+async fn saved_task_views_use_the_authenticated_user_and_utc_calendar() {
     let fixture = Fixture::new().await;
     let (member_id, member_cookie) = add_member(&fixture, "assignee@example.com").await;
     let past = TimestampMillis::from_millis(TimestampMillis::now().as_millis() - 3 * 86_400_000);
     let soon = TimestampMillis::from_millis(TimestampMillis::now().as_millis() + 2 * 86_400_000);
+    let day_ms = 86_400_000;
+    let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;
+    let days_since_epoch = start_of_utc_day / day_ms;
+    let monday = start_of_utc_day - (days_since_epoch + 3).rem_euclid(7) * day_ms;
+    let this_week = TimestampMillis::from_millis(monday + day_ms / 2);
+    let next_week = TimestampMillis::from_millis(monday + 7 * day_ms + day_ms / 2);
     for (title, assignee, due) in [
         ("Mine overdue", Some(member_id), Some(past)),
         ("Mine soon", Some(member_id), Some(soon)),
         ("Theirs overdue", None, Some(past)),
+        ("This calendar week", None, Some(this_week)),
+        ("Next calendar week", None, Some(next_week)),
         ("No date", Some(member_id), None),
     ] {
         let mut body = json!({
@@ -1852,6 +1860,31 @@ async fn mine_overdue_and_due_soon_views_use_the_authenticated_user_and_utc_day(
         .collect();
     assert!(soon_titles.contains(&"Mine soon".to_owned()));
     assert!(!soon_titles.contains(&"Mine overdue".to_owned()));
+
+    let current_week = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks?view=current_week",
+                    fixture.workspace_id
+                ),
+                &member_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let current_week_titles: Vec<_> = current_week["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(current_week_titles.contains(&"This calendar week".to_owned()));
+    assert!(!current_week_titles.contains(&"Next calendar week".to_owned()));
 }
 
 async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {

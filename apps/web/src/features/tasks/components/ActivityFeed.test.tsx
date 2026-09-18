@@ -83,3 +83,17 @@ test('the reply composer is handed the workspace members for mentions', async ()
 
   expect(reply.slice(0, reply.indexOf('/>'))).toContain('members={state.users}')
 })
+
+test('shows a service account as the activity actor', () => {
+  const serviceTask = {
+    ...task,
+    activity: [{
+      id: 'service-activity', actorId: '', actorName: 'Discord', actorServiceAccountId: 'service-1',
+      text: 'Created task', createdAt: '2026-09-17T10:00:00.000Z',
+    }],
+  }
+  const view = render(<ActivityFeed task={serviceTask} state={{ ...state, tasks: [serviceTask] }} />, { wrapper: Wrapper })
+
+  expect(view.getByText('Discord')).toBeTruthy()
+  expect(view.queryByText('Andras')).toBeNull()
+})

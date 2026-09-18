@@ -9,7 +9,10 @@ import type { StatusGroup } from '../tasksLib'
 import { TaskList } from './TaskList'
 
 const originalFetch = globalThis.fetch
-afterEach(() => { globalThis.fetch = originalFetch })
+afterEach(() => {
+  globalThis.fetch = originalFetch
+  window.localStorage.clear()
+})
 
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
 const status: TaskStatusDef = {
@@ -157,4 +160,15 @@ test('with "Show sub-issues" on, children nest under a disclosure that collapses
   expect(view.queryByText('ORB-2')).toBeNull()
   fireEvent.click(view.getByRole('button', { name: 'Expand sub-issues of ORB-1' }))
   expect(view.getByText('ORB-2')).toBeTruthy()
+})
+
+test('remembers collapsed groups after the task list reloads', () => {
+  const firstView = viewFor([task(1)])
+  fireEvent.click(firstView.getByRole('button', { name: 'Collapse Todo' }))
+  expect(firstView.getByRole('button', { name: 'Expand Todo' }).getAttribute('aria-expanded')).toBe('false')
+  firstView.unmount()
+
+  const reloadedView = viewFor([task(1)])
+  expect(reloadedView.getByRole('button', { name: 'Expand Todo' }).getAttribute('aria-expanded')).toBe('false')
+  expect(reloadedView.queryByText('Task 1')).toBeNull()
 })

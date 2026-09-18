@@ -76,8 +76,11 @@ pub struct TaskRecord {
     pub description_text: String,
     pub priority: String,
     pub position: i64,
-    #[schema(value_type = String)]
-    pub creator_id: Id,
+    #[schema(value_type = Option<String>)]
+    pub creator_id: Option<Id>,
+    #[schema(value_type = Option<String>)]
+    pub creator_service_account_id: Option<Id>,
+    pub creator_service_account_name: Option<String>,
     /// The task this one is a sub-issue of. Any depth, any project, same workspace.
     #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
@@ -183,6 +186,15 @@ pub struct CreateTask {
     pub parent_id: Option<Id>,
 }
 
+#[derive(Clone, Debug)]
+pub struct DiscordTask {
+    pub event_id: String,
+    pub payload_hash: [u8; 32],
+    pub project_id: Id,
+    pub title: String,
+    pub description: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TaskChanges {
     pub project_id: Option<Id>,
@@ -267,6 +279,8 @@ pub enum TaskError {
     },
     #[error("task operation conflicts with current state")]
     Conflict,
+    #[error("integration event conflicts with its original payload")]
+    IntegrationConflict,
     #[error("restore conflicts with the current {field}")]
     RestoreConflict { field: &'static str },
     #[error("the supplied cursor is invalid")]
@@ -1062,7 +1076,7 @@ impl TaskRepository {
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
-             tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
+             tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id FROM tasks \
              JOIN projects ON projects.id = tasks.project_id \
              WHERE tasks.workspace_id = ",
@@ -1102,7 +1116,10 @@ impl TaskRepository {
                 .push_bind(assignee_id.to_string())
                 .push(")");
         }
-        if matches!(filter.view.as_deref(), Some("overdue") | Some("due_soon")) {
+        if matches!(
+            filter.view.as_deref(),
+            Some("overdue") | Some("due_soon") | Some("current_week")
+        ) {
             let day_ms = 86_400_000;
             let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;
             query.push(
@@ -1112,12 +1129,20 @@ impl TaskRepository {
                 query
                     .push(" AND tasks.due_at < ")
                     .push_bind(start_of_utc_day);
-            } else {
+            } else if filter.view.as_deref() == Some("due_soon") {
                 query
                     .push(" AND tasks.due_at >= ")
                     .push_bind(start_of_utc_day)
                     .push(" AND tasks.due_at < ")
                     .push_bind(start_of_utc_day + 7 * day_ms);
+            } else {
+                let days_since_epoch = start_of_utc_day / day_ms;
+                let monday = start_of_utc_day - (days_since_epoch + 3).rem_euclid(7) * day_ms;
+                query
+                    .push(" AND tasks.due_at >= ")
+                    .push_bind(monday)
+                    .push(" AND tasks.due_at < ")
+                    .push_bind(monday + 7 * day_ms);
             }
         }
         if let Some(label_id) = filter.label_id {
@@ -1218,7 +1243,7 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let row = sqlx::query(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
-             tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
+             tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id FROM tasks \
              JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
@@ -1299,7 +1324,7 @@ impl TaskRepository {
             let row = sqlx::query(
                 "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, \
                  tasks.identifier_key, tasks.number, tasks.title, \
-                 tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
+                 tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, \
                  tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id FROM tasks \
                  JOIN projects ON projects.id = tasks.project_id \
                  WHERE tasks.workspace_id = ? AND tasks.identifier_key = ? AND tasks.number = ? \
@@ -1343,18 +1368,8 @@ impl TaskRepository {
         // One statement inside the enclosing BEGIN IMMEDIATE, so the counter cannot race. The
         // WHERE clause matches at most the single primary-key row; None means the project is
         // missing or soft-deleted.
-        let allocation = sqlx::query(
-            "UPDATE projects SET next_task_number = next_task_number + 1 \
-             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL \
-             RETURNING project_key, next_task_number - 1 AS number",
-        )
-        .bind(input.project_id.to_string())
-        .bind(workspace_id.to_string())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(TaskError::NotFound)?;
-        let identifier_key: String = allocation.get("project_key");
-        let number: i64 = allocation.get("number");
+        let (identifier_key, number) =
+            allocate_identifier(&mut tx, workspace_id, input.project_id).await?;
         let (description_json, description_text) =
             document_columns(&input.description_json, "description_json")?;
         let position = match input.position {
@@ -1441,7 +1456,9 @@ impl TaskRepository {
             description_text,
             priority: input.priority,
             position,
-            creator_id: actor_id,
+            creator_id: Some(actor_id),
+            creator_service_account_id: None,
+            creator_service_account_name: None,
             parent_id: input.parent_id,
             sub_issue_total: 0,
             sub_issue_done: 0,
@@ -1456,6 +1473,152 @@ impl TaskRepository {
             created_at: now,
             updated_at: now,
         })
+    }
+
+    pub async fn create_discord_task(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        service_account_id: Option<Id>,
+        input: DiscordTask,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(TaskRecord, bool), TaskError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let service_account_name = if let Some(service_account_id) = service_account_id {
+            let name = sqlx::query_scalar::<_, String>(
+                "SELECT name FROM service_accounts WHERE id = ? AND workspace_id = ? AND disabled_at IS NULL",
+            )
+            .bind(service_account_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_optional(&mut *tx)
+            .await?;
+            Some(name.ok_or(TaskError::NotFound)?)
+        } else {
+            require_access_tx(&mut tx, workspace_id, actor_id).await?;
+            None
+        };
+
+        if let Some(row) = sqlx::query(
+            "SELECT integration_events.task_id, integration_events.payload_hash, tasks.deleted_at \
+             FROM integration_events \
+             JOIN tasks ON tasks.id = integration_events.task_id \
+             WHERE integration_events.workspace_id = ? AND integration_events.provider = 'discord' AND integration_events.external_event_id = ?",
+        )
+        .bind(workspace_id.to_string())
+        .bind(&input.event_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            let task_id = parse_id(row.get("task_id"))?;
+            if row.get::<Option<i64>, _>("deleted_at").is_some() {
+                sqlx::query(
+                    "DELETE FROM integration_events WHERE workspace_id = ? AND provider = 'discord' AND external_event_id = ?",
+                )
+                .bind(workspace_id.to_string())
+                .bind(&input.event_id)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                if row.get::<Vec<u8>, _>("payload_hash") != input.payload_hash {
+                    return Err(TaskError::IntegrationConflict);
+                }
+                let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
+                tx.commit().await?;
+                return Ok((task, false));
+            }
+        }
+
+        project_in_tx(&mut tx, workspace_id, input.project_id, false).await?;
+        let status_id = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
+        )
+        .bind(workspace_id.to_string())
+        .bind(input.project_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(TaskError::NotFound)
+        .and_then(parse_id)?;
+
+        let existing_label = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM labels WHERE workspace_id = ? AND lower(name) = 'discord' ORDER BY id LIMIT 1",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let label_id = if let Some(id) = existing_label {
+            parse_id(id)?
+        } else {
+            let id = Id::new_v7();
+            sqlx::query("INSERT INTO labels (id, workspace_id, name, color, version, created_at, updated_at) VALUES (?, ?, 'Discord', '#5865F2', 0, ?, ?)")
+                .bind(id.to_string()).bind(workspace_id.to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
+            record_principal_mutation(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                service_account_id.zip(service_account_name.as_deref()),
+                "label.created",
+                "label",
+                id,
+                request_id,
+                now,
+            )
+            .await?;
+            id
+        };
+
+        let task_id = Id::new_v7();
+        let position = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM tasks WHERE workspace_id = ? AND project_id = ? AND status_id = ? AND deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string()).bind(input.project_id.to_string()).bind(status_id.to_string())
+        .fetch_one(&mut *tx).await?;
+        // Discord message text is Markdown, so it goes through the same converter the
+        // 0020 backfill uses; the stored columns are derived exactly as on any write.
+        let (identifier_key, number) =
+            allocate_identifier(&mut tx, workspace_id, input.project_id).await?;
+        let description = rich_text::markdown_to_document(&input.description);
+        let (description_json, description_text) = document_columns(&description, "description")?;
+        sqlx::query(
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, identifier_key, number, title, description_json, description_text, priority, position, creator_id, creator_service_account_id, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'none', ?, ?, ?, 0, ?, ?)",
+        )
+        .bind(task_id.to_string()).bind(workspace_id.to_string()).bind(input.project_id.to_string()).bind(status_id.to_string())
+        .bind(&identifier_key).bind(number)
+        .bind(&input.title).bind(&description_json).bind(&description_text).bind(position).bind(actor_id.to_string()).bind(service_account_id.map(|id| id.to_string())).bind(now.as_millis()).bind(now.as_millis())
+        .execute(&mut *tx).await?;
+        rebuild_task_references(&mut tx, workspace_id, "task", task_id, &description).await?;
+        sync_task_search(
+            &mut tx,
+            workspace_id,
+            task_id,
+            &format!("{identifier_key}-{number}"),
+            &input.title,
+            &description_text,
+        )
+        .await?;
+        sqlx::query("INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)")
+            .bind(task_id.to_string())
+            .bind(label_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO integration_events (workspace_id, provider, external_event_id, payload_hash, task_id, created_at) VALUES (?, 'discord', ?, ?, ?, ?)")
+            .bind(workspace_id.to_string()).bind(&input.event_id).bind(input.payload_hash.to_vec()).bind(task_id.to_string()).bind(now.as_millis())
+            .execute(&mut *tx).await?;
+        record_principal_mutation(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            service_account_id.zip(service_account_name.as_deref()),
+            "task.created",
+            "task",
+            task_id,
+            request_id,
+            now,
+        )
+        .await?;
+        let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
+        tx.commit().await?;
+        Ok((task, true))
     }
 
     pub async fn update_task(
@@ -1819,7 +1982,7 @@ impl TaskRepository {
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id \
+            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id \
              FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
         );
         query
@@ -2455,6 +2618,28 @@ fn priority_rank(priority: &str) -> i64 {
     }
 }
 
+/// Issues the next `KEY-n` for a project. One statement inside the caller's
+/// BEGIN IMMEDIATE, so the counter cannot race. `NotFound` means the project is
+/// missing or soft-deleted. Every task-creating path must go through this: the
+/// `tasks_require_identifier_insert` trigger rejects a task without one.
+async fn allocate_identifier(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    project_id: Id,
+) -> Result<(String, i64), TaskError> {
+    let allocation = sqlx::query(
+        "UPDATE projects SET next_task_number = next_task_number + 1 \
+         WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL \
+         RETURNING project_key, next_task_number - 1 AS number",
+    )
+    .bind(project_id.to_string())
+    .bind(workspace_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(TaskError::NotFound)?;
+    Ok((allocation.get("project_key"), allocation.get("number")))
+}
+
 /// Validates a client document and derives its stored columns. The server never
 /// trusts a client-supplied text field: `description_text` / `body_text` and the
 /// fts5 body always come from `extract_text` on the document that was stored.
@@ -2961,6 +3146,51 @@ async fn record_mutation(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn record_principal_mutation(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    actor_id: Id,
+    service_account: Option<(Id, &str)>,
+    action: &str,
+    resource_type: &str,
+    resource_id: Id,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<(), TaskError> {
+    if let Some((service_account_id, service_account_name)) = service_account {
+        audit::record(
+            tx,
+            workspace_id,
+            None,
+            action,
+            AuditOutcome::Success,
+            resource_type,
+            Some(resource_id),
+            request_id,
+            json!({
+                "actor_service_account_id": service_account_id,
+                "actor_service_account_name": service_account_name,
+            }),
+            now,
+        )
+        .await?;
+        Ok(())
+    } else {
+        record_mutation(
+            tx,
+            workspace_id,
+            actor_id,
+            action,
+            resource_type,
+            resource_id,
+            request_id,
+            now,
+        )
+        .await
+    }
+}
+
 fn is_unique_violation(result: &Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error>) -> bool {
     matches!(result, Err(sqlx::Error::Database(error)) if error.is_unique_violation())
 }
@@ -3018,7 +3248,7 @@ async fn task_in_tx(
     deleted: bool,
 ) -> Result<TaskRecord, TaskError> {
     let row = sqlx::query(
-        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id \
+        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id \
          FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
          AND ((? = 1 AND tasks.deleted_at IS NOT NULL) OR (? = 0 AND tasks.deleted_at IS NULL)) AND (? = 1 OR projects.deleted_at IS NULL)",
     )
@@ -3221,6 +3451,10 @@ fn task_record_from_row(
         (Some(identifier_key), Some(number)) => (identifier_key, number),
         _ => return Err(TaskError::Conflict),
     };
+    let creator_service_account_id = row
+        .get::<Option<String>, _>("creator_service_account_id")
+        .map(parse_id)
+        .transpose()?;
     Ok(TaskRecord {
         id,
         workspace_id: parse_id(row.get("workspace_id"))?,
@@ -3235,7 +3469,13 @@ fn task_record_from_row(
         description_text: row.get("description_text"),
         priority: row.get("priority"),
         position: row.get("position"),
-        creator_id: parse_id(row.get("creator_id"))?,
+        creator_id: if creator_service_account_id.is_some() {
+            None
+        } else {
+            Some(parse_id(row.get("creator_id"))?)
+        },
+        creator_service_account_id,
+        creator_service_account_name: row.get("creator_service_account_name"),
         parent_id: row
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)

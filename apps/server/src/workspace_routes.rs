@@ -20,6 +20,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::{CookieMode, issued_session_cookie};
+use crate::repositories::api_tokens::{
+    ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
+};
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository, SuspensionError};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 
@@ -27,6 +30,7 @@ use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, Worksp
 pub struct WorkspaceState {
     identity: Arc<IdentityRepository>,
     workspaces: Arc<WorkspaceRepository>,
+    api_tokens: Arc<ApiTokenRepository>,
     public_origin: String,
     cookie_mode: CookieMode,
     passwords: PasswordExecutor,
@@ -42,6 +46,7 @@ impl WorkspaceState {
         cookie_mode: CookieMode,
     ) -> Self {
         Self {
+            api_tokens: Arc::new(ApiTokenRepository::new(identity.database().clone())),
             workspaces: Arc::new(WorkspaceRepository::new(identity.database().clone())),
             identity,
             public_origin: public_origin.trim_end_matches('/').to_owned(),
@@ -62,6 +67,7 @@ impl WorkspaceState {
         backups: BackupService,
     ) -> Self {
         Self {
+            api_tokens: Arc::new(ApiTokenRepository::new(identity.database().clone())),
             identity,
             workspaces,
             public_origin: public_origin.trim_end_matches('/').to_owned(),
@@ -120,6 +126,14 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             delete(revoke_invitation),
         )
         .route("/api/v1/workspaces/{workspace_id}/audit", get(list_audit))
+        .route(
+            "/api/v1/workspaces/{workspace_id}/api-tokens",
+            get(list_api_tokens).post(create_api_token),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/api-tokens/{token_id}",
+            delete(revoke_api_token),
+        )
         .route(
             "/api/v1/admin/users/{user_id}/suspension",
             post(set_account_suspension),
@@ -327,6 +341,154 @@ async fn list_members(
         .await
         .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
     Ok(Json(Page { items, next_cursor }))
+}
+
+#[derive(Clone, Copy, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+enum ApiTokenScope {
+    Read,
+    Write,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateApiTokenBody {
+    name: String,
+    #[serde(default)]
+    service_account: bool,
+    expires_in_days: Option<u16>,
+    #[serde(default)]
+    project_ids: Vec<String>,
+    project_id: Option<String>,
+    scopes: Vec<ApiTokenScope>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/api-tokens", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<ApiTokenRecord>)))]
+async fn list_api_tokens(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<ApiTokenRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/api-tokens");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    state
+        .api_tokens
+        .list(workspace_id, session.user.id)
+        .await
+        .map(Json)
+        .map_err(|error| api_token_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/api-tokens", params(("workspace_id" = String, Path)), request_body = CreateApiTokenBody, responses((status = 201, body = IssuedApiToken)))]
+async fn create_api_token(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CreateApiTokenBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/api-tokens");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let name = body.name.trim();
+    let mut requested_project_ids = body.project_ids;
+    if let Some(project_id) = body.project_id {
+        requested_project_ids.push(project_id);
+    }
+    let mut project_ids = Vec::new();
+    for id in requested_project_ids {
+        let id = parse_id(&id, &instance, request_id.as_ref())?;
+        if !project_ids.contains(&id) {
+            project_ids.push(id);
+        }
+    }
+    if name.is_empty()
+        || name.chars().count() > 100
+        || project_ids.is_empty()
+        || body.scopes.is_empty()
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_api_token",
+            "Invalid API token",
+            "Token names must contain 1 to 100 characters, and at least one project and scope are required.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let can_read = body
+        .scopes
+        .iter()
+        .any(|scope| matches!(scope, ApiTokenScope::Read));
+    let can_write = body
+        .scopes
+        .iter()
+        .any(|scope| matches!(scope, ApiTokenScope::Write));
+    let now = TimestampMillis::now();
+    let expires_at = match body.expires_in_days {
+        None => None,
+        Some(days @ (7 | 30 | 90 | 365)) => Some(TimestampMillis::from_millis(
+            now.as_millis() + i64::from(days) * 24 * 60 * 60 * 1_000,
+        )),
+        Some(_) => {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_api_token",
+                "Invalid API token",
+                "Token expiration must be 7, 30, 90, or 365 days, or omitted for no expiration.",
+                instance,
+                request_id.as_ref(),
+            ));
+        }
+    };
+    let issued = state
+        .api_tokens
+        .create(
+            workspace_id,
+            session.user.id,
+            name.to_owned(),
+            project_ids,
+            can_read,
+            can_write,
+            body.service_account,
+            expires_at,
+            request_id_value(request_id.as_ref()),
+            now,
+        )
+        .await
+        .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;
+    let mut response = (StatusCode::CREATED, Json(issued)).into_response();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/api-tokens/{token_id}", params(("workspace_id" = String, Path), ("token_id" = String, Path)), responses((status = 204)))]
+async fn revoke_api_token(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, token_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/api-tokens/{token_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let token_id = parse_id(&token_id, &instance, request_id.as_ref())?;
+    state
+        .api_tokens
+        .revoke(
+            workspace_id,
+            token_id,
+            session.user.id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| api_token_problem(error, instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Clone, Copy, Deserialize, ToSchema)]
@@ -1194,6 +1356,40 @@ fn nonempty_name(
         ));
     }
     Ok(name.to_owned())
+}
+
+fn api_token_problem(
+    error: ApiTokenError,
+    instance: impl Into<String>,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    let instance = instance.into();
+    match error {
+        ApiTokenError::NotFound => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "workspace_resource_not_found",
+            "Workspace resource not found",
+            "The requested workspace resource was not found.",
+            instance,
+            request_id,
+        ),
+        ApiTokenError::Forbidden => ApiError::new(
+            StatusCode::FORBIDDEN,
+            "workspace_action_forbidden",
+            "Workspace action forbidden",
+            "Only workspace owners and administrators may manage API tokens.",
+            instance,
+            request_id,
+        ),
+        ApiTokenError::Unavailable(_) | ApiTokenError::InvalidIdentifier => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id,
+        ),
+    }
 }
 
 fn workspace_problem(

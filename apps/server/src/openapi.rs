@@ -47,10 +47,14 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::restore_workspace,
         crate::workspace_routes::list_trash,
         crate::workspace_routes::list_audit,
+        crate::workspace_routes::list_api_tokens,
+        crate::workspace_routes::create_api_token,
+        crate::workspace_routes::revoke_api_token,
         crate::workspace_routes::set_account_suspension,
         crate::workspace_routes::list_global_audit,
         crate::workspace_routes::export_global_audit,
         crate::workspace_routes::create_backup,
+        crate::integration_routes::create_discord_event,
         crate::task_routes::list_projects,
         crate::task_routes::create_project,
         crate::task_routes::update_project,
@@ -111,6 +115,16 @@ impl Modify for ProblemDetails {
                 "cookieAuth",
                 SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new("__Host-orbit_session"))),
             );
+        openapi
+            .components
+            .as_mut()
+            .expect("OpenAPI components exist")
+            .add_security_scheme(
+                "bearerAuth",
+                SecurityScheme::Http(utoipa::openapi::security::Http::new(
+                    utoipa::openapi::security::HttpAuthScheme::Bearer,
+                )),
+            );
 
         for (route, path) in &mut openapi.paths.paths {
             for operation in [
@@ -128,7 +142,9 @@ impl Modify for ProblemDetails {
             {
                 let schema = problem_schema(route);
                 let operation_id = operation.operation_id.clone().unwrap_or_default();
-                operation.security = Some(if public_operation(&operation_id) {
+                operation.security = Some(if operation_id == "create_discord_event" {
+                    vec![SecurityRequirement::new("bearerAuth", Vec::<String>::new())]
+                } else if public_operation(&operation_id) {
                     vec![SecurityRequirement::default()]
                 } else if operation_id == "accept_invitation" {
                     vec![
@@ -169,7 +185,9 @@ impl Modify for ProblemDetails {
 }
 
 fn problem_schema(route: &str) -> &'static str {
-    if route.contains("/attachments") {
+    if route.contains("/integrations/discord") {
+        "TaskProblem"
+    } else if route.contains("/attachments") {
         "AttachmentProblem"
     } else if route.contains("/tasks") || route.contains("/projects") || route.contains("/labels") {
         "TaskProblem"
@@ -198,10 +216,10 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
     add_code(&mut responses, "409", "contract_mismatch");
     add_code(&mut responses, "413", "request_too_large");
     add_code(&mut responses, "500", "internal_error");
-    if unsafe_operation(operation_id) {
+    if unsafe_operation(operation_id) && operation_id != "create_discord_event" {
         add_code(&mut responses, "403", "origin_forbidden");
     }
-    if !public_operation(operation_id) {
+    if !public_operation(operation_id) && operation_id != "create_discord_event" {
         add_code(&mut responses, "401", "authentication_required");
     }
     if invalid_request_operation(operation_id) {
@@ -237,6 +255,14 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "invalid_password");
             add_code(&mut responses, "429", "invitation_registration_throttled");
         }
+        "create_discord_event" => {
+            add_code(&mut responses, "401", "api_token_required");
+            add_code(&mut responses, "401", "invalid_api_token");
+            add_code(&mut responses, "403", "api_token_scope_forbidden");
+            add_code(&mut responses, "409", "integration_event_conflict");
+            add_code(&mut responses, "422", "validation_failed");
+            add_code(&mut responses, "422", "integration_project_unavailable");
+        }
         "create_workspace" => add_code(&mut responses, "422", "invalid_workspace_name"),
         "get_workspace" => add_code(&mut responses, "404", "workspace_resource_not_found"),
         "rename_workspace" => {
@@ -257,7 +283,8 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "workspace_conflict");
             add_code(&mut responses, "422", "invalid_email");
         }
-        "list_invitations" | "list_audit" => {
+        "list_invitations" | "list_audit" | "list_api_tokens" | "create_api_token"
+        | "revoke_api_token" => {
             add_code(&mut responses, "403", "workspace_action_forbidden");
             add_code(&mut responses, "404", "workspace_resource_not_found");
         }
@@ -317,7 +344,8 @@ fn unsafe_operation(operation_id: &str) -> bool {
 fn invalid_request_operation(operation_id: &str) -> bool {
     matches!(
         operation_id,
-        "setup_complete"
+        "create_discord_event"
+            | "setup_complete"
             | "login"
             | "update_me"
             | "change_password"
@@ -336,6 +364,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "delete_workspace"
             | "restore_workspace"
             | "list_audit"
+            | "list_api_tokens"
+            | "create_api_token"
+            | "revoke_api_token"
             | "set_account_suspension"
             | "list_global_audit"
             | "export_global_audit"

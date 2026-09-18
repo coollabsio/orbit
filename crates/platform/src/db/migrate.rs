@@ -185,24 +185,60 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0012_notifications.sql"),
                     false,
                 ),
+                // 13-18 shipped on main first, so they keep their numbers. This branch's
+                // migrations follow them (they were numbered 13-16 before the merge).
                 Migration::new(
                     13,
-                    include_str!("../../../../apps/server/migrations/0013_task_identity.sql"),
+                    include_str!("../../../../apps/server/migrations/0013_api_tokens.sql"),
                     false,
                 ),
                 Migration::new(
                     14,
-                    include_str!("../../../../apps/server/migrations/0014_rich_text.sql"),
-                    true,
+                    include_str!("../../../../apps/server/migrations/0014_api_token_projects.sql"),
+                    false,
                 ),
                 Migration::new(
                     15,
-                    include_str!("../../../../apps/server/migrations/0015_drop_markdown.sql"),
-                    true,
+                    include_str!("../../../../apps/server/migrations/0015_discord_integration.sql"),
+                    false,
                 ),
                 Migration::new(
                     16,
-                    include_str!("../../../../apps/server/migrations/0016_task_graph.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0016_api_token_projects_many.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    17,
+                    include_str!("../../../../apps/server/migrations/0017_service_accounts.sql"),
+                    false,
+                ),
+                Migration::new(
+                    18,
+                    include_str!(
+                        "../../../../apps/server/migrations/0018_api_token_expiration.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    19,
+                    include_str!("../../../../apps/server/migrations/0019_task_identity.sql"),
+                    false,
+                ),
+                Migration::new(
+                    20,
+                    include_str!("../../../../apps/server/migrations/0020_rich_text.sql"),
+                    true,
+                ),
+                Migration::new(
+                    21,
+                    include_str!("../../../../apps/server/migrations/0021_drop_markdown.sql"),
+                    true,
+                ),
+                Migration::new(
+                    22,
+                    include_str!("../../../../apps/server/migrations/0022_task_graph.sql"),
                     false,
                 ),
             ],

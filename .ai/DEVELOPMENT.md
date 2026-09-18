@@ -14,7 +14,7 @@ just setup
 just dev
 ```
 
-`just dev` starts Orbit at `http://127.0.0.1:8080` and Vite at `http://127.0.0.1:8888`. Vite proxies `/api` to the Rust server. The recipe records and stops only its own child processes.
+`just dev` starts Orbit at `http://127.0.0.1:8080` and Vite at `http://127.0.0.1:8888`. Vite proxies `/api` to the Rust server. Vite updates frontend code with hot module replacement. A lightweight watcher rebuilds and restarts the Rust server when backend source, migration, or Cargo files change. It runs pending migrations and idempotent development seeding before each backend start, so schema changes do not require a manual restart. The recipe records and stops only its own child processes.
 
 `just db-reset` is an explicit development-only destructive reset. `just seed` is idempotent and prints the local seed account credentials after creating a representative workspace, project, workflow, and task.
 
