@@ -10335,6 +10335,13 @@
               "type": "string"
             }
           },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Omit to leave unchanged, `null` to detach, an id to (re-)parent."
+          },
           "position": {
             "type": [
               "integer",
@@ -10521,6 +10528,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Make the new task a sub-issue of this task."
           },
           "position": {
             "type": [
@@ -11418,6 +11432,13 @@
                   "type": "integer",
                   "format": "int64"
                 },
+                "parent_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The task this one is a sub-issue of. Any depth, any project, same workspace."
+                },
                 "position": {
                   "type": "integer",
                   "format": "int64"
@@ -12166,6 +12187,13 @@
             "type": "integer",
             "format": "int64"
           },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task this one is a sub-issue of. Any depth, any project, same workspace."
+          },
           "position": {
             "type": "integer",
             "format": "int64"
@@ -12237,6 +12265,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Omit to leave unchanged, `null` to detach, an id to (re-)parent."
           },
           "position": {
             "type": [

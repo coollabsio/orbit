@@ -108,6 +108,10 @@ export type BulkItem = {
     expected_version: number;
     id: string;
     label_ids?: Array<string> | null;
+    /**
+     * Omit to leave unchanged, `null` to detach, an id to (re-)parent.
+     */
+    parent_id?: string | null;
     position?: number | null;
     priority?: string | null;
     project_id?: string | null;
@@ -161,6 +165,10 @@ export type CreateTaskBody = {
     };
     due_at?: string | null;
     label_ids?: Array<string>;
+    /**
+     * Make the new task a sub-issue of this task.
+     */
+    parent_id?: string | null;
     position?: number | null;
     priority?: string;
     project_id: string;
@@ -385,6 +393,10 @@ export type PageTaskRecord = {
         identifier_key: string;
         label_ids: Array<string>;
         number: number;
+        /**
+         * The task this one is a sub-issue of. Any depth, any project, same workspace.
+         */
+        parent_id?: string | null;
         position: number;
         priority: string;
         project_id: string;
@@ -586,6 +598,10 @@ export type TaskRecord = {
     identifier_key: string;
     label_ids: Array<string>;
     number: number;
+    /**
+     * The task this one is a sub-issue of. Any depth, any project, same workspace.
+     */
+    parent_id?: string | null;
     position: number;
     priority: string;
     project_id: string;
@@ -604,6 +620,10 @@ export type TaskUpdateBody = {
     due_at?: string | null;
     expected_version: number;
     label_ids?: Array<string> | null;
+    /**
+     * Omit to leave unchanged, `null` to detach, an id to (re-)parent.
+     */
+    parent_id?: string | null;
     position?: number | null;
     priority?: string | null;
     project_id?: string | null;

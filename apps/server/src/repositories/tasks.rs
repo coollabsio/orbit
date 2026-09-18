@@ -1,4 +1,4 @@
-use orbit_domain::{DomainError, StatusCategory, rich_text};
+use orbit_domain::{DomainError, MAX_PARENT_DEPTH, StatusCategory, check_parent_edge, rich_text};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -76,6 +76,9 @@ pub struct TaskRecord {
     pub position: i64,
     #[schema(value_type = String)]
     pub creator_id: Id,
+    /// The task this one is a sub-issue of. Any depth, any project, same workspace.
+    #[schema(value_type = Option<String>)]
+    pub parent_id: Option<Id>,
     #[schema(value_type = Vec<String>)]
     pub assignee_ids: Vec<Id>,
     #[schema(value_type = Vec<String>)]
@@ -145,6 +148,7 @@ pub struct CreateTask {
     pub assignee_ids: Vec<Id>,
     pub label_ids: Vec<Id>,
     pub due_at: Option<TimestampMillis>,
+    pub parent_id: Option<Id>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -158,6 +162,8 @@ pub struct TaskChanges {
     pub assignee_ids: Option<Vec<Id>>,
     pub label_ids: Option<Vec<Id>>,
     pub due_at: Option<Option<TimestampMillis>>,
+    /// Outer `Some` = field present, inner `None` = detach from the parent.
+    pub parent_id: Option<Option<Id>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1014,7 +1020,7 @@ impl TaskRepository {
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
              tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
-             tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
+             tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id FROM tasks \
              JOIN projects ON projects.id = tasks.project_id \
              WHERE tasks.workspace_id = ",
         );
@@ -1157,7 +1163,7 @@ impl TaskRepository {
         let row = sqlx::query(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
              tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
-             tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
+             tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id FROM tasks \
              JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
         )
@@ -1185,7 +1191,7 @@ impl TaskRepository {
                 "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, \
                  tasks.identifier_key, tasks.number, tasks.title, \
                  tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
-                 tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
+                 tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id FROM tasks \
                  JOIN projects ON projects.id = tasks.project_id \
                  WHERE tasks.workspace_id = ? AND tasks.identifier_key = ? AND tasks.number = ? \
                  AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
@@ -1216,6 +1222,9 @@ impl TaskRepository {
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
         validate_assignees(&mut tx, workspace_id, &input.assignee_ids).await?;
         validate_labels(&mut tx, workspace_id, &input.label_ids).await?;
+        if let Some(parent_id) = input.parent_id {
+            resolve_parent_tx(&mut tx, workspace_id, id, parent_id).await?;
+        }
         // One statement inside the enclosing BEGIN IMMEDIATE, so the counter cannot race. The
         // WHERE clause matches at most the single primary-key row; None means the project is
         // missing or soft-deleted.
@@ -1245,8 +1254,8 @@ impl TaskRepository {
             .await?,
         };
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, identifier_key, number, title, description_json, description_text, priority, position, creator_id, due_at, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, identifier_key, number, title, description_json, description_text, priority, position, creator_id, due_at, parent_id, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -1261,6 +1270,7 @@ impl TaskRepository {
         .bind(position)
         .bind(actor_id.to_string())
         .bind(input.due_at.map(TimestampMillis::as_millis))
+        .bind(input.parent_id.map(|id| id.to_string()))
         .bind(now.as_millis())
         .bind(now.as_millis())
         .execute(&mut *tx)
@@ -1316,6 +1326,7 @@ impl TaskRepository {
             priority: input.priority,
             position,
             creator_id: actor_id,
+            parent_id: input.parent_id,
             assignee_ids: input.assignee_ids,
             label_ids: input.label_ids,
             due_at: input.due_at,
@@ -1526,7 +1537,7 @@ impl TaskRepository {
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id \
              FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
         );
         query
@@ -1894,6 +1905,12 @@ async fn update_task_in_tx(
     if let Some(labels) = &update.changes.label_ids {
         validate_labels(tx, workspace_id, labels).await?;
     }
+    let parent_id = update.changes.parent_id.unwrap_or(current.parent_id);
+    if let Some(parent_id) = parent_id
+        && Some(parent_id) != current.parent_id
+    {
+        resolve_parent_tx(tx, workspace_id, update.id, parent_id).await?;
+    }
     let title = update
         .changes
         .title
@@ -1912,8 +1929,8 @@ async fn update_task_in_tx(
         .unwrap_or(current.priority.clone());
     let position = update.changes.position.unwrap_or(current.position);
     let due_at = update.changes.due_at.unwrap_or(current.due_at);
-    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description_json = ?, description_text = ?, priority = ?, position = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
-        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description_json).bind(&description_text).bind(&priority).bind(position).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description_json = ?, description_text = ?, priority = ?, position = ?, due_at = ?, parent_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
+        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description_json).bind(&description_text).bind(&priority).bind(position).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_id.map(|id| id.to_string())).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
     if let Some(assignees) = &update.changes.assignee_ids {
         let added: Vec<Id> = assignees
             .iter()
@@ -1958,6 +1975,7 @@ async fn update_task_in_tx(
         priority,
         position,
         due_at,
+        parent_id,
         assignee_ids: update
             .changes
             .assignee_ids
@@ -2327,6 +2345,47 @@ async fn require_task_tx(
     }
 }
 
+/// Bounded ancestor walk, closest first: the proposed parent, then its parent,
+/// and so on, stopping at `MAX_PARENT_DEPTH` rows so a pathological chain can
+/// never scan without limit.
+const PARENT_WALK_SQL: &str = "WITH RECURSIVE ancestors(id, depth) AS ( \
+     SELECT ?, 1 \
+     UNION ALL \
+     SELECT tasks.parent_id, ancestors.depth + 1 FROM tasks JOIN ancestors ON tasks.id = ancestors.id \
+     WHERE tasks.workspace_id = ? AND tasks.parent_id IS NOT NULL AND ancestors.depth < ? \
+ ) SELECT id FROM ancestors ORDER BY depth";
+
+/// Bounded parent walk + domain rule. Runs inside the write transaction so the
+/// graph cannot change between the check and the write.
+async fn resolve_parent_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    child_id: Id,
+    parent_id: Id,
+) -> Result<(), TaskError> {
+    let exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tasks WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+    )
+    .bind(parent_id.to_string())
+    .bind(workspace_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    if exists != 1 {
+        return Err(TaskError::Invalid { field: "parent_id" });
+    }
+    let ancestors = sqlx::query_scalar::<_, String>(PARENT_WALK_SQL)
+        .bind(parent_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(MAX_PARENT_DEPTH as i64)
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    check_parent_edge(child_id, parent_id, &ancestors)
+        .map_err(|_| TaskError::Invalid { field: "parent_id" })
+}
+
 async fn validate_project_status(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
@@ -2627,7 +2686,7 @@ async fn task_in_tx(
     deleted: bool,
 ) -> Result<TaskRecord, TaskError> {
     let row = sqlx::query(
-        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description_json, tasks.description_text, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, tasks.parent_id \
          FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
          AND ((? = 1 AND tasks.deleted_at IS NOT NULL) OR (? = 0 AND tasks.deleted_at IS NULL)) AND (? = 1 OR projects.deleted_at IS NULL)",
     )
@@ -2780,6 +2839,10 @@ fn task_record_from_row(
         priority: row.get("priority"),
         position: row.get("position"),
         creator_id: parse_id(row.get("creator_id"))?,
+        parent_id: row
+            .get::<Option<String>, _>("parent_id")
+            .map(parse_id)
+            .transpose()?,
         assignee_ids,
         label_ids,
         due_at: row

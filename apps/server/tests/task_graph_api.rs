@@ -1,4 +1,148 @@
-use orbit_platform::{Id, TestDatabase};
+use std::sync::Arc;
+
+use axum::body::{Body, to_bytes};
+use axum::http::{Request, StatusCode, header};
+use orbit_platform::{Id, PasswordService, TestDatabase, TimestampMillis};
+use orbit_server::auth_routes::CookieMode;
+use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use orbit_server::task_routes::{TaskState, task_router};
+use serde_json::{Value, json};
+use tower::ServiceExt;
+
+struct Fixture {
+    database: TestDatabase,
+    app: axum::Router,
+    workspace_id: String,
+    project_id: String,
+    status_id: String,
+    owner_cookie: String,
+}
+
+impl Fixture {
+    async fn new() -> Self {
+        let database = TestDatabase::new().await.unwrap();
+        let identity = Arc::new(IdentityRepository::new((*database).clone()));
+        let now = TimestampMillis::now();
+        identity
+            .store_setup_token(
+                "operator-secret",
+                TimestampMillis::from_millis(now.as_millis() + 60_000),
+            )
+            .await
+            .unwrap();
+        let setup = identity
+            .complete_setup(
+                SetupRequest {
+                    token: "operator-secret".to_owned(),
+                    email: "owner@example.com".to_owned(),
+                    display_name: "Owner".to_owned(),
+                    password_hash: PasswordService::default()
+                        .hash("correct horse battery")
+                        .unwrap(),
+                    workspace_name: "Orbit".to_owned(),
+                    project_name: "General".to_owned(),
+                },
+                now,
+            )
+            .await
+            .unwrap();
+        let status_id: String = sqlx::query_scalar(
+            "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+        )
+        .bind(setup.project_id.to_string())
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        let app = task_router(TaskState::new(Arc::clone(&identity), CookieMode::secure()));
+        Self {
+            database,
+            app,
+            workspace_id: setup.workspace_id.to_string(),
+            project_id: setup.project_id.to_string(),
+            status_id,
+            owner_cookie: format!("__Host-orbit_session={}", setup.session.token),
+        }
+    }
+
+    async fn create_task(&self, title: &str) -> Value {
+        self.create_task_with(json!({ "title": title })).await
+    }
+
+    async fn create_task_with(&self, extra: Value) -> Value {
+        let mut body = json!({
+            "project_id": self.project_id,
+            "status_id": self.status_id,
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let response = self
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/tasks", self.workspace_id),
+                &self.owner_cookie,
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        response_json(response).await
+    }
+
+    fn task_path(&self, task: &Value) -> String {
+        format!(
+            "/api/v1/workspaces/{}/tasks/{}",
+            self.workspace_id,
+            task["id"].as_str().unwrap()
+        )
+    }
+
+    async fn patch(&self, task: &Value, body: Value) -> axum::response::Response {
+        self.app
+            .clone()
+            .oneshot(json_request(
+                "PATCH",
+                &self.task_path(task),
+                &self.owner_cookie,
+                body,
+            ))
+            .await
+            .unwrap()
+    }
+
+    async fn get(&self, uri: &str) -> axum::response::Response {
+        self.app
+            .clone()
+            .oneshot(cookie_request("GET", uri, &self.owner_cookie))
+            .await
+            .unwrap()
+    }
+}
+
+fn json_request(method: &str, uri: &str, cookie: &str, value: Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, cookie)
+        .body(Body::from(value.to_string()))
+        .unwrap()
+}
+
+fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, cookie)
+        .body(Body::empty())
+        .unwrap()
+}
+
+async fn response_json(response: axum::response::Response) -> Value {
+    serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
 
 #[tokio::test]
 async fn migration_0016_adds_parent_column_indexes_and_graph_tables() {
@@ -141,4 +285,119 @@ async fn parent_trigger_rejects_cross_workspace_and_self_parenting() {
     .execute(database.pool())
     .await;
     assert!(reference.is_err(), "cross-workspace reference must abort");
+}
+
+#[tokio::test]
+async fn sub_issue_parent_is_accepted_and_cycles_are_refused() {
+    let fixture = Fixture::new().await;
+    let parent = fixture.create_task("Parent").await;
+    let child = fixture.create_task("Child").await;
+    let grandchild = fixture.create_task("Grandchild").await;
+
+    let response = fixture
+        .patch(
+            &child,
+            json!({"expected_version": 0, "parent_id": parent["id"]}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["parent_id"], parent["id"]);
+
+    let response = fixture
+        .patch(
+            &grandchild,
+            json!({"expected_version": 0, "parent_id": child["id"]}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // three-task cycle: parent -> child -> grandchild, now parent under grandchild
+    let response = fixture
+        .patch(
+            &parent,
+            json!({"expected_version": 0, "parent_id": grandchild["id"]}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let problem = response_json(response).await;
+    assert_eq!(problem["code"], "validation_failed");
+    assert_eq!(problem["detail"], "parent_id");
+
+    // self-parenting never reaches SQLite
+    let response = fixture
+        .patch(
+            &parent,
+            json!({"expected_version": 0, "parent_id": parent["id"]}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // an unknown or malformed parent is a validation failure, not a 404
+    for bogus in [Id::new_v7().to_string(), "not-an-id".to_owned()] {
+        let response = fixture
+            .patch(&parent, json!({"expected_version": 0, "parent_id": bogus}))
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response_json(response).await["detail"], "parent_id");
+    }
+
+    // an edit that leaves parent_id out keeps it
+    let response = fixture
+        .patch(&child, json!({"expected_version": 1, "title": "Child!"}))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["parent_id"], parent["id"]);
+
+    // the detail read carries the stored edge
+    let detail = response_json(fixture.get(&fixture.task_path(&grandchild)).await).await;
+    assert_eq!(detail["parent_id"], child["id"]);
+
+    // detaching clears it
+    let response = fixture
+        .patch(&child, json!({"expected_version": 2, "parent_id": null}))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response_json(response).await["parent_id"].is_null());
+    let stored: Option<String> = sqlx::query_scalar("SELECT parent_id FROM tasks WHERE id = ?")
+        .bind(child["id"].as_str().unwrap())
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert!(stored.is_none());
+}
+
+#[tokio::test]
+async fn a_task_can_be_created_as_a_sub_issue_up_to_the_depth_bound() {
+    let fixture = Fixture::new().await;
+    let root = fixture.create_task("Root").await;
+    let mut chain = vec![root];
+    // nine more levels: the deepest task has nine ancestors
+    for level in 1..10 {
+        let parent = chain.last().unwrap()["id"].clone();
+        let child = fixture
+            .create_task_with(json!({"title": format!("Level {level}"), "parent_id": parent}))
+            .await;
+        assert_eq!(child["parent_id"], parent);
+        chain.push(child);
+    }
+    // a tenth ancestor cannot be proved acyclic inside the bounded walk
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({
+                "project_id": fixture.project_id,
+                "status_id": fixture.status_id,
+                "title": "Too deep",
+                "parent_id": chain.last().unwrap()["id"],
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(response_json(response).await["detail"], "parent_id");
 }

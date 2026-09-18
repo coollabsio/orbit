@@ -846,6 +846,8 @@ struct CreateTaskBody {
     label_ids: Vec<String>,
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<TimestampMillis>,
+    /// Make the new task a sub-issue of this task.
+    parent_id: Option<String>,
 }
 
 #[derive(Clone, Deserialize, ToSchema)]
@@ -864,6 +866,10 @@ struct TaskUpdateBody {
     #[serde(default, deserialize_with = "deserialize_due_patch")]
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<Option<TimestampMillis>>,
+    /// Omit to leave unchanged, `null` to detach, an id to (re-)parent.
+    #[serde(default, deserialize_with = "deserialize_parent_patch")]
+    #[schema(value_type = Option<String>)]
+    parent_id: Option<Option<String>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -889,6 +895,10 @@ struct BulkItem {
     #[serde(default, deserialize_with = "deserialize_due_patch")]
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<Option<TimestampMillis>>,
+    /// Omit to leave unchanged, `null` to detach, an id to (re-)parent.
+    #[serde(default, deserialize_with = "deserialize_parent_patch")]
+    #[schema(value_type = Option<String>)]
+    parent_id: Option<Option<String>>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(TaskQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
@@ -1027,6 +1037,10 @@ async fn create_task(
         assignee_ids: parse_ids(body.assignee_ids, &instance, request_id.as_ref())?,
         label_ids: parse_ids(body.label_ids, &instance, request_id.as_ref())?,
         due_at: body.due_at,
+        parent_id: body
+            .parent_id
+            .map(|raw| parent_id(&raw, &instance, request_id.as_ref()))
+            .transpose()?,
     };
     state
         .tasks
@@ -1099,6 +1113,7 @@ async fn bulk_tasks(
                     assignee_ids: item.assignee_ids,
                     label_ids: item.label_ids,
                     due_at: item.due_at,
+                    parent_id: item.parent_id,
                 },
                 &instance,
                 request_id.as_ref(),
@@ -1485,8 +1500,34 @@ fn task_update(
                 .map(|values| parse_ids(values, instance, request_id))
                 .transpose()?,
             due_at: body.due_at,
+            parent_id: body
+                .parent_id
+                .map(|value| {
+                    value
+                        .map(|raw| parent_id(&raw, instance, request_id))
+                        .transpose()
+                })
+                .transpose()?,
         },
     })
+}
+
+/// A malformed parent id is a validation failure on the field, not a 404: the
+/// resource the URL names exists, the proposed edge does not.
+fn parent_id(
+    raw: &str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Id, ApiError> {
+    raw.parse()
+        .map_err(|_| validation("parent_id", instance, request_id))
+}
+
+fn deserialize_parent_patch<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_due_patch<'de, D>(
