@@ -151,7 +151,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 13
+            binary_version: 14
         }
     ));
 }
@@ -451,5 +451,44 @@ async fn task_identity_schema_requires_a_key_and_number() {
             .to_string()
             .contains("task identifier key and number are required"),
         "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn rich_text_schema_adds_document_columns_and_a_workspace_scoped_search_index() {
+    let db = TestDatabase::new().await.unwrap();
+
+    for (table, column) in [
+        ("tasks", "description_json"),
+        ("tasks", "description_text"),
+        ("task_comments", "body_json"),
+        ("task_comments", "body_text"),
+    ] {
+        let count = db
+            .scalar::<i64>(&format!(
+                "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "missing {table}.{column}");
+    }
+
+    // fts5 must actually be compiled into the bundled SQLite, and workspace_id must be an
+    // indexed column so a MATCH can be constrained to one workspace.
+    db.execute(
+        "INSERT INTO task_search (task_id, workspace_id, identifier, title, body) \
+         VALUES ('task-1', 'aaaa', 'GEN-1', 'Login bug', 'the login page fails'), \
+                ('task-2', 'bbbb', 'OTH-1', 'Login bug', 'a different workspace')",
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        db.scalar::<String>(
+            "SELECT task_id FROM task_search WHERE task_search MATCH 'workspace_id:aaaa AND login'"
+        )
+        .await
+        .unwrap(),
+        "task-1"
     );
 }

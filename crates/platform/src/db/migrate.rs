@@ -190,6 +190,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0013_task_identity.sql"),
                     false,
                 ),
+                Migration::new(
+                    14,
+                    include_str!("../../../../apps/server/migrations/0014_rich_text.sql"),
+                    true,
+                ),
             ],
         )
     }
