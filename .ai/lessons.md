@@ -34,5 +34,5 @@
 - For headless Firefox screenshots: the `--screenshot` invocation exits on its own; wrap in `timeout N` instead of killing.
 
 ## Package-manager choice
-- The current checkout was installed with **aube** (lockfile: `apps/web/aube-lock.yaml`; virtual store at `~/.cache/aube`), so existing automation commonly uses `aube run <script>` / `aube exec <bin>`.
-- **Aube is optional.** The project is an ordinary Vite package and can be switched to Bun or pnpm at any time. Use one package manager consistently, generate its lockfile, and remove the obsolete lockfile in the same migration.
+- The package manager is **Bun** (lockfile: `apps/web/bun.lock`). Use `bun install --frozen-lockfile`, `bun run <script>`, `bunx <bin>`. The `justfile` and `.github/workflows/ci.yml` both call `bun` directly.
+- An earlier note here claimed the checkout used **aube** with an `apps/web/aube-lock.yaml`. That file does not exist; the note was stale and cost a wrong command. Check the lockfile on disk before trusting a remembered toolchain.
