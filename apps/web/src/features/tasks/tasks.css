@@ -527,17 +527,65 @@
   max-width: 520px;
 }
 
-/* Keep image grids inside the task column. A max-width alone lets a single
-   image's intrinsic width enlarge the grid track. */
+/* Keep image grids inside the task column. */
 .tasks-desc-wrap .fc-attachment-grid,
 .tasks-comment .fc-attachment-grid {
   width: 100%;
   max-width: 520px;
 }
 
+/* A single screenshot is a preview, not a full-width content panel. */
+.tasks-desc-wrap .fc-attachment-grid[data-count='1'],
+.tasks-comment .fc-attachment-grid[data-count='1'] {
+  width: min(320px, 100%);
+}
+
+.tasks-desc-wrap .fc-attachment-image,
+.tasks-comment .fc-attachment-image {
+  position: relative;
+}
+
 .tasks-desc-wrap .fc-attachment-image[data-single],
 .tasks-comment .fc-attachment-image[data-single] {
   width: 100%;
+}
+
+.tasks-desc-wrap .fc-attachment-image[data-single] img,
+.tasks-comment .fc-attachment-image[data-single] img {
+  width: 100%;
+  height: auto;
+}
+
+.tasks-desc-wrap .fc-attachment-image .fc-attachment-remove,
+.tasks-comment .fc-attachment-image .fc-attachment-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.tasks-desc-wrap .fc-attachment-image:hover .fc-attachment-remove,
+.tasks-comment .fc-attachment-image:hover .fc-attachment-remove,
+.tasks-desc-wrap .fc-attachment-image .fc-attachment-remove:focus-visible,
+.tasks-comment .fc-attachment-image .fc-attachment-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tasks-desc-wrap .fc-attachment-image .fc-attachment-remove:hover,
+.tasks-comment .fc-attachment-image .fc-attachment-remove:hover {
+  background: var(--danger);
 }
 
 /* non-image files: compact chips instead of full-width cards */
@@ -591,8 +639,8 @@
   display: none;
 }
 
-.tasks-desc-wrap .fc-attachment-remove,
-.tasks-comment .fc-attachment-remove {
+.tasks-desc-wrap .fc-file-card-wrap .fc-attachment-remove,
+.tasks-comment .fc-file-card-wrap .fc-attachment-remove {
   top: 50%;
   transform: translateY(-50%);
 }
