@@ -27,7 +27,7 @@ const user: User = {
 function task(index: number): Task {
   return {
     id: `task-${index}`, statusId: status.id, position: index, version: 1, projectId: 'project-1',
-    title: `Task ${index}`, description: '', identifier: `ORB-${index}`, priority: 'none', assigneeIds: [],
+    title: `Task ${index}`, descriptionJson: { type: 'doc', content: [] }, descriptionText: '', identifier: `ORB-${index}`, priority: 'none', assigneeIds: [],
     creatorId: 'user-1', labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [],
   }
 }

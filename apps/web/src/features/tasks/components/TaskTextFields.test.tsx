@@ -5,7 +5,7 @@ import { TaskTextFields } from './TaskTextFields'
 
 function task(version: number, title: string, description: string): Task {
   return {
-    id: 'task-1', version, title, description, statusId: 'todo', position: 0,
+    id: 'task-1', version, title, descriptionJson: { type: 'doc', content: [] }, descriptionText: description, statusId: 'todo', position: 0,
     projectId: 'project-1', identifier: 'ORB-1', priority: 'none', assigneeIds: [],
     creatorId: 'user-1', labels: [], attachments: [], dueAt: null, createdAt: '',
     updatedAt: '', comments: [], activity: [],

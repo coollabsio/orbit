@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { AttachmentRecord, AuditEvent, CommentRecord, ProjectRecord, TaskRecord } from '../../../api/generated/types.gen'
+import { EMPTY_DOCUMENT } from '../../../components/editor/document'
 import { taskFromRecord } from './models'
 
 const project: ProjectRecord = {
@@ -38,7 +39,7 @@ test('generated task records become the existing task view model without mock fa
     statusId: 'status-1',
     priority: 'high',
     dueAt: '2030-01-02T12:30:00.000Z',
-    comments: [{ id: 'comment-1', body: 'Looks good', version: 3 }],
+    comments: [{ id: 'comment-1', bodyJson: { type: 'doc', content: [] }, bodyText: 'Looks good', version: 3 }],
     attachments: [{ id: 'attachment-1', fileName: 'brief.pdf', fileSize: 42 }],
     activity: [{ id: 'activity-1', actorId: 'user-1', text: 'Updated task' }],
     version: 7,
@@ -46,4 +47,31 @@ test('generated task records become the existing task view model without mock fa
   expect(task.attachments[0]?.url).toBe(
     `/api/v1/workspaces/workspace-1/tasks/${record.id}/attachments/attachment-1/download`,
   )
+})
+
+const shipIt = {
+  type: 'doc',
+  content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Ship it' }] }],
+}
+
+test('a task carries the stored document and the server-derived text', () => {
+  const task = taskFromRecord({ ...record, description_json: shipIt, description_text: 'Ship it' })
+
+  expect(task.descriptionJson).toEqual(shipIt as never)
+  expect(task.descriptionText).toBe('Ship it')
+  expect('description' in task).toBe(false)
+})
+
+test('a malformed document degrades to an empty document instead of throwing', () => {
+  const task = taskFromRecord({ ...record, description_json: 'nope' as never })
+
+  expect(task.descriptionJson).toEqual(EMPTY_DOCUMENT)
+})
+
+test('a comment carries its document and derived text', () => {
+  const task = taskFromRecord(record, [{ ...comment, body_json: shipIt, body_text: 'Ship it' }])
+
+  expect(task.comments[0].bodyJson).toEqual(shipIt as never)
+  expect(task.comments[0].bodyText).toBe('Ship it')
+  expect('body' in task.comments[0]).toBe(false)
 })

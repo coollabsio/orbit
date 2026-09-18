@@ -14,7 +14,7 @@ afterEach(() => { globalThis.fetch = originalFetch })
 function task(id: string, statusId: string, position: number): Task {
   return {
     id, statusId, position, version: 1, projectId: 'project-1', title: id === 'moving' ? 'Moving' : id,
-    description: '', identifier: `ORB-${position}`, priority: 'none', assigneeIds: [], creatorId: 'user-1',
+    descriptionJson: { type: 'doc', content: [] }, descriptionText: '', identifier: `ORB-${position}`, priority: 'none', assigneeIds: [], creatorId: 'user-1',
     labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [],
   }
 }

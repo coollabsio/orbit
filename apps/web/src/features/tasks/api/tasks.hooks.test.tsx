@@ -87,7 +87,7 @@ test('comment attachment retry resumes the created comment instead of duplicatin
     return calls === 3 ? failure() : Response.json(attachment, { status: 201 })
   }) as unknown as typeof fetch
   const view = renderHook(() => useCreateTaskComment('workspace-1', 'task-1'), { wrapper })
-  const input = { body: 'Persist once', files: [new File(['a'], 'a.txt'), new File(['b'], 'b.txt')] }
+  const input = { bodyJson: { type: 'doc' as const, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Persist once' }] }] }, files: [new File(['a'], 'a.txt'), new File(['b'], 'b.txt')] }
 
   await act(async () => { await view.result.current.mutateAsync(input).catch(() => undefined) })
   expect(view.result.current.remainingCount).toBe(1)

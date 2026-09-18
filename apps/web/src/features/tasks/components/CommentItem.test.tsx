@@ -28,7 +28,7 @@ function wrapper() {
 }
 
 function comment(overrides: Partial<TaskComment> = {}): TaskComment {
-  return { id: 'c1', authorId: 'user-1', body: 'hello', createdAt: new Date().toISOString(), version: 1, ...overrides }
+  return { id: 'c1', authorId: 'user-1', bodyJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello' }] }] }, bodyText: 'hello', createdAt: new Date().toISOString(), version: 1, ...overrides }
 }
 
 function state(overrides: Partial<TaskViewState> = {}): TaskViewState {

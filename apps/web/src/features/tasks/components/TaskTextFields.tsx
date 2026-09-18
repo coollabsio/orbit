@@ -2,6 +2,8 @@ import { useState, type ReactNode } from 'react'
 import { clipboardFiles } from '../../chat/attachmentLib'
 import type { Task } from '../api/models'
 import { LinkifiedText } from './LinkifiedText'
+import { documentFromText } from '../api/richText'
+import { asDocument, type RichTextDocument } from '../../../components/editor/document'
 
 export function TaskTextFields({
   task,
@@ -10,17 +12,17 @@ export function TaskTextFields({
   children,
 }: {
   task: Task
-  onUpdate: (update: { title?: string; description?: string }) => void
+  onUpdate: (update: { title?: string; description_json?: RichTextDocument }) => void
   onAttachFiles?: (files: File[]) => void
   children?: ReactNode
 }) {
-  return <TaskTextDraft key={`${task.id}:${task.version}:${task.title}:${task.description}`} task={task} onUpdate={onUpdate} onAttachFiles={onAttachFiles}>{children}</TaskTextDraft>
+  return <TaskTextDraft key={`${task.id}:${task.version}:${task.title}:${task.descriptionText}`} task={task} onUpdate={onUpdate} onAttachFiles={onAttachFiles}>{children}</TaskTextDraft>
 }
 
 function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<typeof TaskTextFields>[0]) {
   const isUntitled = task.title === 'Untitled'
   const [title, setTitle] = useState(isUntitled ? '' : task.title)
-  const [description, setDescription] = useState(task.description)
+  const [description, setDescription] = useState(task.descriptionText)
   const [editingTitle, setEditingTitle] = useState(isUntitled)
   const [editingDescription, setEditingDescription] = useState(false)
   const [dropOver, setDropOver] = useState(false)
@@ -79,7 +81,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
             autoFocus
             onChange={(event) => setDescription(event.target.value)}
             onBlur={() => {
-              if (description !== task.description) onUpdate({ description })
+              if (description !== task.descriptionText) onUpdate({ description_json: asDocument(documentFromText(description)) })
               setEditingDescription(false)
             }}
             onPaste={(event) => {

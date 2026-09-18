@@ -1,5 +1,5 @@
 import { confirmAction } from '../../../components/ui/confirmAction'
-import { documentFromText, type MentionTarget } from './richText'
+import type { RichTextDocument } from '../../../components/editor/document'
 import { keepPreviousData, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { apiClient } from '../../../api/client'
@@ -333,9 +333,9 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
   const [remainingCount, setRemainingCount] = useState(0)
   const resume = useRef<{ signature: string; commentId: string; version: number; remaining: File[]; total: number } | null>(null)
   const mutation = useMutation({
-    mutationFn: async (input: { body: string; parentId?: string; files: File[]; mentions?: MentionTarget[] }) => {
-      const { body, parentId, files, mentions = [] } = input
-      const signature = JSON.stringify([body, parentId ?? null, mentions, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
+    mutationFn: async (input: { bodyJson: RichTextDocument; parentId?: string; files: File[] }) => {
+      const { bodyJson, parentId, files } = input
+      const signature = JSON.stringify([bodyJson, parentId ?? null, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
       if (resume.current && resume.current.signature !== signature) {
         await deleteComment({
           client: apiClient,
@@ -352,9 +352,9 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
         let remaining = files
         setProgress(files.length > 0 ? 0 : undefined)
         setRemainingCount(files.length)
-        const mode = commentUploadMode(body, files.length)
+        const mode = commentUploadMode(bodyJson, files.length)
         if (mode === 'text') {
-          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body_json: documentFromText(body, mentions), parent_id: parentId }, throwOnError: true })
+          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body_json: bodyJson, parent_id: parentId }, throwOnError: true })
           comment = required(response.data, 'Create comment response was empty.')
         } else if (mode === 'attachment-only') {
           const [first, ...rest] = files
@@ -401,8 +401,8 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
 export function useUpdateTaskComment(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ commentId, body, version }: { commentId: string; body: string; version: number }) => {
-      const { data } = await updateComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { body_json: documentFromText(body), expected_version: version }, throwOnError: true })
+    mutationFn: async ({ commentId, bodyJson, version }: { commentId: string; bodyJson: RichTextDocument; version: number }) => {
+      const { data } = await updateComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { body_json: bodyJson, expected_version: version }, throwOnError: true })
       return required(data, 'Update comment response was empty.')
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) }),

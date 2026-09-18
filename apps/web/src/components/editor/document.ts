@@ -4,7 +4,9 @@
  * document on every write — but the editor needs the same answers locally for
  * empty checks and chip resolution.
  */
-export interface RichTextNode {
+// Type aliases rather than interfaces, so a document is assignable to the
+// generated client's `{ [key: string]: unknown }` body fields.
+export type RichTextNode = {
   type: string
   text?: string
   attrs?: Record<string, unknown>
@@ -12,9 +14,7 @@ export interface RichTextNode {
   content?: RichTextNode[]
 }
 
-export interface RichTextDocument extends RichTextNode {
-  type: 'doc'
-}
+export type RichTextDocument = RichTextNode & { type: 'doc' }
 
 export const EMPTY_DOCUMENT: RichTextDocument = { type: 'doc', content: [] }
 

@@ -119,7 +119,7 @@ test('task deletion retry returns to the task list after success', async () => {
   const onBack = mock(() => {})
   const { Wrapper } = wrapper()
   const task: Task = {
-    id: 'task-1', identifier: 'ORB-1', title: 'Delete me', description: '', statusId: 'todo',
+    id: 'task-1', identifier: 'ORB-1', title: 'Delete me', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', statusId: 'todo',
     position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
     labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
   }

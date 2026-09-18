@@ -18,6 +18,8 @@ import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
+import { documentFromText } from '../api/richText'
+import { asDocument } from '../../../components/editor/document'
 
 function dueDateLabel(value: string | null) {
   if (!value) return 'Set due date'
@@ -291,7 +293,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
             <div className="tasks-comment-composer">
-              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentions) => createComment.mutateAsync({ body, files, mentions })} />
+              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentions) => createComment.mutateAsync({ bodyJson: asDocument(documentFromText(body, mentions)), files })} />
             </div>
           </div>
         </div>

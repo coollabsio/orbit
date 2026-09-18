@@ -1,3 +1,4 @@
+import { asDocument, type RichTextDocument } from '../../../components/editor/document'
 import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '../../../api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled'
@@ -41,7 +42,10 @@ export interface Attachment {
 export interface TaskComment {
   id: string
   authorId: string
-  body: string
+  /** The stored rich text document. */
+  bodyJson: RichTextDocument
+  /** Plain text the server derives from the document; for copying and search. */
+  bodyText: string
   createdAt: string
   parentId?: string
   attachments?: Attachment[]
@@ -61,7 +65,10 @@ export interface Task {
   id: string
   identifier: string
   title: string
-  description: string
+  /** The stored rich text document. */
+  descriptionJson: RichTextDocument
+  /** Plain text the server derives from the document; what list rows and search read. */
+  descriptionText: string
   statusId: string
   position: number
   priority: TaskPriority
@@ -108,7 +115,8 @@ export function taskFromRecord(
     id: record.id,
     identifier: record.identifier,
     title: record.title,
-    description: record.description_text,
+    descriptionJson: asDocument(record.description_json),
+    descriptionText: record.description_text,
     statusId: record.status_id,
     position: record.position,
     priority,
@@ -123,7 +131,8 @@ export function taskFromRecord(
     comments: comments.map((comment) => ({
       id: comment.id,
       authorId: comment.author_id,
-      body: comment.body_text,
+      bodyJson: asDocument(comment.body_json),
+      bodyText: comment.body_text,
       createdAt: comment.created_at,
       parentId: comment.parent_id ?? undefined,
       editedAt: comment.updated_at === comment.created_at ? null : comment.updated_at,

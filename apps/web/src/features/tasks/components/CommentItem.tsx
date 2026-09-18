@@ -9,6 +9,8 @@ import type { TaskComment, TaskViewState } from '../api/models'
 import { useDeleteTaskComment, useUpdateTaskComment } from '../api/tasks'
 import { useWorkspace } from '../../workspaces/workspaceContext'
 import { agoLabel } from '../tasksLib'
+import { documentFromText } from '../api/richText'
+import { asDocument } from '../../../components/editor/document'
 
 interface CommentItemProps {
   state: TaskViewState
@@ -32,7 +34,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
 
   const commitEdit = () => {
     const trimmed = editText.trim()
-    if (trimmed && trimmed !== comment.body) updateComment.mutate({ commentId: comment.id, body: trimmed, version: comment.version })
+    if (trimmed && trimmed !== comment.bodyText) updateComment.mutate({ commentId: comment.id, bodyJson: asDocument(documentFromText(trimmed)), version: comment.version })
     setEditing(false)
   }
 
@@ -50,7 +52,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
             </time>
             {!editing ? (
               <div className="tasks-comment-actions">
-                <button type="button" className="icon-button" aria-label="Copy text" title="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body)}>
+                <button type="button" className="icon-button" aria-label="Copy text" title="Copy text" onClick={() => void navigator.clipboard.writeText(comment.bodyText)}>
                   <Copy size={14} />
                 </button>
                 {isAuthor ? (
@@ -61,7 +63,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
                       aria-label="Edit comment"
                       title="Edit comment"
                       onClick={() => {
-                        setEditText(comment.body)
+                        setEditText(comment.bodyText)
                         setEditing(true)
                       }}
                     >
@@ -77,11 +79,11 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
           </div>
           {editing ? (
             <EditingTextarea value={editText} onChange={setEditText} onCommit={commitEdit} onCancel={() => setEditing(false)} />
-          ) : comment.body.trim() ? (
-            <div className="tasks-comment-text">{renderMarkdownBlocks(comment.body, comment.id, mentionTokens)}</div>
+          ) : comment.bodyText.trim() ? (
+            <div className="tasks-comment-text">{renderMarkdownBlocks(comment.bodyText, comment.id, mentionTokens)}</div>
           ) : null}
           {comment.attachments && comment.attachments.length > 0 ? (
-            <Attachments attachments={comment.attachments} hasTextContent={!!comment.body.trim()} />
+            <Attachments attachments={comment.attachments} hasTextContent={!!comment.bodyText.trim()} />
           ) : null}
         </div>
       </article>

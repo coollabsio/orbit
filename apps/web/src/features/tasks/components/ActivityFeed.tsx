@@ -9,6 +9,8 @@ import { buildMentionTokens } from '../../chat/chatLib'
 import { agoLabel, buildFeed, type CommentThread } from '../tasksLib'
 import { CommentItem } from './CommentItem'
 import { TaskCommentComposer } from './TaskCommentComposer'
+import { documentFromText } from '../api/richText'
+import { asDocument } from '../../../components/editor/document'
 
 interface ActivityFeedProps {
   task: Task
@@ -59,7 +61,7 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
         <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
       ))}
       <div className="tasks-thread-composer">
-        <TaskCommentComposer compact placeholder="Leave a reply…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ body, files, parentId: thread.root.id })} />
+        <TaskCommentComposer compact placeholder="Leave a reply…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ bodyJson: asDocument(documentFromText(body)), files, parentId: thread.root.id })} />
       </div>
     </div>
   )

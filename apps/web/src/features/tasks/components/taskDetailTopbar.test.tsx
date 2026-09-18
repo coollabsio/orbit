@@ -11,7 +11,7 @@ import { TaskDetail } from './TaskDetail'
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
 
 const task: Task = {
-  id: 'task-1', identifier: 'ORB-1', title: 'Ship it', description: '', statusId: 'todo',
+  id: 'task-1', identifier: 'ORB-1', title: 'Ship it', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', statusId: 'todo',
   position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
   labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
 }

@@ -35,12 +35,12 @@ test('task due date uses the custom picker and can clear the saved value', async
     requestBody = await (input as Request).json()
     return Response.json({
       id: 'task-1', workspace_id: workspace.id, project_id: 'project-1', identifier: 'ORB-1',
-      title: 'Schedule me', description: '', status_id: 'todo', position: 0, priority: 'none',
+      title: 'Schedule me', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', status_id: 'todo', position: 0, priority: 'none',
       assignee_ids: [], creator_id: 'user-1', labels: [], due_at: null, created_at: '', updated_at: '', version: 2,
     })
   }) as unknown as typeof fetch
   const task: Task = {
-    id: 'task-1', identifier: 'ORB-1', title: 'Schedule me', description: '', statusId: 'todo',
+    id: 'task-1', identifier: 'ORB-1', title: 'Schedule me', descriptionJson: { type: 'doc', content: [] }, descriptionText: '', statusId: 'todo',
     position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
     labels: [], attachments: [], dueAt: '2030-01-02T12:30:00.000Z', createdAt: '', updatedAt: '',
     comments: [], activity: [], version: 1,
