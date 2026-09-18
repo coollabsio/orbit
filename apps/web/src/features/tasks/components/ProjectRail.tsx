@@ -1,10 +1,8 @@
 import { useNavigate } from 'react-router'
 import { Add, Setting2, TaskSquare } from 'reicon-react'
-import type { ProjectBody } from '../../../api/generated/types.gen'
+import { useState } from 'react'
 import type { Project } from '../api/models'
-import { useCreateProject } from '../api/projects'
-import { useWorkspace } from '../../workspaces/workspaceContext'
-import { projectDraft } from '../api/projectDraft'
+import { NewProjectModal } from './NewProjectModal'
 
 interface ProjectRailProps {
   projects: Project[]
@@ -15,11 +13,7 @@ interface ProjectRailProps {
 /** Second sidebar for Tasks: "All projects" + one row per project (color square, name, hover gear → settings). */
 export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps) {
   const navigate = useNavigate()
-  const { workspace } = useWorkspace()
-  const createProject = useCreateProject(workspace.id)
-  const createAndSelectProject = (body: ProjectBody) => createProject.mutate(body, {
-    onSuccess: (project) => onSelect(project.id),
-  })
+  const [showNewProject, setShowNewProject] = useState(false)
   return (
     <section className="pane tasks-rail-pane">
       <div className="pane-header">
@@ -51,13 +45,9 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
             </button>
           </div>
         ))}
-        <button className="menu-item" disabled={createProject.isPending} onClick={() => {
-          const name = window.prompt('Project name')?.trim()
-          if (!name) return
-          createAndSelectProject(projectDraft(name))
-        }}><Add size={16} /><span className="menu-item-label">New project</span></button>
-        {createProject.isError ? <p role="alert" className="text-danger text-xs">Project creation failed. <button className="button button-ghost" onClick={() => createProject.variables && createAndSelectProject(createProject.variables)}>Retry</button></p> : null}
+        <button className="menu-item" onClick={() => setShowNewProject(true)}><Add size={16} /><span className="menu-item-label">New project</span></button>
       </div>
+      {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { onSelect(project.id); setShowNewProject(false) }} /> : null}
     </section>
   )
 }
