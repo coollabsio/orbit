@@ -65,6 +65,9 @@ pub struct TaskRecord {
     pub project_id: Id,
     #[schema(value_type = String)]
     pub status_id: Id,
+    pub identifier: String,
+    pub identifier_key: String,
+    pub number: i64,
     pub title: String,
     pub description: String,
     pub priority: String,
@@ -958,7 +961,7 @@ impl TaskRepository {
         let fingerprint = task_fingerprint(workspace_id, filter);
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
+            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
              tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
              JOIN projects ON projects.id = tasks.project_id \
@@ -1090,7 +1093,7 @@ impl TaskRepository {
     ) -> Result<TaskRecord, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let row = sqlx::query(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
+            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, \
              tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
              JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
@@ -1118,6 +1121,21 @@ impl TaskRepository {
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
         validate_assignees(&mut tx, workspace_id, &input.assignee_ids).await?;
         validate_labels(&mut tx, workspace_id, &input.label_ids).await?;
+        // One statement inside the enclosing BEGIN IMMEDIATE, so the counter cannot race. The
+        // WHERE clause matches at most the single primary-key row; None means the project is
+        // missing or soft-deleted.
+        let allocation = sqlx::query(
+            "UPDATE projects SET next_task_number = next_task_number + 1 \
+             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL \
+             RETURNING project_key, next_task_number - 1 AS number",
+        )
+        .bind(input.project_id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(TaskError::NotFound)?;
+        let identifier_key: String = allocation.get("project_key");
+        let number: i64 = allocation.get("number");
         let position = match input.position {
             Some(position) => position,
             None => sqlx::query_scalar::<_, i64>(
@@ -1130,13 +1148,15 @@ impl TaskRepository {
             .await?,
         };
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, priority, position, creator_id, due_at, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, identifier_key, number, title, description, priority, position, creator_id, due_at, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
         .bind(input.project_id.to_string())
         .bind(input.status_id.to_string())
+        .bind(&identifier_key)
+        .bind(number)
         .bind(&input.title)
         .bind(&input.description)
         .bind(&input.priority)
@@ -1179,6 +1199,9 @@ impl TaskRepository {
             workspace_id,
             project_id: input.project_id,
             status_id: input.status_id,
+            identifier: format!("{identifier_key}-{number}"),
+            identifier_key,
+            number,
             title: input.title,
             description: input.description,
             priority: input.priority,
@@ -1383,7 +1406,7 @@ impl TaskRepository {
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
              FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
         );
         query
@@ -2345,7 +2368,7 @@ async fn task_in_tx(
     deleted: bool,
 ) -> Result<TaskRecord, TaskError> {
     let row = sqlx::query(
-        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.identifier_key, tasks.number, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
          FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
          AND ((? = 1 AND tasks.deleted_at IS NOT NULL) OR (? = 0 AND tasks.deleted_at IS NULL)) AND (? = 1 OR projects.deleted_at IS NULL)",
     )
@@ -2475,11 +2498,22 @@ fn task_record_from_row(
     assignee_ids: Vec<Id>,
     label_ids: Vec<Id>,
 ) -> Result<TaskRecord, TaskError> {
+    // ALTER TABLE cannot make these NOT NULL, so a row without them is corrupt rather than absent.
+    let (identifier_key, number) = match (
+        row.get::<Option<String>, _>("identifier_key"),
+        row.get::<Option<i64>, _>("number"),
+    ) {
+        (Some(identifier_key), Some(number)) => (identifier_key, number),
+        _ => return Err(TaskError::Conflict),
+    };
     Ok(TaskRecord {
         id,
         workspace_id: parse_id(row.get("workspace_id"))?,
         project_id: parse_id(row.get("project_id"))?,
         status_id: parse_id(row.get("status_id"))?,
+        identifier: format!("{identifier_key}-{number}"),
+        identifier_key,
+        number,
         title: row.get("title"),
         description: row.get("description"),
         priority: row.get("priority"),

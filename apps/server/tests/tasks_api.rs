@@ -1934,3 +1934,79 @@ fn cursor_hex(value: Value) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[tokio::test]
+async fn tasks_receive_sequential_identifiers_that_survive_a_project_move() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    assert_eq!(first["identifier"], "GEN-1");
+    assert_eq!(first["identifier_key"], "GEN");
+    assert_eq!(first["number"], 1);
+    assert_eq!(second["identifier"], "GEN-2");
+    assert_eq!(second["number"], 2);
+
+    let project = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/projects", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({"name":"Mobile", "key":"MOB", "color":"#112233"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(project.status(), StatusCode::CREATED);
+    let project = response_json(project).await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let status_id: String = sqlx::query_scalar(
+        "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+    )
+    .bind(&project_id)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+
+    let moved = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}",
+                fixture.workspace_id,
+                first["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!({
+                "expected_version": 0,
+                "project_id": project_id,
+                "status_id": status_id
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(moved.status(), StatusCode::OK);
+    let moved = response_json(moved).await;
+    assert_eq!(moved["project_id"], project_id.as_str());
+    assert_eq!(moved["identifier"], "GEN-1");
+
+    let created = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({
+                "project_id": project_id,
+                "status_id": status_id,
+                "title": "Mobile work"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    assert_eq!(response_json(created).await["identifier"], "MOB-1");
+}

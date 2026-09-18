@@ -151,7 +151,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 12
+            binary_version: 13
         }
     ));
 }
@@ -384,4 +384,72 @@ async fn exposes_pending_destructive_migrations_without_running_backups() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].version, 1);
     assert!(pending[0].destructive);
+}
+
+#[tokio::test]
+async fn task_identity_schema_requires_a_key_and_number() {
+    let db = TestDatabase::new().await.unwrap();
+
+    for (table, column) in [
+        ("projects", "next_task_number"),
+        ("tasks", "identifier_key"),
+        ("tasks", "number"),
+    ] {
+        let count = db
+            .scalar::<i64>(&format!(
+                "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "missing {table}.{column}");
+    }
+    assert_eq!(
+        db.scalar::<i64>(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type = 'index' AND name = 'tasks_identifier'"
+        )
+        .await
+        .unwrap(),
+        1
+    );
+
+    // workspaces.owner_membership_id and memberships.workspace_id reference each other, and the
+    // former is DEFERRABLE INITIALLY DEFERRED, so the pair only resolves inside one transaction.
+    db.execute(
+        "BEGIN;\
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash,\
+            created_at, updated_at)\
+         VALUES ('user-1', 'a@example.com', 'a@example.com', 'A', 'unused', 1, 1);\
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)\
+         VALUES ('workspace-1', 'Orbit', 0, 'membership-1', 1, 1);\
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)\
+         VALUES ('membership-1', 'workspace-1', 'user-1', 'owner', 0, 1, 1);\
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version,\
+            created_at, updated_at)\
+         VALUES ('project-1', 'workspace-1', 'General', 'GEN', '#5e6ad2', 0, 1, 1);\
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color,\
+            category, position, version, created_at, updated_at)\
+         VALUES ('status-1', 'workspace-1', 'project-1', 'Todo', '', '#8b8f98',\
+            'unstarted', 0, 0, 1, 1);\
+         COMMIT;",
+    )
+    .await
+    .unwrap();
+
+    let error = db
+        .execute(
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description,\
+                priority, position, creator_id, version, created_at, updated_at)\
+             VALUES ('task-1', 'workspace-1', 'project-1', 'status-1', 'No identity', '',\
+                'none', 0, 'user-1', 0, 1, 1);",
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("task identifier key and number are required"),
+        "unexpected error: {error}"
+    );
 }

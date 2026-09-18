@@ -147,6 +147,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0012_notifications.sql"),
                     false,
                 ),
+                Migration::new(
+                    13,
+                    include_str!("../../../../apps/server/migrations/0013_task_identity.sql"),
+                    false,
+                ),
             ],
         )
     }
