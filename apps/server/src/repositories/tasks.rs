@@ -190,6 +190,14 @@ pub enum SortOrder {
     Desc,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskNesting {
+    /// Flat list, sub-issues included. Default: preserves pre-0016 behaviour.
+    All,
+    /// Only tasks without a parent.
+    Roots,
+}
+
 #[derive(Clone, Debug)]
 pub struct TaskFilter {
     pub project_id: Option<Id>,
@@ -201,6 +209,9 @@ pub struct TaskFilter {
     pub priority: Option<String>,
     pub search: Option<String>,
     pub view: Option<String>,
+    /// Only the direct sub-issues of this task. Takes precedence over `nesting`.
+    pub parent_id: Option<Id>,
+    pub nesting: TaskNesting,
     pub sort: TaskSort,
     pub order: SortOrder,
 }
@@ -1035,6 +1046,13 @@ impl TaskRepository {
             query
                 .push(" AND tasks.status_id = ")
                 .push_bind(status_id.to_string());
+        }
+        if let Some(parent_id) = filter.parent_id {
+            query
+                .push(" AND tasks.parent_id = ")
+                .push_bind(parent_id.to_string());
+        } else if filter.nesting == TaskNesting::Roots {
+            query.push(" AND tasks.parent_id IS NULL");
         }
         if let Some(priority) = &filter.priority {
             query
@@ -2082,7 +2100,7 @@ fn cursor_i64_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(i64
 
 fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
     format!(
-        "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:n={}:r={}:q={}:v={}:sort={:?}:order={:?}",
+        "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:n={}:r={}:q={}:v={}:parent={}:nest={:?}:sort={:?}:order={:?}",
         filter
             .project_id
             .map_or_else(String::new, |id| id.to_string()),
@@ -2102,6 +2120,10 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
         filter.priority.as_deref().unwrap_or(""),
         filter.search.as_deref().unwrap_or(""),
         filter.view.as_deref().unwrap_or(""),
+        filter
+            .parent_id
+            .map_or_else(String::new, |id| id.to_string()),
+        filter.nesting,
         filter.sort,
         filter.order,
     )

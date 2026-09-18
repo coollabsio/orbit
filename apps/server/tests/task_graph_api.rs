@@ -401,3 +401,66 @@ async fn a_task_can_be_created_as_a_sub_issue_up_to_the_depth_bound() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(response_json(response).await["detail"], "parent_id");
 }
+
+#[tokio::test]
+async fn parent_filter_changes_the_cursor_fingerprint_and_hides_sub_issues() {
+    let fixture = Fixture::new().await;
+    let parent = fixture.create_task("Parent").await;
+    let child = fixture.create_task("Child").await;
+    let response = fixture
+        .patch(
+            &child,
+            json!({"expected_version": 0, "parent_id": parent["id"]}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let fixture = &fixture;
+    let list = |query: String| async move {
+        let uri = format!("/api/v1/workspaces/{}/tasks{query}", fixture.workspace_id);
+        fixture.get(&uri).await
+    };
+
+    // default nesting=all keeps today's behaviour
+    let page = response_json(list(String::new()).await).await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 2);
+
+    // nesting=roots hides the sub-issue
+    let page = response_json(list("?nesting=roots".to_owned()).await).await;
+    let roots = page["items"].as_array().unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0]["id"], parent["id"]);
+
+    // parent_id returns only the children
+    let page =
+        response_json(list(format!("?parent_id={}", parent["id"].as_str().unwrap())).await).await;
+    let children = page["items"].as_array().unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0]["id"], child["id"]);
+
+    // an unknown nesting mode is a validation failure
+    let response = list("?nesting=deep".to_owned()).await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(response_json(response).await["detail"], "nesting");
+
+    // a cursor minted for one filter cannot be replayed against another
+    let page = response_json(list("?limit=1".to_owned()).await).await;
+    let cursor = page["next_cursor"]
+        .as_str()
+        .expect("cursor for page 1")
+        .to_owned();
+    let response = list(format!("?limit=1&cursor={cursor}&nesting=roots")).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response_json(response).await["code"], "invalid_cursor");
+
+    let response = list(format!(
+        "?limit=1&cursor={cursor}&parent_id={}",
+        parent["id"].as_str().unwrap()
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // ...while the same filter accepts it
+    let response = list(format!("?limit=1&cursor={cursor}")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+}

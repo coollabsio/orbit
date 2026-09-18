@@ -6311,6 +6311,24 @@
             }
           },
           {
+            "name": "parent_id",
+            "in": "query",
+            "description": "Only the direct sub-issues of this task.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "nesting",
+            "in": "query",
+            "description": "`all` (default) lists sub-issues alongside their parents; `roots` hides them.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "priority",
             "in": "query",
             "required": false,

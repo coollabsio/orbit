@@ -17,7 +17,7 @@ use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::tasks::{
     CreateTask, NotificationRecord, Page, SortOrder, TaskChanges, TaskError, TaskFilter,
-    TaskRecord, TaskRepository, TaskSort, TaskUpdate,
+    TaskNesting, TaskRecord, TaskRepository, TaskSort, TaskUpdate,
 };
 
 #[derive(Clone)]
@@ -813,6 +813,12 @@ struct TaskQuery {
     assignee_id: Option<String>,
     label_id: Option<String>,
     identifier: Option<String>,
+    /// Only the direct sub-issues of this task.
+    parent_id: Option<String>,
+    /// `all` (default) lists sub-issues alongside their parents; `roots` hides them.
+    #[serde(default = "default_nesting")]
+    #[param(required = false)]
+    nesting: String,
     priority: Option<String>,
     search: Option<String>,
     view: Option<String>,
@@ -922,6 +928,12 @@ async fn list_tasks(
             .as_deref()
             .map(|value| parse_identifier(value, &instance, request_id.as_ref()))
             .transpose()?,
+        parent_id: optional_id(query.parent_id, &instance, request_id.as_ref())?,
+        nesting: match query.nesting.as_str() {
+            "all" => TaskNesting::All,
+            "roots" => TaskNesting::Roots,
+            _ => return Err(validation("nesting", &instance, request_id.as_ref())),
+        },
         priority: query
             .priority
             .map(|value| priority(value, &instance, request_id.as_ref()))
@@ -1871,6 +1883,10 @@ fn rich_text_default() -> Value {
 fn default_priority() -> String {
     "none".to_owned()
 }
+fn default_nesting() -> String {
+    "all".to_owned()
+}
+
 fn default_task_sort() -> String {
     "position".to_owned()
 }

@@ -3478,6 +3478,14 @@ export type ListTasksData = {
         assignee_id?: string;
         label_id?: string;
         identifier?: string;
+        /**
+         * Only the direct sub-issues of this task.
+         */
+        parent_id?: string;
+        /**
+         * `all` (default) lists sub-issues alongside their parents; `roots` hides them.
+         */
+        nesting?: string;
         priority?: string;
         search?: string;
         view?: string;
