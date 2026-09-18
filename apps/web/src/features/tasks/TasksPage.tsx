@@ -127,7 +127,9 @@ export function TasksPage() {
   useEffect(() => {
     if (!taskId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') navigate(`/tasks${closeSearchSuffix}`)
+      // A dialog (picker, confirmation) owns Escape while it is open.
+      const dialogOpen = document.querySelector('[role="dialog"][aria-modal="true"]') !== null
+      if (event.key === 'Escape' && !dialogOpen) navigate(`/tasks${closeSearchSuffix}`)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)

@@ -17,6 +17,7 @@ import { useWorkspace } from '../../workspaces/workspaceContext'
 import { Attachments } from '../../chat/components/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { SubIssues } from './SubIssues'
+import { DuplicateBanner, DuplicateErrors, DuplicateMenuItems, DuplicatesGroup, MarkDuplicateDialog, useDuplicateFlow } from './TaskDuplicates'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
@@ -51,6 +52,7 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
   const deleteAttachment = useDeleteTaskAttachment(workspace.id, task?.id ?? '')
   const createComment = useCreateTaskComment(workspace.id, task?.id ?? '')
   const deleteTask = useDeleteTask(workspace.id)
+  const duplicateFlow = useDuplicateFlow(task)
   // The parent is usually on the loaded list page; a deeper sub-issue's parent
   // may not be (the list hides sub-issues), so fetch just that one on demand.
   // A trashed parent answers 404, which the crumb renders as "In trash".
@@ -93,11 +95,15 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
             </button>
           )}>
             {(close) => (
-              <button type="button" className="popover-option" data-tone="danger" disabled={deleteTask.isPending} onClick={async () => {
-                close()
-                if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
-                void deleteAndClose({ taskId: task.id, version: task.version })
-              }}>Delete</button>
+              <>
+                <DuplicateMenuItems task={task} flow={duplicateFlow} close={close} />
+                <div className="popover-separator" />
+                <button type="button" className="popover-option" data-tone="danger" disabled={deleteTask.isPending} onClick={async () => {
+                  close()
+                  if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
+                  void deleteAndClose({ taskId: task.id, version: task.version })
+                }}>Delete</button>
+              </>
             )}
           </Dropdown>
         ) : null}
@@ -116,6 +122,7 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
       ) : (
         <div className="pane-body tasks-detail-body">
           <div className="tasks-detail-main">
+            <DuplicateBanner task={task} tasks={state.tasks} />
             <TaskTextFields
               task={task}
               workspaceId={workspace.id}
@@ -140,7 +147,9 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
             {updateTask.isError ? <p role="alert" className="text-danger text-xs">Task update failed. <button type="button" className="button button-ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</button></p> : null}
             {deleteAttachment.isError ? <p role="alert" className="text-danger text-xs">Attachment removal failed. <button type="button" className="button button-ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</button></p> : null}
             {deleteTask.isError ? <p role="alert" className="text-danger text-xs">Task deletion failed. <button type="button" className="button button-ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</button></p> : null}
+            <DuplicateErrors flow={duplicateFlow} />
             <SubIssues task={task} projects={projects} state={state} onOpen={onOpenTask} />
+            <MarkDuplicateDialog task={task} flow={duplicateFlow} workspaceId={workspace.id} />
 
           </div>
 
@@ -262,6 +271,8 @@ export function TaskDetail({ task, project, projects, state, onBack, onOpenTask 
                 <span className="text-faint text-xs">—</span>
               )}
             </div>
+
+            <DuplicatesGroup task={task} tasks={state.tasks} onOpen={onOpenTask} />
 
             <div className="tasks-side-group">
               <h4 className="tasks-side-heading">Due date</h4>
