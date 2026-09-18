@@ -8,6 +8,8 @@ export interface ResolvedChip {
   taskId?: string
   /** The status colour; omitted when the status definition is not loaded. */
   statusColor?: string
+  /** Set when the task is marked as a duplicate of another; the chip renders struck through. */
+  duplicate?: boolean
 }
 
 export type TaskChipLookup = (identifier: string) => ResolvedChip | undefined

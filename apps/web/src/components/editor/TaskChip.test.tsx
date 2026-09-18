@@ -100,3 +100,39 @@ test('no identifiers means no request at all', async () => {
   await new Promise((resolve) => setTimeout(resolve, 10))
   expect(calls).not.toHaveBeenCalled()
 })
+
+test('a chip for a duplicated task renders struck through, even when reopened', () => {
+  const view = render(
+    <TaskChip identifier="ORB-1" resolved={{ title: 'Same bug', statusCategory: 'started', taskId: 'task-1', duplicate: true }} />,
+    { wrapper: MemoryRouter },
+  )
+  const chip = view.getByText('ORB-1').closest('.editor-chip')
+  expect(chip?.getAttribute('data-duplicate')).toBe('true')
+  expect(chip?.getAttribute('data-cancelled')).toBeNull()
+  expect(chip?.getAttribute('title')).toBe('ORB-1 · Same bug (duplicate)')
+})
+
+test('a chip for a normal task is not struck through', () => {
+  const view = render(
+    <TaskChip identifier="ORB-2" resolved={{ title: 'Real work', statusCategory: 'started', taskId: 'task-2' }} />,
+    { wrapper: MemoryRouter },
+  )
+  expect(view.getByText('ORB-2').closest('[data-duplicate]')).toBeNull()
+})
+
+test('the batch resolve carries the duplicate marker from the server record', async () => {
+  globalThis.fetch = (async () => Response.json({
+    items: [
+      { id: 'task-1', identifier: 'ORB-1', title: 'Same bug', status_id: 'status-2', duplicate_of_task_id: 'task-9' },
+      { id: 'task-2', identifier: 'ORB-2', title: 'Real work', status_id: 'status-1', duplicate_of_task_id: null },
+    ],
+    next_cursor: null,
+  })) as unknown as typeof fetch
+  const identifiers = ['ORB-1', 'ORB-2']
+
+  const { result } = renderHook(() => useTaskChips('workspace-1', identifiers, statuses), { wrapper: queryWrapper() })
+
+  await waitFor(() => expect(result.current('ORB-1')).toBeTruthy())
+  expect(result.current('ORB-1')?.duplicate).toBe(true)
+  expect(result.current('ORB-2')?.duplicate).toBeUndefined()
+})

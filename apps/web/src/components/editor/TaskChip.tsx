@@ -25,7 +25,9 @@ export function TaskChip({ identifier, resolved }: { identifier: string; resolve
     className: 'editor-chip',
     'data-resolved': resolved ? 'true' : undefined,
     'data-cancelled': resolved?.statusCategory === 'cancelled' ? 'true' : undefined,
-    title: resolved ? `${identifier} · ${resolved.title}` : identifier,
+    // A duplicate stays struck through even if someone later reopens its status.
+    'data-duplicate': resolved?.duplicate ? 'true' : undefined,
+    title: resolved ? `${identifier} · ${resolved.title}${resolved.duplicate ? ' (duplicate)' : ''}` : identifier,
   }
 
   return resolved?.taskId ? (

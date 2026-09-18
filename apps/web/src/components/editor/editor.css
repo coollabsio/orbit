@@ -122,7 +122,9 @@ a.editor-chip:hover {
 }
 
 .editor-chip[data-cancelled='true'] .editor-chip-id,
-.editor-chip[data-cancelled='true'] .editor-chip-title {
+.editor-chip[data-cancelled='true'] .editor-chip-title,
+.editor-chip[data-duplicate='true'] .editor-chip-id,
+.editor-chip[data-duplicate='true'] .editor-chip-title {
   text-decoration: line-through;
   color: var(--text-faint);
 }

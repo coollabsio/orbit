@@ -14,6 +14,8 @@ interface ChipTask {
   taskId: string
   title: string
   statusId: string
+  /** Marked as a duplicate (`TaskRecord.duplicate_of_task_id`). */
+  duplicate: boolean
 }
 
 /**
@@ -46,7 +48,12 @@ export function useTaskChips(
       })
       const resolved = new Map<string, ChipTask>()
       for (const task of data?.items ?? []) {
-        const chip: ChipTask = { taskId: task.id, title: task.title, statusId: task.status_id }
+        const chip: ChipTask = {
+          taskId: task.id,
+          title: task.title,
+          statusId: task.status_id,
+          duplicate: Boolean(task.duplicate_of_task_id),
+        }
         resolved.set(task.identifier, chip)
         queryClient.setQueryData(queryKeys.taskChips(workspaceId, task.identifier), chip)
       }
@@ -66,6 +73,7 @@ export function useTaskChips(
         statusCategory: status?.category ?? 'unstarted',
         taskId: task.taskId,
         statusColor: status?.color,
+        ...(task.duplicate ? { duplicate: true } : {}),
       }
     },
     [data, queryClient, workspaceId, statuses],
