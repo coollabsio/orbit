@@ -29,8 +29,9 @@ pub use config::{
     JobsConfig, MetricsConfig, RateLimitConfig, Secret, UploadConfig,
 };
 pub use db::{
-    Database, DatabaseConfig, DatabaseError, GuardedMigrationError, Migration, MigrationError,
-    MigrationRunner, PendingMigration, TestDatabase, TestDatabaseError, run_guarded_migrations,
+    DataMigration, DataMigrationFuture, Database, DatabaseConfig, DatabaseError,
+    GuardedMigrationError, Migration, MigrationError, MigrationRunner, PendingMigration,
+    TestDatabase, TestDatabaseError, run_guarded_migrations,
 };
 pub use files::{
     AuthorizedAttachment, BlobDownload, BlobFuture, BlobObject, BlobReader, BlobStore,

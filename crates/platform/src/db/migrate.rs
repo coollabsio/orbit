@@ -1,3 +1,7 @@
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
@@ -53,10 +57,33 @@ pub struct PendingMigration {
     pub destructive: bool,
 }
 
+pub type DataMigrationFuture<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+
+/// A Rust step that runs immediately after schema version `after_version`
+/// commits and before the next schema migration begins. Schema files cannot
+/// reshape data that needs application code (for example Markdown to rich text),
+/// and every pending migration is applied in a single loop, so the hook has to
+/// live inside the runner rather than after it.
+#[derive(Clone, Copy)]
+pub struct DataMigration {
+    pub after_version: i64,
+    pub run: for<'a> fn(&'a Database) -> DataMigrationFuture<'a>,
+}
+
+impl fmt::Debug for DataMigration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DataMigration")
+            .field("after_version", &self.after_version)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 pub struct MigrationRunner {
     app_version: String,
     migrations: Vec<Migration>,
+    data_migrations: Vec<DataMigration>,
 }
 
 #[derive(Debug, Error)]
@@ -84,6 +111,8 @@ pub enum MigrationError {
         #[source]
         source: sqlx::Error,
     },
+    #[error("data migration after version {version} failed: {message}")]
+    DataMigration { version: i64, message: String },
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -119,7 +148,16 @@ impl MigrationRunner {
         Self {
             app_version: app_version.into(),
             migrations,
+            data_migrations: Vec::new(),
         }
+    }
+
+    /// Registers Rust steps that run between schema migrations.
+    #[must_use]
+    pub fn with_data_migrations(mut self, mut data_migrations: Vec<DataMigration>) -> Self {
+        data_migrations.sort_by_key(|migration| migration.after_version);
+        self.data_migrations = data_migrations;
+        self
     }
 
     #[must_use]
@@ -188,8 +226,22 @@ impl MigrationRunner {
     }
 
     pub async fn run(&self, database: &Database) -> Result<(), MigrationError> {
+        self.run_through(database, i64::MAX).await
+    }
+
+    /// Applies pending migrations up to and including `through_version`, running
+    /// any registered data migration immediately after the schema version it
+    /// brackets. Used by the backfill tests to stop before a destructive drop.
+    pub async fn run_through(
+        &self,
+        database: &Database,
+        through_version: i64,
+    ) -> Result<(), MigrationError> {
         let pending = self.pending(database).await?;
         for pending_migration in pending {
+            if pending_migration.version > through_version {
+                break;
+            }
             let migration = self
                 .migrations
                 .iter()
@@ -224,6 +276,18 @@ impl MigrationRunner {
                     version: migration.version,
                     source,
                 })?;
+            for data_migration in self
+                .data_migrations
+                .iter()
+                .filter(|data| data.after_version == migration.version)
+            {
+                (data_migration.run)(database).await.map_err(|message| {
+                    MigrationError::DataMigration {
+                        version: migration.version,
+                        message,
+                    }
+                })?;
+            }
         }
         Ok(())
     }

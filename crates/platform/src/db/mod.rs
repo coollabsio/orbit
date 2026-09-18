@@ -14,8 +14,8 @@ use thiserror::Error;
 use crate::TimestampMillis;
 
 pub use migrate::{
-    GuardedMigrationError, Migration, MigrationError, MigrationRunner, PendingMigration,
-    run_guarded_migrations,
+    DataMigration, DataMigrationFuture, GuardedMigrationError, Migration, MigrationError,
+    MigrationRunner, PendingMigration, run_guarded_migrations,
 };
 pub use test_db::{TestDatabase, TestDatabaseError};
 
