@@ -54,3 +54,17 @@ test('shows the latest three activities and expands the full list', () => {
   expect(view.getByText(/Activity 1/)).toBeTruthy()
   expect(view.getByRole('button', { name: 'Show fewer activities' }).getAttribute('aria-expanded')).toBe('true')
 })
+
+test('shows a service account as the activity actor', () => {
+  const serviceTask = {
+    ...task,
+    activity: [{
+      id: 'service-activity', actorId: '', actorName: 'Discord', actorServiceAccountId: 'service-1',
+      text: 'Created task', createdAt: '2026-09-17T10:00:00.000Z',
+    }],
+  }
+  const view = render(<ActivityFeed task={serviceTask} state={{ ...state, tasks: [serviceTask] }} />, { wrapper: Wrapper })
+
+  expect(view.getByText('Discord')).toBeTruthy()
+  expect(view.queryByText('Andras')).toBeNull()
+})

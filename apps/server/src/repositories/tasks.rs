@@ -1231,20 +1231,19 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(TaskRecord, bool), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        if let Some(service_account_id) = service_account_id {
-            let active: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM service_accounts WHERE id = ? AND workspace_id = ? AND disabled_at IS NULL",
+        let service_account_name = if let Some(service_account_id) = service_account_id {
+            let name = sqlx::query_scalar::<_, String>(
+                "SELECT name FROM service_accounts WHERE id = ? AND workspace_id = ? AND disabled_at IS NULL",
             )
             .bind(service_account_id.to_string())
             .bind(workspace_id.to_string())
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await?;
-            if active != 1 {
-                return Err(TaskError::NotFound);
-            }
+            Some(name.ok_or(TaskError::NotFound)?)
         } else {
             require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        }
+            None
+        };
 
         if let Some(row) = sqlx::query(
             "SELECT integration_events.task_id, integration_events.payload_hash, tasks.deleted_at \
@@ -1299,10 +1298,11 @@ impl TaskRepository {
             let id = Id::new_v7();
             sqlx::query("INSERT INTO labels (id, workspace_id, name, color, version, created_at, updated_at) VALUES (?, ?, 'Discord', '#5865F2', 0, ?, ?)")
                 .bind(id.to_string()).bind(workspace_id.to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
-            record_mutation(
+            record_principal_mutation(
                 &mut tx,
                 workspace_id,
                 actor_id,
+                service_account_id.zip(service_account_name.as_deref()),
                 "label.created",
                 "label",
                 id,
@@ -1333,10 +1333,11 @@ impl TaskRepository {
         sqlx::query("INSERT INTO integration_events (workspace_id, provider, external_event_id, payload_hash, task_id, created_at) VALUES (?, 'discord', ?, ?, ?, ?)")
             .bind(workspace_id.to_string()).bind(&input.event_id).bind(input.payload_hash.to_vec()).bind(task_id.to_string()).bind(now.as_millis())
             .execute(&mut *tx).await?;
-        record_mutation(
+        record_principal_mutation(
             &mut tx,
             workspace_id,
             actor_id,
+            service_account_id.zip(service_account_name.as_deref()),
             "task.created",
             "task",
             task_id,
@@ -2441,6 +2442,51 @@ async fn record_mutation(
     )
     .await?;
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_principal_mutation(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    actor_id: Id,
+    service_account: Option<(Id, &str)>,
+    action: &str,
+    resource_type: &str,
+    resource_id: Id,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<(), TaskError> {
+    if let Some((service_account_id, service_account_name)) = service_account {
+        audit::record(
+            tx,
+            workspace_id,
+            None,
+            action,
+            AuditOutcome::Success,
+            resource_type,
+            Some(resource_id),
+            request_id,
+            json!({
+                "actor_service_account_id": service_account_id,
+                "actor_service_account_name": service_account_name,
+            }),
+            now,
+        )
+        .await?;
+        Ok(())
+    } else {
+        record_mutation(
+            tx,
+            workspace_id,
+            actor_id,
+            action,
+            resource_type,
+            resource_id,
+            request_id,
+            now,
+        )
+        .await
+    }
 }
 
 fn is_unique_violation(result: &Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error>) -> bool {

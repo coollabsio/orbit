@@ -44,7 +44,7 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
               {status ? <TaskStatusIcon status={status} size={14} /> : <Avatar user={actor} size={14} />}
             </span>
             <span className="tasks-timeline-text truncate">
-              <span className="tasks-timeline-actor">{actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}
+              <span className="tasks-timeline-actor">{item.actorName ?? actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}
             </span>
           </li>
         )

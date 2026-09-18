@@ -52,6 +52,8 @@ export interface TaskComment {
 export interface TaskActivity {
   id: string
   actorId: string
+  actorName?: string
+  actorServiceAccountId?: string
   text: string
   createdAt: string
   statusId?: string
@@ -137,12 +139,17 @@ export function taskFromRecord(
         .map(attachmentView),
       version: comment.version,
     })),
-    activity: activity.map((event) => ({
-      id: event.id,
-      actorId: event.actor_id ?? '',
-      text: event.action.split('.').map((part, index) => index === 0 ? part : part).reverse().join(' ').replace(/^./, (letter) => letter.toUpperCase()),
-      createdAt: event.occurred_at,
-    })),
+    activity: activity.map((event) => {
+      const metadata = event.metadata as Record<string, unknown>
+      return {
+        id: event.id,
+        actorId: event.actor_id ?? '',
+        actorName: typeof metadata.actor_service_account_name === 'string' ? metadata.actor_service_account_name : undefined,
+        actorServiceAccountId: typeof metadata.actor_service_account_id === 'string' ? metadata.actor_service_account_id : undefined,
+        text: event.action.split('.').map((part, index) => index === 0 ? part : part).reverse().join(' ').replace(/^./, (letter) => letter.toUpperCase()),
+        createdAt: event.occurred_at,
+      }
+    }),
     version: record.version,
   }
 }

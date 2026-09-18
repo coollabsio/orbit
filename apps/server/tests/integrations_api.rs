@@ -145,6 +145,31 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
     .await
     .unwrap();
     assert_eq!(mapped_task_id, replacement_id);
+
+    let (actor_id, metadata): (Option<String>, String) = sqlx::query_as(
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = ? AND action = 'task.created'",
+    )
+    .bind(replacement_id)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(actor_id, None);
+    let metadata: Value = serde_json::from_str(&metadata).unwrap();
+    assert_eq!(
+        metadata["actor_service_account_id"],
+        issued.api_token.service_account_id.unwrap().to_string()
+    );
+    assert_eq!(metadata["actor_service_account_name"], "Discord");
+
+    let (label_actor_id, label_metadata): (Option<String>, String) = sqlx::query_as(
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'label' AND action = 'label.created'",
+    )
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(label_actor_id, None);
+    let label_metadata: Value = serde_json::from_str(&label_metadata).unwrap();
+    assert_eq!(label_metadata["actor_service_account_name"], "Discord");
 }
 
 #[tokio::test]

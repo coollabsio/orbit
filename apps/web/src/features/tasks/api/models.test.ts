@@ -47,3 +47,19 @@ test('generated task records become the existing task view model without mock fa
     `/api/v1/workspaces/workspace-1/tasks/${record.id}/attachments/attachment-1/download`,
   )
 })
+
+test('service account audit metadata becomes the task activity actor', () => {
+  const serviceActivity: AuditEvent = {
+    ...activity,
+    actor_id: null,
+    metadata: { actor_service_account_id: 'service-1', actor_service_account_name: 'Discord' },
+  }
+
+  const task = taskFromRecord(record, project, [], [], [serviceActivity])
+
+  expect(task.activity[0]).toMatchObject({
+    actorId: '',
+    actorName: 'Discord',
+    actorServiceAccountId: 'service-1',
+  })
+})
