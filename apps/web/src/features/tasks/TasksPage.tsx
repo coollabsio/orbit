@@ -83,8 +83,16 @@ export function TasksPage() {
   const persisted = new URLSearchParams(searchParams)
   persisted.delete('new')
   persisted.delete('layout')
-  const search = persisted.toString()
-  const searchSuffix = search ? `?${search}` : ''
+  const detailParams = new URLSearchParams(persisted)
+  detailParams.delete('project')
+  const detailSearch = detailParams.toString()
+  const detailSearchSuffix = detailSearch ? `?${detailSearch}` : ''
+
+  const taskProjectId = activeTask?.projectId
+  const closeParams = new URLSearchParams(detailParams)
+  if (taskProjectId) closeParams.set('project', taskProjectId)
+  const closeSearch = closeParams.toString()
+  const closeSearchSuffix = closeSearch ? `?${closeSearch}` : ''
 
   const setProjectFilter = (projectId: string | null) => {
     const next = new URLSearchParams(searchParams)
@@ -104,17 +112,22 @@ export function TasksPage() {
       },
     })
   }
-  const openTask = (id: string) => navigate(`/tasks/${id}${searchSuffix}`)
-  const closeTask = () => navigate(`/tasks${searchSuffix}`)
+  const openTask = (id: string) => navigate(`/tasks/${id}${detailSearchSuffix}`)
+  const closeTask = () => navigate(`/tasks${closeSearchSuffix}`)
+
+  useEffect(() => {
+    if (!taskId || !searchParams.has('project')) return
+    navigate(`/tasks/${taskId}${detailSearchSuffix}`, { replace: true })
+  }, [detailSearchSuffix, navigate, searchParams, taskId])
 
   useEffect(() => {
     if (!taskId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') navigate(`/tasks${searchSuffix}`)
+      if (event.key === 'Escape') navigate(`/tasks${closeSearchSuffix}`)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [navigate, searchSuffix, taskId])
+  }, [closeSearchSuffix, navigate, taskId])
 
   const creating = useRef(false)
   const startNewTask = async (statusKey: string | null = null, replace = false) => {
@@ -124,7 +137,7 @@ export function TasksPage() {
     creating.current = true
     try {
       const task = await createTask.mutateAsync({ title: 'Untitled', project_id: projectId, status_id: statusId })
-      navigate(`/tasks/${task.id}${searchSuffix}`, { replace })
+      navigate(`/tasks/${task.id}${detailSearchSuffix}`, { replace })
     } catch {
       // The mutation exposes the server problem beside the create action.
     } finally {
