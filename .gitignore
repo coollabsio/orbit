@@ -10,3 +10,6 @@ todo.md
 
 # Local production domain/image selection
 deploy/.env
+
+# Local implementation plans (not committed)
+.ai/plans/
