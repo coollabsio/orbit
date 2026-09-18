@@ -2117,3 +2117,46 @@ async fn tasks_can_be_filtered_and_searched_by_identifier() {
         .unwrap();
     assert_eq!(malformed.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[tokio::test]
+async fn identifiers_resolve_in_one_batch_request() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+
+    // Request order is preserved, duplicates collapse, and unknown identifiers are omitted
+    // rather than failing the whole document.
+    let resolved = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks/resolve", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({"identifiers": ["GEN-2", "GEN-1", "GEN-2", "GEN-404"]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resolved.status(), StatusCode::OK);
+    let resolved = response_json(resolved).await;
+    let items = resolved["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["id"], second["id"]);
+    assert_eq!(items[1]["id"], first["id"]);
+    assert!(resolved["next_cursor"].is_null());
+
+    for body in [json!({"identifiers": []}), json!({"identifiers": ["nope"]})] {
+        let rejected = fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/tasks/resolve", fixture.workspace_id),
+                &fixture.owner_cookie,
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+}

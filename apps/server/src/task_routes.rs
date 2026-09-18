@@ -102,6 +102,10 @@ pub fn task_router(state: TaskState) -> Router {
             post(bulk_tasks),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/resolve",
+            post(resolve_tasks),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/tasks/reorder",
             post(reorder_tasks),
         )
@@ -756,6 +760,47 @@ async fn delete_label(
         )
         .await
         .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResolveBody {
+    identifiers: Vec<String>,
+}
+
+/// Batch identifier lookup so a rich-text document resolves all of its task chips in one request.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/resolve", params(("workspace_id" = String, Path)), request_body = ResolveBody, responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
+pub async fn resolve_tasks(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ResolveBody>,
+) -> Result<Json<Page<TaskRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/resolve");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    if body.identifiers.is_empty() || body.identifiers.len() > 100 {
+        return Err(validation("identifiers", &instance, request_id.as_ref()));
+    }
+    let mut identifiers = Vec::with_capacity(body.identifiers.len());
+    for value in &body.identifiers {
+        let parsed = parse_identifier(value, &instance, request_id.as_ref())?;
+        if !identifiers.contains(&parsed) {
+            identifiers.push(parsed);
+        }
+    }
+    state
+        .tasks
+        .resolve_tasks(workspace_id, actor_id, &identifiers)
+        .await
+        .map(|items| {
+            Json(Page {
+                items,
+                next_cursor: None,
+            })
+        })
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 

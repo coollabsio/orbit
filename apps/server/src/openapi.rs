@@ -72,6 +72,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::create_task,
         crate::task_routes::update_task,
         crate::task_routes::bulk_tasks,
+        crate::task_routes::resolve_tasks,
         crate::task_routes::reorder_tasks,
         crate::task_routes::delete_task,
         crate::task_routes::restore_task,
@@ -355,6 +356,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_task"
             | "update_task"
             | "bulk_tasks"
+            | "resolve_tasks"
             | "reorder_tasks"
             | "delete_task"
             | "restore_task"
@@ -416,6 +418,7 @@ fn task_operation(operation_id: &str) -> bool {
             | "create_task"
             | "update_task"
             | "bulk_tasks"
+            | "resolve_tasks"
             | "reorder_tasks"
             | "delete_task"
             | "restore_task"
@@ -453,6 +456,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "create_task"
             | "update_task"
             | "bulk_tasks"
+            | "resolve_tasks"
             | "reorder_tasks"
             | "create_comment"
             | "update_comment"

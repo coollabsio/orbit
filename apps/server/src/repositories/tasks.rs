@@ -1156,6 +1156,39 @@ impl TaskRepository {
         task_from_row(self.database.pool(), row).await
     }
 
+    /// Batch identifier lookup for rich-text task chips: one request, never N+1. Each entry is an
+    /// index seek on `tasks_identifier`; unknown identifiers are omitted so a document that
+    /// references a deleted task still renders.
+    pub async fn resolve_tasks(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        identifiers: &[(String, i64)],
+    ) -> Result<Vec<TaskRecord>, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let mut records = Vec::with_capacity(identifiers.len());
+        for (identifier_key, number) in identifiers {
+            let row = sqlx::query(
+                "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, \
+                 tasks.identifier_key, tasks.number, tasks.title, \
+                 tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.due_at, tasks.version, \
+                 tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
+                 JOIN projects ON projects.id = tasks.project_id \
+                 WHERE tasks.workspace_id = ? AND tasks.identifier_key = ? AND tasks.number = ? \
+                 AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
+            )
+            .bind(workspace_id.to_string())
+            .bind(identifier_key)
+            .bind(number)
+            .fetch_optional(self.database.pool())
+            .await?;
+            if let Some(row) = row {
+                records.push(task_from_row(self.database.pool(), row).await?);
+            }
+        }
+        Ok(records)
+    }
+
     pub async fn create_task(
         &self,
         workspace_id: Id,
