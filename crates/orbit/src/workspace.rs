@@ -21,6 +21,7 @@ pub enum DomainError {
     WorkspaceMismatch,
     ParentMismatch,
     NotDeleted,
+    InvalidDocument { reason: &'static str },
 }
 
 impl fmt::Display for DomainError {
@@ -31,6 +32,9 @@ impl fmt::Display for DomainError {
                     formatter,
                     "expected version {expected}, current version is {current}"
                 )
+            }
+            Self::InvalidDocument { reason } => {
+                write!(formatter, "rich text document is invalid: {reason}")
             }
             Self::RestoreConflict { field } => {
                 write!(

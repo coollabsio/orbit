@@ -3,6 +3,7 @@
 mod identity;
 mod policy;
 mod ports;
+pub mod rich_text;
 mod tasks;
 mod workspace;
 
