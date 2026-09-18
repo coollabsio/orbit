@@ -1104,17 +1104,8 @@
   overflow: visible;
 }
 
-.tasks-sidebar-button {
-  display: none;
-}
-
 /* responsive: one pane on mobile */
 @media (max-width: 899px) {
-  .tasks-sidebar-button {
-    display: inline-flex;
-    flex-shrink: 0;
-  }
-
   .tasks-rail-pane {
     display: none;
   }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Add, ChevronDown, Menu, Setting2, TaskSquare } from 'reicon-react'
+import { Add, ChevronDown, Setting2, TaskSquare } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
+import { TopbarSlot } from '../../components/shell/TopbarSlot'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useCurrentUser } from '../auth/api'
 import { useMembers } from '../workspaces/api'
@@ -176,14 +177,12 @@ export function TasksPage() {
         <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} />
       ) : (
         <section className="pane tasks-list-pane">
-          <div className="pane-header product-pane-header">
-            <button type="button" className="icon-button tasks-sidebar-button" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
-              <Menu size={18} />
-            </button>
+          <TopbarSlot side="left">
+            <span className="topbar-crumb-sep" aria-hidden="true">›</span>
             <Dropdown className="tasks-project-picker" trigger={(open) => (
               <button type="button" className="tasks-project-trigger" data-open={open || undefined} aria-label="Select project">
                 {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : null}
-                <span>{activeProject?.name ?? 'All projects'}</span><ChevronDown size={14} />
+                <span className="pane-title">{activeProject?.name ?? 'All tasks'}</span><ChevronDown size={14} />
               </button>
             )}>
               {(close) => <><button className="popover-option" data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><TaskSquare size={15} />All projects</button>
@@ -197,13 +196,13 @@ export function TasksPage() {
                 }}><Setting2 size={15} />{projectSettingsLabel()}</button> : null}
                 </>}
             </Dropdown>
-            <span className="pane-title">All tasks</span>
-            <div className="spacer" />
+          </TopbarSlot>
+          <TopbarSlot side="right">
             <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
             {createTask.isError ? <span role="alert" className="text-danger text-xs">Task creation failed.</span> : null}
             {createProject.isError ? <span role="alert" className="text-danger text-xs">Project creation failed.</span> : null}
-          </div>
+          </TopbarSlot>
           <div className="pane-body">
             {layout === 'board'
               ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
