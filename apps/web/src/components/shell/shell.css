@@ -410,12 +410,13 @@
 }
 
 /* ---------- top bar ---------- */
+/* One bar on every route at every width; pages fill the slots through TopbarSlot. */
 .topbar {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 8px;
   height: var(--topbar-height);
-  padding: 0 16px;
+  padding: 0 12px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--hairline);
   background: var(--canvas);
@@ -433,6 +434,19 @@
   gap: 8px;
   overflow: hidden;
   white-space: nowrap;
+}
+
+.topbar-slot[data-slot='left'] {
+  display: contents;
+}
+
+.topbar-slot[data-slot='right'] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .topbar-crumb {
@@ -474,13 +488,6 @@ a.topbar-crumb:hover {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -668,85 +675,22 @@ a.topbar-crumb:hover {
     border-top: none;
   }
 
+  /* one compact variant: the bar wraps instead of shrinking its controls off-screen */
   .topbar {
-    display: flex;
-    height: 48px;
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
     padding: 0 8px;
     border-bottom: none;
-  }
-
-  .topbar[data-root='settings'] {
-    gap: 7px;
-    height: 44px;
-    min-height: 44px;
-    padding: 6px 8px;
-    border-bottom-color: var(--line);
-  }
-
-  .topbar[data-root='settings'] .topbar-crumbs {
-    gap: 7px;
-    padding: 5px 0;
-  }
-
-  .topbar[data-root='settings'] .topbar-crumb {
-    color: var(--text-muted);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .topbar[data-root='settings'] .topbar-actions {
-    gap: 8px;
-  }
-
-  .topbar[data-root='settings'] .icon-button:not(.topbar-drawer-button) {
-    width: auto;
-    height: 32px;
-    padding-inline: 10px;
-    color: var(--text-muted);
-  }
-
-  .topbar[data-root='settings'] .topbar-drawer-button {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 0;
-    color: var(--text-faint);
-  }
-
-  .topbar[data-root='settings'] .icon-button:hover {
-    color: var(--text-primary);
   }
 
   .topbar-menu-button {
     display: inline-flex;
   }
 
-  .topbar[data-root='home'] .topbar-drawer-button,
-  .topbar[data-root='home'] .topbar-new-menu {
-    display: none;
-  }
-
-  .topbar[data-root='home'] .topbar-crumbs {
-    gap: 0;
-  }
-
-  .topbar[data-root='home'] .topbar-crumb {
-    color: var(--text-heading);
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .topbar[data-root='home'] .topbar-actions {
-    gap: 2px;
-  }
-
-  .topbar[data-root='tasks'],
-  .topbar[data-root='mail'],
-  .topbar[data-root='docs'],
-  .topbar[data-root='dm'],
-  .topbar[data-root='chat'],
-  .topbar[data-root='inbox'] {
-    display: none;
+  .topbar-slot[data-slot='right'] {
+    gap: 6px;
+    flex-wrap: wrap;
   }
 
   .topbar-status {
