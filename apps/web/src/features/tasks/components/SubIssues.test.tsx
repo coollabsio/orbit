@@ -119,3 +119,23 @@ test('the add button inserts an inline row instead of opening a modal', async ()
   fireEvent.keyDown(view.getByLabelText('New sub-issue title'), { key: 'Escape' })
   expect(view.queryByLabelText('New sub-issue title')).toBeNull()
 })
+
+test('the task graph styles are declared in tasks.css', async () => {
+  const css = await Bun.file(new URL('../tasks.css', import.meta.url)).text()
+  for (const selector of [
+    '.tasks-subissues',
+    '.tasks-subissues-header',
+    '.tasks-subissues-count',
+    '.tasks-subissues-bar',
+    '.tasks-subissues-bar-fill',
+    '.tasks-subissue-row',
+    '.tasks-row[data-compact=',
+    '.tasks-row[data-depth=',
+    '.tasks-row-disclosure',
+    '.tasks-duplicate-banner',
+    '.tasks-side-link',
+  ]) {
+    expect(css.includes(selector)).toBe(true)
+  }
+  expect(css.includes('prefers-reduced-motion')).toBe(true)
+})

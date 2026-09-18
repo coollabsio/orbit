@@ -1524,3 +1524,221 @@
   color: var(--text-primary);
   white-space: nowrap;
 }
+
+/* ── Task graph: sub-issues, list nesting, duplicates, backlinks ───────────── */
+
+/* Sub-issues: a flat group below the description, above the activity feed. */
+.tasks-subissues {
+  display: flex;
+  flex-direction: column;
+  margin: 24px 0 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.tasks-subissues-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 2px;
+}
+
+.tasks-subissues-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.tasks-subissues-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-subissues-bar {
+  width: 72px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--fill);
+  overflow: hidden;
+}
+
+.tasks-subissues-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.tasks-subissues-add {
+  color: var(--text-faint);
+}
+
+.tasks-subissues-add:hover {
+  color: var(--text-primary);
+}
+
+.tasks-subissues-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Child rows are the shared TaskRow, one notch smaller. */
+.tasks-row[data-compact='true'] {
+  min-height: 32px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-bottom-color: var(--hairline);
+}
+
+.tasks-row[data-compact='true'] .tasks-row-date,
+.tasks-row[data-compact='true'] .tasks-row-labels {
+  display: none;
+}
+
+.tasks-subissue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.tasks-subissue-draft input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.tasks-subissue-draft input::placeholder {
+  color: var(--text-faint);
+}
+
+.tasks-subissue-draft:focus-within {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Nested list rows: one level, indented under the disclosure triangle. */
+.tasks-row[data-depth='1'] {
+  padding-left: calc(12px + 20px * var(--tasks-row-depth, 0));
+}
+
+.tasks-row-disclosure {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+}
+
+button.tasks-row-disclosure {
+  cursor: pointer;
+}
+
+button.tasks-row-disclosure:hover {
+  background: var(--fill);
+  color: var(--text-primary);
+}
+
+button.tasks-row-disclosure:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.tasks-row-disclosure svg {
+  transition: transform 140ms ease;
+}
+
+.tasks-row-disclosure[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.tasks-row-project {
+  flex: none;
+}
+
+/* Duplicate banner: muted, informational, never alarming. */
+.tasks-duplicate-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin-bottom: 12px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--recessed);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tasks-duplicate-banner a {
+  flex: none;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.tasks-duplicate-banner a:hover {
+  text-decoration: underline;
+}
+
+.tasks-duplicate-banner-title {
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+/* Sidebar links (Duplicates, Referenced by): identifier, then a faint title. */
+.tasks-side-link {
+  max-width: 100%;
+  gap: 6px;
+}
+
+.tasks-side-link svg {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.tasks-side-link-id {
+  flex: none;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-side-link-title {
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+@media (max-width: 899px) {
+  .tasks-subissues-bar {
+    width: 48px;
+  }
+
+  .tasks-subissues {
+    margin-top: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tasks-subissues-bar-fill,
+  .tasks-row,
+  .tasks-row-disclosure svg {
+    transition: none;
+  }
+}
