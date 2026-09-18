@@ -345,12 +345,6 @@
   color: var(--text-secondary);
 }
 
-@media (max-width: 899px) {
-  .settings-page-header {
-    display: none;
-  }
-}
-
 /* Match the Tasks project heading's inset, icon gap, and muted label. */
 .settings-page-header {
   gap: 7px;
