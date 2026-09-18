@@ -1195,10 +1195,6 @@
     pointer-events: auto;
   }
 
-  .tasks-list-pane > .pane-header {
-    flex-wrap: wrap;
-  }
-
   .tasks-search {
     order: 10;
     flex-basis: 100%;
@@ -1207,12 +1203,12 @@
     margin-top: 4px;
   }
 
-  .tasks-list-pane > .pane-header .pane-title {
+  .tasks-project-trigger .pane-title {
     margin-right: 4px;
   }
 
   .tasks-filter,
-  .tasks-list-pane > .pane-header > .button-primary {
+  .topbar-slot[data-slot='right'] > .button-primary {
     width: 32px;
     min-width: 32px;
     padding: 0;
