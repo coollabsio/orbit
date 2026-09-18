@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '../../features/realtime/useWorkspaceEvents'
-import { Outlet } from 'react-router'
+import { Outlet, useNavigate } from 'react-router'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { CommandPalette } from './CommandPalette'
 import { SidebarBrand } from './SidebarBrand'
 import { SidebarNav } from './SidebarNav'
+import { useNewTaskShortcut } from './newTaskShortcut'
 import { useSidebarToggleShortcut } from './sidebarShortcut'
 import { Topbar } from './Topbar'
 import { TopbarSlotProvider } from './TopbarSlot'
@@ -14,6 +15,7 @@ import { MobileDock } from './MobileDock'
 
 export function AppShell() {
   const { workspace } = useWorkspace()
+  const navigate = useNavigate()
   const live = useWorkspaceEvents(workspace.id)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -67,6 +69,10 @@ export function AppShell() {
 
   const toggleSidebar = useCallback(() => setSidebarCollapsed((collapsed) => !collapsed), [])
   useSidebarToggleShortcut(toggleSidebar)
+
+  // Replaces the deleted topbar New dropdown: creating a task stays one keystroke from any route.
+  const newTask = useCallback(() => navigate('/tasks?new=1'), [navigate])
+  useNewTaskShortcut(newTask)
 
   return (
     <div className="app-shell">
