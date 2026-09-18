@@ -931,6 +931,7 @@ async fn list_tasks(
             "title" => TaskSort::Title,
             "created_at" => TaskSort::CreatedAt,
             "updated_at" => TaskSort::UpdatedAt,
+            "relevance" => TaskSort::Relevance,
             _ => return Err(validation("sort", &instance, request_id.as_ref())),
         },
         order: match query.order.as_str() {

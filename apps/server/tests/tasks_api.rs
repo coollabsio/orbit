@@ -2174,3 +2174,81 @@ fn doc(text: &str) -> serde_json::Value {
         { "type": "paragraph", "content": [{ "type": "text", "text": text }] }
     ] })
 }
+
+#[tokio::test]
+async fn search_uses_the_index_and_never_crosses_a_workspace() {
+    let fixture = Fixture::new().await;
+    let hit = fixture.create_task("Login page is broken").await;
+    let _miss = fixture.create_task("Unrelated work").await;
+
+    // Description text is indexed too, not just the title.
+    let described = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}",
+                fixture.workspace_id,
+                _miss["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!({
+                "expected_version": 0,
+                "description_json": doc("a note about zebras")
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(described.status(), StatusCode::OK);
+
+    let search = |term: &str| {
+        let app = fixture.app.clone();
+        let uri = format!(
+            "/api/v1/workspaces/{}/tasks?search={term}",
+            fixture.workspace_id
+        );
+        let cookie = fixture.owner_cookie.clone();
+        async move {
+            let response = app
+                .oneshot(cookie_request("GET", &uri, &cookie))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            response_json(response).await
+        }
+    };
+
+    let by_title = search("login").await;
+    assert_eq!(by_title["items"].as_array().unwrap().len(), 1);
+    assert_eq!(by_title["items"][0]["id"], hit["id"]);
+
+    let by_description = search("zebras").await;
+    assert_eq!(by_description["items"].as_array().unwrap().len(), 1);
+    assert_eq!(by_description["items"][0]["id"], _miss["id"]);
+
+    // fts5 operators in user input are reduced to plain terms rather than executed.
+    let injected = search("login%20OR%20zebras").await;
+    assert_eq!(injected["items"].as_array().unwrap().len(), 0);
+
+    let nothing = search("%20%20").await;
+    assert_eq!(nothing["items"].as_array().unwrap().len(), 0);
+
+    // A trashed task leaves the index.
+    let deleted = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}?expected_version=0",
+                fixture.workspace_id,
+                hit["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert_eq!(search("login").await["items"].as_array().unwrap().len(), 0);
+}

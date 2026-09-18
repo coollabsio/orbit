@@ -174,6 +174,8 @@ pub enum TaskSort {
     Title,
     CreatedAt,
     UpdatedAt,
+    /// fts5 bm25 ranking. Requires a search term and is never cursor-paginated.
+    Relevance,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1076,15 +1078,17 @@ impl TaskRepository {
                 .push_bind(*number);
         }
         if let Some(search) = &filter.search {
-            let pattern = format!("%{}%", escape_like(&search.to_lowercase()));
-            query
-                .push(" AND (LOWER(tasks.title) LIKE ")
-                .push_bind(pattern.clone())
-                .push(" ESCAPE '\\' OR LOWER(tasks.description_text) LIKE ")
-                .push_bind(pattern.clone())
-                .push(" ESCAPE '\\' OR LOWER(tasks.identifier_key || '-' || tasks.number) LIKE ")
-                .push_bind(pattern)
-                .push(" ESCAPE '\\')");
+            match search_match_query(workspace_id, search) {
+                Some(match_query) => {
+                    query
+                        .push(" AND tasks.id IN (SELECT task_id FROM task_search WHERE task_search MATCH ")
+                        .push_bind(match_query)
+                        .push(")");
+                }
+                None => {
+                    query.push(" AND 0");
+                }
+            }
         }
         if let Some((raw_value, id)) = after {
             let operator = if filter.order == SortOrder::Asc {
@@ -1263,6 +1267,15 @@ impl TaskRepository {
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
         replace_labels(&mut tx, id, &input.label_ids).await?;
+        sync_task_search(
+            &mut tx,
+            workspace_id,
+            id,
+            &format!("{identifier_key}-{number}"),
+            &input.title,
+            &description_text,
+        )
+        .await?;
         notify_users(
             &mut tx,
             workspace_id,
@@ -1432,6 +1445,8 @@ impl TaskRepository {
         check_version(expected_version, current.version, &current)?;
         sqlx::query("UPDATE tasks SET deleted_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
             .bind(now.as_millis()).bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        // A trashed task must leave the index, or search would surface it.
+        remove_task_search(&mut tx, task_id).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1469,6 +1484,15 @@ impl TaskRepository {
             .await?;
         sqlx::query("UPDATE tasks SET deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NOT NULL AND version = ?")
             .bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        sync_task_search(
+            &mut tx,
+            workspace_id,
+            task_id,
+            &current.identifier,
+            &current.title,
+            &current.description_text,
+        )
+        .await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1892,6 +1916,16 @@ async fn update_task_in_tx(
     if let Some(labels) = &update.changes.label_ids {
         replace_labels(tx, update.id, labels).await?;
     }
+    // Unconditional: a title- or description-only edit must reindex too.
+    sync_task_search(
+        tx,
+        workspace_id,
+        update.id,
+        &current.identifier,
+        &title,
+        &description_text,
+    )
+    .await?;
     Ok(TaskRecord {
         project_id,
         status_id,
@@ -2039,6 +2073,8 @@ fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
         TaskSort::Title => task.title.clone(),
         TaskSort::CreatedAt => task.created_at.as_millis().to_string(),
         TaskSort::UpdatedAt => task.updated_at.as_millis().to_string(),
+        // Never reached: relevance queries return no cursor.
+        TaskSort::Relevance => task.position.to_string(),
     };
     vec![primary, task.id.to_string()]
 }
@@ -2052,6 +2088,8 @@ fn task_sort_column(sort: &TaskSort) -> &'static str {
         TaskSort::Title => "tasks.title",
         TaskSort::CreatedAt => "tasks.created_at",
         TaskSort::UpdatedAt => "tasks.updated_at",
+        // Never reached: a relevance query short-circuits before the ORDER BY branch.
+        TaskSort::Relevance => "tasks.position",
     }
 }
 
@@ -2064,7 +2102,11 @@ fn push_cursor_value<'a>(
         TaskSort::Title => {
             query.push_bind(value.to_owned());
         }
-        TaskSort::Position | TaskSort::Priority | TaskSort::CreatedAt | TaskSort::UpdatedAt => {
+        TaskSort::Position
+        | TaskSort::Priority
+        | TaskSort::CreatedAt
+        | TaskSort::UpdatedAt
+        | TaskSort::Relevance => {
             query.push_bind(value.parse::<i64>().map_err(|_| TaskError::InvalidCursor)?);
         }
     }
@@ -2097,11 +2139,71 @@ fn document_columns(document: &Value, field: &'static str) -> Result<(String, St
     Ok((json, text))
 }
 
-fn escape_like(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
+/// fts5 stores the hyphen-stripped UUID because unicode61 splits on hyphens; a
+/// single token keeps `workspace_id:<value>` a cheap index lookup.
+fn search_workspace_token(workspace_id: Id) -> String {
+    workspace_id.to_string().replace('-', "")
+}
+
+/// Builds the fts5 MATCH expression. Every term is reduced to alphanumerics so a
+/// user cannot inject fts5 operators, and the workspace is ANDed in so the index
+/// never scans across workspaces. `None` means "no usable term" -> no results.
+fn search_match_query(workspace_id: Id, search: &str) -> Option<String> {
+    let terms: Vec<String> = search
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|term| !term.is_empty())
+        .take(8)
+        .map(str::to_lowercase)
+        .collect();
+    if terms.is_empty() {
+        return None;
+    }
+    let clauses: Vec<String> = terms
+        .iter()
+        .map(|term| format!("(identifier:{term}* OR title:{term}* OR body:{term}*)"))
+        .collect();
+    Some(format!(
+        "workspace_id:{} AND {}",
+        search_workspace_token(workspace_id),
+        clauses.join(" AND ")
+    ))
+}
+
+/// Keeps `task_search` in step inside the caller's write transaction. The house
+/// rule is that repositories own explicit SQL, so this is a delete + insert
+/// rather than a SQL trigger.
+async fn sync_task_search(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    task_id: Id,
+    identifier: &str,
+    title: &str,
+    body: &str,
+) -> Result<(), TaskError> {
+    remove_task_search(tx, task_id).await?;
+    sqlx::query(
+        "INSERT INTO task_search (task_id, workspace_id, identifier, title, body) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(task_id.to_string())
+    .bind(search_workspace_token(workspace_id))
+    .bind(identifier)
+    .bind(title)
+    .bind(body)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn remove_task_search(
+    tx: &mut Transaction<'_, Sqlite>,
+    task_id: Id,
+) -> Result<(), TaskError> {
+    sqlx::query("DELETE FROM task_search WHERE task_id = ?")
+        .bind(task_id.to_string())
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 async fn require_access(
