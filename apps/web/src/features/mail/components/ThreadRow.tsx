@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Paperclip, Star } from 'reicon-react'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { relativeTime } from '../../../lib/format'
 import { toggleThreadStar } from '../../../mock/actions'
 import type { MailThread } from '../../../mock/types'
@@ -43,7 +43,7 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
       }}
     >
       <span className="mail-row-dot">{thread.unread ? <span className="unread-dot" /> : null}</span>
-      <Avatar user={null} name={sender.name} size={32} />
+      <UserAvatar user={null} name={sender.name} size={32} />
       <div className="mail-row-main">
         <div className="mail-row-line1">
           <span className="mail-row-sender truncate">{sender.name}</span>

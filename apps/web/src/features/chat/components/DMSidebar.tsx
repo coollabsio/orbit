@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Edit } from 'reicon-react'
 import { useNavigate } from 'react-router'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import type { AppState } from '../../../mock/types'
 import { relativeTime } from '../../../lib/format'
 import { extractPreview } from '../chatLib'
@@ -68,7 +68,7 @@ export function DMSidebar({ state, activeId }: { state: AppState; activeId: stri
                 onClick={() => navigate(`/dm/${dm.id}`)}
               >
                 <span className="dm-avatar-wrap">
-                  <Avatar user={user} size={34} />
+                  <UserAvatar user={user} size={34} />
                   <span className="dm-status-dot" data-online={user.online || undefined} />
                 </span>
                 <span className="dm-row-copy">

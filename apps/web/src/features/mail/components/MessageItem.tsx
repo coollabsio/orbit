@@ -1,4 +1,4 @@
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { fullDate, timeOfDay } from '../../../lib/format'
 import type { MailMessage } from '../../../mock/types'
 import { firstLine } from '../mailLib'
@@ -24,7 +24,7 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
           if (e.key === 'Enter' && e.target === e.currentTarget) onToggle()
         }}
       >
-        <Avatar user={null} name={message.from.name} size={32} />
+        <UserAvatar user={null} name={message.from.name} size={32} />
         <div className="mail-message-meta">
           <span className="mail-message-sender truncate">{message.from.name}</span>
           <span className="text-xs text-faint truncate">{message.from.email}</span>

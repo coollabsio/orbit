@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Magnifier, Messages2 } from 'reicon-react'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { Modal } from '../../../components/ui/Modal'
 import { getOrCreateDirectMessage } from '../../../mock/actions'
 import type { AppState } from '../../../mock/types'
@@ -28,7 +28,7 @@ export function NewDMModal({ state, onClose, onCreated }: { state: AppState; onC
             className="dm-member-row"
             onClick={() => onCreated(getOrCreateDirectMessage(user.id))}
           >
-            <Avatar user={user} size={36} />
+            <UserAvatar user={user} size={36} />
             <span className="dm-member-copy">
               <strong>{user.name}</strong>
               <small>@{user.handle}</small>

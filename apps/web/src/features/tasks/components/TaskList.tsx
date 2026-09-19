@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Add, ChevronRight, TaskSquare, Xmark } from 'reicon-react'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
 import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
@@ -262,7 +262,7 @@ function BulkBar({
               const everyone = tasks.every((t) => t.assigneeIds.includes(u.id))
               return (
                 <button key={u.id} className="popover-option" data-selected={everyone || undefined} onClick={() => { bulkAssign(u.id); close() }}>
-                  <Avatar user={u} size={16} />
+                  <UserAvatar user={u} size={16} />
                   {u.name}
                   {everyone ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
                 </button>

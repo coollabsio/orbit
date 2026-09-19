@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { confirmAction } from '../../../components/ui/confirmAction'
 import { ArrowLeft, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
-import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
+import { UserAvatar, UserAvatarStack } from '../../../components/ui/UserAvatar'
 import { DatePicker } from '../../../components/ui/DatePicker'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmptyState } from '../../../components/ui/EmptyState'
@@ -174,12 +174,12 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                   <button className="button button-ghost tasks-side-prop">
                     {assignees.length > 0 ? (
                       <>
-                        <AvatarStack users={assignees} size={16} />
+                        <UserAvatarStack users={assignees} size={16} />
                         <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
                       </>
                     ) : (
                       <>
-                        <Avatar user={undefined} size={16} name="—" />
+                        <UserAvatar user={undefined} size={16} name="—" />
                         Assign
                       </>
                     )}
@@ -202,7 +202,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                             close()
                           }}
                         >
-                          <Avatar user={u} size={16} />
+                          <UserAvatar user={u} size={16} />
                           {u.name}
                           {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
                         </button>

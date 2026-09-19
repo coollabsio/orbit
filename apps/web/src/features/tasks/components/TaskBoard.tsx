@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AvatarStack } from '../../../components/ui/Avatar'
+import { UserAvatarStack } from '../../../components/ui/UserAvatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { Task, TaskStatusDef, User } from '../api/models'
 import type { LabelRecord } from '../../../api/generated/types.gen'
@@ -120,7 +120,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
                       <div className="tasks-board-card-topline">
                         <span>{task.identifier}</span>
                         <span className="tasks-board-card-meta">
-                          {assignees.length > 0 ? <AvatarStack users={assignees} size={18} /> : null}
+                          {assignees.length > 0 ? <UserAvatarStack users={assignees} size={18} /> : null}
                           <PriorityPicker task={task} align="right" />
                         </span>
                       </div>

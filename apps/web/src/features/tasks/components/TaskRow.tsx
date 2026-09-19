@@ -1,5 +1,5 @@
 import { Xmark } from 'reicon-react'
-import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
+import { UserAvatar, UserAvatarStack } from '../../../components/ui/UserAvatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import { projectStatuses } from '../../../components/workspace/taskMeta'
@@ -105,7 +105,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
               className="tasks-row-assignees"
               aria-label={assignees.length > 0 ? `Assignees: ${assignees.map((user) => user.name).join(', ')}` : 'Assign task'}
             >
-              <AvatarStack users={assignees} size={18} />
+              <UserAvatarStack users={assignees} size={18} />
             </button>
           )}
         >
@@ -133,7 +133,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
                       close()
                     }}
                   >
-                    <Avatar user={user} size={16} />
+                    <UserAvatar user={user} size={16} />
                     {user.name}
                     {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
                   </button>

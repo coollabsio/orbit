@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Edit, Trash } from 'reicon-react'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
 import { Attachments } from '../../chat/components/Attachments'
 import type { MentionToken } from '../../chat/chatLib'
@@ -39,7 +39,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
   return (
     <>
       <article className="tasks-comment" data-reply={reply || undefined}>
-        <Avatar user={author} size={reply ? 22 : 28} name={name} />
+        <UserAvatar user={author} size={reply ? 22 : 28} name={name} />
         <div className="tasks-comment-body">
           <div className="tasks-comment-header">
             <span className="tasks-comment-author">{name}</span>

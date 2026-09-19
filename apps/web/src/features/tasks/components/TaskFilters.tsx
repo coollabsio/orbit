@@ -1,5 +1,5 @@
 import { Filter, Kanban, List, SearchNormal, Setting4, Sort } from 'reicon-react'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { User } from '../api/models'
@@ -83,7 +83,7 @@ export function TaskFilters({
                   close()
                 }}
               >
-                <Avatar user={u} size={16} />
+                <UserAvatar user={u} size={16} />
                 {u.name}
               </button>
             ))}

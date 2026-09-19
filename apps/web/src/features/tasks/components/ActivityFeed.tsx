@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown } from 'reicon-react'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { Task, TaskActivity, TaskViewState } from '../api/models'
 import { useCreateTaskComment } from '../api/tasks'
@@ -41,7 +41,7 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
         return (
           <li key={item.id} className="tasks-timeline-item">
             <span className="tasks-timeline-icon">
-              {status ? <TaskStatusIcon status={status} size={14} /> : <Avatar user={actor} size={14} />}
+              {status ? <TaskStatusIcon status={status} size={14} /> : <UserAvatar user={actor} size={14} />}
             </span>
             <span className="tasks-timeline-text truncate">
               <span className="tasks-timeline-actor">{item.actorName ?? actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}

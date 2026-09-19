@@ -6,7 +6,7 @@ import { ArrowLeft, Folder, Hashtag, Magnifier, Paperclip2, People, Xmark } from
 import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import type { AppState, Channel, ChatMessage, User } from '../../../mock/types'
-import { Avatar } from '../../../components/ui/Avatar'
+import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { FilesView } from './FilesView'
 import { MessageInput, type MessageInputHandle } from './MessageInput'
 import { MessageList } from './MessageList'
@@ -88,7 +88,7 @@ export function ChatArea({
           <button type="button" className="fc-mobile-back" title="Back to conversations" onClick={() => navigate(dmParticipant ? '/dm' : '/chat')}>
             <ArrowLeft size={18} />
           </button>
-          {dmParticipant ? <Avatar user={dmParticipant} size={28} showOnline /> : channel.emoji ? <span className="fc-emoji-icon" data-size="lg"><Emoji value={channel.emoji} size={20} /></span> : <Hashtag size={20} />}
+          {dmParticipant ? <UserAvatar user={dmParticipant} size={28} showOnline /> : channel.emoji ? <span className="fc-emoji-icon" data-size="lg"><Emoji value={channel.emoji} size={20} /></span> : <Hashtag size={20} />}
           <div className="fc-chat-header-title">
             <h2>{channel.name}</h2>
             {channel.description ? (
