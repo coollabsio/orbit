@@ -14,7 +14,7 @@
 
 - First sidebar groups Workspace, Personal, Manage.
 - Personal order is Inbox, then Direct messages.
-- Collapse control sits in the 48px brand row to the right of the workspace switcher. It is hidden until the sidebar is hovered and always visible on `:focus-visible`; on the collapsed rail it swaps in place with the workspace initial. `[` toggles it from anywhere outside text entry.
+- Collapse control sits in the footer beside the user menu and is always visible. On the collapsed rail its arrow flips to read as "expand". `[` toggles it from anywhere outside text entry.
 - Collapsed state is a 56px icon rail with section separators.
 - Feature sidebars may be resizable from 220–420px; persist widths in local storage and hide resizers on mobile.
 - Second sidebar content starts below a 48px header with internal padding; never flush against the top border.

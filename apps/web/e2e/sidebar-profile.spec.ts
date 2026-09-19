@@ -32,10 +32,7 @@ for (const mode of ['desktop', 'collapsed', 'mobile']) {
     })
     await page.goto('/tasks?workspace=alpha')
     if (mode === 'mobile') await page.getByRole('button', { name: 'Menu', exact: true }).click()
-    if (mode === 'collapsed') {
-      await page.locator('.app-sidebar').hover()
-      await page.getByRole('button', { name: 'Collapse sidebar' }).click()
-    }
+    if (mode === 'collapsed') await page.getByRole('button', { name: 'Collapse sidebar' }).click()
     const sidebar = page.locator(mode === 'mobile' ? '.mobile-drawer' : '.app-sidebar')
     const trigger = sidebar.getByRole('button', { name: 'Account menu for Test User' })
     await expect(trigger).toBeVisible()

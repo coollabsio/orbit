@@ -29,7 +29,17 @@ export interface RichTextEditorProps {
 
 // ProseMirror and TipTap are ~100 KB gzipped. Lists render descriptions as plain
 // text, so they must never enter a list chunk — only this dynamic import pulls them in.
-const Surface = lazy(() => import('./RichTextEditorSurface'))
+const importSurface = () => import('./RichTextEditorSurface')
+const Surface = lazy(importSurface)
+
+/**
+ * Warm the editor chunk before it is first shown, so opening the create modal or
+ * clicking a description does not stall on a multi-second first import. The dynamic
+ * import is de-duped, so calling this repeatedly is free.
+ */
+export function prefetchRichTextEditor() {
+  void importSurface()
+}
 
 export function RichTextEditor(props: RichTextEditorProps) {
   return (

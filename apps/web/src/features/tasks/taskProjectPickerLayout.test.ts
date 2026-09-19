@@ -28,7 +28,17 @@ test('filters and the create action live in the right-hand topbar slot', async (
 
   expect(right).toContain('<TaskFilters')
   expect(right).toContain('aria-label="New task"')
-  expect(right).toContain('Task creation failed.')
+  // Creation now opens the modal; the create failure message lives there, not the topbar.
+  expect(right).not.toContain('Task creation failed.')
+})
+
+test('the New task button opens the create modal instead of creating then navigating', async () => {
+  const source = await Bun.file(new URL('./TasksPage.tsx', import.meta.url)).text()
+
+  expect(source).toContain('<NewTaskModal')
+  expect(source).toContain('onClick={() => openNewTask()}')
+  // No immediate "Untitled" create-and-navigate anymore.
+  expect(source).not.toContain("title: 'Untitled'")
 })
 
 test('the page-local hamburger is gone now the topbar is global', async () => {

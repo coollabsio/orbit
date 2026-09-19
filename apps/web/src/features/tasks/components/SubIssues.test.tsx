@@ -92,7 +92,7 @@ test('a leaf task never requests its (empty) sub-issue list', () => {
   expect(calls).toBe(0)
 })
 
-test('the add button inserts an inline row instead of opening a modal', async () => {
+test('the add button opens the create modal preset to this parent', async () => {
   const bodies: unknown[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
@@ -105,19 +105,16 @@ test('the add button inserts an inline row instead of opening a modal', async ()
   const view = render(<SubIssues task={parent} projects={[]} state={state} onOpen={() => {}} />, { wrapper: Wrapper })
 
   fireEvent.click(view.getByRole('button', { name: 'Add sub-issue' }))
-  expect(view.queryByRole('dialog')).toBeNull()
-  const input = view.getByLabelText('New sub-issue title') as HTMLInputElement
-  expect(document.activeElement).toBe(input)
+  expect(await view.findByRole('dialog')).toBeTruthy()
+
+  const input = view.getByLabelText('Issue title') as HTMLInputElement
   fireEvent.change(input, { target: { value: 'Write the docs' } })
-  fireEvent.keyDown(input, { key: 'Enter' })
+  fireEvent.click(view.getByRole('button', { name: 'Create sub-issue' }))
 
   await waitFor(() => expect(bodies.length).toBe(1))
   expect(bodies[0]).toMatchObject({ title: 'Write the docs', parent_id: 'task-1', project_id: 'project-1', status_id: 'todo' })
-  // the row stays open and empties for the next sub-issue
-  await waitFor(() => expect((view.getByLabelText('New sub-issue title') as HTMLInputElement).value).toBe(''))
-
-  fireEvent.keyDown(view.getByLabelText('New sub-issue title'), { key: 'Escape' })
-  expect(view.queryByLabelText('New sub-issue title')).toBeNull()
+  // A single create closes the modal instead of navigating anywhere.
+  await waitFor(() => expect(view.queryByRole('dialog')).toBeNull())
 })
 
 test('the task graph styles are declared in tasks.css', async () => {
@@ -128,9 +125,9 @@ test('the task graph styles are declared in tasks.css', async () => {
     '.tasks-subissues-count',
     '.tasks-subissues-bar',
     '.tasks-subissues-bar-fill',
-    '.tasks-subissue-row',
     '.tasks-row[data-compact=',
     '.tasks-row[data-depth=',
+    '.tasks-subissues-empty-add',
     '.tasks-row-disclosure',
     '.tasks-duplicate-banner',
     '.tasks-side-link',

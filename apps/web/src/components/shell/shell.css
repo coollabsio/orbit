@@ -48,21 +48,13 @@
   gap: 7px;
 }
 
-/* Linear-style: the toggle only appears when the sidebar is hovered, but keyboard focus always wins. */
+/* The collapse toggle lives in the footer beside the user menu and is always visible. */
 .app-sidebar-collapse {
   width: 28px;
   height: 28px;
   flex-shrink: 0;
   color: var(--text-faint);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.14s ease, color 0.14s ease;
-}
-
-.app-sidebar:hover .app-sidebar-collapse,
-.app-sidebar-collapse:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
+  transition: color 0.14s ease;
 }
 
 .app-sidebar-collapse:hover {
@@ -70,7 +62,6 @@
 }
 
 .app-sidebar[data-collapsed='true'] .app-sidebar-brand {
-  position: relative;
   justify-content: center;
   padding-inline: 0;
 }
@@ -79,31 +70,9 @@
   display: flex;
 }
 
-/* 56px rail: no room for both, so the toggle sits on top of the workspace initial and swaps with it. */
-.app-sidebar[data-collapsed='true'] .app-sidebar-collapse {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-}
-
-.app-sidebar[data-collapsed='true'] .workspace-switcher {
-  transition: opacity 0.14s ease;
-}
-
-.app-sidebar[data-collapsed='true']:hover .workspace-switcher,
-.app-sidebar[data-collapsed='true'] .app-sidebar-brand:has(.app-sidebar-collapse:focus-visible) .workspace-switcher {
-  opacity: 0;
-}
-
+/* Collapsed rail: the arrow points the other way to read as "expand". */
 .app-sidebar[data-collapsed='true'] .app-sidebar-collapse svg {
   transform: rotate(180deg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .app-sidebar-collapse,
-  .app-sidebar[data-collapsed='true'] .workspace-switcher {
-    transition: none;
-  }
 }
 
 .app-sidebar-title {

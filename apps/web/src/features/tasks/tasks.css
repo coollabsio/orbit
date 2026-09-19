@@ -679,10 +679,25 @@
 }
 
 /* Read-only description: the same metrics as the editor it turns into, so a
-   click to edit never shifts the layout. */
+   click to edit never shifts the layout. Both share a small negative inset so
+   the read-only hover highlight has breathing room without moving the text. */
+.tasks-desc-view,
+.tasks-desc-wrap .editor-surface {
+  margin-inline: -8px;
+  padding: 4px 8px;
+}
+
 .tasks-desc-view {
   cursor: text;
   overflow-wrap: anywhere;
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tasks-desc-view:hover {
+    background: var(--nav-hover-bg);
+  }
 }
 
 .tasks-desc-view[data-muted='true'] {
@@ -691,7 +706,17 @@
 
 .tasks-desc-wrap .editor-surface {
   min-height: 60px;
-  padding: 0;
+}
+
+/* Match the read-only height so the lazy editor's loading frame never jumps. */
+.tasks-desc-wrap .editor-shell-loading {
+  min-height: 60px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tasks-desc-view {
+    transition: none;
+  }
 }
 
 /* activity: timeline of events, then comment threads */
@@ -931,15 +956,30 @@
   margin-top: 16px;
 }
 
+/* The whole composer is one input-like frame: editor, attachments and the
+   action row share a single border and focus ring, so the Send button reads as
+   part of the field instead of floating beneath it (Linear's comment box). */
 .tasks-native-composer {
   position: relative;
   display: grid;
   gap: 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 10px;
+  background: var(--recessed);
+  padding: 8px 10px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-/* The comment editors sit in an input-like frame; the ring follows the whole
-   frame rather than the bare contenteditable inside it. */
-.tasks-native-composer .editor-shell,
+.tasks-native-composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.tasks-native-composer[data-compact] {
+  padding: 6px 8px;
+}
+
+/* The inline "edit comment" box keeps its own frame; the surface below is shared. */
 .tasks-comment-edit .editor-shell {
   border: 1px solid var(--control-border);
   border-radius: 8px;
@@ -948,7 +988,6 @@
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.tasks-native-composer .editor-shell:focus-within,
 .tasks-comment-edit .editor-shell:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
@@ -966,7 +1005,7 @@
 }
 
 .tasks-native-composer .editor-shell-loading {
-  min-height: 54px;
+  min-height: 40px;
 }
 
 .tasks-native-composer .editor-shell-loading[data-compact],
@@ -975,7 +1014,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tasks-native-composer .editor-shell,
+  .tasks-native-composer,
   .tasks-comment-edit .editor-shell {
     transition: none;
   }
@@ -987,6 +1026,16 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Toolbar row: quiet against the frame, so the Send button carries the weight. */
+.tasks-native-actions .button-ghost {
+  margin-left: -4px;
+  color: var(--text-faint);
+}
+
+.tasks-native-actions .button-ghost:hover {
+  color: var(--text-primary);
 }
 
 .tasks-composer-hint {
@@ -1536,6 +1585,25 @@
   border-top: 1px solid var(--hairline);
 }
 
+/* No sub-issues yet: no separator, no heading — just one quiet action. */
+.tasks-subissues[data-empty] {
+  margin: 4px 0 8px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.tasks-subissues-empty-add {
+  align-self: flex-start;
+  margin-left: -8px;
+  gap: 6px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.tasks-subissues-empty-add:hover {
+  color: var(--text-primary);
+}
+
 .tasks-subissues-header {
   display: flex;
   align-items: center;
@@ -1585,6 +1653,90 @@
   flex-direction: column;
 }
 
+/* ---------- create-issue modal ---------- */
+.tasks-new {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tasks-new-title {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--text-heading);
+  outline: none;
+}
+
+.tasks-new-title::placeholder {
+  color: var(--control-placeholder);
+}
+
+/* The modal's description reuses the editor surface; give it a comfortable floor
+   and the same inset as the title so typed text never sits against the edge. */
+.tasks-new .editor-surface {
+  min-height: 72px;
+  padding: 6px 10px;
+}
+
+.tasks-new .editor-shell-loading {
+  min-height: 72px;
+}
+
+/* Property row: pill-style pickers that wrap, quiet until hovered. Inset to line
+   the pills up with the padded title and description above. */
+.tasks-new-props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-inline: 10px;
+}
+
+/* Layout only: the look comes from the shared `.button.button-ghost`, so these
+   pickers match the task-detail property controls instead of inventing a new style. */
+.tasks-new-prop {
+  height: 28px;
+  min-height: 28px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.tasks-new-prop[data-active='true'] {
+  color: var(--text-primary);
+}
+
+/* The label picker sits inline with the pills. */
+.tasks-new-props .tasks-side-pills {
+  gap: 6px;
+}
+
+.tasks-new-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tasks-new-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tasks-new-more input {
+  accent-color: var(--accent);
+}
+
 /* Child rows are the shared TaskRow, one notch smaller. */
 .tasks-row[data-compact='true'] {
   min-height: 32px;
@@ -1596,35 +1748,6 @@
 .tasks-row[data-compact='true'] .tasks-row-date,
 .tasks-row[data-compact='true'] .tasks-row-labels {
   display: none;
-}
-
-.tasks-subissue-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 0 6px;
-  border-bottom: 1px solid var(--hairline);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.tasks-subissue-draft input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  outline: none;
-}
-
-.tasks-subissue-draft input::placeholder {
-  color: var(--text-faint);
-}
-
-.tasks-subissue-draft:focus-within {
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* Nested list rows: one level, indented under the disclosure triangle. */

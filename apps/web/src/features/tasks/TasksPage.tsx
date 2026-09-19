@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { Add, ChevronDown, Setting2, TaskSquare } from 'reicon-react'
 import { Dropdown } from '../../components/ui/Dropdown'
@@ -13,19 +13,20 @@ import { useLabels } from './api/labels'
 import { taskFromRecord } from './api/models'
 import {
   useCommentAttachments,
-  useCreateTask,
   useTask,
   useTaskActivity,
   useTaskAttachments,
   useTaskComments,
   useTasks,
 } from './api/tasks'
+import { prefetchRichTextEditor } from '../../components/editor/RichTextEditor'
 import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFilters } from './components/TaskFilters'
 import { TaskList } from './components/TaskList'
 import { shouldCloseTaskOnKey } from './closeOnEscape'
 import { NewProjectModal } from './components/NewProjectModal'
+import { NewTaskModal } from './components/NewTaskModal'
 import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from './tasksLib'
 import './tasks.css'
 
@@ -42,8 +43,10 @@ export function TasksPage() {
   const membersQuery = useMembers(workspace.id)
   const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
-  const createTask = useCreateTask(workspace.id)
   const [showNewProject, setShowNewProject] = useState(false)
+  // Non-null while the create-issue modal is open; carries a preselected status key
+  // from a list group "+", else null.
+  const [newTask, setNewTask] = useState<{ statusKey: string | null } | null>(null)
 
   const [layout, setLayout] = useState<'list' | 'board'>(() => searchParams.get('layout') === 'board' ? 'board' : 'list')
   const [sort, setSort] = useState<SortKey>('manual')
@@ -125,28 +128,32 @@ export function TasksPage() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [closeSearchSuffix, navigate, taskId])
 
-  const creating = useRef(false)
-  const startNewTask = async (statusKey: string | null = null, replace = false) => {
-    const projectId = projectFilter ?? projects[0]?.id
-    const statusId = projectId ? resolveStatusId(statusesQuery.data, projectId, statusKey) : undefined
-    if (!projectId || !statusId || creating.current) return
-    creating.current = true
-    try {
-      const task = await createTask.mutateAsync({ title: 'Untitled', project_id: projectId, status_id: statusId })
-      navigate(`/tasks/${task.id}${detailSearchSuffix}`, { replace })
-    } catch {
-      // The mutation exposes the server problem beside the create action.
-    } finally {
-      creating.current = false
+  // Warm the heavy editor chunk while the page is idle, so opening the create modal
+  // (or clicking a description) does not stall on the first TipTap/ProseMirror import.
+  useEffect(() => {
+    const idle = window.requestIdleCallback
+    if (idle) {
+      const handle = idle(() => prefetchRichTextEditor())
+      return () => window.cancelIdleCallback?.(handle)
     }
-  }
+    const timer = setTimeout(() => prefetchRichTextEditor(), 300)
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Creation happens entirely in the modal, so the user never navigates into the
+  // full-page detail just to fill an issue in.
+  const openNewTask = (statusKey: string | null = null) => setNewTask({ statusKey })
 
   const wantsNew = searchParams.get('new') === '1'
   useEffect(() => {
-    if (wantsNew && projects.length > 0 && statusesQuery.data.length > 0) void startNewTask(null, true)
-    // The URL flag is the one-shot trigger; the ref prevents duplicate in-flight creation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsNew, projects.length, statusesQuery.data.length])
+    if (!wantsNew) return
+    // The `c` shortcut and topbar route here with `?new=1`; open the modal once and
+    // clear the flag so a refresh does not reopen it.
+    setNewTask((current) => current ?? { statusKey: null })
+    const next = new URLSearchParams(searchParams)
+    next.delete('new')
+    setSearchParams(next, { replace: true })
+  }, [wantsNew, searchParams, setSearchParams])
 
   const groups = statusGroups(statusesQuery.data, projectFilter)
   const activeProject = projects.find((project) => project.id === projectFilter)
@@ -205,18 +212,29 @@ export function TasksPage() {
           </TopbarSlot>
           <TopbarSlot side="right">
             <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} showSubIssues={showSubIssues} onShowSubIssuesChange={setShowSubIssues} />
-            <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
-            {createTask.isError ? <span role="alert" className="text-danger text-xs">Task creation failed.</span> : null}
+            <button className="button button-primary" aria-label="New task" onClick={() => openNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
           </TopbarSlot>
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
           <div className="pane-body">
             {layout === 'board'
               ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
-              : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} showSubIssues={showSubIssues} />}
+              : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => openNewTask(key)} showSubIssues={showSubIssues} />}
             {tasksQuery.hasNextPage ? <div className="tasks-load-more"><button className="button" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</button></div> : null}
           </div>
         </section>
       )}
+      {newTask ? (
+        <NewTaskModal
+          workspaceId={workspace.id}
+          projects={projects}
+          statuses={statusesQuery.data}
+          users={users}
+          labels={labelsQuery.data ?? []}
+          defaultProjectId={projectFilter}
+          defaultStatusKey={newTask.statusKey}
+          onClose={() => setNewTask(null)}
+        />
+      ) : null}
     </div>
   )
 }

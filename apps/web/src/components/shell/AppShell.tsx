@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '../../features/realtime/useWorkspaceEvents'
 import { Outlet, useNavigate } from 'react-router'
+import { SidebarLeft } from 'reicon-react'
+import { prefetchRichTextEditor } from '../editor/RichTextEditor'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { CommandPalette } from './CommandPalette'
 import { SidebarBrand } from './SidebarBrand'
 import { SidebarNav } from './SidebarNav'
 import { useNewTaskShortcut } from './newTaskShortcut'
-import { useSidebarToggleShortcut } from './sidebarShortcut'
+import { SIDEBAR_TOGGLE_KEY, useSidebarToggleShortcut } from './sidebarShortcut'
 import { Topbar } from './Topbar'
 import { TopbarSlotProvider } from './TopbarSlot'
 import { UserMenu } from './UserMenu'
@@ -71,17 +73,30 @@ export function AppShell() {
   useSidebarToggleShortcut(toggleSidebar)
 
   // Replaces the deleted topbar New dropdown: creating a task stays one keystroke from any route.
-  const newTask = useCallback(() => navigate('/tasks?new=1'), [navigate])
+  // Warm the editor chunk as we route, so the create modal opens with its description ready.
+  const newTask = useCallback(() => {
+    prefetchRichTextEditor()
+    navigate('/tasks?new=1')
+  }, [navigate])
   useNewTaskShortcut(newTask)
 
   return (
     <div className="app-shell">
       {!live ? <div className="connection-status" role="status">Connecting to live updates…</div> : null}
       <aside className="app-sidebar" data-collapsed={sidebarCollapsed || undefined}>
-        <SidebarBrand collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
+        <SidebarBrand collapsed={sidebarCollapsed} />
         <SidebarNav collapsed={sidebarCollapsed} />
         <div className="app-sidebar-footer">
           <UserMenu collapsed={sidebarCollapsed} />
+          <button
+            type="button"
+            className="icon-button app-sidebar-collapse"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={`${sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} (${SIDEBAR_TOGGLE_KEY})`}
+            onClick={toggleSidebar}
+          >
+            <SidebarLeft size={17} />
+          </button>
         </div>
       </aside>
 

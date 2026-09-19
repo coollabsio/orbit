@@ -98,14 +98,18 @@ async function createTaskWithAttachment(page: Page) {
   const workspaceId = workspaces.find((workspace) => workspace.name === 'Foundation')!.id
   await api(page, `/api/v1/workspaces/${workspaceId}/labels`, 'POST', { name: 'Unused label', color: '#123456' })
   await page.goto('/tasks')
+  // Create the issue entirely in the modal — creation never navigates into the detail.
   await page.getByRole('button', { name: 'New task' }).click()
+  const createDialog = page.getByRole('dialog')
+  await expect(createDialog).toBeVisible()
+  await createDialog.getByLabel('Issue title').fill('Restored task')
+  await createDialog.getByRole('button', { name: 'Create issue' }).click()
+  await expect(createDialog).toBeHidden()
+
+  // Open the created task to attach files, comment and adjust its properties.
+  await page.getByText('Restored task').click()
   await expect(page).toHaveURL(/\/tasks\/.+/)
-  const title = page.getByLabel('Task title')
-  await expect(title).toBeFocused()
-  await title.fill('Restored task')
-  const titleSaved = page.waitForResponse((response) => response.request().method() === 'PATCH' && /\/tasks\/[^/]+$/.test(new URL(response.url()).pathname))
-  await title.press('Tab')
-  await titleSaved
+  await expect(page.getByLabel('Task title')).toContainText('Restored task')
   await page.getByLabel('Attach files').setInputFiles({
     name: 'proof.txt',
     mimeType: 'text/plain',
@@ -146,10 +150,13 @@ async function createTaskWithAttachment(page: Page) {
   const taskId = new URL(page.url()).pathname.split('/').at(-1)!
   const record = await api<{ version: number }>(page, `/api/v1/workspaces/${workspaceId}/tasks/${taskId}`)
   await api(page, `/api/v1/workspaces/${workspaceId}/tasks/${taskId}`, 'PATCH', { expected_version: record.version, title: 'Server title' })
-  await expect(title).toHaveValue('Server title')
-  await title.fill('Restored task')
-  await title.press('Tab')
-  await expect(title).toHaveValue('Restored task')
+  await expect(page.getByLabel('Task title')).toContainText('Server title')
+  // Edit the title back through the inline editor.
+  await page.getByLabel('Task title').click()
+  const titleInput = page.getByRole('textbox', { name: 'Task title' })
+  await titleInput.fill('Restored task')
+  await titleInput.press('Tab')
+  await expect(page.getByLabel('Task title')).toContainText('Restored task')
 }
 
 async function deleteAndRestoreTask(page: Page) {
