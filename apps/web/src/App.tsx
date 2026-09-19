@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { ConfirmationModalHost } from './components/ui/ConfirmationModal'
+import { Toaster } from './components/ui/sonner'
 import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router'
 import { setAppNavigate } from './lib/navigateBridge'
 import { AppShell } from './components/shell/AppShell'
@@ -32,6 +33,7 @@ export default function App() {
     <>
       <NavigateBridge />
       <ConfirmationModalHost />
+      <Toaster />
       <Routes>
         <Route path="setup" element={<SetupPage />} />
         <Route path="login" element={<LoginPage />} />

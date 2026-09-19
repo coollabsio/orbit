@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Button } from './button'
 
 /** Desktop pane footer; mobile top-of-screen overlay. */
 export function UnsavedBar({ onReset, onSave, saving }: { onReset: () => void; onSave: () => void; saving?: boolean }) {
@@ -34,14 +35,19 @@ export function UnsavedBar({ onReset, onSave, saving }: { onReset: () => void; o
   }, [mobile])
 
   const bar = (
-    <div ref={barRef} className="unsaved-bar" role="status" style={mobile ? { position: 'fixed', top: 'calc(12px + env(safe-area-inset-top, 0px))', bottom: 'auto', width: 'calc(100% - 24px)', animation: 'none' } : undefined}>
-      <span className="unsaved-bar-text">Careful — you have unsaved changes!</span>
-      <button type="button" className="unsaved-bar-reset" onClick={onReset}>
+    <div
+      ref={barRef}
+      role="status"
+      className="absolute bottom-5 left-1/2 z-40 flex w-[min(720px,calc(100%-48px))] -translate-x-1/2 items-center gap-3 rounded-lg border bg-popover py-2.5 pr-2.5 pl-4 shadow-md"
+      style={mobile ? { position: 'fixed', top: 'calc(12px + env(safe-area-inset-top, 0px))', bottom: 'auto', width: 'calc(100% - 24px)' } : undefined}
+    >
+      <span className="min-w-0 flex-1 text-[13px] font-medium">Careful — you have unsaved changes!</span>
+      <Button variant="link" className="text-primary" onClick={onReset}>
         Reset
-      </button>
-      <button type="button" className="button button-primary" onClick={onSave} disabled={saving}>
+      </Button>
+      <Button onClick={onSave} disabled={saving}>
         Save Changes
-      </button>
+      </Button>
     </div>
   )
   return mobile ? createPortal(bar, document.body) : bar

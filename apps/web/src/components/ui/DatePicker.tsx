@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Clock } from 'reicon-react'
+import { Clock } from 'lucide-react'
+import { Button } from './button'
+import { Calendar } from './calendar'
 import { Listbox } from './Listbox'
-
-const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
 
 const HALF_HOURS = Array.from({ length: 48 }, (_, i) => {
   const h = String(Math.floor(i / 2)).padStart(2, '0')
@@ -11,10 +11,6 @@ const HALF_HOURS = Array.from({ length: 48 }, (_, i) => {
 
 function timeOf(date: Date) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
-
-function sameDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
 function withTime(day: Date, time: string) {
@@ -32,77 +28,35 @@ interface DatePickerProps {
   onDone: () => void
 }
 
-/** Calendar + time picker for a popover (month grid, ‹ › navigation, half-hour time list). */
+/** Calendar + time picker for a popover (shadcn Calendar month grid + half-hour time list). */
 export function DatePicker({ value, onChange, onClear, onDone }: DatePickerProps) {
-  const selected = value ? new Date(value) : null
-  const [view, setView] = useState(() => {
-    const base = selected ?? new Date()
-    return new Date(base.getFullYear(), base.getMonth(), 1)
-  })
+  const selected = value ? new Date(value) : undefined
+  const [month, setMonth] = useState(() => selected ?? new Date())
   // time used for the next picked day when nothing is selected yet
   const [timeDraft, setTimeDraft] = useState('09:00')
   const time = selected ? timeOf(selected) : timeDraft
   const timeOptions = (HALF_HOURS.includes(time) ? HALF_HOURS : [...HALF_HOURS, time].sort()).map((t) => ({ value: t, label: t }))
 
-  const today = new Date()
-  const monthLabel = view.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-  // Monday-first grid, 6 rows
-  const offset = (view.getDay() + 6) % 7
-  const cells = Array.from({ length: 42 }, (_, i) => new Date(view.getFullYear(), view.getMonth(), i - offset + 1))
-
-  const shiftMonth = (delta: number) => setView(new Date(view.getFullYear(), view.getMonth() + delta, 1))
-
-  const pickDay = (day: Date) => onChange(withTime(day, time).toISOString())
-
+  const pickDay = (day: Date | undefined) => {
+    if (day) onChange(withTime(day, time).toISOString())
+  }
   const pickTime = (next: string) => {
     if (selected) onChange(withTime(selected, next).toISOString())
     else setTimeDraft(next)
   }
 
   return (
-    <div className="datepicker">
-      <div className="datepicker-head">
-        <button type="button" className="icon-button" aria-label="Previous month" onClick={() => shiftMonth(-1)}>
-          <ChevronLeft size={14} />
-        </button>
-        <span className="datepicker-title">{monthLabel}</span>
-        <button type="button" className="icon-button" aria-label="Next month" onClick={() => shiftMonth(1)}>
-          <ChevronRight size={14} />
-        </button>
+    <div className="flex flex-col gap-3 p-3">
+      <Calendar mode="single" selected={selected} onSelect={pickDay} month={month} onMonthChange={setMonth} />
+      <div className="flex items-center gap-2">
+        <Clock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <Listbox value={time} options={timeOptions} onChange={pickTime} aria-label="Time" className="flex-1" />
       </div>
-      <div className="datepicker-grid" role="grid">
-        {WEEKDAYS.map((day) => (
-          <span key={day} className="datepicker-weekday">
-            {day}
-          </span>
-        ))}
-        {cells.map((day) => (
-          <button
-            key={day.toISOString()}
-            type="button"
-            className="datepicker-day"
-            data-muted={day.getMonth() !== view.getMonth() || undefined}
-            data-today={sameDay(day, today) || undefined}
-            data-selected={(selected && sameDay(day, selected)) || undefined}
-            aria-label={day.toDateString()}
-            aria-pressed={(selected && sameDay(day, selected)) || undefined}
-            onClick={() => pickDay(day)}
-          >
-            {day.getDate()}
-          </button>
-        ))}
-      </div>
-      <div className="datepicker-time">
-        <Clock size={14} />
-        <Listbox value={time} options={timeOptions} onChange={pickTime} aria-label="Time" className="datepicker-time-list" />
-      </div>
-      <div className="datepicker-footer">
-        <button type="button" className="button button-ghost" onClick={onClear} disabled={!value}>
+      <div className="flex justify-between">
+        <Button variant="ghost" onClick={onClear} disabled={!value}>
           Clear
-        </button>
-        <button type="button" className="button button-primary" onClick={onDone}>
-          Done
-        </button>
+        </Button>
+        <Button onClick={onDone}>Done</Button>
       </div>
     </div>
   )

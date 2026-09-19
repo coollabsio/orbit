@@ -1,10 +1,18 @@
-import { InfoCircle } from 'reicon-react'
+import { Info } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip'
 
-/** Small info icon with a custom hover/focus tooltip (no native `title`). */
+/** Small info icon with a hover/focus tooltip. */
 export function InfoTip({ text, size = 14 }: { text: string; size?: number }) {
   return (
-    <span className="info-tip" tabIndex={0} role="img" aria-label={text} data-tip={text}>
-      <InfoCircle size={size} />
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex cursor-default text-muted-foreground" tabIndex={0} aria-label={text} />
+        }
+      >
+        <Info size={size} aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent>{text}</TooltipContent>
+    </Tooltip>
   )
 }
