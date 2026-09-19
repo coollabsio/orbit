@@ -3,6 +3,10 @@ import { clipboardFiles } from '../../chat/attachmentLib'
 import type { Task } from '../api/models'
 import { LinkifiedText } from './LinkifiedText'
 
+const TITLE = 'w-full border-none bg-transparent p-0 text-2xl leading-8 font-semibold text-foreground outline-none placeholder:text-muted-foreground max-[899px]:text-xl max-[899px]:leading-[26px]'
+const DESC = 'w-full resize-none border-none bg-transparent p-0 text-[13px] leading-5 text-foreground outline-none [field-sizing:content] min-h-[60px] placeholder:text-muted-foreground max-[899px]:min-h-12 max-[899px]:text-sm max-[899px]:leading-[22px]'
+const DISPLAY = 'cursor-text whitespace-pre-wrap [overflow-wrap:anywhere] data-[muted]:text-muted-foreground'
+
 export function TaskTextFields({
   task,
   onUpdate,
@@ -28,7 +32,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
     <>
       {editingTitle ? (
         <input
-          className="tasks-detail-title"
+          className={TITLE}
           value={title}
           placeholder="Task title"
           aria-label="Task title"
@@ -50,10 +54,10 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
           }}
         />
       ) : (
-        <EditableLinkifiedText className="tasks-detail-title tasks-text-display" text={title} ariaLabel="Task title" onEdit={() => setEditingTitle(true)} />
+        <EditableLinkifiedText className={`${TITLE} ${DISPLAY}`} text={title} ariaLabel="Task title" onEdit={() => setEditingTitle(true)} />
       )}
       <div
-        className="tasks-desc-wrap"
+        className="mt-4 rounded-lg transition-[box-shadow,background-color] data-[drop-over]:bg-primary/10 data-[drop-over]:ring-2 data-[drop-over]:ring-primary/40"
         data-drop-over={dropOver || undefined}
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes('Files')) return
@@ -72,7 +76,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
       >
         {editingDescription ? (
           <textarea
-            className="tasks-desc"
+            className={DESC}
             value={description}
             placeholder="Add description… (paste or drop images and files)"
             aria-label="Description"
@@ -91,7 +95,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
           />
         ) : (
           <EditableLinkifiedText
-            className="tasks-desc tasks-text-display"
+            className={`${DESC} ${DISPLAY}`}
             text={description || 'Add description… (paste or drop images and files)'}
             muted={!description}
             ariaLabel="Description"

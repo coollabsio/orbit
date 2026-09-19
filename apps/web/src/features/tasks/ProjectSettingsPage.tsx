@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Add, ArrowLeft, Edit, More, TaskSquare, TickCircle, Trash } from 'reicon-react'
+import { ArrowLeft, Check, MoreHorizontal, Pencil, Plus, SquareCheck, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { InfoTip } from '../../components/ui/InfoTip'
@@ -13,14 +16,18 @@ import { useCreateStatus, useDeleteProject, useDeleteStatus, useProjectStatuses,
 import { useTasks } from './api/tasks'
 import { ConfirmDeleteModal } from '../chat/components/ChannelModals'
 import { SettingsCard } from '../settings/SettingsCard'
-import '../shared/cards.css'
-import '../settings/settings.css'
-import './tasks.css'
 
 const PROJECT_COLORS = [
   '#8b5cf6', '#6366f1', '#0ea5e9', '#06b6d4', '#10b981', '#22c55e', '#84cc16', '#eab308', '#f59e0b', '#f97316', '#ef4444',
   '#ec4899', '#d946ef', '#64748b', '#78716c',
 ]
+
+const FIELD_LABEL = 'mb-1.5 flex h-4 items-center gap-1 text-[13px] leading-4 font-medium text-muted-foreground'
+const OPTION =
+  'group flex w-full min-h-8 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50 data-[tone=danger]:text-destructive'
+const COLOR_DOT =
+  'relative inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-white aria-pressed:ring-2 aria-pressed:ring-foreground/60 aria-pressed:ring-offset-2 aria-pressed:ring-offset-background'
+const TILE = 'inline-flex size-10 items-center justify-center rounded-lg bg-muted'
 
 type Editor = { mode: 'new'; category: StatusCategory } | { mode: 'edit'; statusId: string }
 
@@ -55,47 +62,48 @@ export function ProjectSettingsPage() {
   }
 
   if (projectsQuery.isPending || statusQuery.isPending || tasksQuery.isPending) {
-    return <div className="page"><section className="pane" style={{ flex: 1 }}><EmptyState icon={TaskSquare} title="Loading project" description="Loading persisted project settings." /></section></div>
+    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title="Loading project" description="Loading persisted project settings." /></section></div>
   }
   if (projectsQuery.isError || statusQuery.isError || tasksQuery.isError) {
-    return <div className="page"><section className="pane" style={{ flex: 1 }}><EmptyState icon={TaskSquare} title="Project unavailable" description="The server could not load this project." /></section></div>
+    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title="Project unavailable" description="The server could not load this project." /></section></div>
   }
 
   return (
-    <div className="page">
-      <section className="pane project-settings-pane">
-        <div className="pane-header">
-          <button className="icon-button" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
-            <ArrowLeft size={16} />
-          </button>
-          <span className="pane-title">{project ? `${project.name} settings` : 'Project settings'}</span>
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      <section className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
+            <ArrowLeft className="size-4" />
+          </Button>
+          <span className="truncate text-[13px] font-semibold text-foreground">{project ? `${project.name} settings` : 'Project settings'}</span>
         </div>
         {!project ? (
-          <div className="pane-body">
-            <EmptyState icon={TaskSquare} title="Project not found" description="This project does not exist or was removed." />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <EmptyState icon={SquareCheck} title="Project not found" description="This project does not exist or was removed." />
           </div>
         ) : (
-          <div className="settings-scroll">
-            <div className="settings-content project-settings">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-10 pt-7 pb-12 max-[899px]:px-5">
               <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} />
 
               <SettingsCard title="Statuses" description="The workflow a task goes through from start to completion." flush>
-                <div className="ps-status-list">
+                <div className="flex flex-col py-3 pr-3 pl-[18px]">
                   {CATEGORY_ORDER.map((category) => {
                     const own = statuses.filter((s) => s.category === category)
                     return (
-                      <div key={category} className="ps-status-group">
-                        <div className="ps-status-group-header">
+                      <div key={category}>
+                        <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
                           <span>{CATEGORY_LABEL[category]}</span>
-                          <button
-                            type="button"
-                            className="icon-button ps-status-add"
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="size-6 text-muted-foreground/70"
                             aria-label={`Add ${CATEGORY_LABEL[category].toLowerCase()} status`}
                             title="Add status"
                             onClick={() => setEditor({ mode: 'new', category })}
                           >
-                            <Add size={14} />
-                          </button>
+                            <Plus className="size-3.5" />
+                          </Button>
                         </div>
                         {own.map((status) =>
                           editor?.mode === 'edit' && editor.statusId === status.id ? (
@@ -112,7 +120,7 @@ export function ProjectSettingsPage() {
                           ) : (
                             <div
                               key={status.id}
-                              className="ps-status-row"
+                              className="group/row relative flex items-center gap-3 px-1 py-2.5 data-[dragging]:rounded-lg data-[dragging]:bg-muted data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-0 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-[''] data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-['']"
                               draggable
                               data-dragging={dragId === status.id || undefined}
                               data-drop={dropAt?.id === status.id ? dropAt.position : undefined}
@@ -150,48 +158,48 @@ export function ProjectSettingsPage() {
                                 endDrag()
                               }}
                             >
-                              <span className="ps-status-grip" aria-hidden="true">
+                              <span className="absolute -left-[13px] inline-flex text-muted-foreground/70 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden="true">
                                 <GripIcon />
                               </span>
-                              <span className="ps-status-tile">
+                              <span className={TILE}>
                                 <TaskStatusIcon status={status} size={16} />
                               </span>
-                              <span className="ps-status-text">
-                                <span className="ps-status-name">
+                              <span className="flex flex-col gap-0.5">
+                                <span className="text-sm font-medium text-foreground">
                                   {status.name}
-                                  {status.id === defaultStatus?.id ? <span className="ps-status-note"> · Default</span> : null}
+                                  {status.id === defaultStatus?.id ? <span className="font-normal text-muted-foreground"> · Default</span> : null}
                                 </span>
                                 {status.description ? (
-                                  <span className="ps-status-count">{status.description}</span>
+                                  <span className="text-xs text-muted-foreground/70">{status.description}</span>
                                 ) : countFor(status.id) > 0 ? (
-                                  <span className="ps-status-count">
+                                  <span className="text-xs text-muted-foreground/70">
                                     {countFor(status.id)} {countFor(status.id) === 1 ? 'task' : 'tasks'}
                                   </span>
                                 ) : null}
                               </span>
-                              <div className="spacer" />
+                              <div className="flex-1" />
                               <Dropdown
                                 align="right"
                                 trigger={() => (
-                                  <button className="icon-button ps-status-menu" aria-label={`${status.name} actions`} title="Actions">
-                                    <More size={16} />
-                                  </button>
+                                  <Button variant="ghost" size="icon-sm" className="size-[30px] rounded-full bg-muted opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100" aria-label={`${status.name} actions`} title="Actions">
+                                    <MoreHorizontal className="size-4" />
+                                  </Button>
                                 )}
                               >
                                 {(close) => (
-                                  <>
+                                  <div className="flex min-w-[180px] flex-col gap-px p-1">
                                     <button
-                                      className="popover-option"
+                                      className={OPTION}
                                       onClick={() => {
                                         setEditor({ mode: 'edit', statusId: status.id })
                                         close()
                                       }}
                                     >
-                                      <Edit size={15} />
+                                      <Pencil className="size-3.5" />
                                       Edit
                                     </button>
                                     <button
-                                      className="popover-option"
+                                      className={OPTION}
                                       data-tone="danger"
                                       disabled={statuses.length === 1}
                                       onClick={() => {
@@ -199,10 +207,10 @@ export function ProjectSettingsPage() {
                                         close()
                                       }}
                                     >
-                                      <Trash size={15} />
+                                      <Trash2 className="size-3.5" />
                                       Delete
                                     </button>
-                                  </>
+                                  </div>
                                 )}
                               </Dropdown>
                             </div>
@@ -222,18 +230,18 @@ export function ProjectSettingsPage() {
                     )
                   })}
                 </div>
-                {createStatus.isError ? <p role="alert" className="text-danger">Status creation failed. <button className="button button-ghost" onClick={() => createStatus.variables && createStatus.mutate(createStatus.variables)}>Retry</button></p> : null}
-                {updateStatus.isError ? <p role="alert" className="text-danger">Status update failed. <button className="button button-ghost" onClick={() => updateStatus.variables && updateStatus.mutate(updateStatus.variables)}>Retry</button></p> : null}
-                {deleteStatus.isError ? <p role="alert" className="text-danger">Status deletion failed. <button className="button button-ghost" onClick={() => deleteStatus.variables && deleteStatus.mutate(deleteStatus.variables)}>Retry</button></p> : null}
-                {reorderStatuses.isError ? <p role="alert" className="text-danger">Status reorder failed. <button className="button button-ghost" onClick={() => reorderStatuses.variables && reorderStatuses.mutate(reorderStatuses.variables)}>Retry</button></p> : null}
+                {createStatus.isError ? <p role="alert" className="text-destructive">Status creation failed. <Button variant="ghost" onClick={() => createStatus.variables && createStatus.mutate(createStatus.variables)}>Retry</Button></p> : null}
+                {updateStatus.isError ? <p role="alert" className="text-destructive">Status update failed. <Button variant="ghost" onClick={() => updateStatus.variables && updateStatus.mutate(updateStatus.variables)}>Retry</Button></p> : null}
+                {deleteStatus.isError ? <p role="alert" className="text-destructive">Status deletion failed. <Button variant="ghost" onClick={() => deleteStatus.variables && deleteStatus.mutate(deleteStatus.variables)}>Retry</Button></p> : null}
+                {reorderStatuses.isError ? <p role="alert" className="text-destructive">Status reorder failed. <Button variant="ghost" onClick={() => reorderStatuses.variables && reorderStatuses.mutate(reorderStatuses.variables)}>Retry</Button></p> : null}
                 {createStatus.isPending || updateStatus.isPending || deleteStatus.isPending || reorderStatuses.isPending ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
 
               <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
-                <button type="button" className="button button-danger" onClick={() => setConfirmDelete(true)}>
+                <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
                   Delete project
-                </button>
-                {deleteProject.isError ? <p role="alert" className="text-danger">Project deletion failed. <button className="button button-ghost" onClick={() => deleteProject.variables && deleteProject.mutate(deleteProject.variables, { onSuccess: () => navigate('/tasks') })}>Retry</button></p> : null}
+                </Button>
+                {deleteProject.isError ? <p role="alert" className="text-destructive">Project deletion failed. <Button variant="ghost" onClick={() => deleteProject.variables && deleteProject.mutate(deleteProject.variables, { onSuccess: () => navigate('/tasks') })}>Retry</Button></p> : null}
               </SettingsCard>
             </div>
           </div>
@@ -285,47 +293,46 @@ function ProjectGeneralCard({ project }: { project: Project }) {
   return (
     <>
       <SettingsCard title="General" description="Name, tag and color of this project.">
-        <div className="settings-grid">
-          <div className="settings-field">
-            <label className="field-label" htmlFor="project-name">
+        <div className="grid grid-cols-2 gap-4 max-[899px]:grid-cols-1">
+          <div className="w-full min-w-0">
+            <Label className={FIELD_LABEL} htmlFor="project-name">
               Name
-            </label>
-            <input id="project-name" className="input" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+            </Label>
+            <Input id="project-name" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
           </div>
-          <div className="settings-field">
-            <label className="field-label" htmlFor="project-key">
+          <div className="w-full min-w-0">
+            <Label className={FIELD_LABEL} htmlFor="project-key">
               Tag
               <InfoTip text={`Short prefix used in task ids, for example ${project.key}-101.`} />
-            </label>
-            <input
+            </Label>
+            <Input
               id="project-key"
-              className="input"
               value={draft.key}
               maxLength={5}
               placeholder="INF"
               onChange={(e) => setDraft((d) => ({ ...d, key: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
             />
           </div>
-          <div className="settings-field col-span-2">
-            <span className="field-label">Color</span>
-            <div className="ps-color-palette ps-color-palette-inline">
+          <div className="col-span-2 w-full min-w-0 max-[899px]:col-span-1">
+            <span className={FIELD_LABEL}>Color</span>
+            <div className="flex flex-wrap items-center gap-2 pt-1.5">
               {PROJECT_COLORS.map((color) => (
                 <button
                   key={color}
                   type="button"
-                  className="ps-color-dot"
+                  className={COLOR_DOT}
                   style={{ backgroundColor: color }}
                   title={color}
                   aria-label={`Color ${color}`}
                   aria-pressed={draft.color.toLowerCase() === color}
                   onClick={() => setDraft((d) => ({ ...d, color }))}
                 >
-                  {draft.color.toLowerCase() === color ? <TickCircle size={14} /> : null}
+                  {draft.color.toLowerCase() === color ? <Check className="size-3.5" /> : null}
                 </button>
               ))}
-              <span className="ps-color-sep" />
-              <label className="ps-color-dot ps-color-custom" title="Custom color">
-                <input type="color" value={draft.color} aria-label="Custom color" onChange={(e) => setDraft((d) => ({ ...d, color: e.target.value }))} />
+              <span className="h-5 w-px bg-border" />
+              <label className={COLOR_DOT} style={{ backgroundImage: 'conic-gradient(#eb5757, #f2c94c, #4cb782, #26b5ce, #5e6ad2, #a78bfa, #eb5757)' }} title="Custom color">
+                <input type="color" value={draft.color} aria-label="Custom color" className="absolute inset-0 cursor-pointer opacity-0" onChange={(e) => setDraft((d) => ({ ...d, color: e.target.value }))} />
               </label>
             </div>
           </div>
@@ -338,7 +345,7 @@ function ProjectGeneralCard({ project }: { project: Project }) {
           saving={!canSave || updateProject.isPending}
         />
       ) : null}
-      {updateProject.isError ? <p role="alert" className="text-danger">Project update failed. <button className="button button-ghost" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</button></p> : null}
+      {updateProject.isError ? <p role="alert" className="text-destructive">Project update failed. <Button variant="ghost" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</Button></p> : null}
     </>
   )
 }
@@ -362,7 +369,7 @@ function StatusEditor({
 
   return (
     <form
-      className="ps-status-editor"
+      className="flex items-center gap-2.5 px-1 py-2.5"
       onSubmit={(e) => {
         e.preventDefault()
         if (canSave) onSave({ name: name.trim(), description: description.trim(), color })
@@ -370,35 +377,35 @@ function StatusEditor({
     >
       <Dropdown
         trigger={() => (
-          <button type="button" className="ps-status-tile ps-status-tile-button" aria-label="Status color" title="Color">
+          <button type="button" className={`${TILE} cursor-pointer hover:bg-border`} aria-label="Status color" title="Color">
             <TaskStatusIcon status={{ category, color }} size={16} />
           </button>
         )}
       >
         {() => (
-          <div className="ps-color-palette">
+          <div className="flex items-center gap-2 p-1.5">
             {STATUS_COLORS.map((preset) => (
               <button
                 key={preset}
                 type="button"
-                className="ps-color-dot"
+                className={COLOR_DOT}
                 style={{ backgroundColor: preset }}
                 aria-label={`Color ${preset}`}
                 aria-pressed={color === preset}
                 onClick={() => setColor(preset)}
               >
-                {color === preset ? <TickCircle size={14} /> : null}
+                {color === preset ? <Check className="size-3.5" /> : null}
               </button>
             ))}
-            <span className="ps-color-sep" />
-            <label className="ps-color-dot ps-color-custom" title="Custom color">
-              <input type="color" value={color} aria-label="Custom color" onChange={(e) => setColor(e.target.value)} />
+            <span className="h-5 w-px bg-border" />
+            <label className={COLOR_DOT} style={{ backgroundImage: 'conic-gradient(#eb5757, #f2c94c, #4cb782, #26b5ce, #5e6ad2, #a78bfa, #eb5757)' }} title="Custom color">
+              <input type="color" value={color} aria-label="Custom color" className="absolute inset-0 cursor-pointer opacity-0" onChange={(e) => setColor(e.target.value)} />
             </label>
           </div>
         )}
       </Dropdown>
-      <input
-        className="input ps-status-input"
+      <Input
+        className="h-9 w-[200px]"
         placeholder="Status name"
         aria-label="Status name"
         value={name}
@@ -408,8 +415,8 @@ function StatusEditor({
           if (e.key === 'Escape') onCancel()
         }}
       />
-      <input
-        className="input ps-status-input ps-status-input-desc"
+      <Input
+        className="h-9 min-w-0 flex-1"
         placeholder="Description…"
         aria-label="Description"
         value={description}
@@ -418,12 +425,12 @@ function StatusEditor({
           if (e.key === 'Escape') onCancel()
         }}
       />
-      <button type="button" className="button button-ghost" onClick={onCancel}>
+      <Button type="button" variant="ghost" onClick={onCancel}>
         Cancel
-      </button>
-      <button type="submit" className="button button-primary" disabled={!canSave}>
+      </Button>
+      <Button type="submit" disabled={!canSave}>
         Save
-      </button>
+      </Button>
     </form>
   )
 }

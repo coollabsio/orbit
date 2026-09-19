@@ -5,8 +5,9 @@ test('mobile settings keeps shell actions and hides only the duplicate page head
   // the tasks top bar is hidden on mobile, but the settings top bar is kept (its shell actions stay)
   expect(topbar).toContain('data-[root=tasks]:hidden')
   expect(topbar).not.toMatch(/data-\[root=settings\]:hidden/)
-  const settingsCss = await Bun.file(new URL('../../features/settings/settings.css', import.meta.url)).text()
-  expect(settingsCss).toMatch(/@media \(max-width: 899px\)\s*\{\s*\.settings-page-header\s*\{\s*display: none;/)
+  // Settings is Tailwind now: the duplicate page header hides on mobile so the shell topbar takes over.
+  const settings = await Bun.file(new URL('../../features/settings/SettingsLayout.tsx', import.meta.url)).text()
+  expect(settings).toContain('max-[899px]:hidden')
 })
 
 test('tasks and settings share the mobile product header contract', async () => {
@@ -15,9 +16,11 @@ test('tasks and settings share the mobile product header contract', async () => 
     Bun.file(new URL('../../features/tasks/TasksPage.tsx', import.meta.url)).text(),
     Bun.file(new URL('../../features/settings/SettingsLayout.tsx', import.meta.url)).text(),
   ])
-  expect(tasks).toContain('pane-header product-pane-header')
+  // Tasks is Tailwind now: its product header collapses to the 44px mobile height (min-h-11).
+  expect(tasks).toContain('max-[899px]:min-h-11')
   // Settings is migrated to Tailwind: its duplicate page header hides on mobile so the shell topbar takes over.
   expect(settings).toContain('max-[899px]:hidden')
+  // utilities.css still documents the shared 44px product-header contract.
   expect(utilities).toContain('.product-pane-header')
   expect(utilities).toContain('min-height: 44px')
   expect(utilities).toContain('.product-pane-header-icon')
@@ -34,15 +37,15 @@ test('settings sidebar menu stays left of the title without a duplicate gear ico
 test('settings header uses Tasks muted title and toolbar styling', async () => {
   const [topbar, settings] = await Promise.all([
     Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text(),
-    Bun.file(new URL('../../features/settings/settings.css', import.meta.url)).text(),
+    Bun.file(new URL('../../features/settings/SettingsLayout.tsx', import.meta.url)).text(),
   ])
   // home lifts the crumb to the heading color; settings keeps the muted base color
   expect(topbar).toMatch(/group-data-\[root=home\]\/topbar:text-foreground/)
   expect(topbar).not.toMatch(/group-data-\[root=settings\]\/topbar:text-foreground/)
   // the settings search icon is the smaller 15px size, tasks uses 16px (size-4)
   expect(topbar).toContain("routeRoot === 'settings' ? 'size-[15px]' : 'size-4'")
-  expect(settings).toContain('.settings-page-header .pane-title')
-  expect(settings).toContain('color: var(--text-muted)')
+  // the settings page header keeps the muted title/icon color (Tailwind token)
+  expect(settings).toContain('text-muted-foreground')
 })
 
 test('settings menu button matches the tasks burger size', async () => {

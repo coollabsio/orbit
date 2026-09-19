@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Edit, Trash } from 'reicon-react'
+import { Copy, Pencil, Trash2 } from 'lucide-react'
+import { cn } from 'cn'
+import { Button } from '@/components/ui/button'
 import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
 import { Attachments } from '../../chat/components/Attachments'
@@ -38,26 +40,33 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
 
   return (
     <>
-      <article className="tasks-comment" data-reply={reply || undefined}>
+      <article
+        className={cn(
+          'group/comment flex gap-2.5 px-3.5 py-3 transition-colors hover:bg-muted/40 focus-within:bg-muted/40',
+          reply && 'border-t border-border pl-[52px] max-[899px]:pl-10',
+        )}
+        data-reply={reply || undefined}
+      >
         <UserAvatar user={author} size={reply ? 22 : 28} name={name} />
-        <div className="tasks-comment-body">
-          <div className="tasks-comment-header">
-            <span className="tasks-comment-author">{name}</span>
-            <span className="tasks-comment-dot" aria-hidden="true">·</span>
-            <time className="tasks-comment-time" dateTime={comment.createdAt}>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-h-[22px] items-center gap-1.5">
+            <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{name}</span>
+            <span className="shrink-0 text-[11px] leading-none text-muted-foreground/70" aria-hidden="true">·</span>
+            <time className="shrink-0 text-[11px] font-medium text-muted-foreground" dateTime={comment.createdAt}>
               {agoLabel(comment.createdAt)}
               {comment.editedAt ? ' (edited)' : ''}
             </time>
             {!editing ? (
-              <div className="tasks-comment-actions">
-                <button type="button" className="icon-button" aria-label="Copy text" title="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body)}>
-                  <Copy size={14} />
-                </button>
+              <div className="ml-auto flex shrink-0 items-center gap-px opacity-0 transition-opacity group-hover/comment:opacity-100 group-focus-within/comment:opacity-100 max-[899px]:opacity-100">
+                <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70" aria-label="Copy text" title="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body)}>
+                  <Copy className="size-3.5" />
+                </Button>
                 {isAuthor ? (
                   <>
-                    <button
-                      type="button"
-                      className="icon-button"
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-6 text-muted-foreground/70"
                       aria-label="Edit comment"
                       title="Edit comment"
                       onClick={() => {
@@ -65,11 +74,11 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
                         setEditing(true)
                       }}
                     >
-                      <Edit size={14} />
-                    </button>
-                    <button type="button" className="icon-button" data-danger="true" aria-label="Delete comment" title="Delete comment" onClick={() => setConfirmDelete(true)}>
-                      <Trash size={14} />
-                    </button>
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive" aria-label="Delete comment" title="Delete comment" onClick={() => setConfirmDelete(true)}>
+                      <Trash2 className="size-3.5" />
+                    </Button>
                   </>
                 ) : null}
               </div>
@@ -78,7 +87,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
           {editing ? (
             <EditingTextarea value={editText} onChange={setEditText} onCommit={commitEdit} onCancel={() => setEditing(false)} />
           ) : comment.body.trim() ? (
-            <div className="tasks-comment-text">{renderMarkdownBlocks(comment.body, comment.id, mentionTokens)}</div>
+            <div className="mt-0.5 text-[13px] leading-[19px] font-normal text-foreground [overflow-wrap:anywhere]">{renderMarkdownBlocks(comment.body, comment.id, mentionTokens)}</div>
           ) : null}
           {comment.attachments && comment.attachments.length > 0 ? (
             <Attachments attachments={comment.attachments} hasTextContent={!!comment.body.trim()} />
@@ -97,8 +106,8 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
           }}
         />
       ) : null}
-      {updateComment.isError ? <p role="alert" className="text-danger text-xs">Comment update failed. <button className="button button-ghost" onClick={() => updateComment.variables && updateComment.mutate(updateComment.variables)}>Retry</button></p> : null}
-      {deleteComment.isError ? <p role="alert" className="text-danger text-xs">Comment deletion failed. <button className="button button-ghost" onClick={() => deleteComment.variables && deleteComment.mutate(deleteComment.variables)}>Retry</button></p> : null}
+      {updateComment.isError ? <p role="alert" className="text-xs text-destructive">Comment update failed. <Button variant="ghost" onClick={() => updateComment.variables && updateComment.mutate(updateComment.variables)}>Retry</Button></p> : null}
+      {deleteComment.isError ? <p role="alert" className="text-xs text-destructive">Comment deletion failed. <Button variant="ghost" onClick={() => deleteComment.variables && deleteComment.mutate(deleteComment.variables)}>Retry</Button></p> : null}
     </>
   )
 }
@@ -126,10 +135,10 @@ function EditingTextarea({
   }, [])
 
   return (
-    <div className="tasks-comment-edit">
+    <div className="mt-1.5">
       <textarea
         ref={ref}
-        className="input"
+        className="min-h-[52px] w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-[13px] leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
         value={value}
         rows={2}
         aria-label="Edit comment"
@@ -146,8 +155,8 @@ function EditingTextarea({
           if (e.key === 'Escape') onCancel()
         }}
       />
-      <div className="tasks-comment-edit-hint">
-        escape to <b>cancel</b> · enter to <b>save</b>
+      <div className="mt-1 text-[11px] text-muted-foreground">
+        escape to <b className="text-foreground">cancel</b> · enter to <b className="text-foreground">save</b>
       </div>
     </div>
   )

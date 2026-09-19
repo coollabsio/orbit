@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test'
 
 test('keeps the task identifier on one line', async () => {
-  const css = await Bun.file(new URL('./tasks.css', import.meta.url)).text()
-  const rule = css.match(/\.tasks-row-id\s*\{([^}]*)\}/)?.[1]
+  const source = await Bun.file(new URL('./components/TaskRow.tsx', import.meta.url)).text()
+  // the identifier cell renders with a nowrap class so the id never wraps
+  const idCell = source.slice(0, source.indexOf('{task.identifier}</span>'))
+  const openingTag = idCell.slice(idCell.lastIndexOf('<span'))
 
-  expect(rule).toContain('white-space: nowrap')
+  expect(openingTag).toContain('whitespace-nowrap')
 })

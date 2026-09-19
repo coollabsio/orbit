@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Add, ChevronDown, Menu, Setting2, TaskSquare } from 'reicon-react'
+import { ChevronDown, Menu, Plus, Settings, SquareCheck } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Dropdown } from '../../components/ui/Dropdown'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useCurrentUser } from '../auth/api'
@@ -25,9 +26,11 @@ import { TaskFilters } from './components/TaskFilters'
 import { TaskList } from './components/TaskList'
 import { NewProjectModal } from './components/NewProjectModal'
 import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from './tasksLib'
-import './tasks.css'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
+
+const OPTION =
+  'group flex w-full min-h-8 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent data-[selected]:bg-accent data-[selected]:font-medium'
 
 export function TasksPage() {
   const { workspace } = useWorkspace()
@@ -171,44 +174,44 @@ export function TasksPage() {
   }
 
   return (
-    <div className="page tasks-page" data-view={taskId ? 'detail' : 'list'}>
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background" data-view={taskId ? 'detail' : 'list'}>
       {taskId ? (
         <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} />
       ) : (
-        <section className="pane tasks-list-pane">
-          <div className="pane-header product-pane-header">
-            <button type="button" className="icon-button tasks-sidebar-button" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
-              <Menu size={18} />
-            </button>
-            <Dropdown className="tasks-project-picker" trigger={(open) => (
-              <button type="button" className="tasks-project-trigger" data-open={open || undefined} aria-label="Select project">
-                {activeProject ? <span className="pill-dot" style={{ background: activeProject.color }} /> : null}
-                <span>{activeProject?.name ?? 'All projects'}</span><ChevronDown size={14} />
+        <section className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+          <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-foreground max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:border-b-0 max-[899px]:px-2 max-[899px]:py-1.5">
+            <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
+              <Menu className="size-[18px]" />
+            </Button>
+            <Dropdown trigger={(open) => (
+              <button type="button" className="inline-flex min-w-0 items-center gap-[7px] rounded-md px-[7px] py-[5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[open]:bg-accent data-[open]:text-foreground" data-open={open || undefined} aria-label="Select project">
+                {activeProject ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: activeProject.color }} /> : null}
+                <span>{activeProject?.name ?? 'All projects'}</span><ChevronDown className="size-3.5" />
               </button>
             )}>
-              {(close) => <><button className="popover-option" data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><TaskSquare size={15} />All projects</button>
-                {projects.map((project) => <button key={project.id} className="popover-option" data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="pill-dot" style={{ background: project.color }} />{project.name}</button>)}
-                <div className="popover-separator" />
-                <button className="popover-option" onClick={() => { close(); setShowNewProject(true) }}><Add size={15} />New project</button>
-                {activeProject ? <button className="popover-option" onClick={() => {
+              {(close) => <div className="flex min-w-[190px] flex-col gap-px p-1"><button className={OPTION} data-active={projectFilter === null || undefined} onClick={() => { setProjectFilter(null); close() }}><SquareCheck className="size-3.5" />All projects</button>
+                {projects.map((project) => <button key={project.id} className={OPTION} data-active={project.id === projectFilter || undefined} onClick={() => { setProjectFilter(project.id); close() }}><span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />{project.name}</button>)}
+                <div className="my-1 h-px shrink-0 bg-border" />
+                <button className={OPTION} onClick={() => { close(); setShowNewProject(true) }}><Plus className="size-3.5" />New project</button>
+                {activeProject ? <button className={OPTION} onClick={() => {
                   const path = projectSettingsPath(activeProject.id)
                   close()
                   if (path) navigate(path)
-                }}><Setting2 size={15} />{projectSettingsLabel()}</button> : null}
-                </>}
+                }}><Settings className="size-3.5" />{projectSettingsLabel()}</button> : null}
+                </div>}
             </Dropdown>
-            <span className="pane-title">{viewTitle}</span>
-            <div className="spacer" />
+            <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
+            <div className="flex-1" />
             <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
-            <button className="button button-primary" aria-label="New task" disabled={createTask.isPending} onClick={() => void startNewTask()}><Add size={16} /><span className="tasks-new-label">New task</span></button>
-            {createTask.isError ? <span role="alert" className="text-danger text-xs">Task creation failed.</span> : null}
+            <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
+            {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
-          <div className="pane-body">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {layout === 'board'
               ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
               : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
-            {tasksQuery.hasNextPage ? <div className="tasks-load-more"><button className="button" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</button></div> : null}
+            {tasksQuery.hasNextPage ? <div className="flex justify-center p-4"><Button variant="outline" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</Button></div> : null}
           </div>
         </section>
       )}
@@ -217,5 +220,5 @@ export function TasksPage() {
 }
 
 function TaskBoundary({ title, description }: { title: string; description: string }) {
-  return <div className="page"><section className="pane" style={{ flex: 1 }}><EmptyState icon={TaskSquare} title={title} description={description} /></section></div>
+  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title={title} description={description} /></section></div>
 }

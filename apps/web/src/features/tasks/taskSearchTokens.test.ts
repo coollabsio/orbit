@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test'
 
 test('task search uses shared input tokens and one wrapper focus ring', async () => {
-  const css = await Bun.file(new URL('./tasks.css', import.meta.url)).text()
-  expect(css).toContain('border: 1px solid var(--control-border)')
-  expect(css).toContain('background: var(--recessed)')
-  expect(css).toContain('color: var(--text-primary)')
-  expect(css).toContain('.tasks-search:focus-within')
-  expect(css).toContain('.tasks-search input:focus-visible')
-  expect(css).toContain('box-shadow: none')
+  const source = await Bun.file(new URL('./components/TaskFilters.tsx', import.meta.url)).text()
+  const wrapper = source.slice(source.indexOf('<label'), source.indexOf('</label>'))
+  // the wrapper carries the shared control tokens and the single focus ring
+  expect(wrapper).toContain('border border-input')
+  expect(wrapper).toContain('bg-muted')
+  expect(wrapper).toContain('focus-within:ring-1')
+  // the inner input contributes no border/ring of its own
+  expect(wrapper).toContain('border-0')
+  expect(wrapper).toContain('focus:outline-none')
 })

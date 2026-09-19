@@ -13,7 +13,7 @@ export function LinkifiedText({ text }: { text: string }) {
     const url = rawUrl.replace(TRAILING_PUNCTUATION, '')
     parts.push(text.slice(cursor, start))
     parts.push(
-      <a key={start} href={url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+      <a key={start} href={url} target="_blank" rel="noreferrer" className="cursor-pointer text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>
         {url}
       </a>,
     )

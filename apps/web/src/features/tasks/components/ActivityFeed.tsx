@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown } from 'reicon-react'
+import { ChevronDown } from 'lucide-react'
+import { cn } from 'cn'
+import { Button } from '@/components/ui/button'
 import { UserAvatar } from '../../../components/ui/UserAvatar'
 import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
 import type { Task, TaskActivity, TaskViewState } from '../api/models'
@@ -14,6 +16,9 @@ interface ActivityFeedProps {
   task: Task
   state: TaskViewState
 }
+
+const TIMELINE_ITEM =
+  "relative flex min-w-0 items-center gap-2.5 py-[7px] pl-1.5 text-xs text-muted-foreground before:absolute before:top-0 before:left-[12.5px] before:h-[calc(50%-8px)] before:w-px before:bg-border before:content-[''] after:absolute after:bottom-0 after:left-[12.5px] after:top-[calc(50%+8px)] after:w-px after:bg-border after:content-[''] first:before:hidden last:after:hidden"
 
 /**
  * Chronological feed: activity events (timeline rows) and comment threads (cards) interleaved by time,
@@ -34,17 +39,17 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
   const feed = buildFeed({ ...task, activity: visibleActivity })
 
   const renderTimeline = (items: TaskActivity[], key: string) => (
-    <ol key={key} className="tasks-timeline">
+    <ol key={key} className="m-0 flex list-none flex-col p-0">
       {items.map((item) => {
         const actor = userById(item.actorId)
         const status = item.statusId ? state.statuses.find((s) => s.id === item.statusId) : undefined
         return (
-          <li key={item.id} className="tasks-timeline-item">
-            <span className="tasks-timeline-icon">
+          <li key={item.id} className={TIMELINE_ITEM}>
+            <span className="inline-flex size-3.5 shrink-0 items-center justify-center">
               {status ? <TaskStatusIcon status={status} size={14} /> : <UserAvatar user={actor} size={14} />}
             </span>
-            <span className="tasks-timeline-text truncate">
-              <span className="tasks-timeline-actor">{item.actorName ?? actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}
+            <span className="truncate">
+              <span className="font-medium text-foreground">{item.actorName ?? actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}
             </span>
           </li>
         )
@@ -53,31 +58,32 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
   )
 
   const renderThread = (thread: CommentThread) => (
-    <div key={thread.root.id} className="tasks-thread">
+    <div key={thread.root.id} className="mt-3 overflow-hidden rounded-[10px] border border-border bg-card">
       <CommentItem state={state} taskId={task.id} comment={thread.root} mentionTokens={mentionTokens} />
       {thread.replies.map((reply) => (
         <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
       ))}
-      <div className="tasks-thread-composer">
+      <div className="border-t border-border px-3 pt-2.5 pb-3">
         <TaskCommentComposer compact placeholder="Leave a reply…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ body, files, parentId: thread.root.id })} />
       </div>
     </div>
   )
 
   return (
-    <div className="tasks-activity">
-      <div className="tasks-activity-heading">
-        <h3>Activity</h3>
+    <div>
+      <div className="mt-5 mb-2 flex items-center gap-1 border-t border-border pt-3.5 max-[899px]:mt-0 max-[899px]:border-t-0 max-[899px]:pt-0">
+        <h3 className="m-0 text-sm font-semibold text-foreground">Activity</h3>
         {hasMoreActivity ? (
-          <button
-            type="button"
-            className="icon-button tasks-activity-toggle"
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-6 text-muted-foreground"
             aria-label={expanded ? 'Show fewer activities' : 'Show all activities'}
             aria-expanded={expanded}
             onClick={() => setExpanded((current) => !current)}
           >
-            <ChevronDown size={14} />
-          </button>
+            <ChevronDown className={cn('size-3.5 transition-transform', expanded && 'rotate-180')} />
+          </Button>
         ) : null}
       </div>
       {feed.map((entry, index) =>
