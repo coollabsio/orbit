@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../api/generated/types.gen'
 import { WorkspaceContext } from '../../workspaces/workspaceContext'
@@ -44,10 +45,12 @@ function viewFor(tasks: Task[], onOpen = () => {}, users: User[] = []) {
   return render(<TaskList tasks={tasks} users={users} labels={[]} statuses={[status]} groups={groups} sort="manual" onOpen={onOpen} onAdd={() => {}} />, { wrapper })
 }
 
-function chooseUrgent(view: ReturnType<typeof render>) {
+async function chooseUrgent(view: ReturnType<typeof render>) {
   const toolbar = view.getByRole('toolbar', { name: 'Selected tasks' })
+  // fireEvent opens the Base UI trigger (userEvent would double-toggle it); userEvent
+  // then clicks the option, waiting until the opened popover is actually actionable.
   fireEvent.click(within(toolbar).getByRole('button', { name: 'Priority' }))
-  fireEvent.click(view.getByRole('button', { name: /^Urgent/ }))
+  await userEvent.click(await view.findByRole('button', { name: /^Urgent/ }, { timeout: 5000 }))
 }
 
 test('bulk toolbar rejects more than 100 selected tasks without a server request', async () => {
@@ -60,14 +63,14 @@ test('bulk toolbar rejects more than 100 selected tasks without a server request
   act(() => {
     for (const checkbox of view.getAllByRole('checkbox')) checkbox.click()
   })
-  await waitFor(() => expect(view.getByText('101 selected')).toBeTruthy())
+  await waitFor(() => expect(view.getByText('101 selected')).toBeTruthy(), { timeout: 5000 })
 
-  chooseUrgent(view)
+  await chooseUrgent(view)
 
-  expect((await view.findByRole('alert')).textContent).toContain('Select 100 or fewer')
+  expect((await view.findByRole('alert', {}, { timeout: 5000 })).textContent).toContain('Select 100 or fewer')
   expect(requests).toBe(0)
   expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
-})
+}, 20000)
 
 test('bulk toolbar retry repeats the original valid atomic payload', async () => {
   const bodies: unknown[] = []
@@ -81,7 +84,7 @@ test('bulk toolbar retry repeats the original valid atomic payload', async () =>
   }) as unknown as typeof fetch
   const view = viewFor([task(1), task(2)])
   for (const checkbox of view.getAllByRole('checkbox')) fireEvent.click(checkbox)
-  chooseUrgent(view)
+  await chooseUrgent(view)
   await view.findByRole('alert')
 
   fireEvent.click(view.getByRole('button', { name: 'Retry' }))

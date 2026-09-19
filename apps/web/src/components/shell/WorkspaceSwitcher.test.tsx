@@ -34,16 +34,16 @@ test('switching workspaces updates the current name, route and saved preference,
   expect(view.queryByRole('button', { name: 'Alpha' })).toBeNull()
 })
 
-test('the workspace menu can be dismissed without switching', () => {
+test('the workspace menu can be dismissed without switching', async () => {
   const view = setup()
   const trigger = view.getByRole('button', { name: 'Workspace: Alpha' })
   expect(trigger.getAttribute('aria-expanded')).toBe('false')
   fireEvent.click(trigger)
   expect(trigger.getAttribute('aria-expanded')).toBe('true')
-  fireEvent.keyDown(document, { key: 'Escape' })
+  await userEvent.keyboard('{Escape}')
   expect(trigger.getAttribute('aria-expanded')).toBe('false')
   fireEvent.click(trigger)
-  fireEvent.pointerDown(document.body)
+  await userEvent.click(document.body)
   expect(trigger.getAttribute('aria-expanded')).toBe('false')
   expect(view.getByTestId('location').textContent).toBe('/tasks?workspace=alpha')
 })
@@ -98,7 +98,7 @@ test('dismissing a pending creation prevents duplicate submission and a late wor
   await userEvent.type(view.getByLabelText('New workspace'), 'Gamma')
   await userEvent.click(view.getByRole('button', { name: 'Create workspace' }))
   await view.findByRole('button', { name: 'Creating…' })
-  fireEvent.keyDown(document, { key: 'Escape' })
+  await userEvent.keyboard('{Escape}')
   fireEvent.click(view.getByRole('button', { name: 'Workspace: Alpha' }))
   expect((view.getByRole('button', { name: 'Create workspace' }) as HTMLButtonElement).disabled).toBe(true)
   fireEvent.click(view.getByRole('button', { name: 'Beta' }))
