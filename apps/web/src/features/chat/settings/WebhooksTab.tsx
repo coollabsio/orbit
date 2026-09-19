@@ -1,7 +1,9 @@
 // Server settings › Webhooks: accordion rows (icon, name, created; expanded: icon upload,
 // name, channel, copy URL, delete).
 import { useState } from 'react'
-import { ArrowRight2, Copy, TickCircle, Trash } from 'reicon-react'
+import { Check, ChevronRight, Copy, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Listbox } from '../../../components/ui/Listbox'
 import { WebhookIcon } from '../../../components/ui/WebhookIcon'
 import { createWebhook, deleteWebhook, updateWebhook } from '../../../mock/actions'
@@ -9,8 +11,6 @@ import { useAppState } from '../../../mock/store'
 import type { Webhook } from '../../../mock/types'
 import { ConfirmDeleteModal } from '../components/ChannelModals'
 import { channelLabel, webhookUrl } from './webhookLib'
-import './server.css'
-import './webhooks.css'
 
 const MAX_WEBHOOK_ICON_BYTES = 5 * 1024 * 1024
 const MAX_WEBHOOK_ICON_DIMENSION = 1000
@@ -100,49 +100,56 @@ export function WebhooksTab() {
   }
 
   return (
-    <div className="fs-page" style={{ gap: 32 }}>
-      <div className="fs-webhooks-head">
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col items-start gap-4 border-b border-border pb-7">
         <div>
-          <h2 className="fs-title">Webhooks</h2>
-          <p className="fs-subtitle" data-strong style={{ marginTop: 12, maxWidth: 576, lineHeight: '24px' }}>
+          <h2 className="text-xl leading-7 font-semibold text-foreground">Webhooks</h2>
+          <p className="mt-3 max-w-[576px] text-sm leading-6 text-foreground">
             Webhooks post messages from other apps and websites into this server.
           </p>
         </div>
-        <button type="button" className="fs-btn" data-variant="primary" onClick={handleCreate}>
+        <Button size="lg" onClick={handleCreate}>
           New Webhook
-        </button>
+        </Button>
       </div>
 
-      {error ? <p className="fs-error">{error}</p> : null}
+      {error ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
 
       {state.webhooks.length === 0 ? (
-        <p className="wh-empty">No webhooks yet.</p>
+        <p className="py-8 text-sm text-muted-foreground">No webhooks yet.</p>
       ) : (
-        <div className="wh-list">
+        <div className="flex flex-col gap-4">
           {state.webhooks.map((wh) => {
             const isExpanded = expandedId === wh.id
             const isUploading = uploadingId === wh.id
             return (
-              <div key={wh.id} className="wh-row">
-                <button type="button" className="wh-row-header" onClick={() => setExpandedId(isExpanded ? null : wh.id)}>
-                  <span className="wh-avatar">{wh.iconUrl ? <img src={wh.iconUrl} alt="" /> : <WebhookIcon size={20} />}</span>
-                  <span className="wh-row-text">
-                    <span className="wh-row-name">{wh.name}</span>
-                    <span className="wh-row-meta">{formatCreatedAt(wh.createdAt)}</span>
+              <div key={wh.id} className="overflow-hidden rounded-lg border border-border bg-background">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-foreground/[0.02]"
+                  onClick={() => setExpandedId(isExpanded ? null : wh.id)}
+                >
+                  <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-amber-500/15 text-amber-400">
+                    {wh.iconUrl ? <img className="size-full object-cover" src={wh.iconUrl} alt="" /> : <WebhookIcon size={20} />}
                   </span>
-                  <ArrowRight2 size={14} className="wh-chevron" data-open={isExpanded || undefined} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-semibold text-foreground">{wh.name}</span>
+                    <span className="mt-0.5 text-xs font-medium text-muted-foreground">{formatCreatedAt(wh.createdAt)}</span>
+                  </span>
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/55 transition-transform data-[open]:rotate-90" data-open={isExpanded || undefined} />
                 </button>
 
                 {isExpanded ? (
                   <>
-                    <div className="wh-divider" />
-                    <div className="wh-body">
+                    <div className="mx-4 border-t border-border" />
+                    <div className="grid grid-cols-[104px_minmax(0,1fr)] gap-5 p-4 max-[599px]:grid-cols-[minmax(0,1fr)]">
                       <div>
-                        <p className="wh-label">Icon</p>
-                        <label className="wh-icon-upload">
+                        <p className="mb-2 text-sm font-semibold text-foreground">Icon</p>
+                        <label className="relative flex size-16 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-amber-500/15 text-amber-400 transition-opacity hover:opacity-85">
                           <input
                             type="file"
                             accept="image/*"
+                            className="absolute inset-0 cursor-pointer opacity-0"
                             disabled={isUploading}
                             aria-label="Upload webhook icon"
                             onChange={(event) => {
@@ -150,21 +157,21 @@ export function WebhooksTab() {
                               event.currentTarget.value = ''
                             }}
                           />
-                          {wh.iconUrl ? <img src={wh.iconUrl} alt="" /> : <WebhookIcon size={32} />}
-                          {isUploading ? <span className="wh-icon-busy">...</span> : null}
+                          {wh.iconUrl ? <img className="size-full object-cover" src={wh.iconUrl} alt="" /> : <WebhookIcon size={32} />}
+                          {isUploading ? <span className="absolute inset-0 flex items-center justify-center bg-background/55 text-xs font-semibold text-foreground">...</span> : null}
                         </label>
-                        <p className="wh-icon-hint">
-                          <span>1000x1000</span>
-                          <span>5MB max</span>
+                        <p className="mt-2 w-16 text-center text-[11px] font-medium leading-4 text-muted-foreground">
+                          <span className="block">1000x1000</span>
+                          <span className="block">5MB max</span>
                         </p>
                       </div>
-                      <div className="wh-fields">
-                        <div className="wh-grid">
-                          <label className="wh-field">
-                            <span className="wh-label">Name</span>
-                            <input
+                      <div className="flex min-w-0 flex-col gap-5">
+                        <div className="grid grid-cols-2 gap-4 max-[599px]:grid-cols-[minmax(0,1fr)]">
+                          <label className="block min-w-0">
+                            <span className="mb-2 block text-sm font-semibold text-foreground">Name</span>
+                            <Input
                               type="text"
-                              className="fs-input"
+                              className="px-3"
                               value={nameDrafts[wh.id] ?? wh.name}
                               onChange={(e) => setNameDrafts((prev) => ({ ...prev, [wh.id]: e.target.value }))}
                               onBlur={() => commitName(wh)}
@@ -173,8 +180,8 @@ export function WebhooksTab() {
                               }}
                             />
                           </label>
-                          <div className="wh-field">
-                            <span className="wh-label">Channel</span>
+                          <div className="block min-w-0">
+                            <span className="mb-2 block text-sm font-semibold text-foreground">Channel</span>
                             <Listbox
                               value={wh.channelId}
                               options={state.channels.map((c) => ({ value: c.id, label: channelLabel(state.channels, c.id) }))}
@@ -182,15 +189,15 @@ export function WebhooksTab() {
                             />
                           </div>
                         </div>
-                        <div className="wh-actions">
-                          <button type="button" className="fs-btn" data-variant="secondary" onClick={() => handleCopyUrl(wh)}>
-                            {copiedId === wh.id ? <TickCircle size={16} /> : <Copy size={16} />}
+                        <div className="flex flex-wrap gap-3 border-t border-border pt-4">
+                          <Button variant="secondary" size="lg" onClick={() => handleCopyUrl(wh)}>
+                            {copiedId === wh.id ? <Check className="size-4" /> : <Copy className="size-4" />}
                             {copiedId === wh.id ? 'Copied' : 'Copy Webhook URL'}
-                          </button>
-                          <button type="button" className="fs-btn wh-delete" onClick={() => setDeleteTarget(wh)}>
-                            <Trash size={16} />
+                          </Button>
+                          <Button variant="destructive" size="lg" onClick={() => setDeleteTarget(wh)}>
+                            <Trash2 className="size-4" />
                             Delete Webhook
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     </div>

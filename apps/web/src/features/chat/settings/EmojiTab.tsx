@@ -1,11 +1,12 @@
 // Chat settings › Emoji: upload custom emojis usable across the whole app as :name:.
 import { useRef, useState } from 'react'
-import { Trash } from 'reicon-react'
+import { Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { createCustomEmoji, deleteCustomEmoji, renameCustomEmoji } from '../../../mock/actions'
 import { useAppState } from '../../../mock/store'
 import type { CustomEmoji } from '../../../mock/types'
 import { ConfirmDeleteModal } from '../components/ChannelModals'
-import './server.css'
 
 const MAX_EMOJI_BYTES = 256 * 1024
 
@@ -54,18 +55,18 @@ export function EmojiTab() {
   }
 
   return (
-    <div className="fs-page" style={{ gap: 32 }}>
-      <div className="fs-webhooks-head">
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col items-start gap-4 border-b border-border pb-7">
         <div>
-          <h2 className="fs-title">Emoji</h2>
-          <p className="fs-subtitle" data-strong style={{ marginTop: 12, maxWidth: 576, lineHeight: '24px' }}>
+          <h2 className="text-xl leading-7 font-semibold text-foreground">Emoji</h2>
+          <p className="mt-3 max-w-[576px] text-sm leading-6 text-foreground">
             Custom emojis work everywhere in the app: type :name: in chat, comments and docs, or pick them
             from any emoji panel.
           </p>
         </div>
-        <button type="button" className="fs-btn" data-variant="primary" onClick={() => fileInput.current?.click()}>
+        <Button size="lg" onClick={() => fileInput.current?.click()}>
           Upload Emoji
-        </button>
+        </Button>
         <input
           ref={fileInput}
           type="file"
@@ -80,23 +81,23 @@ export function EmojiTab() {
         />
       </div>
 
-      {error ? <p className="fs-error">{error}</p> : null}
+      {error ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
 
       {state.customEmojis.length === 0 ? (
-        <p className="wh-empty">No custom emojis yet.</p>
+        <p className="py-8 text-sm text-muted-foreground">No custom emojis yet.</p>
       ) : (
-        <div className="em-list">
-          <div className="em-head-row">
+        <div className="flex flex-col">
+          <div className="grid grid-cols-[72px_minmax(0,1fr)_40px] items-center gap-3 border-b border-border px-1 pt-2.5 pb-1.5 text-[11px] font-semibold tracking-[0.03em] uppercase text-muted-foreground/70">
             <span>Emoji</span>
             <span>Name</span>
             <span />
           </div>
           {state.customEmojis.map((emoji) => (
-            <div key={emoji.id} className="em-row">
-              <img className="em-image" src={emoji.url} alt={`:${emoji.name}:`} />
-              <div className="em-name">
-                <input
-                  className="input em-name-input"
+            <div key={emoji.id} className="grid grid-cols-[72px_minmax(0,1fr)_40px] items-center gap-3 border-b border-border px-1 py-2.5">
+              <img className="size-8 rounded-md object-contain" src={emoji.url} alt={`:${emoji.name}:`} />
+              <div className="flex items-center gap-0.5 text-muted-foreground/70">
+                <Input
+                  className="h-8 w-[200px]"
                   value={drafts[emoji.id] ?? emoji.name}
                   aria-label={`Emoji name ${emoji.name}`}
                   onChange={(e) => setDrafts((prev) => ({ ...prev, [emoji.id]: e.target.value }))}
@@ -106,15 +107,16 @@ export function EmojiTab() {
                   }}
                 />
               </div>
-              <button
-                type="button"
-                className="icon-button em-delete"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground/70 hover:text-destructive"
                 aria-label={`Delete :${emoji.name}:`}
                 title="Delete"
                 onClick={() => setDeleteTarget(emoji)}
               >
-                <Trash size={15} />
-              </button>
+                <Trash2 className="size-4" />
+              </Button>
             </div>
           ))}
         </div>

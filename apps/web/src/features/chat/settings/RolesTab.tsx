@@ -2,12 +2,14 @@
 // Display (name + color) and Manage Members tabs.
 import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useSearchParams } from 'react-router'
-import { Add, ArrowLeft2, Edit, Magnifier, People, TickCircle, Trash, Xmark } from 'reicon-react'
+import { ArrowLeft, Check, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { assignMemberRoles, createRole, deleteRole, reorderRoles, updateRole } from '../../../mock/actions'
 import { useAppState } from '../../../mock/store'
 import type { Role, User } from '../../../mock/types'
 import { ConfirmDeleteModal } from '../components/ChannelModals'
-import './server.css'
 
 const ROLE_COLORS = [
   '#99aab5', '#57f287', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6', '#e91e63', '#f1c40f', '#e67e22', '#e74c3c', '#95a5a6',
@@ -56,7 +58,13 @@ function moveRole(roles: Role[], draggedRoleId: string, targetRoleId: string, ta
 
 function RoleDropLine({ position }: { position: DropPosition | null }) {
   if (!position) return null
-  return <span aria-hidden="true" className="fs-drop-line" data-position={position} />
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 z-10 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)] data-[position=before]:top-0 data-[position=after]:bottom-0"
+      data-position={position}
+    />
+  )
 }
 
 export function RolesTab() {
@@ -123,23 +131,27 @@ export function RolesTab() {
 
   if (selectedRole) {
     return (
-      <div className="fs-role-edit">
-        <div className="fs-role-rail">
-          <div className="fs-role-rail-head">
-            <button type="button" className="fs-role-back" onClick={() => setSelectedRoleId(null)}>
-              <ArrowLeft2 size={16} />
+      <div className="grid min-h-[calc(100vh-5rem)] grid-cols-[13rem_1fr] gap-8 max-[899px]:min-h-0 max-[899px]:grid-cols-[minmax(0,1fr)]">
+        <div className="min-w-0 border-r border-border pr-4 max-[899px]:border-r-0 max-[899px]:pr-0">
+          <div className="mb-6 flex items-center justify-between">
+            <button
+              type="button"
+              className="flex items-center gap-2 text-base leading-6 font-bold uppercase text-foreground transition-colors hover:text-primary"
+              onClick={() => setSelectedRoleId(null)}
+            >
+              <ArrowLeft className="size-4" />
               Back
             </button>
-            <button type="button" className="fc-thread-icon-button" title="Create role" onClick={handleCreate}>
-              <Add size={16} />
-            </button>
+            <Button variant="ghost" size="icon-sm" title="Create role" onClick={handleCreate}>
+              <Plus className="size-4" />
+            </Button>
           </div>
-          <div className="fs-role-rail-list">
+          <div className="flex flex-col gap-1">
             {roles.map((role) => (
               <button
                 key={role.id}
                 type="button"
-                className="fs-role-rail-item"
+                className="relative flex h-9 w-full min-w-0 cursor-grab items-center gap-2 rounded-md px-3 text-left text-sm leading-5 font-bold text-foreground transition-colors select-none hover:bg-sidebar-accent/60 data-[active=true]:bg-sidebar-accent data-[dragging=true]:opacity-50"
                 data-role-drop-id={role.id}
                 data-active={selectedRole.id === role.id ? 'true' : undefined}
                 data-dragging={dragRoleId === role.id ? 'true' : undefined}
@@ -155,26 +167,41 @@ export function RolesTab() {
                 }}
               >
                 <RoleDropLine position={dropIndicator?.roleId === role.id ? dropIndicator.position : null} />
-                <span className="fs-role-dot" style={{ backgroundColor: role.color }} />
+                <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: role.color }} />
                 <span className="truncate">{role.name}</span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="fs-role-panel">
-          <div className="fs-role-panel-head">
-            <h2>Edit Role — {selectedRole.name}</h2>
-            <button type="button" className="fs-role-close" title="Close" onClick={() => setSelectedRoleId(null)}>
-              <Xmark size={16} />
+        <div className="min-w-0 max-w-xl">
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <h2 className="min-w-0 truncate text-base leading-6 font-bold uppercase text-foreground">Edit Role — {selectedRole.name}</h2>
+            <button
+              type="button"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full border-2 border-muted-foreground/60 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+              title="Close"
+              onClick={() => setSelectedRoleId(null)}
+            >
+              <X className="size-4" />
             </button>
           </div>
 
-          <div className="fs-tabs">
-            <button type="button" className="fs-tab" data-active={roleTab === 'display' ? 'true' : undefined} onClick={() => setRoleTab('display')}>
+          <div className="mb-6 flex gap-8 border-b border-border">
+            <button
+              type="button"
+              className="border-b-2 border-transparent pb-3 text-sm leading-5 font-semibold text-muted-foreground transition-colors hover:text-foreground data-[active=true]:border-primary data-[active=true]:text-primary"
+              data-active={roleTab === 'display' ? 'true' : undefined}
+              onClick={() => setRoleTab('display')}
+            >
               Display
             </button>
-            <button type="button" className="fs-tab" data-active={roleTab === 'members' ? 'true' : undefined} onClick={() => setRoleTab('members')}>
+            <button
+              type="button"
+              className="border-b-2 border-transparent pb-3 text-sm leading-5 font-semibold text-muted-foreground transition-colors hover:text-foreground data-[active=true]:border-primary data-[active=true]:text-primary"
+              data-active={roleTab === 'members' ? 'true' : undefined}
+              onClick={() => setRoleTab('members')}
+            >
               Manage Members ({memberCount(members, selectedRole.id)})
             </button>
           </div>
@@ -196,42 +223,38 @@ export function RolesTab() {
   }
 
   return (
-    <div className="fs-page" data-wide>
+    <div className="flex flex-col gap-6">
       <div>
-        <h2 className="fs-title">Roles</h2>
-        <p className="fs-subtitle" data-strong>
-          Use roles to group your server members.
-        </p>
+        <h2 className="text-xl leading-7 font-semibold text-foreground">Roles</h2>
+        <p className="mt-0.5 text-sm leading-5 text-foreground">Use roles to group your server members.</p>
       </div>
 
-      <div className="fs-row">
-        <label className="fs-search">
-          <Magnifier size={16} />
-          <input type="text" className="fs-input" value={roleSearch} placeholder="Search Roles" onChange={(e) => setRoleSearch(e.target.value)} />
+      <div className="flex items-center gap-4">
+        <label className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input type="text" className="h-10 pl-10 pr-3 font-medium" value={roleSearch} placeholder="Search Roles" onChange={(e) => setRoleSearch(e.target.value)} />
         </label>
-        <button type="button" className="fs-btn" data-variant="primary" onClick={handleCreate}>
+        <Button size="lg" onClick={handleCreate}>
           Create Role
-        </button>
+        </Button>
       </div>
 
-      <p className="fs-subtitle" data-strong>
-        Members use the color of the highest role they have on this list.
-      </p>
+      <p className="mt-0.5 text-sm leading-5 text-foreground">Members use the color of the highest role they have on this list.</p>
 
       <div>
-        <div className="fs-roles-head">
+        <div className="grid grid-cols-[1fr_8rem_6rem] border-b border-border pb-2 text-xs leading-5 font-bold uppercase text-muted-foreground">
           <span>Roles — {roles.length}</span>
-          <span>Members</span>
+          <span className="-ml-3">Members</span>
           <span className="sr-only">Actions</span>
         </div>
         {filteredRoles.length === 0 ? (
-          <p className="fs-roles-empty">No roles found.</p>
+          <p className="py-8 text-sm text-muted-foreground">No roles found.</p>
         ) : (
-          <div className="fs-roles-list">
+          <div className="[&>*+*]:border-t [&>*+*]:border-border">
             {filteredRoles.map((role) => (
               <div
                 key={role.id}
-                className="fs-role-row"
+                className="relative grid min-h-16 cursor-grab grid-cols-[1fr_8rem_6rem] items-center gap-3 py-2 select-none active:cursor-grabbing data-[dragging=true]:opacity-50"
                 data-role-drop-id={role.id}
                 data-dragging={dragRoleId === role.id ? 'true' : undefined}
                 onMouseMove={(event: ReactMouseEvent<HTMLDivElement>) => handleRoleDragOver(role.id, event.currentTarget, event.clientY)}
@@ -244,34 +267,42 @@ export function RolesTab() {
                 <RoleDropLine position={dropIndicator?.roleId === role.id ? dropIndicator.position : null} />
                 <button
                   type="button"
-                  className="fs-role-name"
+                  className="flex min-w-0 items-center gap-3 rounded-lg py-2 pr-3 text-left text-sm leading-5 font-bold text-foreground transition-colors hover:text-primary"
                   onClick={() => {
                     setSelectedRoleId(role.id)
                     setRoleTab('display')
                   }}
                 >
-                  <span className="fs-role-dot" style={{ backgroundColor: role.color }} />
+                  <span className="size-3.5 shrink-0 rounded-full" style={{ backgroundColor: role.color }} />
                   <span className="truncate">{role.name}</span>
                 </button>
-                <div className="fs-role-count">
+                <div className="flex items-center gap-1.5 text-sm leading-5 font-medium text-muted-foreground">
                   <span>{memberCount(members, role.id)}</span>
-                  <People size={16} />
+                  <Users className="size-4" />
                 </div>
-                <div className="fs-role-actions">
-                  <button
-                    type="button"
-                    className="fs-square-button"
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="size-10 rounded-lg bg-muted"
                     title="Edit role"
                     onClick={() => {
                       setSelectedRoleId(role.id)
                       setRoleTab('display')
                     }}
                   >
-                    <Edit size={16} />
-                  </button>
-                  <button type="button" className="fs-square-button" data-danger="true" title="Delete role" onClick={() => setDeleteRoleTarget(role)}>
-                    <Trash size={16} />
-                  </button>
+                    <Pencil className="size-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="size-10 rounded-lg bg-muted hover:bg-destructive/10 hover:text-destructive"
+                    data-danger="true"
+                    title="Delete role"
+                    onClick={() => setDeleteRoleTarget(role)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
                 </div>
               </div>
             ))}
@@ -308,15 +339,14 @@ function RoleDisplayPanel({ role, onUpdate }: { role: Role; onUpdate: (updates: 
 
   return (
     <div>
-      <div className="fs-section">
-        <label className="fs-field-label" htmlFor="role-name">
-          Role name <span className="fs-required">*</span>
-        </label>
-        <input
+      <div className="mb-8 border-b border-border pb-6">
+        <Label className="mb-2 text-sm leading-5 font-bold text-foreground" htmlFor="role-name">
+          Role name <span className="text-primary">*</span>
+        </Label>
+        <Input
           id="role-name"
           type="text"
-          className="fs-input"
-          data-h10
+          className="h-10 px-3 font-medium"
           value={draftName}
           maxLength={50}
           onChange={(e) => setDraftName(e.target.value)}
@@ -325,20 +355,20 @@ function RoleDisplayPanel({ role, onUpdate }: { role: Role; onUpdate: (updates: 
       </div>
 
       <div>
-        <h3 className="fs-field-label" style={{ marginBottom: 0 }}>
-          Role color <span className="fs-required">*</span>
+        <h3 className="text-sm leading-5 font-bold text-foreground">
+          Role color <span className="text-primary">*</span>
         </h3>
-        <p className="fs-field-help">Members use the color of the highest role they have on the roles list.</p>
-        <div className="fs-swatches">
-          <label className="fs-swatch-custom" style={{ backgroundColor: draftColor }} title="Custom color">
-            <input type="color" value={draftColor} aria-label={`${role.name} color`} onChange={(e) => setDraftColor(e.target.value)} onBlur={saveIfChanged} />
-            <Edit size={16} />
+        <p className="mb-3 text-sm leading-5 text-muted-foreground">Members use the color of the highest role they have on the roles list.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="relative flex h-12 w-16 cursor-pointer items-center justify-center rounded-md border border-border text-white" style={{ backgroundColor: draftColor }} title="Custom color">
+            <input type="color" className="absolute inset-0 cursor-pointer opacity-0" value={draftColor} aria-label={`${role.name} color`} onChange={(e) => setDraftColor(e.target.value)} onBlur={saveIfChanged} />
+            <Pencil className="size-4 [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.4))]" />
           </label>
           {ROLE_COLORS.map((color) => (
             <button
               key={color}
               type="button"
-              className="fs-swatch"
+              className="flex size-6 items-center justify-center rounded-md text-white"
               style={{ backgroundColor: color }}
               title={color}
               onClick={() => {
@@ -346,7 +376,7 @@ function RoleDisplayPanel({ role, onUpdate }: { role: Role; onUpdate: (updates: 
                 if (color !== role.color) onUpdate({ color })
               }}
             >
-              {draftColor.toLowerCase() === color.toLowerCase() ? <TickCircle size={16} /> : null}
+              {draftColor.toLowerCase() === color.toLowerCase() ? <Check className="size-4 [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.4))]" /> : null}
             </button>
           ))}
         </div>
@@ -373,32 +403,31 @@ function RoleMembersPanel({
   const unassignedMembers = members.filter((member) => !member.roleIds.includes(role.id))
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div className="fs-row">
-        <label className="fs-search">
-          <Magnifier size={16} />
-          <input type="text" className="fs-input" value={memberSearch} placeholder="Search Members" onChange={(e) => onMemberSearch(e.target.value)} />
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center gap-4">
+        <label className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input type="text" className="h-10 pl-10 pr-3 font-medium" value={memberSearch} placeholder="Search Members" onChange={(e) => onMemberSearch(e.target.value)} />
         </label>
-        <button
-          type="button"
-          className="fs-btn"
-          data-variant={addingMembers ? 'secondary' : 'primary'}
+        <Button
+          size="lg"
+          variant={addingMembers ? 'secondary' : 'default'}
           onClick={() => {
             setAddingMembers((open) => !open)
             onMemberSearch('')
           }}
         >
           {addingMembers ? 'Done' : 'Add Members'}
-        </button>
+        </Button>
       </div>
 
       {addingMembers ? (
-        <div className="fs-add-box">
-          <div className="fs-add-box-title">Add Members</div>
+        <div className="rounded-lg border border-border bg-background p-2">
+          <div className="px-2 pb-2 text-xs leading-5 font-bold uppercase text-muted-foreground">Add Members</div>
           {unassignedMembers.length === 0 ? (
-            <p className="fs-members-empty">{memberSearch.trim() ? 'No members found.' : 'All members already have this role.'}</p>
+            <p className="px-2 py-6 text-sm text-muted-foreground">{memberSearch.trim() ? 'No members found.' : 'All members already have this role.'}</p>
           ) : (
-            <div className="fs-member-list">
+            <div className="flex flex-col gap-1">
               {unassignedMembers.map((member) => (
                 <MemberRoleRow key={member.id} member={member} action="add" onClick={() => onToggleMember(member)} />
               ))}
@@ -407,9 +436,9 @@ function RoleMembersPanel({
         </div>
       ) : null}
 
-      <div className="fs-member-list">
+      <div className="flex flex-col gap-1">
         {assignedMembers.length === 0 ? (
-          <p className="fs-members-empty" style={{ padding: '24px 0' }}>
+          <p className="px-0 py-6 text-sm text-muted-foreground">
             {memberSearch.trim() ? 'No assigned members found.' : 'No members have this role.'}
           </p>
         ) : (
@@ -422,23 +451,23 @@ function RoleMembersPanel({
 
 function MemberRoleRow({ member, action, onClick }: { member: User; action: 'add' | 'remove'; onClick: () => void }) {
   return (
-    <div className="fs-member-row">
-      <span className="fs-member-avatar" style={{ background: `color-mix(in srgb, ${member.color} 22%, transparent)`, color: member.color }}>
+    <div className="flex min-h-10 items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-sidebar-accent/60">
+      <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-bold" style={{ background: `color-mix(in srgb, ${member.color} 22%, transparent)`, color: member.color }}>
         {member.name.charAt(0).toUpperCase()}
       </span>
-      <div className="fs-member-name">
-        <strong>{member.name}</strong>
-        <span>{member.handle}</span>
+      <div className="min-w-0 flex-1 text-sm leading-5">
+        <strong className="font-bold text-foreground">{member.name}</strong>
+        <span className="ml-1 text-muted-foreground">{member.handle}</span>
       </div>
       <button
         type="button"
-        className="fs-member-action"
+        className="flex size-6 items-center justify-center rounded-full transition-colors data-[action=remove]:bg-muted data-[action=remove]:text-muted-foreground data-[action=remove]:hover:bg-destructive data-[action=remove]:hover:text-white data-[action=add]:border data-[action=add]:border-border data-[action=add]:text-muted-foreground data-[action=add]:hover:bg-primary data-[action=add]:hover:text-white"
         data-action={action}
         title={action === 'remove' ? 'Remove from role' : 'Add to role'}
         aria-label={action === 'remove' ? `Remove ${member.name} from role` : `Add ${member.name} to role`}
         onClick={onClick}
       >
-        {action === 'remove' ? <Xmark size={14} /> : <Add size={14} />}
+        {action === 'remove' ? <X className="size-3.5" /> : <Plus className="size-3.5" />}
       </button>
     </div>
   )
