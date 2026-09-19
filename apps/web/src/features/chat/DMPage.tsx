@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Messages2 } from 'reicon-react'
+import { MessagesSquare } from 'lucide-react'
 import { useParams } from 'react-router'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { markDirectMessageRead } from '../../mock/actions'
@@ -9,7 +9,6 @@ import { ChatArea } from './components/ChatArea'
 import { DMSidebar } from './components/DMSidebar'
 import { NewThreadPanel } from './components/NewThreadPanel'
 import { ThreadPanel } from './components/ThreadPanel'
-import './chat.css'
 
 type ThreadView = { kind: 'thread'; root: ChatMessage } | { kind: 'new' } | null
 
@@ -32,7 +31,7 @@ export function DMPage() {
   }, [dmId])
 
   return (
-    <div className="page chat-page dm-page" data-view={channel ? 'conversation' : 'list'}>
+    <div className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background" data-view={channel ? 'conversation' : 'list'}>
       <DMSidebar state={state} activeId={dmId ?? null} />
       {channel && participant ? (
         <>
@@ -61,8 +60,8 @@ export function DMPage() {
           ) : null}
         </>
       ) : (
-        <div className="fc-chat-area">
-          <EmptyState icon={Messages2} title="Your messages" description="Choose a conversation or start a new one." />
+        <div className="relative flex min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=list]/chat:hidden">
+          <EmptyState icon={MessagesSquare} title="Your messages" description="Choose a conversation or start a new one." />
         </div>
       )}
     </div>

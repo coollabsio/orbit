@@ -2,7 +2,7 @@
 // inline-renamable title, the root message, a separator, grouped replies, and a composer.
 // With `fullScreen` it fills the chat area instead (route /chat/:channelId/thread/:rootId).
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Edit, Xmark } from 'reicon-react'
+import { Pencil, X } from 'lucide-react'
 import { ExpandIcon } from '../../../components/ui/icons/ExpandIcon'
 import { FollowIcon } from '../../../components/ui/icons/FollowIcon'
 import { useNavigate, useSearchParams } from 'react-router'
@@ -14,6 +14,9 @@ import { MessageItem } from './MessageItem'
 
 const DEFAULT_WIDTH = 468
 const GROUP_WINDOW_MS = 300_000
+
+const threadIconBtn =
+  'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:hover:bg-primary/20'
 
 export function ThreadPanel({
   state,
@@ -93,14 +96,18 @@ export function ThreadPanel({
   }
 
   return (
-    <div className="fc-thread-panel" data-fullscreen={fullScreen ? 'true' : undefined} style={isMobile || fullScreen ? undefined : { width }}>
-      {!isMobile && !fullScreen ? <div className="fc-thread-resize" onPointerDown={handleResizeStart} title="Resize thread panel" /> : null}
-      <div className="fc-thread-header">
-        <div className="fc-thread-header-title">
+    <div
+      className="relative flex h-full shrink-0 flex-col border-l border-border bg-background data-[fullscreen=true]:min-w-0 data-[fullscreen=true]:flex-1 data-[fullscreen=true]:border-l-0"
+      data-fullscreen={fullScreen ? 'true' : undefined}
+      style={isMobile || fullScreen ? undefined : { width }}
+    >
+      {!isMobile && !fullScreen ? <div className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/40" onPointerDown={handleResizeStart} title="Resize thread panel" /> : null}
+      <div className="flex h-[47px] shrink-0 items-center justify-between border-b border-border px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
           {editingTitle ? (
             <input
               autoFocus
-              className="fc-thread-title-input"
+              className="h-8 min-w-0 flex-1 rounded-md border border-input bg-muted/40 px-2 text-sm font-semibold text-foreground focus:border-primary focus:outline-none"
               value={titleDraft}
               aria-label="Thread name"
               onChange={(e) => setTitleDraft(e.target.value)}
@@ -116,13 +123,13 @@ export function ThreadPanel({
               }}
             />
           ) : (
-            <h2 className="truncate">{threadTitle}</h2>
+            <h2 className="min-w-0 truncate text-[15px] font-semibold text-foreground">{threadTitle}</h2>
           )}
         </div>
-        <div className="fc-thread-header-actions">
+        <div className="ml-2 flex shrink-0 items-center gap-1">
           <button
             type="button"
-            className="fc-thread-icon-button"
+            className={threadIconBtn}
             data-active={root.threadFollowed ? 'true' : undefined}
             title={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
             aria-label={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
@@ -133,7 +140,7 @@ export function ThreadPanel({
           {!fullScreen ? (
             <button
               type="button"
-              className="fc-thread-icon-button"
+              className={threadIconBtn}
               title="Open full screen"
               aria-label="Open full screen"
               onClick={() => navigate(`/chat/${channel.id}/thread/${root.id}`)}
@@ -141,16 +148,16 @@ export function ThreadPanel({
               <ExpandIcon size={16} />
             </button>
           ) : null}
-          <button type="button" className="fc-thread-icon-button" title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
-            <Edit size={16} />
+          <button type="button" className={threadIconBtn} title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
+            <Pencil size={16} />
           </button>
-          <button type="button" className="fc-thread-icon-button" title="Close thread" aria-label="Close thread" onClick={onClose}>
-            <Xmark size={16} />
+          <button type="button" className={threadIconBtn} title="Close thread" aria-label="Close thread" onClick={onClose}>
+            <X size={16} />
           </button>
         </div>
       </div>
 
-      <div className="fc-thread-body">
+      <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
         {shouldRenderRoot ? (
           <MessageItem
             state={state}
@@ -162,7 +169,7 @@ export function ThreadPanel({
             hideThreadPreview
           />
         ) : null}
-        {shouldRenderRoot && replies.length > 0 ? <div className="fc-thread-separator" /> : null}
+        {shouldRenderRoot && replies.length > 0 ? <div className="my-2 h-px bg-border" /> : null}
         {replies.map((reply, index) => {
           const previous = index > 0 ? replies[index - 1] : null
           const compact =

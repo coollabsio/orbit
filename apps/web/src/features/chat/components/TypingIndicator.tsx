@@ -28,12 +28,12 @@ export function TypingIndicator({ state, channelId }: { state: AppState; channel
   }
 
   return (
-    <div className="fc-typing">
-      <div className="fc-typing-inner">
-        <div className="fc-typing-dots">
-          <span />
-          <span />
-          <span />
+    <div className="absolute bottom-full left-4 pb-1">
+      <div className="flex h-3 items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+        <div className="flex gap-0.5">
+          <span className="inline-block size-1 rounded-full bg-muted-foreground motion-safe:animate-bounce [animation-delay:-0.3s]" />
+          <span className="inline-block size-1 rounded-full bg-muted-foreground motion-safe:animate-bounce [animation-delay:-0.15s]" />
+          <span className="inline-block size-1 rounded-full bg-muted-foreground motion-safe:animate-bounce" />
         </div>
         <span>{text}</span>
       </div>

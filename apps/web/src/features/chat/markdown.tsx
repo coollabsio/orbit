@@ -23,8 +23,9 @@ function githubGlyph(kind: 'issue' | 'pull' | 'discussion' | 'repo'): React.Reac
       'M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z',
     repo: 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z',
   }
+  const color = kind === 'issue' || kind === 'pull' ? 'text-[#3fb950]' : 'text-muted-foreground'
   return (
-    <svg className={`fc-gh-icon fc-gh-${kind}`} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <svg className={`shrink-0 ${color}`} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d={paths[kind]} />
     </svg>
   )
@@ -64,7 +65,7 @@ function linkifyText(text: string): React.ReactNode[] {
           href={safeHref(match[0])}
           target="_blank"
           rel="noopener noreferrer"
-          className="fc-link fc-github-link"
+          className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
           title={match[0]}
         >
           {githubGlyph(github.kind)}
@@ -74,7 +75,7 @@ function linkifyText(text: string): React.ReactNode[] {
         <a
           key={`link-${match.index}`}
           href={path}
-          className="fc-link"
+          className="text-primary hover:underline"
           onClick={(e) => {
             e.preventDefault()
             appNavigate(path)
@@ -88,7 +89,7 @@ function linkifyText(text: string): React.ReactNode[] {
           href={safeHref(match[0])}
           target="_blank"
           rel="noopener noreferrer"
-          className="fc-link"
+          className="text-primary hover:underline"
         >
           {match[0]}
         </a>
@@ -136,7 +137,7 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
         <a
           key={key}
           href={matched.href}
-          className="fc-mention fc-mention-channel"
+          className="cursor-pointer rounded-sm bg-[#5865f2]/15 px-0.5 font-bold no-underline hover:underline dark:bg-[#5865f2]/30"
           style={{ color: matched.color }}
           onClick={(e) => {
             e.preventDefault()
@@ -147,7 +148,7 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
           {value}
         </a>
       ) : (
-        <span key={key} className="fc-mention" style={{ color: matched.color }}>
+        <span key={key} className="rounded-sm bg-[#5865f2]/15 px-0.5 font-bold dark:bg-[#5865f2]/30" style={{ color: matched.color }}>
           {value}
         </span>
       ),
@@ -189,7 +190,7 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
       const linkMatch = token.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/)
       if (linkMatch) {
         parts.push(
-          <a key={key} href={safeHref(linkMatch[2])} target="_blank" rel="noopener noreferrer" className="fc-link">
+          <a key={key} href={safeHref(linkMatch[2])} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
             {renderMarkdownText(linkMatch[1], `${key}-link`, mentionTokens)}
           </a>,
         )
@@ -198,7 +199,7 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
       }
     } else if (token.startsWith('`')) {
       parts.push(
-        <code key={key} className="fc-code">
+        <code key={key} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">
           {token.slice(1, -1)}
         </code>,
       )
@@ -206,7 +207,7 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
       const shortcode = token.slice(1, -1)
       const custom = getState().customEmojis.find((e) => e.name === shortcode)
       if (custom) {
-        parts.push(<img key={key} className="fc-custom-emoji" src={custom.url} alt={token} title={token} />)
+        parts.push(<img key={key} className="inline-block size-5 rounded-[3px] object-contain align-[-4px]" src={custom.url} alt={token} title={token} />)
       } else {
         parts.push(EMOJI_SHORTCODES[shortcode] || token)
       }
@@ -262,8 +263,9 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
     const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
     if (headingMatch) {
       const level = headingMatch[1].length
+      const headingSize = level === 1 ? 'text-2xl leading-8' : level === 2 ? 'text-xl leading-7' : level === 3 ? 'text-lg leading-6' : 'text-base leading-6'
       blocks.push(
-        <div key={`${keyPrefix}-heading-${i}`} role="heading" aria-level={level} className="fc-md-heading" data-level={level}>
+        <div key={`${keyPrefix}-heading-${i}`} role="heading" aria-level={level} className={`mt-1 font-bold text-foreground ${headingSize}`} data-level={level}>
           {renderMarkdownText(headingMatch[2], `${keyPrefix}-heading-${i}`, mentionTokens)}
         </div>,
       )
@@ -272,7 +274,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
     }
 
     if (line.trim() === '') {
-      blocks.push(<div key={`${keyPrefix}-blank-${i}`} className="fc-md-blank" />)
+      blocks.push(<div key={`${keyPrefix}-blank-${i}`} className="h-5" />)
       i += 1
       continue
     }
@@ -286,9 +288,9 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
         i += 1
       }
       blocks.push(
-        <blockquote key={`${keyPrefix}-quote-${i}`} className="fc-md-quote">
+        <blockquote key={`${keyPrefix}-quote-${i}`} className="border-l-4 border-muted-foreground/40 pl-3 text-foreground/85">
           {quoteLines.map((quoteLine, index) => (
-            <p key={`${keyPrefix}-quote-${i}-${index}`} className="fc-md-p">
+            <p key={`${keyPrefix}-quote-${i}-${index}`} className="min-h-5">
               {renderMarkdownText(quoteLine, `${keyPrefix}-quote-${i}-${index}`, mentionTokens)}
             </p>
           ))}
@@ -306,7 +308,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
         i += 1
       }
       blocks.push(
-        <ul key={`${keyPrefix}-ul-${i}`} className="fc-md-list" data-ordered="false">
+        <ul key={`${keyPrefix}-ul-${i}`} className="ml-4 list-disc" data-ordered="false">
           {items.map((item, index) => (
             <li key={`${keyPrefix}-ul-${i}-${index}`}>{renderMarkdownText(item, `${keyPrefix}-ul-${i}-${index}`, mentionTokens)}</li>
           ))}
@@ -324,7 +326,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
         i += 1
       }
       blocks.push(
-        <ol key={`${keyPrefix}-ol-${i}`} className="fc-md-list" data-ordered="true">
+        <ol key={`${keyPrefix}-ol-${i}`} className="ml-4 list-decimal" data-ordered="true">
           {items.map((item, index) => (
             <li key={`${keyPrefix}-ol-${i}-${index}`}>{renderMarkdownText(item, `${keyPrefix}-ol-${i}-${index}`, mentionTokens)}</li>
           ))}
@@ -334,7 +336,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
     }
 
     blocks.push(
-      <p key={`${keyPrefix}-p-${i}`} className="fc-md-p">
+      <p key={`${keyPrefix}-p-${i}`} className="min-h-5">
         {renderMarkdownText(line, `${keyPrefix}-p-${i}`, mentionTokens)}
       </p>,
     )

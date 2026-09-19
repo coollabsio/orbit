@@ -1,6 +1,6 @@
 // Port of the chat reference MemberList: role groups, Online/Offline sections, presence dots, resizable.
 import { useEffect, useState } from 'react'
-import { Xmark } from 'reicon-react'
+import { X } from 'lucide-react'
 import type { AppState, User } from '../../../mock/types'
 import { primaryRole } from '../chatLib'
 
@@ -66,22 +66,22 @@ export function MemberList({
   const colorOf = (member: User) => primaryRole(state, member.id)?.color
 
   const content = (
-    <div className="fc-members" style={isMobile ? { height: '100%', width: 240 } : { width }}>
+    <div className="relative flex shrink-0 flex-col border-l border-border bg-background text-foreground" style={isMobile ? { height: '100%', width: 240 } : { width }}>
       {!isMobile ? (
-        <div className="fc-members-resize" onPointerDown={handleResizeStart} title="Resize member list" />
+        <div className="absolute top-0 bottom-0 -left-px z-20 w-1 cursor-col-resize transition-colors hover:bg-primary/40" onPointerDown={handleResizeStart} title="Resize member list" />
       ) : null}
       {isMobile ? (
-        <div className="fc-members-mobile-header">
-          <span>Members</span>
-          <button type="button" className="fc-composer-reply-close" title="Close" onClick={onClose}>
-            <Xmark />
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+          <span className="text-sm font-semibold">Members</span>
+          <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" title="Close" onClick={onClose}>
+            <X className="size-3.5" />
           </button>
         </div>
       ) : null}
-      <div className="fc-members-scroll">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto [overscroll-behavior:none]">
         {roleGroups.map(({ role, members }) => (
-          <div key={role.id} className="fc-members-section">
-            <div className="fc-members-heading">
+          <div key={role.id} className="flex min-w-0 flex-col gap-0.5 px-4 pt-4">
+            <div className="mb-0.5 flex items-center gap-2 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground">
               <span>
                 {role.name} — {members.length}
               </span>
@@ -92,8 +92,8 @@ export function MemberList({
           </div>
         ))}
         {online.length > 0 ? (
-          <div className="fc-members-section">
-            <div className="fc-members-heading">
+          <div className="flex min-w-0 flex-col gap-0.5 px-4 pt-4">
+            <div className="mb-0.5 flex items-center gap-2 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground">
               <span>Online — {online.length}</span>
             </div>
             {online.map((member) => (
@@ -102,8 +102,8 @@ export function MemberList({
           </div>
         ) : null}
         {offline.length > 0 ? (
-          <div className="fc-members-section">
-            <div className="fc-members-heading">
+          <div className="flex min-w-0 flex-col gap-0.5 px-4 pt-4">
+            <div className="mb-0.5 flex items-center gap-2 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground">
               <span>Offline — {offline.length}</span>
             </div>
             {offline.map((member) => (
@@ -118,29 +118,29 @@ export function MemberList({
   if (isMobile) {
     return (
       <>
-        <div className="fc-members-mobile-backdrop" onClick={onClose} />
-        <div className="fc-members-mobile">{content}</div>
+        <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
+        <div className="fixed top-0 right-0 bottom-0 z-50 duration-200 animate-in slide-in-from-right motion-reduce:animate-none">{content}</div>
       </>
     )
   }
 
-  return <div className="fc-members-desktop" style={{ display: 'flex' }}>{content}</div>
+  return <div className="flex max-[1279px]:hidden">{content}</div>
 }
 
 function MemberItem({ member, online, nameColor }: { member: User; online: boolean; nameColor?: string }) {
   return (
-    <div className="fc-member-item">
-      <div className="fc-member-avatar-wrap">
+    <div className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg p-2 text-sm leading-5 font-medium transition-colors hover:bg-muted">
+      <div className="relative shrink-0">
         <div
-          className="fc-member-avatar"
+          className="flex size-6 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground"
           style={{ background: `color-mix(in srgb, ${member.color} 22%, transparent)`, color: member.color }}
         >
           {member.name.charAt(0).toUpperCase()}
         </div>
-        {online ? <span className="fc-presence" /> : null}
+        {online ? <span className="absolute -right-0.5 -bottom-0.5 flex size-3 rounded-full border-2 border-background bg-green-500" /> : null}
       </div>
       <span
-        className="fc-member-name"
+        className="min-w-0 truncate text-foreground data-[online=false]:text-muted-foreground"
         data-online={online ? 'true' : 'false'}
         style={nameColor ? { color: nameColor, opacity: online ? 1 : 0.65 } : undefined}
       >

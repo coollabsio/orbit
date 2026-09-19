@@ -1,9 +1,17 @@
 // the chat reference CodeBlock + highlightCode (MessageItem.tsx): fenced code with copy button and
 // hand-rolled JS/Rust token colors.
 import { useState } from 'react'
-import { Copy } from 'reicon-react'
+import { Copy } from 'lucide-react'
 
 /* ---------- code block (the chat reference CodeBlock + highlightCode) ---------- */
+
+const TOKEN_CLASS: Record<string, string> = {
+  comment: 'text-[#6e7781] dark:text-[#8b949e]',
+  string: 'text-[#0a3069] dark:text-[#a5d6ff]',
+  number: 'text-[#0550ae] dark:text-[#79c0ff]',
+  type: 'text-[#953800] dark:text-[#ffa657]',
+  keyword: 'text-[#cf222e] dark:text-[#ff7b72]',
+}
 
 function highlightCode(code: string, language: string): React.ReactNode[] {
   const normalizedLanguage = language.toLowerCase()
@@ -34,7 +42,7 @@ function highlightCode(code: string, language: string): React.ReactNode[] {
     else if (/^\d/.test(token)) kind = 'number'
     else if (typeRegex.test(token)) kind = 'type'
     parts.push(
-      <span key={`code-token-${match.index}-${tokenIndex}`} className="fc-tok" data-kind={kind}>
+      <span key={`code-token-${match.index}-${tokenIndex}`} className={TOKEN_CLASS[kind]} data-kind={kind}>
         {token}
       </span>,
     )
@@ -81,15 +89,20 @@ export function CodeBlock({ code, language = '' }: { code: string; language?: st
   }
 
   return (
-    <div className="fc-codeblock">
-      <pre>
-        <code>{highlightCode(code, language)}</code>
+    <div className="group relative my-1 w-fit max-w-full min-[900px]:max-w-[80%]">
+      <pre className="w-full rounded-lg border border-border bg-muted/20 py-3 pr-12 pl-3 font-mono text-[13px] leading-5 font-semibold whitespace-pre-wrap text-foreground/85 [overflow-wrap:anywhere]">
+        <code className="font-[inherit] whitespace-pre-wrap [overflow-wrap:anywhere]">{highlightCode(code, language)}</code>
       </pre>
-      <button type="button" className="fc-codeblock-copy" data-state={copyState} title="Copy code" onClick={copyCode}>
-        <Copy size={14} />
+      <button
+        type="button"
+        className="absolute top-2 right-2 inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background/90 px-2 text-[11px] font-semibold text-muted-foreground opacity-0 shadow-sm transition-[opacity,background-color,color,transform] hover:bg-muted hover:text-foreground focus:opacity-100 active:scale-95 group-hover:opacity-100 data-[state=copied]:bg-primary/10 data-[state=copied]:text-primary data-[state=failed]:bg-destructive/10 data-[state=failed]:text-destructive"
+        data-state={copyState}
+        title="Copy code"
+        onClick={copyCode}
+      >
+        <Copy className="size-3.5" />
         {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Failed' : 'Copy'}
       </button>
     </div>
   )
 }
-

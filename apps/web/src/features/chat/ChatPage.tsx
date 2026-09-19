@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Hashtag } from 'reicon-react'
+import { Hash } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useAppState } from '../../mock/store'
@@ -9,7 +9,6 @@ import { ChatArea } from './components/ChatArea'
 import { MemberList } from './components/MemberList'
 import { NewThreadPanel } from './components/NewThreadPanel'
 import { ThreadPanel } from './components/ThreadPanel'
-import './chat.css'
 
 function isMobileViewport() {
   return window.matchMedia('(max-width: 899px)').matches
@@ -65,7 +64,7 @@ export function ChatPage() {
   }, [channelId, firstChannel, mobile, navigate])
 
   return (
-    <div className="page chat-page" data-view={channel ? 'conversation' : 'list'}>
+    <div className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background" data-view={channel ? 'conversation' : 'list'}>
       <ChannelSidebar
         state={state}
         activeChannelId={channel?.id ?? null}
@@ -92,8 +91,8 @@ export function ChatPage() {
           {threadPane ? (
             mobile ? (
               <>
-                <div className="fc-members-mobile-backdrop" onClick={() => setThreadView(null)} />
-                <div className="fc-thread-mobile">{threadPane}</div>
+                <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setThreadView(null)} />
+                <div className="fixed top-0 right-0 bottom-0 z-50 w-[min(320px,100vw)] duration-200 animate-in slide-in-from-right motion-reduce:animate-none">{threadPane}</div>
               </>
             ) : (
               threadPane
@@ -104,9 +103,9 @@ export function ChatPage() {
           ) : null}
         </>
       ) : (
-        <div className="fc-chat-area">
+        <div className="relative flex min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=list]/chat:hidden">
           <EmptyState
-            icon={Hashtag}
+            icon={Hash}
             title="Pick a channel"
             description="Choose a channel from the list to start reading and chatting."
           />

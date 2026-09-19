@@ -2,7 +2,7 @@
 // search box) over MessageList + TypingIndicator + MessageInput, with file drag & drop.
 import { useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
-import { ArrowLeft, Folder, Hashtag, Magnifier, Paperclip2, People, Xmark } from 'reicon-react'
+import { ArrowLeft, Folder, Hash, Paperclip, Search, Users, X } from 'lucide-react'
 import { PinIcon } from '../../../components/ui/icons/PinIcon'
 import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
 import type { AppState, Channel, ChatMessage, User } from '../../../mock/types'
@@ -15,6 +15,9 @@ import { PinnedMessages } from './PinnedMessages'
 import { SearchPanel } from './SearchPanel'
 import { ThreadsPopover } from './ThreadsPopover'
 import { TypingIndicator } from './TypingIndicator'
+
+const headerButtonClass =
+  'inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[active=true]:text-primary data-[active=true]:hover:bg-primary/10 [&>svg]:size-5 max-[899px]:size-[30px] max-[899px]:[&>svg]:size-[17px]'
 
 function eventHasFiles(event: DragEvent<HTMLElement>) {
   return Array.from(event.dataTransfer.types).includes('Files')
@@ -79,26 +82,26 @@ export function ChatArea({
     if (files.length > 0) inputRef.current?.addFiles(files)
   }
 
-  const headerButton = (active: boolean) => ({ className: 'fc-header-button', 'data-active': active ? 'true' : undefined })
+  const headerButton = (active: boolean) => ({ className: headerButtonClass, 'data-active': active ? 'true' : undefined })
 
   return (
-    <div className="fc-chat-area">
-      <div className="fc-chat-header">
-        <div className="fc-chat-header-left">
-          <button type="button" className="fc-mobile-back" title="Back to conversations" onClick={() => navigate(dmParticipant ? '/dm' : '/chat')}>
-            <ArrowLeft size={18} />
+    <div className="relative flex min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=list]/chat:hidden">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background pr-3 pl-4 max-[899px]:relative max-[899px]:px-2">
+        <div className="flex min-w-0 items-center gap-3 max-[899px]:gap-[7px] [&>svg]:size-5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground">
+          <button type="button" className="-ml-1 hidden size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground max-[899px]:flex" title="Back to conversations" onClick={() => navigate(dmParticipant ? '/dm' : '/chat')}>
+            <ArrowLeft className="size-[18px]" />
           </button>
-          {dmParticipant ? <UserAvatar user={dmParticipant} size={28} showOnline /> : channel.emoji ? <span className="fc-emoji-icon" data-size="lg"><Emoji value={channel.emoji} size={20} /></span> : <Hashtag size={20} />}
-          <div className="fc-chat-header-title">
-            <h2>{channel.name}</h2>
+          {dmParticipant ? <UserAvatar user={dmParticipant} size={28} showOnline /> : channel.emoji ? <span className="inline-flex size-5 items-center justify-center text-base leading-none"><Emoji value={channel.emoji} size={20} /></span> : <Hash />}
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h2 className="text-sm font-semibold whitespace-nowrap text-foreground max-[899px]:max-w-[110px] max-[899px]:truncate max-[899px]:text-[13px]">{channel.name}</h2>
             {channel.description ? (
-              <div className="fc-chat-topic">
-                <span>{channel.description}</span>
+              <div className="flex min-w-0 items-baseline gap-1.5 border-l border-border pl-3 max-[899px]:hidden">
+                <span className="truncate text-xs text-muted-foreground">{channel.description}</span>
               </div>
             ) : null}
           </div>
         </div>
-        <div className="fc-chat-header-actions">
+        <div className="flex items-center gap-2 max-[899px]:gap-0">
           <button
             type="button"
             {...headerButton(filesOpen)}
@@ -110,7 +113,7 @@ export function ChatArea({
               setSearchOpen(false)
             }}
           >
-            <Folder size={20} weight="Filled" />
+            <Folder />
           </button>
           <button
             type="button"
@@ -136,19 +139,20 @@ export function ChatArea({
           </button>
           {!dmParticipant ? (
             <button type="button" {...headerButton(membersOpen)} title="Toggle Member List" onClick={onToggleMembers}>
-              <People size={20} weight="Filled" />
+              <Users />
             </button>
           ) : null}
           <div
-            className="fc-header-search"
+            className="group/search relative mx-1 flex h-8 w-56 items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[open=true]:border-primary/50 data-[open=true]:bg-muted data-[open=true]:text-foreground max-[899px]:mx-0 max-[899px]:w-[30px] max-[899px]:cursor-pointer max-[899px]:justify-center max-[899px]:border-transparent max-[899px]:bg-transparent max-[899px]:px-0 data-[open=true]:max-[899px]:absolute data-[open=true]:max-[899px]:right-2 data-[open=true]:max-[899px]:left-2 data-[open=true]:max-[899px]:z-[5] data-[open=true]:max-[899px]:w-auto data-[open=true]:max-[899px]:cursor-text data-[open=true]:max-[899px]:justify-start data-[open=true]:max-[899px]:gap-1.5 data-[open=true]:max-[899px]:border-primary/50 data-[open=true]:max-[899px]:bg-muted data-[open=true]:max-[899px]:px-2"
             data-open={searchOpen ? 'true' : undefined}
             onClick={(event) => event.currentTarget.querySelector('input')?.focus()}
           >
-            <Magnifier size={16} />
+            <Search className="size-4 shrink-0" />
             <input
               type="text"
               value={searchQuery}
               placeholder="Search"
+              className="min-w-0 flex-1 border-none bg-transparent text-xs font-medium text-foreground outline-none max-[899px]:absolute max-[899px]:inset-0 max-[899px]:w-full max-[899px]:cursor-pointer max-[899px]:opacity-0 group-data-[open=true]/search:max-[899px]:static group-data-[open=true]/search:max-[899px]:w-auto group-data-[open=true]/search:max-[899px]:cursor-text group-data-[open=true]/search:max-[899px]:opacity-100"
               onFocus={() => {
                 setFilesOpen(false)
                 setSearchOpen(true)
@@ -168,14 +172,14 @@ export function ChatArea({
             {searchQuery || searchOpen ? (
               <button
                 type="button"
-                className="fc-header-search-clear"
+                className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground hover:text-foreground max-[899px]:hidden group-data-[open=true]/search:max-[899px]:grid"
                 title="Clear search"
                 onClick={() => {
                   setSearchQuery('')
                   setSearchOpen(false)
                 }}
               >
-                <Xmark size={14} />
+                <X className="size-3.5" />
               </button>
             ) : null}
           </div>
@@ -199,28 +203,28 @@ export function ChatArea({
       ) : null}
       {pinsOpen ? <PinnedMessages state={state} channel={channel} onClose={() => setPinsOpen(false)} /> : null}
 
-      <div className="fc-chat-body">
+      <div className="flex min-h-0 flex-1">
       {filesOpen ? (
         <FilesView state={state} channel={channel} onBack={() => setFilesOpen(false)} />
       ) : (
         <>
         <div
-          className="fc-drop-zone"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
           onDragEnter={handleDragEnter}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
           {draggingFiles ? (
-            <div className="fc-drop-overlay">
-              <div className="fc-drop-overlay-card">
-                <Paperclip2 size={20} />
+            <div className="pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-xl border-2 border-dashed border-primary/70 bg-background/80 backdrop-blur-sm">
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-popover px-4 py-3 text-sm font-bold text-foreground shadow-xl [&>svg]:text-primary">
+                <Paperclip className="size-5" />
                 Drop files to upload
               </div>
             </div>
           ) : null}
           <MessageList state={state} channel={channel} onReply={setReplyTarget} onOpenThread={onOpenThread} />
-          <div style={{ position: 'relative' }}>
+          <div className="relative">
             <TypingIndicator state={state} channelId={channel.id} />
             <MessageInput
               ref={inputRef}
