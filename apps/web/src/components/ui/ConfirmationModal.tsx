@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Button } from './button'
 import { Modal } from './Modal'
-
 import { registerConfirmationHandler, type ConfirmationOptions } from './confirmAction'
 
 interface ConfirmationRequest extends ConfirmationOptions {
@@ -14,15 +13,17 @@ export function ConfirmationModalHost() {
   const queue = useRef<ConfirmationRequest[]>([])
   const nextId = useRef(0)
   const [request, setRequest] = useState<ConfirmationRequest>()
-  const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     const pendingRequests = queue.current
-    const unregister = registerConfirmationHandler((options) => new Promise<boolean>((resolve) => {
-      const pending = { ...options, id: nextId.current++, resolve }
-      pendingRequests.push(pending)
-      if (pendingRequests.length === 1) setRequest(pending)
-    }))
+    const unregister = registerConfirmationHandler(
+      (options) =>
+        new Promise<boolean>((resolve) => {
+          const pending = { ...options, id: nextId.current++, resolve }
+          pendingRequests.push(pending)
+          if (pendingRequests.length === 1) setRequest(pending)
+        }),
+    )
     return () => {
       unregister()
       pendingRequests.splice(0).forEach((pending) => pending.resolve(false))
@@ -35,23 +36,18 @@ export function ConfirmationModalHost() {
   }, [])
   const cancel = useCallback(() => settle(false), [settle])
 
-  useEffect(() => {
-    cancelRef.current?.focus()
-  }, [request])
-
   if (!request) return null
 
-  return createPortal(
+  return (
     <Modal key={request.id} title={request.title} description={request.description} onClose={cancel} maxWidth={480}>
-      <div className="confirmation-actions">
-        <button ref={cancelRef} type="button" className="button" onClick={cancel}>
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={cancel}>
           {request.cancelLabel ?? 'Cancel'}
-        </button>
-        <button type="button" className={`button ${request.danger ? 'button-danger' : 'button-primary'}`} onClick={() => settle(true)}>
+        </Button>
+        <Button variant={request.danger ? 'destructive' : 'default'} onClick={() => settle(true)}>
           {request.confirmLabel ?? 'Confirm'}
-        </button>
+        </Button>
       </div>
-    </Modal>,
-    document.body,
+    </Modal>
   )
 }
