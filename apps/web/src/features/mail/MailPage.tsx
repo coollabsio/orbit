@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sms } from 'reicon-react'
+import { Mail } from 'lucide-react'
 import { useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useAppState } from '../../mock/store'
@@ -8,7 +8,6 @@ import { FolderRail } from './components/FolderRail'
 import { ThreadList } from './components/ThreadList'
 import { ThreadView } from './components/ThreadView'
 import { DEFAULT_FOLDER_ID, threadsInFolder } from './mailLib'
-import './mail.css'
 
 export function MailPage() {
   const { threadId } = useParams()
@@ -37,7 +36,10 @@ export function MailPage() {
   const currentUser = state.users.find((u) => u.id === state.currentUserId)
 
   return (
-    <div className="page mail-page" data-view={thread ? 'thread' : 'list'}>
+    <div
+      className="group/mail flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      data-view={thread ? 'thread' : 'list'}
+    >
       <FolderRail
         folders={state.mailFolders}
         threads={state.mailThreads}
@@ -50,7 +52,7 @@ export function MailPage() {
         activeThreadId={thread?.id}
         onCompose={() => setComposeOpen(true)}
       />
-      <section className="pane mail-view">
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col border-l border-border bg-background max-[899px]:border-l-0 max-[899px]:group-data-[view=list]/mail:hidden">
         {thread ? (
           <ThreadView
             key={thread.id}
@@ -60,9 +62,9 @@ export function MailPage() {
             currentUserEmail={currentUser?.email ?? ''}
           />
         ) : (
-          <div className="pane-body">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <EmptyState
-              icon={Sms}
+              icon={Mail}
               title="Select a conversation"
               description="Choose a conversation from the list to read it here."
             />
