@@ -1,8 +1,4 @@
 @import 'tailwindcss';
-
-@import './styles/tokens.css';
-@import './styles/base.css';
-@import './styles/utilities.css';
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/noto-sans";
@@ -124,11 +120,88 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 18%, transparent) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 18%, transparent);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+  }
+
   html {
-    @apply font-sans;
+    @apply font-sans bg-background;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  html,
+  body,
+  #root {
+    height: var(--app-height, 100svh);
+    max-height: var(--app-height, 100svh);
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-size: 14px;
+    line-height: 1.45;
+    overflow: hidden;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-semibold text-foreground;
+  }
+  h1 {
+    font-size: 24px;
+    line-height: 28px;
+    letter-spacing: -0.025em;
+  }
+  h2 {
+    font-size: 18px;
+  }
+  h3 {
+    font-size: 15px;
+  }
+
+  /* bare <button>s (shadcn Button sets its own): keep the old reset */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 30%, transparent);
+  }
+
+  /* prevent iOS zoom on focus for small screens */
+  @media (max-width: 767px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
     }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }

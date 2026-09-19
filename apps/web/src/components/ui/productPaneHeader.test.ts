@@ -11,8 +11,7 @@ test('mobile settings keeps shell actions and hides only the duplicate page head
 })
 
 test('tasks and settings share the mobile product header contract', async () => {
-  const [utilities, tasks, settings] = await Promise.all([
-    Bun.file(new URL('../../styles/utilities.css', import.meta.url)).text(),
+  const [tasks, settings] = await Promise.all([
     Bun.file(new URL('../../features/tasks/TasksPage.tsx', import.meta.url)).text(),
     Bun.file(new URL('../../features/settings/SettingsLayout.tsx', import.meta.url)).text(),
   ])
@@ -20,10 +19,6 @@ test('tasks and settings share the mobile product header contract', async () => 
   expect(tasks).toContain('max-[899px]:min-h-11')
   // Settings is migrated to Tailwind: its duplicate page header hides on mobile so the shell topbar takes over.
   expect(settings).toContain('max-[899px]:hidden')
-  // utilities.css still documents the shared 44px product-header contract.
-  expect(utilities).toContain('.product-pane-header')
-  expect(utilities).toContain('min-height: 44px')
-  expect(utilities).toContain('.product-pane-header-icon')
 })
 
 test('settings sidebar menu stays left of the title without a duplicate gear icon', async () => {

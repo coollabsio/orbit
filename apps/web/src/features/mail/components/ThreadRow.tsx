@@ -45,7 +45,7 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
           color: 'var(--foreground)',
           whiteSpace: 'nowrap',
           textOverflow: 'ellipsis',
-          boxShadow: 'var(--shadow-popover)',
+          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.16)',
         })
         ghost.textContent = `✉️ ${thread.subject}`
         document.body.appendChild(ghost)

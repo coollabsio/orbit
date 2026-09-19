@@ -13,14 +13,14 @@ export function PriorityIcon({ priority, size = 14 }: { priority: TaskPriority; 
   if (priority === 'urgent') {
     return (
       <svg {...common} aria-label="Urgent">
-        <rect x="1" y="1" width="12" height="12" rx="3" fill="var(--danger-dot)" />
+        <rect x="1" y="1" width="12" height="12" rx="3" fill="var(--destructive)" />
         <path d="M7 3.8 V8" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
         <circle cx="7" cy="10.4" r="0.9" fill="#fff" />
       </svg>
     )
   }
-  const active = 'var(--text-secondary)'
-  const inactive = 'var(--fill)'
+  const active = 'var(--muted-foreground)'
+  const inactive = 'var(--muted)'
   const level = priority === 'high' ? 3 : priority === 'medium' ? 2 : priority === 'low' ? 1 : 0
   return (
     <svg {...common} aria-label={PRIORITY_LABEL[priority]}>

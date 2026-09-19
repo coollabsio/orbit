@@ -36,7 +36,7 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
 
   return (
     <div
-      className="mt-6 border-t border-border pt-5 duration-150 animate-in fade-in slide-in-from-bottom-1 data-[drop-over]:bg-primary/10 data-[drop-over]:ring-1 data-[drop-over]:ring-inset data-[drop-over]:ring-primary/25 [&_.fc-attachments]:mt-1 [&_.fc-attachments]:mb-2 [&_.fc-attachments]:max-w-[520px] [&_.fc-file-cards]:max-w-none [&_.fc-file-cards]:flex-row [&_.fc-file-cards]:flex-wrap [&_.fc-file-card-wrap]:w-max [&_.fc-file-card]:max-w-[280px] [&_.fc-file-card]:py-[7px] [&_.fc-file-card]:pr-[30px] [&_.fc-file-card]:pl-[10px] [&_.fc-file-card>svg]:size-5 [&_.fc-file-card-download]:hidden [&_.fc-attachment-remove]:top-1/2 [&_.fc-attachment-remove]:-translate-y-1/2"
+      className="mt-6 border-t border-border pt-5 duration-150 animate-in fade-in slide-in-from-bottom-1 data-[drop-over]:bg-primary/10 data-[drop-over]:ring-1 data-[drop-over]:ring-inset data-[drop-over]:ring-primary/25"
       data-drop-over={dropOver || undefined}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return
