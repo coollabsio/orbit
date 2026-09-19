@@ -29,7 +29,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
 
   const itemClass = (active: boolean) =>
     cn(
-      'relative flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
+      'relative flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
       collapsed && 'justify-center px-0',
       active && 'bg-sidebar-accent text-sidebar-accent-foreground',
     )

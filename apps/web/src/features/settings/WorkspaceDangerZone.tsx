@@ -39,7 +39,7 @@ export function WorkspaceDangerZone() {
   }
 
   return <>
-    <SettingsCard className="shadow-[0_0_0_1px_var(--destructive)] hover:shadow-[0_0_0_1px_var(--destructive)] [&_h3]:text-destructive" title="Danger zone" description="Delete this workspace and remove access for all members.">
+    <SettingsCard className="shadow-[0_0_0_1px_var(--destructive)] hover:shadow-[0_0_0_1px_var(--destructive)] [&_h3]:text-destructive [&>div]:bg-transparent [&>div]:pt-0 [&>div]:shadow-none" title="Danger zone" description="Delete this workspace and remove access for all members.">
       <Button type="button" variant="destructive" onClick={() => { setConfirmation(''); deletion.reset(); setOpen(true) }}>Delete workspace</Button>
     </SettingsCard>
     {open ? createPortal(
