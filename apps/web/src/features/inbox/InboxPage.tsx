@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { DirectInbox } from 'reicon-react'
+import { Inbox } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { relativeTime } from '../../lib/format'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useWorkspace } from '../workspaces/workspaceContext'
 import { useMembers } from '../workspaces/api'
 import { notificationCopy, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from './api'
-import './inbox.css'
 
 type InboxTab = 'all' | 'unread' | 'mentions'
 
@@ -27,39 +27,39 @@ export function InboxPage() {
   const unreadCount = unreadQuery.data?.length ?? items.filter((notification) => !notification.read_at).length
 
   if (allQuery.isPending) {
-    return <div className="page"><EmptyState icon={DirectInbox} title="Loading inbox" description="Loading your notifications." /></div>
+    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><EmptyState icon={Inbox} title="Loading inbox" description="Loading your notifications." /></div>
   }
   if (allQuery.isError) {
     return (
-      <div className="page">
-        <EmptyState icon={DirectInbox} title="Inbox unavailable" description="Notifications could not be loaded." />
-        <button type="button" className="button" onClick={() => void allQuery.refetch()}>Retry</button>
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+        <EmptyState icon={Inbox} title="Inbox unavailable" description="Notifications could not be loaded." />
+        <Button variant="outline" type="button" onClick={() => void allQuery.refetch()}>Retry</Button>
       </div>
     )
   }
 
   return (
-    <div className="page">
-      <div className="pane" style={{ flex: 1 }}>
-        <div className="pane-header">
-          <span className="pane-title">Inbox</span>
-          {unreadCount > 0 ? <span className="count-badge">{unreadCount}</span> : null}
-          <span className="spacer" />
-          <button
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+          <span className="truncate text-[13px] font-semibold text-foreground">Inbox</span>
+          {unreadCount > 0 ? <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">{unreadCount}</span> : null}
+          <span className="flex-1" />
+          <Button
+            variant="ghost"
             type="button"
-            className="button button-ghost"
             disabled={unreadCount === 0 || markAll.isPending}
             onClick={() => markAll.mutate()}
           >
             {markAll.isPending ? 'Marking…' : 'Mark all read'}
-          </button>
+          </Button>
         </div>
-        <div className="pane-toolbar">
+        <div className="flex min-h-10 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border px-3 py-1 [scrollbar-width:none]">
           {(['all', 'unread', 'mentions'] as const).map((item) => (
             <button
               key={item}
               type="button"
-              className="app-tab"
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[active]:bg-primary/10 data-[active]:text-primary data-[active]:ring-1 data-[active]:ring-primary/25 data-[active]:ring-inset"
               data-active={tab === item || undefined}
               onClick={() => setTab(item)}
             >
@@ -67,9 +67,9 @@ export function InboxPage() {
             </button>
           ))}
         </div>
-        <div className="pane-body inbox-list">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {items.length === 0 ? (
-            <EmptyState icon={DirectInbox} title="You're all caught up" description="Assignments and mentions appear here." />
+            <EmptyState icon={Inbox} title="You're all caught up" description="Assignments and mentions appear here." />
           ) : (
             items.map((notification) => {
               const actor = members.data?.find((member) => member.id === notification.actor_user_id)
@@ -78,23 +78,23 @@ export function InboxPage() {
                 <button
                   key={notification.id}
                   type="button"
-                  className="list-row"
+                  className="flex min-h-14 w-full min-w-0 cursor-pointer items-center gap-2.5 border-b border-border px-3 py-1.5 text-left transition-colors hover:bg-foreground/[0.02]"
                   onClick={() => {
                     if (!notification.read_at) markRead.mutate(notification.id)
                     navigate(`/tasks/${notification.task_id}`)
                   }}
                 >
-                  <span className="inbox-dot-slot">
-                    {!notification.read_at ? <span className="unread-dot" /> : null}
+                  <span className="flex w-2 shrink-0 justify-center">
+                    {!notification.read_at ? <span className="size-2 shrink-0 rounded-full bg-primary" /> : null}
                   </span>
-                  <span className="inbox-icon-circle">{(actor?.name ?? '?').charAt(0).toUpperCase()}</span>
-                  <span className="inbox-row-main">
-                    <span className="inbox-row-title" data-unread={!notification.read_at || undefined}>
+                  <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">{(actor?.name ?? '?').charAt(0).toUpperCase()}</span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-[13px] text-foreground data-[unread]:font-semibold" data-unread={!notification.read_at || undefined}>
                       {copy.title}
                     </span>
-                    <span className="inbox-row-body">{actor ? `${actor.name} · ${copy.body}` : copy.body}</span>
+                    <span className="truncate text-xs text-muted-foreground/70">{actor ? `${actor.name} · ${copy.body}` : copy.body}</span>
                   </span>
-                  <span className="text-faint text-xs" style={{ flexShrink: 0 }}>
+                  <span className="shrink-0 text-xs text-muted-foreground/70">
                     {relativeTime(notification.created_at)}
                   </span>
                 </button>

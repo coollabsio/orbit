@@ -17,6 +17,9 @@ import {
 } from './api'
 import { consumeQueryToken } from './authFlow'
 import { LoadingScreen } from '../../components/ui/LoadingScreen'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 export function AuthGate() {
   const setup = useSetupStatus()
@@ -139,17 +142,17 @@ export function AcceptInvitationPage() {
           : { token })
         navigate(`/?workspace=${encodeURIComponent(accepted.workspace_id)}`, { replace: true })
       }}
-      footer={!user.data ? <button type="button" className="button" disabled={pending} onClick={() => {
+      footer={!user.data ? <Button variant="outline" type="button" disabled={pending} onClick={() => {
         setSignIn((value) => !value)
         setPassword('')
         login.reset()
         accept.reset()
-      }}>{signIn ? 'Create an account instead' : 'Sign in instead'}</button> : undefined}
+      }}>{signIn ? 'Create an account instead' : 'Sign in instead'}</Button> : undefined}
     >
-      <label className="auth-boundary-field"><span>Email</span><input className="input" type="email" value={email} readOnly /></label>
-      {mismatch ? <p className="auth-boundary-hint">You are signed in as {user.data!.email}. Switch accounts to accept this invitation as {email}.</p> : (
+      <Label className="grid gap-1.5 text-[13px] text-muted-foreground"><span>Email</span><Input type="email" value={email} readOnly /></Label>
+      {mismatch ? <p className="text-[13px]">You are signed in as {user.data!.email}. Switch accounts to accept this invitation as {email}.</p> : (
         <>
-          <p className="auth-boundary-hint">{user.data ? 'Accept to join this workspace with your account.' : signIn ? 'Sign in with your existing account to join this workspace.' : 'Choose your name and password to create your account.'} To use another email, ask the inviter for a new invitation.</p>
+          <p className="text-[13px]">{user.data ? 'Accept to join this workspace with your account.' : signIn ? 'Sign in with your existing account to join this workspace.' : 'Choose your name and password to create your account.'} To use another email, ask the inviter for a new invitation.</p>
           {!user.data && !signIn ? <AuthInput label="Your name" value={displayName} onChange={setDisplayName} /> : null}
           {!user.data ? <AuthInput label="Password" type="password" value={password} onChange={setPassword} /> : null}
         </>
@@ -159,26 +162,26 @@ export function AcceptInvitationPage() {
 }
 
 function AuthInput({ label, value, onChange, type = 'text', required = true }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {
-  return <label className="auth-boundary-field"><span>{label}</span><input className="input" type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} /></label>
+  return <Label className="grid gap-1.5 text-[13px] text-muted-foreground"><span>{label}</span><Input type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} /></Label>
 }
 
 function AuthForm({ title, children, error, pending, submitLabel, onSubmit, footer }: { title: string; children: React.ReactNode; error: Error | null; pending: boolean; submitLabel: string; onSubmit: () => Promise<unknown>; footer?: React.ReactNode }) {
   return (
-    <main className="auth-boundary-page"><form className="auth-boundary-card auth-boundary-form" onSubmit={(event) => {
+    <main className="grid min-h-screen place-items-center bg-background p-6"><form className="grid w-[min(100%,420px)] gap-[18px] rounded-xl border border-border bg-card p-8 shadow-lg" onSubmit={(event) => {
       event.preventDefault()
       // Dismiss the mobile keyboard before replacing the login form with the app.
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
       void onSubmit().catch(() => undefined)
     }}>
-      <span className="auth-boundary-wordmark">Orbit</span><h1>{title}</h1>
-      <div className="auth-boundary-fields">{children}</div>
-      {error ? <p className="auth-boundary-error" role="alert">{error instanceof ApiProblem ? error.detail : 'The server could not complete the request.'}</p> : null}
-      <button className="button button-primary" type="submit" disabled={pending}>{pending ? 'Please wait…' : submitLabel}</button>
-      {footer ? <div className="auth-boundary-footer">{footer}</div> : null}
+      <span className="text-[13px] font-bold tracking-[0.08em] text-primary uppercase">Orbit</span><h1 className="mt-4 mb-2">{title}</h1>
+      <div className="grid gap-[14px]">{children}</div>
+      {error ? <p className="text-[13px] text-destructive" role="alert">{error instanceof ApiProblem ? error.detail : 'The server could not complete the request.'}</p> : null}
+      <Button type="submit" disabled={pending}>{pending ? 'Please wait…' : submitLabel}</Button>
+      {footer ? <div className="text-center text-[13px]">{footer}</div> : null}
     </form></main>
   )
 }
 
 function AuthMessage({ title, detail }: { title: string; detail: string }) {
-  return <main className="auth-boundary-page"><section className="auth-boundary-card"><span className="auth-boundary-wordmark">Orbit</span><h1>{title}</h1><p>{detail}</p></section></main>
+  return <main className="grid min-h-screen place-items-center bg-background p-6"><section className="w-[min(100%,420px)] rounded-xl border border-border bg-card p-8 shadow-lg"><span className="text-[13px] font-bold tracking-[0.08em] text-primary uppercase">Orbit</span><h1 className="mt-4 mb-2">{title}</h1><p className="leading-[1.6] text-muted-foreground">{detail}</p></section></main>
 }

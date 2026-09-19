@@ -17,7 +17,6 @@ import { ProfilePage } from './features/profile/ProfilePage'
 import { InboxPage } from './features/inbox/InboxPage'
 import { AcceptInvitationPage, AuthGate, LoginPage, RecoveryPage, SetupPage } from './features/auth/AuthGate'
 import { WorkspaceProvider } from './features/workspaces/WorkspaceProvider'
-import './features/auth/auth.css'
 
 /** Hands the router's navigate function to non-component code (markdown links). */
 function NavigateBridge() {
