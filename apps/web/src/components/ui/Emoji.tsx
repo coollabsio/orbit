@@ -8,7 +8,7 @@ export function Emoji({ value, size = 16 }: { value: string; size?: number }) {
   if (custom) {
     return (
       <img
-        className="app-custom-emoji"
+        className="inline-block rounded-[3px] object-contain align-[-4px]"
         src={custom.url}
         alt={`:${custom.name}:`}
         title={`:${custom.name}:`}
