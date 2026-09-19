@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import {
-  DirectInbox,
-  Home2,
-  People,
-  SearchNormal,
-  Setting2,
-  ShieldTick,
-  TaskSquare,
-  Trash,
-} from 'reicon-react'
-import type { IconComponent } from 'reicon-react'
+  Inbox,
+  Home,
+  Users,
+  Search,
+  Settings,
+  ShieldCheck,
+  SquareCheck,
+  Trash2,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
 import { useProjects } from '../../features/tasks/api/projects'
 import { taskFromRecord } from '../../features/tasks/api/models'
@@ -18,7 +18,7 @@ import { useTasks } from '../../features/tasks/api/tasks'
 
 interface CommandEntry {
   id: string
-  icon: IconComponent
+  icon: LucideIcon
   title: string
   meta: string
   to: string
@@ -37,18 +37,18 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const entries = useMemo<CommandEntry[]>(() => {
     const nav: CommandEntry[] = [
-      { id: 'nav_home', icon: Home2, title: 'Go to Home', meta: 'Navigation', to: '/', keywords: 'home' },
-      { id: 'nav_tasks', icon: TaskSquare, title: 'Go to Tasks', meta: 'Navigation', to: '/tasks', keywords: 'tasks' },
-      { id: 'nav_inbox', icon: DirectInbox, title: 'Go to Inbox', meta: 'Navigation', to: '/inbox', keywords: 'inbox notifications' },
-      { id: 'nav_profile', icon: People, title: 'Go to Profile', meta: 'Navigation', to: '/profile', keywords: 'profile account password name' },
-      { id: 'nav_settings', icon: Setting2, title: 'Go to Settings', meta: 'Navigation', to: '/settings', keywords: 'settings preferences' },
-      { id: 'nav_members', icon: People, title: 'Go to Members', meta: 'Navigation', to: '/settings/members', keywords: 'members invitations people' },
-      { id: 'nav_sessions', icon: ShieldTick, title: 'Go to Sessions', meta: 'Navigation', to: '/settings/sessions', keywords: 'sessions devices' },
-      { id: 'nav_trash', icon: Trash, title: 'Go to Task trash', meta: 'Navigation', to: '/tasks-trash', keywords: 'trash deleted tasks' },
+      { id: 'nav_home', icon: Home, title: 'Go to Home', meta: 'Navigation', to: '/', keywords: 'home' },
+      { id: 'nav_tasks', icon: SquareCheck, title: 'Go to Tasks', meta: 'Navigation', to: '/tasks', keywords: 'tasks' },
+      { id: 'nav_inbox', icon: Inbox, title: 'Go to Inbox', meta: 'Navigation', to: '/inbox', keywords: 'inbox notifications' },
+      { id: 'nav_profile', icon: Users, title: 'Go to Profile', meta: 'Navigation', to: '/profile', keywords: 'profile account password name' },
+      { id: 'nav_settings', icon: Settings, title: 'Go to Settings', meta: 'Navigation', to: '/settings', keywords: 'settings preferences' },
+      { id: 'nav_members', icon: Users, title: 'Go to Members', meta: 'Navigation', to: '/settings/members', keywords: 'members invitations people' },
+      { id: 'nav_sessions', icon: ShieldCheck, title: 'Go to Sessions', meta: 'Navigation', to: '/settings/sessions', keywords: 'sessions devices' },
+      { id: 'nav_trash', icon: Trash2, title: 'Go to Task trash', meta: 'Navigation', to: '/tasks-trash', keywords: 'trash deleted tasks' },
     ]
     const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
       id: t.id,
-      icon: TaskSquare,
+      icon: SquareCheck,
       title: t.title,
       meta: t.identifier,
       to: `/tasks/${t.id}`,
@@ -98,17 +98,20 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="command-backdrop"
+      className="fixed inset-0 z-[100] flex justify-center bg-black/40 p-4 backdrop-blur-[2px]"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="command-panel" onKeyDown={onKeyDown}>
-        <div className="command-input-row">
-          <SearchNormal size={16} />
+      <div
+        className="mt-[12vh] flex h-fit max-h-[min(60vh,28rem)] w-full max-w-[576px] flex-col overflow-hidden rounded-xl bg-card shadow-2xl ring-1 ring-border"
+        onKeyDown={onKeyDown}
+      >
+        <div className="flex min-h-11 shrink-0 items-center gap-2.5 px-3.5 text-muted-foreground/70">
+          <Search className="size-4 shrink-0" />
           <input
             ref={inputRef}
-            className="command-input"
+            className="h-11 flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus:shadow-none focus:outline-none"
             placeholder="Search tasks and navigation…"
             value={query}
             onChange={(e) => {
@@ -116,23 +119,25 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
               setActiveIndex(0)
             }}
           />
-          <span className="kbd">esc</span>
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-accent px-1.5 text-[11px] font-medium text-muted-foreground/70">
+            esc
+          </span>
         </div>
-        <div className="command-list" ref={listRef}>
+        <div className="mx-1.5 mb-1.5 min-h-0 flex-1 overflow-y-auto rounded-lg bg-background p-1 ring-1 ring-border" ref={listRef}>
           {results.length === 0 ? (
-            <div className="command-empty">No results for “{query}”</div>
+            <div className="p-6 text-center text-[13px] text-muted-foreground">No results for “{query}”</div>
           ) : (
             results.map((entry, index) => (
               <button
                 key={entry.id}
-                className="command-item"
+                className="relative flex h-10 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] text-foreground before:absolute before:top-2 before:bottom-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0 data-[active=true]:bg-accent data-[active=true]:before:opacity-100"
                 data-active={index === activeIndex}
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => open(entry)}
               >
-                <entry.icon size={16} />
+                <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
                 <span className="truncate">{entry.title}</span>
-                <span className="command-item-meta">{entry.meta}</span>
+                <span className="ml-auto text-[11px] whitespace-nowrap text-muted-foreground/70">{entry.meta}</span>
               </button>
             ))
           )}

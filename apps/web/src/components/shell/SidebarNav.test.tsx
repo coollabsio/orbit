@@ -18,7 +18,7 @@ test('the task navigation includes a current calendar week view', () => {
 
   fireEvent.click(view.getByRole('link', { name: 'This week' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?view=current_week')
-  expect(view.getByRole('link', { name: 'This week' }).classList.contains('active')).toBe(true)
+  expect(view.getByRole('link', { name: 'This week' }).classList.contains('bg-sidebar-accent')).toBe(true)
 })
 
 test('settings pages are not duplicated in the main sidebar', () => {

@@ -1,32 +1,45 @@
 import { NavLink } from 'react-router'
-import { Home2, Message, Messages2, Note2, Setting2, Sms, TaskSquare } from 'reicon-react'
+import { Home, MessageSquare, MessagesSquare, FileText, Settings, Mail, SquareCheck } from 'lucide-react'
+import { cn } from 'cn'
 import { mobileDockPaths } from './productNavigation'
 
 const DOCK_LINKS = [
-  { to: '/', label: 'Home', icon: Home2 },
-  { to: '/tasks', label: 'Tasks', icon: TaskSquare },
-  { to: '/docs', label: 'Docs', icon: Note2 },
-  { to: '/mail', label: 'Mail', icon: Sms },
-  { to: '/chat', label: 'Chat', icon: Message },
-  { to: '/dm', label: 'DMs', icon: Messages2 },
-  { to: '/settings', label: 'Settings', icon: Setting2 },
+  { to: '/', label: 'Home', icon: Home },
+  { to: '/tasks', label: 'Tasks', icon: SquareCheck },
+  { to: '/docs', label: 'Docs', icon: FileText },
+  { to: '/mail', label: 'Mail', icon: Mail },
+  { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/dm', label: 'DMs', icon: MessagesSquare },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ]
+
+const itemClass =
+  'relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-muted-foreground'
 
 export function MobileDock() {
   return (
-    <nav className="mobile-dock" aria-label="Mobile navigation">
+    <nav
+      className="hidden h-auto min-h-14 shrink-0 items-stretch bg-background pt-3 [@media(display-mode:standalone)]:pb-[env(safe-area-inset-bottom,0px)] max-[899px]:flex"
+      aria-label="Mobile navigation"
+    >
       {DOCK_LINKS.map((link) => mobileDockPaths.some((path) => path === link.to) ? (
-        <NavLink key={link.to} to={link.to}>
+        <NavLink key={link.to} to={link.to} className="flex flex-1 items-stretch">
           {({ isActive }) => (
-            <span className="mobile-dock-item" data-active={isActive}>
-              <link.icon size={20} />
+            <span className={cn(itemClass, isActive && 'text-primary')} data-active={isActive}>
+              <link.icon className="size-5" />
               {link.label}
             </span>
           )}
         </NavLink>
       ) : (
-        <button key={link.to} type="button" className="mobile-dock-item" disabled aria-label={link.label}>
-          <link.icon size={20} />
+        <button
+          key={link.to}
+          type="button"
+          className={cn(itemClass, 'disabled:cursor-not-allowed disabled:text-muted-foreground/50')}
+          disabled
+          aria-label={link.label}
+        >
+          <link.icon className="size-5" />
           {link.label}
         </button>
       ))}

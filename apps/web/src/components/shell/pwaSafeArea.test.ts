@@ -12,22 +12,25 @@ test('standalone web apps opt into iOS safe-area insets', async () => {
 })
 
 test('the app shell fills the webview and only pads the dock in standalone mode', async () => {
-  const css = await Bun.file(new URL('./shell.css', import.meta.url)).text()
-  const shell = css.slice(css.indexOf('.app-shell {'), css.indexOf('.app-sidebar {'))
-  expect(shell).toContain('height: var(--app-height, 100svh)')
-  expect(shell).toContain('env(safe-area-inset-top')
-  expect(shell).not.toMatch(/height:\s*100dvh/)
-  const dock = css.slice(css.indexOf('.mobile-dock {'), css.indexOf('.mobile-dock > a'))
-  expect(dock).toContain('padding-bottom: 0')
-  expect(dock).toContain('min-height: var(--dock-height)')
-  expect(dock).toContain('padding-top: 12px')
-  expect(css).toMatch(/@media \(display-mode: standalone\)[\s\S]*?\.mobile-dock \{[\s\S]*?env\(safe-area-inset-bottom/)
+  const shell = await Bun.file(new URL('./AppShell.tsx', import.meta.url)).text()
+  expect(shell).toContain('h-[var(--app-height,100svh)]')
+  expect(shell).toContain('pt-[env(safe-area-inset-top,0px)]')
+  expect(shell).not.toMatch(/100dvh/)
+  const dock = await Bun.file(new URL('./MobileDock.tsx', import.meta.url)).text()
+  expect(dock).toContain('min-h-14') // --dock-height (56px)
+  expect(dock).toContain('pt-3') // padding-top 12px
+  // the dock only extends behind the home indicator when installed (standalone)
+  expect(dock).toContain('[@media(display-mode:standalone)]:pb-[env(safe-area-inset-bottom,0px)]')
 })
 
 test('mobile chrome has no outer or dock hairlines', async () => {
-  const css = await Bun.file(new URL('./shell.css', import.meta.url)).text()
-  const mobile = css.slice(css.indexOf('@media (max-width: 899px)'))
-  expect(mobile).toMatch(/\.mobile-dock\s*\{[^}]*border-top:\s*none/)
-  expect(mobile).toMatch(/\.topbar\s*\{[^}]*border-bottom:\s*none/)
-  expect(mobile).toMatch(/\.app-shell\s*\{[^}]*border:\s*none/)
+  // the dock carries no border in any state
+  const dock = await Bun.file(new URL('./MobileDock.tsx', import.meta.url)).text()
+  expect(dock).not.toMatch(/border/)
+  // the mobile top bar is borderless except for the settings sub-header
+  const topbar = await Bun.file(new URL('./Topbar.tsx', import.meta.url)).text()
+  expect(topbar).not.toMatch(/(?<!settings\]:)border-b\b/)
+  // the only outer vertical hairline lives on the sidebar, which is hidden on mobile
+  const shell = await Bun.file(new URL('./AppShell.tsx', import.meta.url)).text()
+  expect(shell).toMatch(/border-r border-border[^"]*max-\[899px\]:hidden/)
 })

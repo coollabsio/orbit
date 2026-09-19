@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 
 test('mobile settings keeps shell actions and hides only the duplicate page header', async () => {
-  const css = await Bun.file(new URL('../shell/shell.css', import.meta.url)).text()
-  const mobile = css.slice(css.indexOf('@media (max-width: 899px)'))
-  const hiddenHeaders = mobile.match(/\.topbar\[data-root='tasks'\][^{]+\{\s*display: none;\s*\}/)?.[0]
-  expect(hiddenHeaders).not.toContain(".topbar[data-root='settings']")
+  const topbar = await Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text()
+  // the tasks top bar is hidden on mobile, but the settings top bar is kept (its shell actions stay)
+  expect(topbar).toContain('data-[root=tasks]:hidden')
+  expect(topbar).not.toMatch(/data-\[root=settings\]:hidden/)
   const settingsCss = await Bun.file(new URL('../../features/settings/settings.css', import.meta.url)).text()
   expect(settingsCss).toMatch(/@media \(max-width: 899px\)\s*\{\s*\.settings-page-header\s*\{\s*display: none;/)
 })
@@ -23,37 +23,33 @@ test('tasks and settings share the mobile product header contract', async () => 
 })
 
 test('settings sidebar menu stays left of the title without a duplicate gear icon', async () => {
-  const [css, topbar] = await Promise.all([
-    Bun.file(new URL('../shell/shell.css', import.meta.url)).text(),
-    Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text(),
-  ])
-  expect(css).not.toMatch(/\.topbar\[data-root='settings'\] \.topbar-drawer-button\s*\{\s*order: 1;/)
-  expect(topbar.indexOf('aria-label="Menu"')).toBeLessThan(topbar.indexOf('<nav className="topbar-crumbs">'))
-  const crumbs = topbar.slice(topbar.indexOf('<nav className="topbar-crumbs">'), topbar.indexOf('</nav>'))
-  expect(crumbs).not.toContain('<Setting2')
+  const topbar = await Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text()
+  // the menu (drawer) button renders before the breadcrumb nav
+  expect(topbar.indexOf('aria-label="Menu"')).toBeLessThan(topbar.indexOf('<nav '))
+  const crumbs = topbar.slice(topbar.indexOf('<nav '), topbar.indexOf('</nav>'))
+  expect(crumbs).not.toContain('<Settings')
 })
 
 test('settings header uses Tasks muted title and toolbar styling', async () => {
-  const [css, topbar, settings] = await Promise.all([
-    Bun.file(new URL('../shell/shell.css', import.meta.url)).text(),
+  const [topbar, settings] = await Promise.all([
     Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text(),
     Bun.file(new URL('../../features/settings/settings.css', import.meta.url)).text(),
   ])
-  expect(css).toMatch(/\.topbar\[data-root='settings'\] \.topbar-crumb\s*\{\s*color: var\(--text-muted\)/)
-  expect(css).toMatch(/\.topbar\[data-root='settings'\] \.icon-button:not\(\.topbar-drawer-button\)\s*\{[^}]*color: var\(--text-muted\)/)
-  expect(topbar).toContain("<SearchNormal size={routeRoot === 'settings' ? 15 : 16} />")
+  // home lifts the crumb to the heading color; settings keeps the muted base color
+  expect(topbar).toMatch(/group-data-\[root=home\]\/topbar:text-foreground/)
+  expect(topbar).not.toMatch(/group-data-\[root=settings\]\/topbar:text-foreground/)
+  // the settings search icon is the smaller 15px size, tasks uses 16px (size-4)
+  expect(topbar).toContain("routeRoot === 'settings' ? 'size-[15px]' : 'size-4'")
   expect(settings).toContain('.settings-page-header .pane-title')
   expect(settings).toContain('color: var(--text-muted)')
 })
 
 test('settings menu button matches the tasks burger size', async () => {
-  const [css, topbar] = await Promise.all([
-    Bun.file(new URL('../shell/shell.css', import.meta.url)).text(),
-    Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text(),
-  ])
-  expect(topbar).toContain('<Menu size={18} />')
-  expect(topbar).not.toContain("routeRoot === 'settings' ? 15 : 18")
-  expect(css).toMatch(/\.topbar\[data-root='settings'\] \.topbar-drawer-button\s*\{[^}]*width: 28px;[^}]*height: 28px;/)
+  const topbar = await Bun.file(new URL('../shell/Topbar.tsx', import.meta.url)).text()
+  // the burger icon is 18px regardless of route, and the button uses the shared 28px icon-sm size
+  expect(topbar).toContain('<Menu className="size-[18px]" />')
+  expect(topbar).not.toContain("? 15 : 18")
+  expect(topbar).toContain('size="icon-sm"')
 })
 
 test('Settings and Profile exclude the unrelated New dropdown', async () => {

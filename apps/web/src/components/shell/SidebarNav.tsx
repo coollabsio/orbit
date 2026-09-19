@@ -1,35 +1,68 @@
 import { NavLink, useLocation } from 'react-router'
 import {
   Calendar,
-  DirectInbox,
-  Home2,
-  Message,
-  Messages2,
-  Note2,
-  SearchNormal,
-  Setting2,
-  Sms,
-  TaskSquare,
+  Inbox,
+  Home,
+  MessageSquare,
+  MessagesSquare,
+  FileText,
+  Search,
+  Settings,
+  Mail,
+  SquareCheck,
   Timer,
-} from 'reicon-react'
+} from 'lucide-react'
+import { cn } from 'cn'
+
 const WORKSPACE_LINKS = [
-  { to: '/tasks', label: 'Tasks', icon: TaskSquare, enabled: true },
-  { to: '/', label: 'Home', icon: Home2, enabled: false },
-  { to: '/docs', label: 'Docs', icon: Note2, enabled: false },
-  { to: '/mail', label: 'Mail', icon: Sms, enabled: false },
-  { to: '/chat', label: 'Chat', icon: Message, enabled: false },
+  { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
+  { to: '/', label: 'Home', icon: Home, enabled: false },
+  { to: '/docs', label: 'Docs', icon: FileText, enabled: false },
+  { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
+  { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
 ]
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
 export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const location = useLocation()
   const view = new URLSearchParams(location.search).get('view')
-  const taskViewClass = (name: string | null) =>
-    location.pathname === '/tasks' && view === name ? 'menu-item active' : 'menu-item'
+
+  const itemClass = (active: boolean) =>
+    cn(
+      'relative flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
+      collapsed && 'justify-center px-0',
+      active && 'bg-sidebar-accent text-sidebar-accent-foreground',
+    )
+  const labelClass = cn('min-w-0 flex-1 truncate', collapsed && 'hidden')
+  const disabledClass = 'cursor-not-allowed opacity-[0.48]'
+  const comingSoonClass = 'ml-auto text-[10px] text-muted-foreground/70'
+
+  const taskViewActive = (name: string | null) => location.pathname === '/tasks' && view === name
+
+  const Section = ({ label, first }: { label: string; first?: boolean }) => {
+    if (collapsed) {
+      if (first) return null
+      return <div className="mx-1 my-1.5 h-px bg-border" aria-hidden="true" />
+    }
+    return (
+      <div
+        className={cn(
+          'px-2 pt-1 pb-[3px] text-[10px] leading-4 font-medium tracking-[0.02em] text-sidebar-foreground/60 select-none',
+          !first && 'mt-2',
+        )}
+      >
+        {label}
+      </div>
+    )
+  }
+
   return (
     <>
       <button
-        className="sidebar-search"
+        className={cn(
+          'flex h-8 w-full shrink-0 items-center gap-2 rounded-md bg-sidebar-accent px-2 text-[13px] font-medium text-muted-foreground/70 transition-colors hover:bg-sidebar-accent/70',
+          collapsed && 'justify-center px-0',
+        )}
         aria-label="Search"
         title={collapsed ? 'Search' : undefined}
         onClick={() => {
@@ -37,96 +70,103 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           window.dispatchEvent(new CustomEvent('open-command-palette'))
         }}
       >
-        <SearchNormal size={15} />
-        {!collapsed ? <>Search <span className="kbd">⌘K</span></> : null}
+        <Search className="size-[15px] shrink-0" />
+        {!collapsed ? (
+          <>
+            Search{' '}
+            <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-sidebar-accent px-1.5 text-[11px] font-medium text-muted-foreground/70">
+              ⌘K
+            </span>
+          </>
+        ) : null}
       </button>
-      <div className="app-sidebar-scroll">
-        <div className="nav-section">Workspace</div>
+      <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto', collapsed ? 'gap-1' : 'gap-0.5')}>
+        <Section label="Workspace" first />
         {WORKSPACE_LINKS.map((link) => link.enabled ? (
           <NavLink
             key={link.to}
             to={link.to}
-            className={({ isActive }) => (isActive && !view ? 'menu-item active' : 'menu-item')}
+            className={({ isActive }) => itemClass(isActive && !view)}
             aria-label={link.label}
             title={collapsed ? link.label : undefined}
             onClick={onNavigate}
           >
-            <link.icon size={18} />
-            <span className="menu-item-label">{link.label}</span>
+            <link.icon className="size-[18px] shrink-0 opacity-90" />
+            <span className={labelClass}>{link.label}</span>
           </NavLink>
         ) : (
-          <button key={link.to} type="button" className="menu-item menu-item-disabled" disabled title={`${link.label} — Coming soon`}>
-            <link.icon size={18} />
-            <span className="menu-item-label">{link.label}</span>
-            {!collapsed ? <span className="coming-soon">Coming soon</span> : null}
+          <button key={link.to} type="button" className={cn(itemClass(false), disabledClass)} disabled title={`${link.label} — Coming soon`}>
+            <link.icon className="size-[18px] shrink-0 opacity-90" />
+            <span className={labelClass}>{link.label}</span>
+            {!collapsed ? <span className={comingSoonClass}>Coming soon</span> : null}
           </button>
         ))}
-        <div className="nav-section">Personal</div>
+        <Section label="Personal" />
         <NavLink
           to="/inbox"
-          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          className={({ isActive }) => itemClass(isActive)}
           aria-label="Inbox"
           title={collapsed ? 'Inbox' : undefined}
           onClick={onNavigate}
         >
-          <DirectInbox size={18} />
-          <span className="menu-item-label">Inbox</span>
+          <Inbox className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>Inbox</span>
         </NavLink>
         <NavLink
           to="/tasks?view=mine"
-          className={() => taskViewClass('mine')}
+          className={itemClass(taskViewActive('mine'))}
           aria-label="My tasks"
           title={collapsed ? 'My tasks' : undefined}
           onClick={onNavigate}
         >
-          <TaskSquare size={18} />
-          <span className="menu-item-label">My tasks</span>
+          <SquareCheck className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>My tasks</span>
         </NavLink>
         <NavLink
           to="/tasks?view=current_week"
-          className={() => taskViewClass('current_week')}
+          className={itemClass(taskViewActive('current_week'))}
           aria-label="This week"
           title={collapsed ? 'This week' : undefined}
           onClick={onNavigate}
         >
-          <Calendar size={18} />
-          <span className="menu-item-label">This week</span>
+          <Calendar className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>This week</span>
         </NavLink>
         <NavLink
           to="/tasks?view=overdue"
-          className={() => taskViewClass('overdue')}
+          className={itemClass(taskViewActive('overdue'))}
           aria-label="Overdue"
           title={collapsed ? 'Overdue' : undefined}
           onClick={onNavigate}
         >
-          <Timer size={18} />
-          <span className="menu-item-label">Overdue</span>
+          <Timer className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>Overdue</span>
         </NavLink>
         <NavLink
           to="/tasks?view=due_soon"
-          className={() => taskViewClass('due_soon')}
+          className={itemClass(taskViewActive('due_soon'))}
           aria-label="Due soon"
           title={collapsed ? 'Due soon' : undefined}
           onClick={onNavigate}
         >
-          <Calendar size={18} />
-          <span className="menu-item-label">Due soon</span>
+          <Calendar className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>Due soon</span>
         </NavLink>
-        <button type="button" className="menu-item menu-item-disabled" disabled title="Direct messages — Coming soon">
-          <Messages2 size={18} />
-          <span className="menu-item-label">Direct messages</span>
-          {!collapsed ? <span className="coming-soon">Coming soon</span> : null}
+        <button type="button" className={cn(itemClass(false), disabledClass)} disabled title="Direct messages — Coming soon">
+          <MessagesSquare className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>Direct messages</span>
+          {!collapsed ? <span className={comingSoonClass}>Coming soon</span> : null}
         </button>
-        <div className="nav-section">Manage</div>
+        <Section label="Manage" />
         <NavLink
           to="/settings"
-          className={({ isActive }) => (isActive ? 'menu-item active' : 'menu-item')}
+          className={({ isActive }) => itemClass(isActive)}
           aria-label="Settings"
           title={collapsed ? 'Settings' : undefined}
           onClick={onNavigate}
         >
-          <Setting2 size={18} />
-          <span className="menu-item-label">Settings</span>
+          <Settings className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>Settings</span>
         </NavLink>
       </div>
     </>

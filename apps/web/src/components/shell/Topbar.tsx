@@ -1,5 +1,7 @@
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Add, Menu, Moon, SearchNormal, Setting2, Sun } from 'reicon-react'
+import { Plus, Menu, Moon, Search, Settings, Sun } from 'lucide-react'
+import { cn } from 'cn'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { useTheme } from '../../lib/themeContext'
 import { useAppState } from '../../mock/store'
 import { useWorkspace } from '../../features/workspaces/workspaceContext'
@@ -38,7 +40,7 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
         return {
           crumbs,
           status: (
-            <span className="topbar-status">
+            <span className="inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground max-[899px]:hidden">
               <TaskStatusIcon status={status} size={12} />
               {status?.name ?? 'No status'}
             </span>
@@ -118,23 +120,41 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
   const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state, taskNavigation)
   const routeRoot = location.pathname.split('/')[1] || 'home'
 
+  const crumbBase =
+    'min-w-0 shrink overflow-hidden text-[13.5px] font-medium whitespace-nowrap text-ellipsis text-muted-foreground group-data-[root=home]/topbar:text-sm group-data-[root=home]/topbar:font-semibold group-data-[root=home]/topbar:text-foreground group-data-[root=settings]/topbar:text-[13px] group-data-[root=settings]/topbar:font-semibold'
+  const menuOptionClass =
+    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40'
+
   return (
-    <header className="topbar" data-root={routeRoot}>
-      <button className="icon-button topbar-menu-button topbar-drawer-button" onClick={onOpenDrawer} aria-label="Menu">
-        <Menu size={18} />
-      </button>
-      <nav className="topbar-crumbs">
+    <header
+      className={cn(
+        'group/topbar hidden h-12 shrink-0 items-center gap-2 bg-background px-2 max-[899px]:flex',
+        'data-[root=settings]:h-11 data-[root=settings]:min-h-11 data-[root=settings]:gap-[7px] data-[root=settings]:border-b data-[root=settings]:border-border data-[root=settings]:px-2 data-[root=settings]:py-1.5',
+        'data-[root=tasks]:hidden data-[root=mail]:hidden data-[root=docs]:hidden data-[root=dm]:hidden data-[root=chat]:hidden data-[root=inbox]:hidden',
+      )}
+      data-root={routeRoot}
+    >
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="text-muted-foreground/70 group-data-[root=home]/topbar:hidden"
+        onClick={onOpenDrawer}
+        aria-label="Menu"
+      >
+        <Menu className="size-[18px]" />
+      </Button>
+      <nav className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap group-data-[root=home]/topbar:gap-0 group-data-[root=settings]/topbar:gap-[7px] group-data-[root=settings]/topbar:py-[5px]">
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1
           return (
             <span key={index} style={{ display: 'contents' }}>
-              {index > 0 ? <span className="topbar-crumb-sep">/</span> : null}
+              {index > 0 ? <span className="shrink-0 text-[13px] text-muted-foreground/70 select-none">/</span> : null}
               {crumb.to && !isLast ? (
-                <Link className="topbar-crumb" to={crumb.to}>
+                <Link className={cn(crumbBase, 'hover:text-foreground')} to={crumb.to}>
                   {crumb.label}
                 </Link>
               ) : (
-                <span className="topbar-crumb" data-current={isLast}>
+                <span className={cn(crumbBase, 'data-[current=true]:max-w-[40vw] data-[current=true]:shrink-0 data-[current=true]:text-foreground')} data-current={isLast}>
                   {crumb.label}
                 </span>
               )}
@@ -143,24 +163,24 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
         })}
         {status}
       </nav>
-      <div className="topbar-actions">
-        <button className="icon-button topbar-menu-button" onClick={onOpenPalette} aria-label="Search">
-          <SearchNormal size={routeRoot === 'settings' ? 15 : 16} />
-        </button>
-        <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">
-          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
+      <div className="flex shrink-0 items-center gap-1.5 group-data-[root=home]/topbar:gap-0.5 group-data-[root=settings]/topbar:gap-2">
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onOpenPalette} aria-label="Search">
+          <Search className={routeRoot === 'settings' ? 'size-[15px]' : 'size-4'} />
+        </Button>
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={toggleTheme} aria-label="Toggle theme">
+          {theme === 'dark' ? <Sun className="size-[15px]" /> : <Moon className="size-[15px]" />}
+        </Button>
         {routeRoot === 'home' ? (
-          <button className="icon-button topbar-settings-button" onClick={() => navigate('/settings')} aria-label="Settings">
-            <Setting2 size={15} />
-          </button>
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/settings')} aria-label="Settings">
+            <Settings className="size-[15px]" />
+          </Button>
         ) : null}
         {routeRoot !== 'home' && routeRoot !== 'settings' && routeRoot !== 'profile' ? <Dropdown
-          className="topbar-new-menu"
+          className="min-w-[160px] p-1"
           align="right"
           trigger={() => (
-            <span className="button button-primary">
-              <Add size={16} />
+            <span className={cn(buttonVariants({ variant: 'default' }))}>
+              <Plus className="size-4" />
               New
             </span>
           )}
@@ -168,7 +188,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
           {(close) => (
             <>
               <button
-                className="popover-option"
+                className={menuOptionClass}
                 onClick={() => {
                   close()
                   navigate('/tasks?new=1')
@@ -176,9 +196,9 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
               >
                 Task
               </button>
-              <button className="popover-option" disabled>Document</button>
-              <button className="popover-option" disabled>Email</button>
-              <button className="popover-option" disabled>Chat message</button>
+              <button className={menuOptionClass} disabled>Document</button>
+              <button className={menuOptionClass} disabled>Email</button>
+              <button className={menuOptionClass} disabled>Chat message</button>
             </>
           )}
         </Dropdown> : null}

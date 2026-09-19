@@ -89,7 +89,7 @@ test('empty search shows enabled navigation and Escape closes the palette', asyn
   const input = await view.findByPlaceholderText('Search tasks and navigation…')
   expect(view.getByRole('button', { name: /Go to Tasks/ })).toBeTruthy()
   expect(view.getByRole('button', { name: /Go to Settings/ })).toBeTruthy()
-  fireEvent.keyDown(input.closest('.command-panel')!, { key: 'Escape' })
+  fireEvent.keyDown(input, { key: 'Escape' })
   expect(closed).toBe(1)
 })
 
@@ -108,7 +108,7 @@ test('Enter opens the highlighted navigation result', async () => {
   await userEvent.type(input, 'settings')
   expect(await view.findByRole('button', { name: /Go to Settings/ })).toBeTruthy()
   expect(view.queryByRole('button', { name: /Go to Home/ })).toBeNull()
-  fireEvent.keyDown(input.closest('.command-panel')!, { key: 'Enter' })
+  fireEvent.keyDown(input, { key: 'Enter' })
   expect(closed).toBe(1)
   expect(view.getByTestId('location').textContent).toBe('/settings')
 })
