@@ -16,7 +16,7 @@ export function EmptyState({ icon: Icon, title, description, action, size = 'bas
     <Empty className={cn('border', size === 'sm' ? 'min-h-44 p-4' : 'min-h-80')}>
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          <Icon size={size === 'sm' ? 18 : 20} />
+          <Icon className={size === 'sm' ? 'size-4.5' : 'size-5'} />
         </EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
         {description ? <EmptyDescription>{description}</EmptyDescription> : null}
