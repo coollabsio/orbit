@@ -16,7 +16,8 @@ test('tasks and settings share the mobile product header contract', async () => 
     Bun.file(new URL('../../features/settings/SettingsLayout.tsx', import.meta.url)).text(),
   ])
   expect(tasks).toContain('pane-header product-pane-header')
-  expect(settings).toContain('pane-header product-pane-header')
+  // Settings is migrated to Tailwind: its duplicate page header hides on mobile so the shell topbar takes over.
+  expect(settings).toContain('max-[899px]:hidden')
   expect(utilities).toContain('.product-pane-header')
   expect(utilities).toContain('min-height: 44px')
   expect(utilities).toContain('.product-pane-header-icon')

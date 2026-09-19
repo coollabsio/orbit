@@ -1,8 +1,9 @@
 import { Link } from 'react-router'
-import { Hashtag } from 'reicon-react'
+import { Hash } from 'lucide-react'
 import { useAppState } from '../../mock/store'
 import { relativeTime } from '../../lib/format'
-import { cx } from '../../lib/cx'
+import { cn } from 'cn'
+import { buttonVariants } from '@/components/ui/button'
 import { TaskStatusIcon } from '../../components/workspace/TaskStatusIcon'
 import { PriorityIcon } from '../../components/workspace/PriorityIcon'
 import { PRIORITY_ORDER } from '../../components/workspace/taskMeta'
@@ -11,8 +12,10 @@ import { useWorkspace } from '../workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '../tasks/api/projects'
 import { taskFromRecord } from '../tasks/api/models'
 import { useTasks } from '../tasks/api/tasks'
-import '../shared/cards.css'
-import './home.css'
+
+const LIST_ROW = 'flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2.5 border-b border-border px-3 py-1.5 text-left transition-colors last:border-b-0 hover:bg-foreground/[0.02]'
+const CARD_EMPTY = 'p-4 text-[13px] text-muted-foreground/70'
+const META = 'shrink-0 text-xs text-muted-foreground/70'
 
 function greetingFor(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -30,15 +33,15 @@ function HomeCard({
   children: React.ReactNode
 }) {
   return (
-    <section className="layer-card">
-      <header className="layer-card-header">
+    <section className="flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)] transition-shadow duration-200 hover:shadow-[0_0_0_1px_var(--border),0_8px_24px_rgba(0,0,0,0.08)]">
+      <header className="flex min-h-12 items-center gap-2 py-2 pr-2 pl-4 text-sm font-medium text-muted-foreground">
         {title}
-        <span className="spacer" />
-        <Link to={viewAllTo} className="button button-ghost">
+        <span className="flex-1" />
+        <Link to={viewAllTo} className={buttonVariants({ variant: 'ghost' })}>
           View all
         </Link>
       </header>
-      <div className="layer-card-body flush">{children}</div>
+      <div className="relative min-w-0 overflow-hidden rounded-lg bg-background shadow-[0_0_0_1px_var(--muted)]">{children}</div>
     </section>
   )
 }
@@ -82,15 +85,15 @@ export function HomePage() {
   const channels = [...state.channels].sort((a, b) => b.unreadCount - a.unreadCount)
 
   return (
-    <div className="page home-page">
-      <div className="pane" style={{ flex: 1 }}>
-        <div className="home-scroll">
-          <div className="home-body">
-            <div className="home-greeting">
-              <h1>
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-6 pt-12 pb-8 max-[599px]:px-4 max-[599px]:pt-8 max-[599px]:pb-6">
+            <div>
+              <h1 className="mb-1.5">
                 {greetingFor(new Date().getHours())}, {firstName}
               </h1>
-              <p className="home-summary">
+              <p className="text-[13px] text-muted-foreground [&_a]:text-muted-foreground [&_a]:no-underline [&_a:hover]:text-foreground [&_a:hover]:underline">
                 <Link to="/tasks">
                   {myOpenTasks.length} open {myOpenTasks.length === 1 ? 'task' : 'tasks'} assigned to you
                 </Link>
@@ -108,22 +111,22 @@ export function HomePage() {
                 </Link>
               </p>
             </div>
-            <div className="home-grid">
+            <div className="grid grid-cols-1 items-start gap-4 min-[900px]:grid-cols-2">
               <HomeCard title="My tasks" viewAllTo="/tasks">
                 {myOpenTasks.length === 0 ? (
-                  <div className="home-card-empty">No open tasks — enjoy the calm.</div>
+                  <div className={CARD_EMPTY}>No open tasks — enjoy the calm.</div>
                 ) : (
                   myOpenTasks.map((task) => (
-                    <Link key={task.id} to={`/tasks/${task.id}`} className="list-row">
+                    <Link key={task.id} to={`/tasks/${task.id}`} className={LIST_ROW}>
                       <TaskStatusIcon status={statuses.data.find((s) => s.id === task.statusId)} />
-                      <span className="text-faint" style={{ fontSize: 12, flexShrink: 0 }}>
+                      <span className={META}>
                         {task.identifier}
                       </span>
-                      <span className="truncate" style={{ flex: 1, fontSize: 13 }}>
+                      <span className="flex-1 truncate text-[13px]">
                         {task.title}
                       </span>
                       <PriorityIcon priority={task.priority} />
-                      <span className="text-faint text-xs" style={{ flexShrink: 0 }}>
+                      <span className={META}>
                         {relativeTime(task.updatedAt)}
                       </span>
                     </Link>
@@ -133,18 +136,15 @@ export function HomePage() {
 
               <HomeCard title="Inbox" viewAllTo="/inbox">
                 {inboxItems.length === 0 ? (
-                  <div className="home-card-empty">Nothing here yet.</div>
+                  <div className={CARD_EMPTY}>Nothing here yet.</div>
                 ) : (
                   inboxItems.map((n) => (
-                    <Link key={n.id} to="/inbox" className="list-row">
-                      <span
-                        className={cx(!n.readAt && 'unread-dot')}
-                        style={{ width: 8, height: 8, flexShrink: 0 }}
-                      />
-                      <span className="truncate" style={{ flex: 1, fontSize: 13 }}>
+                    <Link key={n.id} to="/inbox" className={LIST_ROW}>
+                      <span className={cn('size-2 shrink-0', !n.readAt && 'rounded-full bg-primary')} />
+                      <span className="flex-1 truncate text-[13px]">
                         {n.title}
                       </span>
-                      <span className="text-faint text-xs" style={{ flexShrink: 0 }}>
+                      <span className={META}>
                         {relativeTime(n.createdAt)}
                       </span>
                     </Link>
@@ -154,25 +154,17 @@ export function HomePage() {
 
               <HomeCard title="Recent mail" viewAllTo="/mail">
                 {recentMail.length === 0 ? (
-                  <div className="home-card-empty">No mail yet.</div>
+                  <div className={CARD_EMPTY}>No mail yet.</div>
                 ) : (
                   recentMail.map((thread) => (
-                    <Link key={thread.id} to={`/mail/${thread.id}`} className="list-row">
-                      <span
-                        className="truncate"
-                        style={{
-                          fontSize: 13,
-                          fontWeight: thread.unread ? 600 : 400,
-                          flexShrink: 0,
-                          maxWidth: 140,
-                        }}
-                      >
+                    <Link key={thread.id} to={`/mail/${thread.id}`} className={LIST_ROW}>
+                      <span className={cn('max-w-[140px] shrink-0 truncate text-[13px]', thread.unread ? 'font-semibold' : 'font-normal')}>
                         {thread.messages[0]?.from.name ?? 'Unknown'}
                       </span>
-                      <span className="truncate text-muted" style={{ flex: 1, fontSize: 13 }}>
+                      <span className="flex-1 truncate text-[13px] text-muted-foreground">
                         {thread.subject}
                       </span>
-                      <span className="text-faint text-xs" style={{ flexShrink: 0 }}>
+                      <span className={META}>
                         {relativeTime(thread.updatedAt)}
                       </span>
                     </Link>
@@ -182,24 +174,18 @@ export function HomePage() {
 
               <HomeCard title="Active channels" viewAllTo="/chat">
                 {channels.length === 0 ? (
-                  <div className="home-card-empty">No channels yet.</div>
+                  <div className={CARD_EMPTY}>No channels yet.</div>
                 ) : (
                   channels.map((channel) => (
-                    <Link key={channel.id} to={`/chat/${channel.id}`} className="list-row">
-                      <Hashtag size={16} style={{ flexShrink: 0, color: 'var(--text-faint)' }} />
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: channel.unreadCount > 0 ? 600 : 400,
-                          flexShrink: 0,
-                        }}
-                      >
+                    <Link key={channel.id} to={`/chat/${channel.id}`} className={LIST_ROW}>
+                      <Hash className="size-4 shrink-0 text-muted-foreground/70" />
+                      <span className={cn('shrink-0 text-[13px]', channel.unreadCount > 0 ? 'font-semibold' : 'font-normal')}>
                         {channel.name}
                       </span>
                       {channel.unreadCount > 0 ? (
-                        <span className="count-badge">{channel.unreadCount}</span>
+                        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">{channel.unreadCount}</span>
                       ) : null}
-                      <span className="truncate text-faint" style={{ flex: 1, fontSize: 12 }}>
+                      <span className="flex-1 truncate text-xs text-muted-foreground/70">
                         {channel.description}
                       </span>
                     </Link>

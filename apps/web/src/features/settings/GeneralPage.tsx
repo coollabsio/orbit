@@ -4,10 +4,17 @@ import { apiClient } from '../../api/client'
 import { createBackup } from '../../api/generated/sdk.gen'
 import { Listbox } from '../../components/ui/Listbox'
 import { UnsavedBar } from '../../components/ui/UnsavedBar'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useTheme, type Theme } from '../../lib/themeContext'
 import { useRenameWorkspace } from '../workspaces/api'
 import { useWorkspace } from '../workspaces/workspaceContext'
 import { SettingsCard } from './SettingsCard'
+
+const FIELD_LABEL = 'mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-muted-foreground'
+const GRID = 'grid grid-cols-1 gap-4 min-[900px]:grid-cols-2'
+const FIELD = 'w-full min-w-0'
 
 export function GeneralPage() {
   const { theme, setTheme } = useTheme()
@@ -36,19 +43,19 @@ export function GeneralPage() {
   return (
     <>
       <SettingsCard title="Workspace" description="Rename this workspace.">
-        <form ref={formRef} className="settings-grid" onSubmit={(event) => { event.preventDefault(); saveWorkspace() }}>
-          <div className="settings-field"><label className="field-label" htmlFor="workspace-name">Name</label><input id="workspace-name" className="input" required disabled={renameWorkspace.isPending} value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></div>
+        <form ref={formRef} className={GRID} onSubmit={(event) => { event.preventDefault(); saveWorkspace() }}>
+          <div className={FIELD}><Label className={FIELD_LABEL} htmlFor="workspace-name">Name</Label><Input id="workspace-name" required disabled={renameWorkspace.isPending} value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></div>
         </form>
-        {renameWorkspace.isError ? <p role="alert" className="text-danger">Workspace rename failed. <button className="button button-ghost" onClick={saveWorkspace}>Retry</button></p> : null}
+        {renameWorkspace.isError ? <p role="alert" className="text-destructive">Workspace rename failed. <Button variant="ghost" onClick={saveWorkspace}>Retry</Button></p> : null}
         {renameWorkspace.isPending ? <p role="status">Saving workspace…</p> : null}
       </SettingsCard>
 
       <SettingsCard title="Appearance" description="Theme for this browser.">
-        <div className="settings-grid">
-          <div className="settings-field">
-            <label className="field-label" htmlFor="appearance-theme">
+        <div className={GRID}>
+          <div className={FIELD}>
+            <Label className={FIELD_LABEL} htmlFor="appearance-theme">
               Theme
-            </label>
+            </Label>
             <Listbox<Theme>
               id="appearance-theme"
               value={theme}
@@ -63,38 +70,37 @@ export function GeneralPage() {
       </SettingsCard>
 
       <SettingsCard title="About" description="Version and backend status of this Orbit instance.">
-        <div className="settings-grid">
-          <div className="settings-field">
-            <label className="field-label" htmlFor="about-version">
+        <div className={GRID}>
+          <div className={FIELD}>
+            <Label className={FIELD_LABEL} htmlFor="about-version">
               Version
-            </label>
-            <input id="about-version" className="input" value="0.1.0" readOnly />
+            </Label>
+            <Input id="about-version" value="0.1.0" readOnly />
           </div>
-          <div className="settings-field">
-            <label className="field-label" htmlFor="about-backend">
+          <div className={FIELD}>
+            <Label className={FIELD_LABEL} htmlFor="about-backend">
               Backend
-            </label>
-            <input
+            </Label>
+            <Input
               id="about-backend"
-              className="input"
               value="Connected"
               readOnly
             />
           </div>
-          <div className="settings-field">
-            <label className="field-label" htmlFor="about-storage">
+          <div className={FIELD}>
+            <Label className={FIELD_LABEL} htmlFor="about-storage">
               Storage
-            </label>
-            <input id="about-storage" className="input" value="Server data directory" readOnly />
+            </Label>
+            <Input id="about-storage" value="Server data directory" readOnly />
           </div>
         </div>
       </SettingsCard>
       <SettingsCard title="Backup" description="Create a verified snapshot of the database and attachments without stopping Orbit.">
-        <button className="button button-primary" disabled={backup.isPending} onClick={() => backup.mutate()}>
+        <Button disabled={backup.isPending} onClick={() => backup.mutate()}>
           {backup.isPending ? 'Creating backup…' : 'Create backup now'}
-        </button>
+        </Button>
         {backup.isSuccess ? <p role="status">Backup created: <code>{backup.data.id}</code></p> : null}
-        {backup.isError ? <p role="alert" className="text-danger">Backup failed. Installation administrator access is required.</p> : null}
+        {backup.isError ? <p role="alert" className="text-destructive">Backup failed. Installation administrator access is required.</p> : null}
       </SettingsCard>
       {dirty ? (
         <UnsavedBar

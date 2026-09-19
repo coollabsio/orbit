@@ -53,7 +53,7 @@ test('page size options escape the card and changing size resets pagination', as
   expect(trigger.getAttribute('aria-expanded')).toBe('false')
   expect(trigger.textContent).toBe('25')
   expect(view.getByText('1-25 of 30')).toBeTruthy()
-  expect(view.container.querySelectorAll('.data-table-row')).toHaveLength(25)
+  expect(view.container.querySelectorAll('[data-member-row]')).toHaveLength(25)
 
   fireEvent.click(trigger)
   await userEvent.keyboard('{Escape}')

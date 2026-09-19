@@ -1,12 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { Eye, EyeSlash } from 'reicon-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { ApiProblem } from '../../api/problem'
 import { UnsavedBar } from '../../components/ui/UnsavedBar'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { cn } from 'cn'
 import { useChangePassword, useCurrentUser, useUpdateProfile } from '../auth/api'
 import { SettingsCard } from '../settings/SettingsCard'
-import '../shared/cards.css'
-import '../settings/settings.css'
-import './profile.css'
+
+const FIELD_LABEL = 'mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-muted-foreground'
+const GRID = 'grid grid-cols-1 gap-4 min-[900px]:grid-cols-2'
+const FIELD = 'w-full min-w-0'
+const REQ = 'inline-block font-semibold text-primary'
 
 function PasswordInput({
   id,
@@ -23,15 +29,15 @@ function PasswordInput({
 }) {
   const [visible, setVisible] = useState(false)
   return (
-    <div className="settings-field">
-      <label className="field-label" htmlFor={id}>
-        {label} <span className="field-required">*</span>
-      </label>
-      <div className="input-group">
-        <input
+    <div className={FIELD}>
+      <Label className={FIELD_LABEL} htmlFor={id}>
+        {label} <span className={REQ}>*</span>
+      </Label>
+      <div className="relative">
+        <Input
           id={id}
           type={visible ? 'text' : 'password'}
-          className="input"
+          className="pr-10"
           required
           autoComplete={autoComplete}
           value={value}
@@ -39,11 +45,11 @@ function PasswordInput({
         />
         <button
           type="button"
-          className="input-group-toggle"
+          className="absolute inset-y-0 right-0 z-[1] flex items-center pr-2 text-muted-foreground transition-colors hover:text-foreground"
           aria-label="Toggle password visibility"
           onClick={() => setVisible((v) => !v)}
         >
-          {visible ? <EyeSlash size={18} /> : <Eye size={18} />}
+          {visible ? <EyeOff className="size-4.5" /> : <Eye className="size-4.5" />}
         </button>
       </div>
     </div>
@@ -106,40 +112,39 @@ export function ProfilePage() {
       : null)
 
   return (
-    <div className="page">
-      <div className="pane" style={{ flex: 1, position: 'relative' }}>
-        <div className="pane-header">
-          <span className="pane-title">Account settings</span>
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+          <span className="truncate text-[13px] font-semibold text-foreground">Account settings</span>
         </div>
-        <div className="settings-scroll">
-          <div className="profile-workspace">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex w-full min-w-0 flex-col gap-6 px-5 pt-5 pb-8 min-[900px]:px-10 min-[900px]:pt-7 min-[900px]:pb-10">
             <form ref={formRef} onSubmit={saveDetails}>
               <SettingsCard
                 title="Profile details"
                 description="Your display name and verified sign-in address."
               >
-                <div className="settings-grid">
-                  <div className="settings-field">
-                    <label className="field-label" htmlFor="profile-name">
-                      Name <span className="field-required">*</span>
-                    </label>
-                    <input
+                <div className={GRID}>
+                  <div className={FIELD}>
+                    <Label className={FIELD_LABEL} htmlFor="profile-name">
+                      Name <span className={REQ}>*</span>
+                    </Label>
+                    <Input
                       id="profile-name"
-                      className="input"
                       required
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                     />
                   </div>
-                  <div className="settings-field">
-                    <label className="field-label" htmlFor="profile-email">
+                  <div className={FIELD}>
+                    <Label className={FIELD_LABEL} htmlFor="profile-email">
                       Email
-                    </label>
-                    <input id="profile-email" className="input" value={me?.email ?? ''} readOnly />
+                    </Label>
+                    <Input id="profile-email" value={me?.email ?? ''} readOnly />
                   </div>
                 </div>
                 {updateProfile.isError ? (
-                  <p className="profile-error" role="alert">
+                  <p className="text-xs text-destructive" role="alert">
                     {errorDetail(updateProfile.error, 'Display name could not be saved.')}
                   </p>
                 ) : null}
@@ -151,13 +156,13 @@ export function ProfilePage() {
                 title="Password"
                 description="Other devices will be signed out."
                 actions={
-                  <button type="submit" className="button" disabled={changePasswordMutation.isPending}>
+                  <Button type="submit" variant="outline" disabled={changePasswordMutation.isPending}>
                     {changePasswordMutation.isPending ? 'Changing…' : 'Change password'}
-                  </button>
+                  </Button>
                 }
               >
-                <div className="settings-grid">
-                  <div className="col-span-2">
+                <div className={GRID}>
+                  <div className="min-[900px]:col-span-2">
                     <PasswordInput
                       id="current-password"
                       label="Current password"
@@ -181,7 +186,7 @@ export function ProfilePage() {
                     onChange={setConfirmPassword}
                   />
                   {passwordAlert ? (
-                    <p className="profile-error col-span-2" role="alert">
+                    <p className={cn('text-xs text-destructive', 'min-[900px]:col-span-2')} role="alert">
                       {passwordAlert}
                     </p>
                   ) : null}
