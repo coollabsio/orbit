@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Download, Global, Paperclip2, Xmark } from 'reicon-react'
+import { Globe, Paperclip, X } from 'lucide-react'
+import { cn } from 'cn'
 import { appNavigate } from '../../../lib/navigateBridge'
 import type { DocBlock } from '../../../mock/types'
 import { formatSize } from '../../chat/attachmentLib'
@@ -13,14 +14,20 @@ function domainOf(url: string): string {
   }
 }
 
+const MEDIA_BASE =
+  'group/media relative my-1 w-fit min-w-0 max-w-full cursor-text rounded-md px-1.5 py-0.5 first:mt-0 hover:bg-foreground/[0.02]'
+
 /** Embed (bookmark card), image and file blocks; all removable on hover. */
 export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () => void }) {
   const [viewerOpen, setViewerOpen] = useState(false)
 
-  const remove = (
+  const remove = (extra?: string) => (
     <button
       type="button"
-      className="doc-media-remove"
+      className={cn(
+        'absolute top-1.5 right-1.5 z-[2] inline-flex size-[22px] items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-[opacity,background-color] duration-150 group-hover/media:opacity-100 hover:bg-destructive focus-visible:opacity-100',
+        extra,
+      )}
       aria-label="Remove block"
       title="Remove"
       onClick={(e) => {
@@ -29,21 +36,27 @@ export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () 
         onRemove()
       }}
     >
-      <Xmark size={12} />
+      <X className="size-3" />
     </button>
   )
 
   if (block.type === 'image' && block.url) {
     return (
-      <div className="doc-block doc-media">
-        <button type="button" className="doc-image" aria-label={`Open image ${block.fileName ?? ''}`} onClick={() => setViewerOpen(true)}>
+      <div className={cn(MEDIA_BASE, 'w-full')}>
+        <button
+          type="button"
+          className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border"
+          aria-label={`Open image ${block.fileName ?? ''}`}
+          onClick={() => setViewerOpen(true)}
+        >
           <img
+            className="block h-auto w-full"
             src={block.url}
             alt={block.fileName ?? ''}
             loading={block.url.startsWith('data:') ? 'eager' : 'lazy'}
           />
         </button>
-        {remove}
+        {remove()}
         {viewerOpen ? (
           <ImageViewer
             attachment={{
@@ -62,18 +75,19 @@ export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () 
 
   if (block.type === 'file' && block.url) {
     return (
-      <div className="doc-block doc-media doc-media-file">
-        <a href={block.url} download={block.fileName} className="fc-file-card">
-          <Paperclip2 size={22} />
-          <span className="fc-file-card-text">
-            <span className="fc-file-card-name">{block.fileName}</span>
-            <span className="fc-file-card-size">{formatSize(block.fileSize ?? 0)}</span>
-          </span>
-          <span className="fc-file-card-download">
-            <Download size={16} />
+      <div className={MEDIA_BASE}>
+        <a
+          href={block.url}
+          download={block.fileName}
+          className="flex max-w-[320px] items-center gap-2 rounded-lg border border-border bg-background py-[7px] pr-[30px] pl-2.5 text-muted-foreground no-underline shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:bg-muted"
+        >
+          <Paperclip className="size-[22px]" />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-sm font-medium text-foreground">{block.fileName}</span>
+            <span className="text-xs text-muted-foreground">{formatSize(block.fileSize ?? 0)}</span>
           </span>
         </a>
-        {remove}
+        {remove('top-1/2 -translate-y-1/2')}
       </div>
     )
   }
@@ -83,9 +97,9 @@ export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () 
   const origin = window.location.origin
   const internal = url.startsWith(`${origin}/`) ? url.slice(origin.length) : url.startsWith('/') ? url : null
   return (
-    <div className="doc-block doc-media">
+    <div className={MEDIA_BASE}>
       <a
-        className="doc-embed"
+        className="flex w-[480px] max-w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 no-underline transition-colors hover:bg-muted"
         href={internal ?? url}
         target={internal ? undefined : '_blank'}
         rel={internal ? undefined : 'noopener noreferrer'}
@@ -98,15 +112,15 @@ export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () 
             : undefined
         }
       >
-        <span className="doc-embed-icon">
-          <Global size={18} />
+        <span className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <Globe className="size-[18px]" />
         </span>
-        <span className="doc-embed-text">
-          <span className="doc-embed-title">{domainOf(url)}</span>
-          <span className="doc-embed-url">{url}</span>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-[13px] font-semibold text-foreground">{domainOf(url)}</span>
+          <span className="truncate text-xs text-muted-foreground/70">{url}</span>
         </span>
       </a>
-      {remove}
+      {remove()}
     </div>
   )
 }

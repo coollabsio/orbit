@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { ArrowLeft, MoreH, Trash } from 'reicon-react'
+import { ArrowLeft, Ellipsis, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Dropdown } from '../../../components/ui/Dropdown'
 import { EmojiPicker } from '../../../components/ui/EmojiPicker'
 import { relativeTime } from '../../../lib/format'
@@ -186,66 +187,74 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   }
 
   return (
-    <section className="pane docs-editor-pane">
-      <div className="pane-header">
-        <button
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=index]/docs:hidden">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
+        <Button
           type="button"
-          className="icon-button docs-back"
+          variant="ghost"
+          size="icon-sm"
+          className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
           aria-label="Back to docs"
           onClick={() => navigate('/docs')}
         >
-          <ArrowLeft size={16} />
-        </button>
-        <nav className="docs-breadcrumbs" aria-label="Page path">
+          <ArrowLeft className="size-4" />
+        </Button>
+        <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] text-muted-foreground/70" aria-label="Page path">
           {ancestors.map((a) => (
-            <span key={a.id} className="docs-crumb">
-              <Link className="docs-crumb-link truncate" to={`/docs/${a.id}`}>
+            <span key={a.id} className="flex min-w-0 items-center gap-1.5">
+              <Link className="block min-w-0 truncate rounded-[4px] text-muted-foreground/70 no-underline hover:text-foreground" to={`/docs/${a.id}`}>
                 {a.title || 'Untitled'}
               </Link>
-              <span className="docs-crumb-sep">/</span>
+              <span className="shrink-0">/</span>
             </span>
           ))}
-          <Link className="docs-crumb-current truncate" to={`/docs/${doc.id}`} aria-current="page">
+          <Link
+            className="block min-w-0 shrink truncate rounded-[4px] font-medium text-foreground no-underline"
+            to={`/docs/${doc.id}`}
+            aria-current="page"
+          >
             {title || 'Untitled'}
           </Link>
         </nav>
-        <span className="spacer" />
-        <span className="docs-updated-meta text-faint text-xs" style={{ whiteSpace: 'nowrap' }}>
+        <span className="flex-1" />
+        <span className="whitespace-nowrap text-xs text-muted-foreground/70 max-[899px]:hidden">
           Updated {relativeTime(doc.updatedAt)} by {updatedBy?.name ?? 'Unknown'}
         </span>
         <Dropdown
           align="right"
           trigger={() => (
-            <button type="button" className="icon-button" aria-label="Document options">
-              <MoreH size={16} />
-            </button>
+            <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Document options">
+              <Ellipsis className="size-4" />
+            </Button>
           )}
         >
           {(close) => (
             <button
               type="button"
-              className="popover-option"
-              style={{ color: 'var(--danger)' }}
+              className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm leading-5 text-destructive hover:bg-muted"
               onClick={() => {
                 close()
                 setConfirmDelete(true)
               }}
             >
-              <Trash size={14} />
+              <Trash2 className="size-[14px]" />
               Delete
             </button>
           )}
         </Dropdown>
       </div>
-      <div className="pane-body docs-editor-scroll">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
         {doc.cover ? <CoverBanner key={`${doc.id}:${doc.cover}:${doc.coverPos ?? ''}`} doc={doc} /> : null}
-        <div className="docs-editor-column">
+        <div className="mx-auto max-w-[760px]">
           {doc.icon ? (
-            <div className="doc-icon-row" data-cover={doc.cover ? 'true' : undefined}>
+            <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={doc.cover ? 'true' : undefined}>
               <Dropdown
-                className="emoji-dropdown"
                 trigger={() => (
-                  <button type="button" className="doc-icon-button" aria-label="Change icon">
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-xl p-0.5 text-[60px] leading-none drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02]"
+                    aria-label="Change icon"
+                  >
                     <Emoji value={doc.icon ?? ""} size={56} />
                   </button>
                 )}
@@ -266,14 +275,13 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
             </div>
           ) : null}
           {!doc.icon || !doc.cover ? (
-            <div className="doc-decor-actions">
+            <div className="flex gap-2 pt-1.5 pb-2.5">
               {!doc.icon ? (
                 <Dropdown
-                  className="emoji-dropdown"
                   trigger={() => (
-                    <button type="button" className="button button-ghost doc-decor-btn">
+                    <Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground">
                       😀 Add icon
-                    </button>
+                    </Button>
                   )}
                 >
                   {(close) => (
@@ -287,14 +295,20 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
                 </Dropdown>
               ) : null}
               {!doc.cover ? (
-                <button type="button" className="button button-ghost doc-decor-btn" onClick={() => setCoverPanelOpen((o) => !o)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground/70 hover:text-foreground"
+                  onClick={() => setCoverPanelOpen((o) => !o)}
+                >
                   🖼️ Add cover
-                </button>
+                </Button>
               ) : null}
             </div>
           ) : null}
           {!doc.cover && coverPanelOpen ? (
-            <div className="doc-cover-source-inline">
+            <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3">
               <CoverSourcePanel
                 onPicked={(url) => {
                   setCoverPanelOpen(false)
@@ -304,7 +318,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
             </div>
           ) : null}
           <input
-            className="doc-title-input"
+            className="mb-5 w-full border-none bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground outline-none placeholder:text-muted-foreground/70 focus:outline-none max-[899px]:mb-3.5 max-[899px]:text-[22px]"
             value={title}
             placeholder="Untitled"
             onChange={(e) => setTitle(e.target.value)}
@@ -327,7 +341,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
             }}
           />
           <div
-            className="doc-blocks"
+            className="flex flex-col text-[15px] leading-[1.7] text-foreground max-[899px]:text-xs max-[899px]:leading-[17px]"
             onDragOver={(e) => {
               if (e.dataTransfer.types.includes('Files')) e.preventDefault()
             }}
@@ -390,7 +404,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
               ),
             )}
           </div>
-          <button type="button" className="doc-editor-tail" aria-label="Continue writing" onClick={addBlock} />
+          <button type="button" className="block min-h-40 w-full cursor-text" aria-label="Continue writing" onClick={addBlock} />
           <input
             ref={mediaInput}
             type="file"

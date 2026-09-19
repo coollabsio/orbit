@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Add, Note2 } from 'reicon-react'
+import { FileText, Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '../../../components/ui/EmptyState'
 import { createDoc, deleteDoc, moveDoc } from '../../../mock/actions'
 import type { Doc } from '../../../mock/types'
@@ -97,28 +98,30 @@ export function DocTree({ docs, activeId }: DocTreeProps) {
   const roots = childrenOf(docs, null)
 
   return (
-    <section className="pane docs-tree-pane">
-      <div className="pane-header">
-        <span className="pane-title">Documents</span>
-        <span className="spacer" />
-        <button
+    <section className="flex h-full min-h-0 w-[260px] min-w-0 shrink-0 flex-col border-r border-border bg-background max-[899px]:w-full max-[899px]:border-r-0 max-[899px]:group-data-[view=doc]/docs:hidden">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
+        <span className="truncate text-[13px] font-semibold text-foreground">Documents</span>
+        <span className="flex-1" />
+        <Button
           type="button"
-          className="icon-button"
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground/70"
           aria-label="New page"
           onClick={() => handleCreate(null)}
         >
-          <Add size={16} />
-        </button>
+          <Plus className="size-4" />
+        </Button>
       </div>
-      <div className="pane-body">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {roots.length === 0 ? (
           <EmptyState
-            icon={Note2}
+            icon={FileText}
             title="No documents yet"
             description="Create your first page to start writing."
           />
         ) : (
-          <nav className="docs-tree">
+          <nav className="flex flex-col gap-px p-2">
             {roots.map((doc) => (
               <DocTreeItem
                 key={doc.id}

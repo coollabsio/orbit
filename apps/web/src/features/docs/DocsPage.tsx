@@ -1,11 +1,10 @@
 import { useNavigate, useParams } from 'react-router'
-import { Note2 } from 'reicon-react'
+import { FileText } from 'lucide-react'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { deleteDoc } from '../../mock/actions'
 import { useAppState } from '../../mock/store'
 import { DocEditor } from './components/DocEditor'
 import { DocTree } from './components/DocTree'
-import './docs.css'
 
 export function DocsPage() {
   const { docId } = useParams()
@@ -15,7 +14,7 @@ export function DocsPage() {
   const doc = docId ? docs.find((d) => d.id === docId) : undefined
 
   return (
-    <div className="page docs-page" data-view={docId ? 'doc' : 'index'}>
+    <div className="group/docs flex min-h-0 min-w-0 flex-1 overflow-hidden bg-card" data-view={docId ? 'doc' : 'index'}>
       <DocTree docs={docs} activeId={docId ?? null} />
       {doc ? (
         <DocEditor
@@ -29,9 +28,9 @@ export function DocsPage() {
           }}
         />
       ) : (
-        <section className="pane docs-editor-pane">
+        <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=index]/docs:hidden">
           <EmptyState
-            icon={Note2}
+            icon={FileText}
             title={docId ? 'Document not found' : 'Select a document'}
             description={
               docId

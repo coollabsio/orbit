@@ -48,7 +48,7 @@ export function CoverBanner({ doc }: { doc: Doc }) {
   return (
     <div
       ref={boxRef}
-      className="doc-cover"
+      className="group/cover relative mx-[-24px] mt-[-32px] mb-6 h-[224px] shrink-0 overflow-hidden data-[repositioning]:cursor-grab data-[repositioning]:touch-none data-[repositioning]:select-none data-[repositioning]:outline-none data-[repositioning]:active:cursor-grabbing"
       data-repositioning={repositioning || undefined}
       tabIndex={repositioning ? 0 : undefined}
       aria-label={repositioning ? 'Drag the image to reposition it (arrow keys to fine-tune)' : undefined}
@@ -87,15 +87,26 @@ export function CoverBanner({ doc }: { doc: Doc }) {
         else if (e.key === 'Escape') cancelFraming()
       }}
     >
-      <img ref={imgRef} src={doc.cover ?? ''} alt="" draggable={false} style={{ objectPosition: coverObjectPosition(pos) }} />
+      <img
+        ref={imgRef}
+        className="pointer-events-none size-full object-cover"
+        src={doc.cover ?? ''}
+        alt=""
+        draggable={false}
+        style={{ objectPosition: coverObjectPosition(pos) }}
+      />
 
-      <div className="doc-cover-actions" data-cover-actions="" data-open={repositioning || sourceOpen || undefined}>
+      <div
+        className="absolute top-2 right-2 z-[5] hidden gap-1 group-hover/cover:flex data-[open]:flex"
+        data-cover-actions=""
+        data-open={repositioning || sourceOpen || undefined}
+      >
         {repositioning ? (
           <>
-            <button type="button" className="doc-cover-btn" data-primary="true" onClick={saveFraming}>
+            <button type="button" className={COVER_BTN} data-primary="true" onClick={saveFraming}>
               Save position
             </button>
-            <button type="button" className="doc-cover-btn" onClick={cancelFraming}>
+            <button type="button" className={COVER_BTN} onClick={cancelFraming}>
               Cancel
             </button>
           </>
@@ -103,7 +114,7 @@ export function CoverBanner({ doc }: { doc: Doc }) {
           <>
             <button
               type="button"
-              className="doc-cover-btn"
+              className={COVER_BTN}
               onClick={() => {
                 setSourceOpen(false)
                 setRepositioning(true)
@@ -112,10 +123,10 @@ export function CoverBanner({ doc }: { doc: Doc }) {
             >
               Reposition
             </button>
-            <button type="button" className="doc-cover-btn" onClick={() => setSourceOpen((o) => !o)}>
+            <button type="button" className={COVER_BTN} onClick={() => setSourceOpen((o) => !o)}>
               Change
             </button>
-            <button type="button" className="doc-cover-btn" onClick={() => updateDocCover(doc.id, { cover: null, coverPos: null })}>
+            <button type="button" className={COVER_BTN} onClick={() => updateDocCover(doc.id, { cover: null, coverPos: null })}>
               Remove
             </button>
           </>
@@ -123,7 +134,10 @@ export function CoverBanner({ doc }: { doc: Doc }) {
       </div>
 
       {sourceOpen && !repositioning ? (
-        <div className="doc-cover-source" data-cover-actions="">
+        <div
+          className="absolute inset-x-2 top-[44px] z-[6] mx-auto max-w-[420px] rounded-lg border border-border bg-background/95 p-3 shadow-md backdrop-blur-[6px]"
+          data-cover-actions=""
+        >
           <CoverSourcePanel
             onPicked={(url) => {
               setSourceOpen(false)
@@ -136,10 +150,15 @@ export function CoverBanner({ doc }: { doc: Doc }) {
       ) : null}
 
       {repositioning ? (
-        <div className="doc-cover-hint">
-          <span>Drag the image to reposition it (arrow keys to fine-tune)</span>
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+          <span className="rounded-full bg-background/85 px-3 py-1 text-xs text-foreground shadow-md backdrop-blur-[4px]">
+            Drag the image to reposition it (arrow keys to fine-tune)
+          </span>
         </div>
       ) : null}
     </div>
   )
 }
+
+const COVER_BTN =
+  'min-h-[26px] rounded-md border border-border bg-background/80 px-2.5 py-[3px] text-xs font-medium text-foreground backdrop-blur-[4px] hover:bg-background data-[primary=true]:border-primary data-[primary=true]:bg-primary data-[primary=true]:text-primary-foreground'

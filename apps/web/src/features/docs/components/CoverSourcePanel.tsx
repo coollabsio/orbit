@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
-import { Export } from 'reicon-react'
+import { Upload } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 /** Cover image source (the reference app's panel, mock-sized): upload from disk, or paste an image URL. */
 export function CoverSourcePanel({ onPicked }: { onPicked: (url: string) => void }) {
@@ -17,11 +19,11 @@ export function CoverSourcePanel({ onPicked }: { onPicked: (url: string) => void
   }
 
   return (
-    <div className="doc-source-panel">
-      <button type="button" className="button" onClick={() => fileInput.current?.click()}>
-        <Export size={14} />
+    <div className="flex flex-col gap-2.5">
+      <Button type="button" variant="outline" onClick={() => fileInput.current?.click()}>
+        <Upload className="size-3.5" />
         Upload from my computer
-      </button>
+      </Button>
       <input
         ref={fileInput}
         type="file"
@@ -34,14 +36,14 @@ export function CoverSourcePanel({ onPicked }: { onPicked: (url: string) => void
           pickFile(file)
         }}
       />
-      <div className="doc-source-divider">
-        <span />
-        <span className="text-faint text-xs">or</span>
-        <span />
+      <div className="flex items-center gap-2">
+        <span className="h-px flex-1 bg-border" />
+        <span className="text-xs text-muted-foreground/70">or</span>
+        <span className="h-px flex-1 bg-border" />
       </div>
-      <div className="doc-source-url">
-        <input
-          className="input"
+      <div className="flex gap-2">
+        <Input
+          className="min-w-0 flex-1"
           value={url}
           placeholder="Image URL"
           aria-label="Image URL"
@@ -53,11 +55,11 @@ export function CoverSourcePanel({ onPicked }: { onPicked: (url: string) => void
             }
           }}
         />
-        <button type="button" className="button" disabled={!url.trim()} onClick={() => onPicked(url.trim())}>
+        <Button type="button" variant="outline" disabled={!url.trim()} onClick={() => onPicked(url.trim())}>
           Use
-        </button>
+        </Button>
       </div>
-      {error ? <p className="text-faint text-xs">{error}</p> : null}
+      {error ? <p className="text-xs text-muted-foreground/70">{error}</p> : null}
     </div>
   )
 }
