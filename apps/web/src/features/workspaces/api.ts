@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient, type createApiClient } from '../../api/client'
-import { fetchAllPages } from '../../api/pagination'
-import { queryKeys } from '../../api/queryKeys'
+import { apiClient, type createApiClient } from '@/api/client'
+import { fetchAllPages } from '@/api/pagination'
+import { queryKeys } from '@/api/queryKeys'
 import {
   acceptInvitation,
   previewInvitation,
@@ -16,9 +16,9 @@ import {
   renameWorkspace,
   revokeInvitation,
   transferOwnership,
-} from '../../api/generated/sdk.gen'
-import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, WorkspaceRecord } from '../../api/generated/types.gen'
-import type { User } from '../tasks/api/models'
+} from '@/api/generated/sdk.gen'
+import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, WorkspaceRecord } from '@/api/generated/types.gen'
+import type { User } from './models'
 
 type ApiClient = ReturnType<typeof createApiClient>
 

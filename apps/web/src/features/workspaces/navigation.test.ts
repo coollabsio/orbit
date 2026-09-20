@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { WorkspaceRecord } from '../../api/generated/types.gen'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { selectedWorkspaceId, switchWorkspaceHref } from './navigation'
 
 const workspaces: WorkspaceRecord[] = [

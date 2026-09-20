@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createApiClient } from '../../../api/client'
+import { createApiClient } from '@/api/client'
 import { nextTaskCursor, taskListAllPages, taskListPage } from './tasks'
 
 test('task filters and cursor continuation are sent through the generated list call', async () => {

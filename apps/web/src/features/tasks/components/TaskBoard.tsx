@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { UserAvatarStack } from '../../../components/ui/UserAvatar'
-import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import type { Task, TaskStatusDef, User } from '../api/models'
-import type { LabelRecord } from '../../../api/generated/types.gen'
-import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '../api/tasks'
-import { useWorkspace } from '../../workspaces/workspaceContext'
-import { boardDropUpdates, resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '../tasksLib'
+import { UserAvatarStack } from '@/components/common/UserAvatar'
+import { TaskStatusIcon } from './TaskStatusIcon'
+import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { User } from '@/features/workspaces/models'
+import type { LabelRecord } from '@/api/generated/types.gen'
+import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { boardDropUpdates, resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '@/features/tasks/tasksLib'
 import { PriorityPicker } from './PriorityPicker'
 import { LabelPill } from './TaskLabels'
 
@@ -96,7 +97,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
                 // placeholder slot index counts only the cards that can receive the drop
                 const slot = isDragged ? -1 : others.indexOf(task)
                 return (
-                  <div key={task.id} style={{ display: 'contents' }}>
+                  <div key={task.id} className="contents">
                     {!isDragged && placeholderIndex === slot ? (
                       <div className="min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10" style={{ height: dragging?.height }} />
                     ) : null}

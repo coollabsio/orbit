@@ -1,5 +1,5 @@
-import { renderMarkdownBlocks } from '../markdown'
-import type { MentionToken } from '../chatLib'
+import { renderMarkdownBlocks } from '@/lib/markdown'
+import type { MentionToken } from '@/lib/mentions'
 
 export function MessageContent({ content, mentionTokens }: { content: string; mentionTokens: MentionToken[] }) {
   if (!content.trim()) return null

@@ -3,21 +3,24 @@
 import { useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { ArrowLeft, Folder, Hash, Paperclip, Search, Users, X } from 'lucide-react'
-import { PinIcon } from '../../../components/ui/icons/PinIcon'
-import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
-import type { AppState, Channel, ChatMessage, User } from '../../../mock/types'
-import { UserAvatar } from '../../../components/ui/UserAvatar'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverTrigger } from '@/components/ui/popover'
+import { PinIcon } from '@/components/common/icons/PinIcon'
+import { ThreadIcon } from '@/components/common/icons/ThreadIcon'
+import type { AppState, Channel, ChatMessage, User } from '@/mock/types'
+import { UserAvatar } from '@/components/common/UserAvatar'
 import { FilesView } from './FilesView'
 import { MessageInput, type MessageInputHandle } from './MessageInput'
 import { MessageList } from './MessageList'
-import { Emoji } from '../../../components/ui/Emoji'
+import { Emoji } from '@/components/common/Emoji'
 import { PinnedMessages } from './PinnedMessages'
 import { SearchPanel } from './SearchPanel'
 import { ThreadsPopover } from './ThreadsPopover'
 import { TypingIndicator } from './TypingIndicator'
 
 const headerButtonClass =
-  'inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[active=true]:text-primary data-[active=true]:hover:bg-primary/10 [&>svg]:size-5 max-[899px]:size-[30px] max-[899px]:[&>svg]:size-[17px]'
+  "rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted data-[active=true]:text-primary data-[active=true]:hover:bg-primary/10 dark:data-[active=true]:hover:bg-primary/10 [&_svg:not([class*='size-'])]:size-5 max-[899px]:size-[30px] max-[899px]:[&_svg:not([class*='size-'])]:size-[17px]"
 
 function eventHasFiles(event: DragEvent<HTMLElement>) {
   return Array.from(event.dataTransfer.types).includes('Files')
@@ -55,6 +58,7 @@ export function ChatArea({
   const [draggingFiles, setDraggingFiles] = useState(false)
   const dragDepthRef = useRef(0)
   const inputRef = useRef<MessageInputHandle>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
 
   function handleDragEnter(event: DragEvent<HTMLDivElement>) {
     if (!eventHasFiles(event)) return
@@ -82,15 +86,20 @@ export function ChatArea({
     if (files.length > 0) inputRef.current?.addFiles(files)
   }
 
-  const headerButton = (active: boolean) => ({ className: headerButtonClass, 'data-active': active ? 'true' : undefined })
+  const headerButton = (active: boolean) => ({
+    variant: 'ghost' as const,
+    size: 'icon' as const,
+    className: headerButtonClass,
+    'data-active': active ? 'true' : undefined,
+  })
 
   return (
     <div className="relative flex min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=list]/chat:hidden">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background pr-3 pl-4 max-[899px]:relative max-[899px]:px-2">
+      <div ref={headerRef} className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background pr-3 pl-4 max-[899px]:relative max-[899px]:px-2">
         <div className="flex min-w-0 items-center gap-3 max-[899px]:gap-[7px] [&>svg]:size-5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground">
-          <button type="button" className="-ml-1 hidden size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground max-[899px]:flex" title="Back to conversations" onClick={() => navigate(dmParticipant ? '/dm' : '/chat')}>
+          <Button type="button" variant="ghost" size="icon" className="-ml-1 hidden rounded-md text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-muted max-[899px]:flex" title="Back to conversations" onClick={() => navigate(dmParticipant ? '/dm' : '/chat')}>
             <ArrowLeft className="size-[18px]" />
-          </button>
+          </Button>
           {dmParticipant ? <UserAvatar user={dmParticipant} size={28} showOnline /> : channel.emoji ? <span className="inline-flex size-5 items-center justify-center text-base leading-none"><Emoji value={channel.emoji} size={20} /></span> : <Hash />}
           <div className="flex min-w-0 items-baseline gap-2">
             <h2 className="text-sm font-semibold whitespace-nowrap text-foreground max-[899px]:max-w-[110px] max-[899px]:truncate max-[899px]:text-[13px]">{channel.name}</h2>
@@ -102,7 +111,7 @@ export function ChatArea({
           </div>
         </div>
         <div className="flex items-center gap-2 max-[899px]:gap-0">
-          <button
+          <Button
             type="button"
             {...headerButton(filesOpen)}
             title="Files"
@@ -114,33 +123,47 @@ export function ChatArea({
             }}
           >
             <Folder />
-          </button>
-          <button
-            type="button"
-            {...headerButton(threadsOpen)}
-            title="Threads"
-            onClick={() => {
-              setThreadsOpen((o) => !o)
-              setPinsOpen(false)
+          </Button>
+          <Popover
+            open={threadsOpen}
+            onOpenChange={(open) => {
+              setThreadsOpen(open)
+              if (open) setPinsOpen(false)
             }}
           >
-            <ThreadIcon size={20} />
-          </button>
-          <button
-            type="button"
-            {...headerButton(pinsOpen)}
-            title="Pinned Messages"
-            onClick={() => {
-              setPinsOpen((o) => !o)
-              setThreadsOpen(false)
+            <PopoverTrigger render={<Button type="button" {...headerButton(threadsOpen)} title="Threads" />}>
+              <ThreadIcon size={20} />
+            </PopoverTrigger>
+            <ThreadsPopover
+              anchor={headerRef}
+              state={state}
+              channel={channel}
+              onOpenThread={(root) => {
+                setThreadsOpen(false)
+                onOpenThread(root)
+              }}
+              onCreate={() => {
+                setThreadsOpen(false)
+                onNewThread()
+              }}
+            />
+          </Popover>
+          <Popover
+            open={pinsOpen}
+            onOpenChange={(open) => {
+              setPinsOpen(open)
+              if (open) setThreadsOpen(false)
             }}
           >
-            <PinIcon size={20} />
-          </button>
+            <PopoverTrigger render={<Button type="button" {...headerButton(pinsOpen)} title="Pinned Messages" />}>
+              <PinIcon size={20} />
+            </PopoverTrigger>
+            <PinnedMessages anchor={headerRef} state={state} channel={channel} onClose={() => setPinsOpen(false)} />
+          </Popover>
           {!dmParticipant ? (
-            <button type="button" {...headerButton(membersOpen)} title="Toggle Member List" onClick={onToggleMembers}>
+            <Button type="button" {...headerButton(membersOpen)} title="Toggle Member List" onClick={onToggleMembers}>
               <Users />
-            </button>
+            </Button>
           ) : null}
           <div
             className="group/search relative mx-1 flex h-8 w-56 items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[open=true]:border-primary/50 data-[open=true]:bg-muted data-[open=true]:text-foreground max-[899px]:mx-0 max-[899px]:w-[30px] max-[899px]:cursor-pointer max-[899px]:justify-center max-[899px]:border-transparent max-[899px]:bg-transparent max-[899px]:px-0 data-[open=true]:max-[899px]:absolute data-[open=true]:max-[899px]:right-2 data-[open=true]:max-[899px]:left-2 data-[open=true]:max-[899px]:z-[5] data-[open=true]:max-[899px]:w-auto data-[open=true]:max-[899px]:cursor-text data-[open=true]:max-[899px]:justify-start data-[open=true]:max-[899px]:gap-1.5 data-[open=true]:max-[899px]:border-primary/50 data-[open=true]:max-[899px]:bg-muted data-[open=true]:max-[899px]:px-2"
@@ -148,11 +171,11 @@ export function ChatArea({
             onClick={(event) => event.currentTarget.querySelector('input')?.focus()}
           >
             <Search className="size-4 shrink-0" />
-            <input
+            <Input
               type="text"
               value={searchQuery}
               placeholder="Search"
-              className="min-w-0 flex-1 border-none bg-transparent text-xs font-medium text-foreground outline-none max-[899px]:absolute max-[899px]:inset-0 max-[899px]:w-full max-[899px]:cursor-pointer max-[899px]:opacity-0 group-data-[open=true]/search:max-[899px]:static group-data-[open=true]/search:max-[899px]:w-auto group-data-[open=true]/search:max-[899px]:cursor-text group-data-[open=true]/search:max-[899px]:opacity-100"
+              className="h-auto w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-xs font-medium text-foreground shadow-none outline-none focus-visible:ring-0 md:text-xs dark:bg-transparent max-[899px]:absolute max-[899px]:inset-0 max-[899px]:w-full max-[899px]:cursor-pointer max-[899px]:opacity-0 group-data-[open=true]/search:max-[899px]:static group-data-[open=true]/search:max-[899px]:w-auto group-data-[open=true]/search:max-[899px]:cursor-text group-data-[open=true]/search:max-[899px]:opacity-100"
               onFocus={() => {
                 setFilesOpen(false)
                 setSearchOpen(true)
@@ -170,9 +193,11 @@ export function ChatArea({
               }}
             />
             {searchQuery || searchOpen ? (
-              <button
+              <Button
                 type="button"
-                className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground hover:text-foreground max-[899px]:hidden group-data-[open=true]/search:max-[899px]:grid"
+                variant="ghost"
+                size="icon-xs"
+                className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent max-[899px]:hidden group-data-[open=true]/search:max-[899px]:grid"
                 title="Clear search"
                 onClick={() => {
                   setSearchQuery('')
@@ -180,28 +205,11 @@ export function ChatArea({
                 }}
               >
                 <X className="size-3.5" />
-              </button>
+              </Button>
             ) : null}
           </div>
         </div>
       </div>
-
-      {threadsOpen ? (
-        <ThreadsPopover
-          state={state}
-          channel={channel}
-          onClose={() => setThreadsOpen(false)}
-          onOpenThread={(root) => {
-            setThreadsOpen(false)
-            onOpenThread(root)
-          }}
-          onCreate={() => {
-            setThreadsOpen(false)
-            onNewThread()
-          }}
-        />
-      ) : null}
-      {pinsOpen ? <PinnedMessages state={state} channel={channel} onClose={() => setPinsOpen(false)} /> : null}
 
       <div className="flex min-h-0 flex-1">
       {filesOpen ? (

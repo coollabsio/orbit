@@ -1,26 +1,26 @@
 // Port of the chat reference MessageList (grouping, date separators, jump-to-present, enter animation)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router'
 import { MessageSquare, Trash2 } from 'lucide-react'
-import { PinIcon } from '../../../components/ui/icons/PinIcon'
-import { hidePinNotice } from '../../../mock/actions'
-import { ConfirmDeleteModal } from './ChannelModals'
-import type { AppState, Channel, ChatMessage } from '../../../mock/types'
+import { PinIcon } from '@/components/common/icons/PinIcon'
+import { Button } from '@/components/ui/button'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { hidePinNotice } from '@/mock/actions'
+import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import type { AppState, Channel, ChatMessage } from '@/mock/types'
 import {
-  buildMentionTokens,
   formatMessageDate,
   isSameDay,
   jumpToMessage,
   messageMentionsCurrentUser,
-} from '../chatLib'
+} from '@/features/chat/chatLib'
+import { buildMentionTokens } from '@/lib/mentions'
 import { MessageItem } from './MessageItem'
 
 const GROUP_WINDOW_MS = 300_000 // the chat reference: 300 seconds
 
-const menuClass = 'fixed z-[100] min-w-44 rounded-lg border border-border bg-popover p-1.5 shadow-xl'
 const menuItemClass =
-  'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground data-[danger=true]:text-destructive data-[danger=true]:hover:bg-destructive/10 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground data-[danger=true]:[&>svg]:text-destructive'
+  'gap-2 rounded-lg px-2.5 py-1.5 font-medium text-destructive hover:bg-destructive/10 focus:text-destructive data-highlighted:text-destructive [&>svg]:text-destructive focus:*:[svg]:text-destructive'
 
 export function MessageList({
   state,
@@ -159,9 +159,9 @@ export function MessageList({
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
           <div className="pointer-events-auto flex items-center gap-3 rounded-xl border border-border bg-popover/95 px-3 py-2 shadow-xl backdrop-blur-sm">
             <span className="text-xs font-semibold text-foreground">You're Viewing Older Messages</span>
-            <button type="button" className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition hover:brightness-110" onClick={jumpToPresent}>
+            <Button type="button" className="h-auto rounded-lg px-3 py-1.5 text-xs font-bold transition hover:bg-primary hover:brightness-110" onClick={jumpToPresent}>
               Jump To Present
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
@@ -179,56 +179,28 @@ function DateSeparator({ iso }: { iso: string }) {
 
 /** the chat reference PinnedNotice: "X pinned a message to this channel." with a right-click "Delete pin notice". */
 function PinnedNotice({ state, message }: { state: AppState; message: ChatMessage }) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const actor = state.users.find((u) => u.id === message.pinnedBy)
   const actorName = actor?.name ?? 'Someone'
 
-  useEffect(() => {
-    if (!menu) return
-    const close = () => setMenu(null)
-    document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', close)
-    return () => {
-      document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', close)
-    }
-  }, [menu])
-
   return (
     <>
-      <div
-        className="my-1 flex items-center gap-4 px-0.5 py-2 text-sm leading-5 text-muted-foreground max-[899px]:my-0.5 max-[899px]:gap-2 max-[899px]:py-1 max-[899px]:text-[11px] max-[899px]:leading-[15px]"
-        onContextMenu={(e) => {
-          e.preventDefault()
-          setMenu({ x: e.clientX, y: e.clientY })
-        }}
-      >
-        <div className="flex w-10 justify-center [&>svg]:-rotate-[35deg] max-[899px]:w-[30px] max-[899px]:[&>svg]:size-3.5">
-          <PinIcon size={20} />
-        </div>
-        <div className="min-w-0 flex-1 truncate [&>strong]:text-foreground">
-          <strong style={actor ? { color: actor.color } : undefined}>{actorName}</strong> pinned <strong>a message</strong> to this channel.
-        </div>
-      </div>
-      {menu
-        ? createPortal(
-            <div className={menuClass} style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
-              <button
-                className={menuItemClass}
-                data-danger="true"
-                onClick={() => {
-                  setMenu(null)
-                  setConfirmOpen(true)
-                }}
-              >
-                <Trash2 size={16} />
-                Delete pin notice
-              </button>
-            </div>,
-            document.body,
-          )
-        : null}
+      <ContextMenu>
+        <ContextMenuTrigger className="my-1 flex items-center gap-4 px-0.5 py-2 text-sm leading-5 text-muted-foreground select-auto max-[899px]:my-0.5 max-[899px]:gap-2 max-[899px]:py-1 max-[899px]:text-[11px] max-[899px]:leading-[15px]">
+          <div className="flex w-10 justify-center [&>svg]:-rotate-[35deg] max-[899px]:w-[30px] max-[899px]:[&>svg]:size-3.5">
+            <PinIcon size={20} />
+          </div>
+          <div className="min-w-0 flex-1 truncate [&>strong]:text-foreground">
+            <strong style={actor ? { color: actor.color } : undefined}>{actorName}</strong> pinned <strong>a message</strong> to this channel.
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-44 p-1.5">
+          <ContextMenuItem className={menuItemClass} onClick={() => setConfirmOpen(true)}>
+            <Trash2 size={16} />
+            Delete pin notice
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {confirmOpen ? (
         <ConfirmDeleteModal
           title="Delete pin notice?"

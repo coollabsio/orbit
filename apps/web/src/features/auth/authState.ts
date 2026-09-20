@@ -1,4 +1,4 @@
-import type { AuthUserResponse } from '../../api/generated/types.gen'
+import type { AuthUserResponse } from '@/api/generated/types.gen'
 
 type QueryStatus = 'pending' | 'error' | 'success'
 

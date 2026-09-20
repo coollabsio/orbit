@@ -3,12 +3,17 @@
 // With `fullScreen` it fills the chat area instead (route /chat/:channelId/thread/:rootId).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Pencil, X } from 'lucide-react'
-import { ExpandIcon } from '../../../components/ui/icons/ExpandIcon'
-import { FollowIcon } from '../../../components/ui/icons/FollowIcon'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
+import { ExpandIcon } from '@/components/common/icons/ExpandIcon'
+import { FollowIcon } from '@/components/common/icons/FollowIcon'
 import { useNavigate, useSearchParams } from 'react-router'
-import { followThread, renameThread } from '../../../mock/actions'
-import type { AppState, Channel, ChatMessage } from '../../../mock/types'
-import { buildMentionTokens, jumpToMessage, messageMentionsCurrentUser, threadTitleOf } from '../chatLib'
+import { followThread, renameThread } from '@/mock/actions'
+import type { AppState, Channel, ChatMessage } from '@/mock/types'
+import { jumpToMessage, messageMentionsCurrentUser } from '@/features/chat/chatLib'
+import { buildMentionTokens } from '@/lib/mentions'
+import { threadTitleOf } from '@/lib/messagePreview'
 import { MessageInput } from './MessageInput'
 import { MessageItem } from './MessageItem'
 
@@ -16,7 +21,7 @@ const DEFAULT_WIDTH = 468
 const GROUP_WINDOW_MS = 300_000
 
 const threadIconBtn =
-  'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:hover:bg-primary/20'
+  'rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:hover:bg-primary/20 dark:data-[active=true]:hover:bg-primary/20'
 
 export function ThreadPanel({
   state,
@@ -105,9 +110,9 @@ export function ThreadPanel({
       <div className="flex h-[47px] shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
           {editingTitle ? (
-            <input
+            <Input
               autoFocus
-              className="h-8 min-w-0 flex-1 rounded-md border border-input bg-muted/40 px-2 text-sm font-semibold text-foreground focus:border-primary focus:outline-none"
+              className="h-8 w-auto min-w-0 flex-1 rounded-md border border-input bg-muted/40 px-2 py-0 text-sm font-semibold text-foreground focus-visible:border-primary focus-visible:ring-0 md:text-sm dark:bg-muted/40"
               value={titleDraft}
               aria-label="Thread name"
               onChange={(e) => setTitleDraft(e.target.value)}
@@ -127,8 +132,10 @@ export function ThreadPanel({
           )}
         </div>
         <div className="ml-2 flex shrink-0 items-center gap-1">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             className={threadIconBtn}
             data-active={root.threadFollowed ? 'true' : undefined}
             title={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
@@ -136,24 +143,26 @@ export function ThreadPanel({
             onClick={() => followThread(root.id, !root.threadFollowed)}
           >
             <FollowIcon size={16} />
-          </button>
+          </Button>
           {!fullScreen ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               className={threadIconBtn}
               title="Open full screen"
               aria-label="Open full screen"
               onClick={() => navigate(`/chat/${channel.id}/thread/${root.id}`)}
             >
               <ExpandIcon size={16} />
-            </button>
+            </Button>
           ) : null}
-          <button type="button" className={threadIconBtn} title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
+          <Button type="button" variant="ghost" size="icon-sm" className={threadIconBtn} title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
             <Pencil size={16} />
-          </button>
-          <button type="button" className={threadIconBtn} title="Close thread" aria-label="Close thread" onClick={onClose}>
+          </Button>
+          <Button type="button" variant="ghost" size="icon-sm" className={threadIconBtn} title="Close thread" aria-label="Close thread" onClick={onClose}>
             <X size={16} />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -169,7 +178,7 @@ export function ThreadPanel({
             hideThreadPreview
           />
         ) : null}
-        {shouldRenderRoot && replies.length > 0 ? <div className="my-2 h-px bg-border" /> : null}
+        {shouldRenderRoot && replies.length > 0 ? <Separator className="my-2" /> : null}
         {replies.map((reply, index) => {
           const previous = index > 0 ? replies[index - 1] : null
           const compact =

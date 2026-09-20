@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { SessionRecord } from '../../../api/generated/types.gen'
+import type { SessionRecord } from '@/api/generated/types.gen'
 import { sessionView } from './sessions'
 
 test('session records identify the browser session without mock device data', () => {

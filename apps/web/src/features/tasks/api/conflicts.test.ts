@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ApiProblem } from '../../../api/problem'
+import { ApiProblem } from '@/api/problem'
 import { isTaskVersionConflict } from './conflicts'
 
 test('only stale task versions request an explicit refresh', () => {

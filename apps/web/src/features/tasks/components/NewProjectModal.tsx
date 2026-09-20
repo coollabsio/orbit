@@ -2,11 +2,11 @@ import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Modal } from '../../../components/ui/Modal'
-import { useWorkspace } from '../../workspaces/workspaceContext'
-import type { Project } from '../api/models'
-import { projectDraft } from '../api/projectDraft'
-import { useCreateProject } from '../api/projects'
+import { Modal } from '@/components/common/Modal'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import type { Project } from '@/features/tasks/api/models'
+import { projectDraft } from '@/features/tasks/api/projectDraft'
+import { useCreateProject } from '@/features/tasks/api/projects'
 
 export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: (project: Project) => void }) {
   const { workspace } = useWorkspace()

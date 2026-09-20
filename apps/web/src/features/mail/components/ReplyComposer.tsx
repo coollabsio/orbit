@@ -2,10 +2,12 @@ import type { RefObject } from 'react'
 import { useRef, useState } from 'react'
 import { Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { sendReply } from '../../../mock/actions'
-import type { Attachment } from '../../../mock/types'
-import { clipboardFiles, fileToAttachment } from '../../chat/attachmentLib'
-import { Attachments } from '../../chat/components/Attachments'
+import { Kbd, KbdGroup } from '@/components/ui/kbd'
+import { Textarea } from '@/components/ui/textarea'
+import { sendReply } from '@/mock/actions'
+import type { Attachment } from '@/mock/types'
+import { clipboardFiles, fileToAttachment } from '@/lib/attachmentLib'
+import { Attachments } from '@/components/common/Attachments'
 
 interface ReplyComposerProps {
   threadId: string
@@ -54,9 +56,9 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
       }}
     >
       <div className="text-xs font-medium text-muted-foreground">Reply to {replyToName}</div>
-      <textarea
+      <Textarea
         ref={textareaRef}
-        className="block min-h-24 w-full resize-y border-none bg-transparent py-2.5 text-[13px] leading-[1.5] text-foreground outline-none placeholder:text-muted-foreground focus-visible:outline-none"
+        className="block field-sizing-fixed min-h-24 w-full resize-y rounded-none border-0 bg-transparent px-0 py-2.5 text-[13px] leading-[1.5] text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:outline-none md:text-[13px] dark:bg-transparent"
         placeholder="Write a reply…"
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -95,7 +97,13 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
         >
           <Paperclip className="size-4" />
         </Button>
-        <span className="text-xs text-muted-foreground/70">⌘⏎ to send</span>
+        <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
+          <KbdGroup>
+            <Kbd>⌘</Kbd>
+            <Kbd>⏎</Kbd>
+          </KbdGroup>
+          to send
+        </span>
         <Button
           type="button"
           variant="ghost"

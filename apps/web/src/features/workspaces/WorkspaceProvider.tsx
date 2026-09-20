@@ -1,10 +1,10 @@
 import { useEffect, useMemo, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import type { WorkspaceRecord } from '../../api/generated/types.gen'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { useWorkspaces } from './api'
 import { selectedWorkspaceId, switchWorkspaceHref } from './navigation'
 import { WorkspaceContext } from './workspaceContext'
-import { LoadingScreen } from '../../components/ui/LoadingScreen'
+import { LoadingScreen } from '@/components/common/LoadingScreen'
 const preferenceKey = 'orbit:selected_workspace'
 const emptyWorkspaces: WorkspaceRecord[] = []
 

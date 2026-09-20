@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { User } from '../tasks/api/models'
+import type { User } from '@/features/workspaces/models'
 import { INVITABLE_ROLES, canManageMember, canTransferOwnership } from './memberPermissions'
 
 const member = (id: string, role: User['role']): User => ({

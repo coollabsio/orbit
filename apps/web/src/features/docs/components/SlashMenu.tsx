@@ -1,7 +1,8 @@
 // the reference editor-style suggestion menu: grouped items, icon tile + title + subtext,
 // selected row highlighted; rendered below the editing block.
 import { useEffect, useRef } from 'react'
-import type { SlashItem } from '../slashItems'
+import { Button } from '@/components/ui/button'
+import type { SlashItem } from '@/features/docs/slashItems'
 
 export function SlashMenu({
   items,
@@ -37,9 +38,10 @@ export function SlashMenu({
                 {item.group}
               </div>
             ) : null}
-            <button
+            <Button
               type="button"
-              className="flex w-full items-center gap-2.5 rounded-[7px] px-2 py-[7px] text-left hover:bg-muted data-[selected=true]:bg-muted"
+              variant="ghost"
+              className="flex h-auto w-full items-center justify-start gap-2.5 rounded-[7px] border-0 px-2 py-[7px] text-left text-[length:inherit] leading-[inherit] font-normal whitespace-normal hover:bg-muted data-[selected=true]:bg-muted dark:hover:bg-muted"
               data-selected={index === selectedIndex ? 'true' : undefined}
               // preventDefault keeps focus in the textarea (the reference editor does the same)
               onMouseDown={(e) => {
@@ -55,7 +57,7 @@ export function SlashMenu({
                 <span className="text-[13px] font-medium text-foreground">{item.title}</span>
                 <span className="text-[11px] text-muted-foreground/70">{item.subtext}</span>
               </span>
-            </button>
+            </Button>
           </div>
         )
       })}

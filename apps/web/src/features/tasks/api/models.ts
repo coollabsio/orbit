@@ -1,4 +1,5 @@
-import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '../../../api/generated/types.gen'
+import type { User } from '@/features/workspaces/models'
+import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
@@ -16,19 +17,6 @@ export interface TaskStatusDef {
   version: number
 }
 
-export interface User {
-  id: string
-  membershipId: string
-  name: string
-  handle: string
-  email: string
-  role: 'Owner' | 'Admin' | 'Member'
-  color: string
-  online: boolean
-  title: string
-  roleIds: string[]
-  version: number
-}
 
 export interface Attachment {
   id: string

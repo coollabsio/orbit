@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 test('Escape closes task detail on its task project', async () => {
-  const source = await Bun.file(new URL('./TasksPage.tsx', import.meta.url)).text()
+  const source = await Bun.file(new URL('./pages/TasksPage.tsx', import.meta.url)).text()
   const effect = source.slice(source.indexOf("if (!taskId) return"), source.indexOf('const creating = useRef'))
 
   expect(effect).toContain("event.key === 'Escape'")
@@ -11,7 +11,7 @@ test('Escape closes task detail on its task project', async () => {
 })
 
 test('task detail URLs omit the project query parameter', async () => {
-  const source = await Bun.file(new URL('./TasksPage.tsx', import.meta.url)).text()
+  const source = await Bun.file(new URL('./pages/TasksPage.tsx', import.meta.url)).text()
 
   expect(source).toContain("detailParams.delete('project')")
   expect(source).toContain("if (taskProjectId) closeParams.set('project', taskProjectId)")

@@ -1,4 +1,4 @@
-import type { Problem } from './generated/types.gen'
+import type { Problem } from '@/api/generated/types.gen'
 
 export type ProblemDocument = Problem
 

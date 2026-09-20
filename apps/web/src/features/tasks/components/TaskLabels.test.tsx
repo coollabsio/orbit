@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
-import type { LabelRecord } from '../../../api/generated/types.gen'
+import type { LabelRecord } from '@/api/generated/types.gen'
 import { TaskLabels } from './TaskLabels'
 
 const originalFetch = globalThis.fetch

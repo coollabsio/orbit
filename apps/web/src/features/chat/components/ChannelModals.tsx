@@ -1,4 +1,4 @@
-// the chat reference modals (Create/Edit Channel, Create/Edit Category, ConfirmDelete) rendered
+// the chat reference modals (Create/Edit Channel, Create/Edit Category) rendered
 // with the app modal shell and shadcn form controls.
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -6,10 +6,11 @@ import { Smile } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { Emoji } from '../../../components/ui/Emoji'
-import { EmojiPicker } from '../../../components/ui/EmojiPicker'
-import { Modal } from '../../../components/ui/Modal'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Emoji } from '@/components/common/Emoji'
+import { EmojiPicker } from '@/components/common/EmojiPicker'
+import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { Modal } from '@/components/common/Modal'
 import {
   createChannel,
   createChatCategory,
@@ -17,8 +18,8 @@ import {
   deleteChatCategory,
   updateChannel,
   updateChatCategory,
-} from '../../../mock/actions'
-import type { Channel, ChatCategory } from '../../../mock/types'
+} from '@/mock/actions'
+import type { Channel, ChatCategory } from '@/mock/types'
 
 export type ChannelModalState =
   | { kind: 'create-channel'; categoryId: string; categoryName: string }
@@ -86,35 +87,43 @@ function slugChannelName(name: string) {
 
 /** Emoji tile that opens the picker panel (replaces the old text input + "Focus input"). */
 function EmojiSelect({ value, onChange, label = 'Emoji' }: { value: string; onChange: (v: string) => void; label?: string }) {
+  const [open, setOpen] = useState(false)
   return (
     <div className="flex flex-col">
       <span className={labelClass}>
         {label} <span className="text-muted-foreground/70">(optional)</span>
       </span>
-      <Dropdown
-        trigger={() => (
-          <button type="button" className="flex size-10 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-muted" aria-label={value.trim() ? `${label}: ${value}` : `Set ${label.toLowerCase()}`}>
-            {value.trim() ? <Emoji value={value} size={20} /> : <Smile className="size-[18px]" />}
-          </button>
-        )}
-      >
-        {(close) => (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-10 border-input bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-muted-foreground dark:bg-background dark:hover:bg-muted"
+              aria-label={value.trim() ? `${label}: ${value}` : `Set ${label.toLowerCase()}`}
+            />
+          }
+        >
+          {value.trim() ? <Emoji value={value} size={20} /> : <Smile className="size-[18px]" />}
+        </PopoverTrigger>
+        <PopoverContent align="start" className="max-h-(--available-height) w-auto overflow-y-auto p-0">
           <EmojiPicker
             onPick={(emoji) => {
               onChange(emoji)
-              close()
+              setOpen(false)
             }}
             onRemove={
               value.trim()
                 ? () => {
                     onChange('')
-                    close()
+                    setOpen(false)
                   }
                 : undefined
             }
           />
-        )}
-      </Dropdown>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
@@ -275,44 +284,6 @@ function EditCategoryModal({ category, onClose }: { category: ChatCategory; onCl
           </Button>
         </div>
       </form>
-    </Modal>
-  )
-}
-
-export function ConfirmDeleteModal({
-  title,
-  description,
-  onClose,
-  onConfirm,
-  navigateAwayFrom,
-  activeChannelId,
-}: {
-  title: string
-  description: string
-  onClose: () => void
-  onConfirm: () => void
-  navigateAwayFrom?: string | null
-  activeChannelId?: string | null
-}) {
-  const navigate = useNavigate()
-  return (
-    <Modal title={title} onClose={onClose} maxWidth={384}>
-      <p className="text-sm leading-5 text-muted-foreground">{description}</p>
-      <div className={footerClass}>
-        <Button type="button" variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          onClick={() => {
-            onConfirm()
-            if (navigateAwayFrom && navigateAwayFrom === activeChannelId) navigate('/chat')
-          }}
-        >
-          Delete
-        </Button>
-      </div>
     </Modal>
   )
 }

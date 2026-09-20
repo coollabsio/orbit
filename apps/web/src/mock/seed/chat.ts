@@ -1,5 +1,5 @@
-import { ago } from '../../lib/format'
-import type { Attachment, Channel, ChatCategory, ChatMessage, DirectMessage } from '../types'
+import { ago } from '@/lib/format'
+import type { Attachment, Channel, ChatCategory, ChatMessage, DirectMessage } from '@/mock/types'
 
 export const chatCategories: ChatCategory[] = [
   { id: 'cc_general', name: 'General' },

@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { createMailFolder, moveThread } from '../../../mock/actions'
-import type { MailFolder, MailThread } from '../../../mock/types'
-import { FOLDER_ICONS, folderUnreadCount } from '../mailLib'
+import { createMailFolder, moveThread } from '@/mock/actions'
+import type { MailFolder, MailThread } from '@/mock/types'
+import { FOLDER_ICONS, folderUnreadCount } from '@/features/mail/mailLib'
 
 interface FolderRailProps {
   folders: MailFolder[]
@@ -36,9 +37,11 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
     // "Starred" is virtual (filters on the star flag): it cannot hold a dropped thread
     const droppable = folder.id !== 'f_starred'
     return (
-      <button
+      <Button
         key={folder.id}
-        className="relative flex h-8 w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground data-[drop-over]:bg-primary/10 data-[drop-over]:text-primary"
+        type="button"
+        variant="ghost"
+        className="relative flex h-8 w-full min-w-0 items-center justify-start gap-2.5 overflow-hidden rounded-md border-0 px-2.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground dark:hover:bg-sidebar-accent/50 data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground data-[drop-over]:bg-primary/10 data-[drop-over]:text-primary"
         data-active={folder.id === activeFolderId || undefined}
         data-drop-over={dropFolderId === folder.id || undefined}
         onClick={() => navigate(`/mail?folder=${folder.id}`)}
@@ -61,11 +64,11 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
         <Icon className="size-4 shrink-0 opacity-90" />
         <span className="min-w-0 flex-1 truncate text-left">{folder.name}</span>
         {unread > 0 ? (
-          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+          <Badge className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border-0 bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
             {unread}
-          </span>
+          </Badge>
         ) : null}
-      </button>
+      </Button>
     )
   }
 
@@ -96,7 +99,7 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
         {custom.map(row)}
         {adding ? (
           <Input
-            className="mt-0.5 h-7 text-[13px]"
+            className="mt-0.5 h-7 text-[13px] md:text-[13px]"
             autoFocus
             placeholder="Folder name"
             aria-label="New folder name"

@@ -3,10 +3,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
-import type { WorkspaceRecord } from '../../../api/generated/types.gen'
-import { WorkspaceContext } from '../../workspaces/workspaceContext'
-import type { Task, TaskStatusDef, User } from '../api/models'
-import type { StatusGroup } from '../tasksLib'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { User } from '@/features/workspaces/models'
+import type { StatusGroup } from '@/features/tasks/tasksLib'
 import { TaskList } from './TaskList'
 
 const originalFetch = globalThis.fetch
@@ -50,7 +51,7 @@ async function chooseUrgent(view: ReturnType<typeof render>) {
   // fireEvent opens the Base UI trigger (userEvent would double-toggle it); userEvent
   // then clicks the option, waiting until the opened popover is actually actionable.
   fireEvent.click(within(toolbar).getByRole('button', { name: 'Priority' }))
-  await userEvent.click(await view.findByRole('button', { name: /^Urgent/ }, { timeout: 5000 }))
+  await userEvent.click(await view.findByRole('menuitem', { name: /^Urgent/ }, { timeout: 5000 }))
 }
 
 test('bulk toolbar rejects more than 100 selected tasks without a server request', async () => {
@@ -104,7 +105,7 @@ test('bulk toolbar treats an unchanged priority as a local no-op', async () => {
   const toolbar = view.getByRole('toolbar', { name: 'Selected tasks' })
 
   fireEvent.click(within(toolbar).getByRole('button', { name: 'Priority' }))
-  fireEvent.click(view.getByRole('button', { name: /^No priority/ }))
+  fireEvent.click(view.getByRole('menuitem', { name: /^No priority/ }))
 
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(requests).toBe(0)
@@ -137,7 +138,7 @@ test('task list assignee opens the assignment dropdown and updates without openi
   const view = viewFor([assignedTask], () => { opened += 1 }, [user])
 
   fireEvent.click(view.getByRole('button', { name: 'Assignees: Ada Lovelace' }))
-  fireEvent.click(view.getByRole('button', { pressed: true }))
+  fireEvent.click(view.getByRole('menuitemcheckbox', { checked: true }))
 
   expect(view.queryByRole('status')).toBeNull()
   await waitFor(() => expect(body).toEqual({ expected_version: 1, assignee_ids: [] }))

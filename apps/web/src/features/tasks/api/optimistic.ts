@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type { PageTaskRecord, TaskRecord } from '../../../api/generated/types.gen'
-import { queryKeys } from '../../../api/queryKeys'
+import type { PageTaskRecord, TaskRecord } from '@/api/generated/types.gen'
+import { queryKeys } from '@/api/queryKeys'
 
 export interface WorkspaceTaskSnapshot {
   entries: Array<[readonly unknown[], unknown]>

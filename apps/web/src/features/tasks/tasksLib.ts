@@ -1,7 +1,7 @@
-import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from './api/models'
-import type { BulkItem } from '../../api/generated/types.gen'
-import { relativeTime } from '../../lib/format'
-import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from '../../components/workspace/taskMeta'
+import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from '@/features/tasks/api/models'
+import type { BulkItem } from '@/api/generated/types.gen'
+import { relativeTime } from '@/lib/format'
+import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from './taskMeta'
 
 export interface TaskFilterState {
   currentUserId: string

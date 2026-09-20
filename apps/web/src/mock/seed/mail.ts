@@ -1,5 +1,5 @@
-import { ago } from '../../lib/format'
-import type { MailFolder, MailThread } from '../types'
+import { ago } from '@/lib/format'
+import type { MailFolder, MailThread } from '@/mock/types'
 
 export const mailFolders: MailFolder[] = [
   { id: 'f_inbox', name: 'Inbox', icon: 'inbox' },

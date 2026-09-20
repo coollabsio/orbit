@@ -1,10 +1,10 @@
 import { Forward, Reply } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { UserAvatar } from '../../../components/ui/UserAvatar'
-import { fullDate, timeOfDay } from '../../../lib/format'
-import type { MailMessage } from '../../../mock/types'
-import { firstLine } from '../mailLib'
-import { Attachments } from '../../chat/components/Attachments'
+import { UserAvatar } from '@/components/common/UserAvatar'
+import { fullDate, timeOfDay } from '@/lib/format'
+import type { MailMessage } from '@/mock/types'
+import { firstLine } from '@/features/mail/mailLib'
+import { Attachments } from '@/components/common/Attachments'
 
 interface MessageItemProps {
   message: MailMessage

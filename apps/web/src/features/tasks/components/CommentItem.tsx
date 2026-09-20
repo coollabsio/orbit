@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { Copy, Pencil, Trash2 } from 'lucide-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { UserAvatar } from '../../../components/ui/UserAvatar'
-import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
-import { Attachments } from '../../chat/components/Attachments'
-import type { MentionToken } from '../../chat/chatLib'
-import { renderMarkdownBlocks } from '../../chat/markdown'
-import type { TaskComment, TaskViewState } from '../api/models'
-import { useDeleteTaskComment, useUpdateTaskComment } from '../api/tasks'
-import { useWorkspace } from '../../workspaces/workspaceContext'
-import { agoLabel } from '../tasksLib'
+import { Kbd } from '@/components/ui/kbd'
+import { Textarea } from '@/components/ui/textarea'
+import { UserAvatar } from '@/components/common/UserAvatar'
+import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { Attachments } from '@/components/common/Attachments'
+import type { MentionToken } from '@/lib/mentions'
+import { renderMarkdownBlocks } from '@/lib/markdown'
+import type { TaskComment, TaskViewState } from '@/features/tasks/api/models'
+import { useDeleteTaskComment, useUpdateTaskComment } from '@/features/tasks/api/tasks'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { agoLabel } from '@/features/tasks/tasksLib'
 
 interface CommentItemProps {
   state: TaskViewState
@@ -136,9 +138,9 @@ function EditingTextarea({
 
   return (
     <div className="mt-1.5">
-      <textarea
+      <Textarea
         ref={ref}
-        className="min-h-[52px] w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-[13px] leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+        className="inline-block field-sizing-fixed min-h-[52px] w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-[13px] leading-5 md:text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
         value={value}
         rows={2}
         aria-label="Edit comment"
@@ -156,7 +158,7 @@ function EditingTextarea({
         }}
       />
       <div className="mt-1 text-[11px] text-muted-foreground">
-        escape to <b className="text-foreground">cancel</b> · enter to <b className="text-foreground">save</b>
+        <Kbd className="h-4 text-[11px]">escape</Kbd> to <b className="text-foreground">cancel</b> · <Kbd className="h-4 text-[11px]">enter</Kbd> to <b className="text-foreground">save</b>
       </div>
     </div>
   )

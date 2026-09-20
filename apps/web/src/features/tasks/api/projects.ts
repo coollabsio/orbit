@@ -1,7 +1,7 @@
-import { confirmAction } from '../../../components/ui/confirmAction'
+import { confirmAction } from '@/components/common/confirmAction'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '../../../api/client'
-import { fetchAllPages } from '../../../api/pagination'
+import { apiClient } from '@/api/client'
+import { fetchAllPages } from '@/api/pagination'
 import {
   createProject,
   createStatus,
@@ -14,7 +14,7 @@ import {
   restoreProject,
   updateProject,
   updateStatus,
-} from '../../../api/generated/sdk.gen'
+} from '@/api/generated/sdk.gen'
 import type {
   ProjectBody,
   ProjectRecord,
@@ -23,8 +23,8 @@ import type {
   StatusBody,
   StatusRecord,
   StatusUpdateBody,
-} from '../../../api/generated/types.gen'
-import { queryKeys } from '../../../api/queryKeys'
+} from '@/api/generated/types.gen'
+import { queryKeys } from '@/api/queryKeys'
 import type { StatusCategory, TaskStatusDef } from './models'
 import { isTaskVersionConflict } from './conflicts'
 

@@ -1,4 +1,4 @@
-import type { User } from '../tasks/api/models'
+import type { User } from '@/features/workspaces/models'
 
 export const INVITABLE_ROLES = ['Admin', 'Member'] as const
 

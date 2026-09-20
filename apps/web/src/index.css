@@ -119,43 +119,32 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklch, var(--foreground) 18%, transparent) transparent;
+    @apply border-border outline-ring/50 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--foreground)_18%,transparent)_transparent];
   }
 
   *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    @apply size-2;
   }
   *::-webkit-scrollbar-track {
-    background: transparent;
+    @apply bg-transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklch, var(--foreground) 18%, transparent);
-    border: 2px solid transparent;
-    border-radius: 9999px;
-    background-clip: padding-box;
+    @apply rounded-full border-2 border-solid border-transparent bg-foreground/18 bg-clip-padding;
   }
 
   html {
-    @apply font-sans bg-background;
+    @apply bg-background font-sans;
   }
   html.dark {
-    color-scheme: dark;
+    @apply scheme-dark;
   }
   html,
   body,
   #root {
-    height: var(--app-height, 100svh);
-    max-height: var(--app-height, 100svh);
+    @apply h-[var(--app-height,100svh)] max-h-[var(--app-height,100svh)];
   }
   body {
-    @apply bg-background text-foreground antialiased;
-    font-size: 14px;
-    line-height: 1.45;
-    overflow: hidden;
-    text-rendering: optimizeLegibility;
+    @apply overflow-hidden bg-background text-[14px] leading-[1.45] text-foreground antialiased [text-rendering:optimizeLegibility];
   }
 
   h1,
@@ -165,35 +154,32 @@
     @apply font-semibold text-foreground;
   }
   h1 {
-    font-size: 24px;
-    line-height: 28px;
-    letter-spacing: -0.025em;
+    @apply text-[24px] leading-7 tracking-[-0.025em];
   }
   h2 {
-    font-size: 18px;
+    @apply text-[18px];
   }
   h3 {
-    font-size: 15px;
+    @apply text-[15px];
   }
 
   /* bare <button>s (shadcn Button sets its own): keep the old reset */
   button:not(:disabled) {
-    cursor: pointer;
+    @apply cursor-pointer;
   }
 
   ::selection {
-    background: color-mix(in oklch, var(--primary) 30%, transparent);
+    @apply bg-primary/30;
   }
 
   /* prevent iOS zoom on focus for small screens */
-  @media (max-width: 767px) {
-    input,
-    textarea,
-    select {
-      font-size: 16px !important;
-    }
+  input,
+  textarea,
+  select {
+    @apply max-md:text-[16px]!;
   }
 
+  /* no Tailwind utility sets animation-duration/iteration-count on everything */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { cx } from '../../../lib/cx'
-import type { DocBlock, User } from '../../../mock/types'
-import { clipboardFiles } from '../../chat/attachmentLib'
-import { MentionPopover } from '../../chat/components/MentionPopover'
-import { useMentionAutocomplete } from '../../chat/useMentionAutocomplete'
-import { SLASH_ITEMS, filterSuggestionItems, getSlashState, type SlashItem } from '../slashItems'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
+import { cn } from 'cn'
+import type { DocBlock, User } from '@/mock/types'
+import { clipboardFiles } from '@/lib/attachmentLib'
+import { MentionPopover } from '@/components/common/MentionPopover'
+import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
+import { SLASH_ITEMS, filterSuggestionItems, getSlashState, type SlashItem } from '@/features/docs/slashItems'
 import { SlashMenu } from './SlashMenu'
 
 interface BlockEditorProps {
@@ -177,7 +179,7 @@ export function BlockEditor({
 
   return (
     <div
-      className={cx(
+      className={cn(
         'group/block relative mx-[-6px] flex min-w-0 items-start gap-1.5 rounded-md bg-transparent px-1.5 py-0.5 first:mt-0 hover:bg-transparent max-[899px]:py-px',
         block.type === 'h1' && 'mt-[18px] text-[28px] leading-[1.3] font-bold text-foreground max-[899px]:mt-[14px] max-[899px]:text-[21px]',
         block.type === 'h2' && 'mt-[14px] text-[24px] leading-[1.35] font-semibold text-foreground max-[899px]:mt-[11px] max-[899px]:text-[18px]',
@@ -188,19 +190,18 @@ export function BlockEditor({
       )}
     >
       {block.type === 'todo' ? (
-        <input
-          type="checkbox"
-          className="mt-[5px] size-[15px] shrink-0 accent-primary"
+        <Checkbox
+          className="mt-[5px] size-[15px] shrink-0"
           checked={block.checked === true}
           aria-label="Toggle to-do"
-          onChange={onToggleTodo}
+          onCheckedChange={onToggleTodo}
         />
       ) : marker ? (
         <span className="min-w-3 shrink-0 select-none text-right text-muted-foreground">{marker}</span>
       ) : null}
-      <textarea
+      <Textarea
         ref={ref}
-        className="block w-full min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 [font:inherit] text-inherit outline-none placeholder:text-transparent focus:placeholder:text-muted-foreground/70 focus:outline-none max-[767px]:[font-size:inherit]!"
+        className="block field-sizing-fixed min-h-0 w-full min-w-0 flex-1 resize-none overflow-hidden rounded-none border-0 bg-transparent p-0 [font:inherit] text-[length:inherit] leading-[inherit] text-inherit shadow-none outline-none placeholder:text-transparent focus:placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[length:inherit] max-[767px]:[font-size:inherit]! dark:bg-transparent"
         rows={1}
         value={text}
         placeholder={block.type === 'embed' ? 'Paste a link and press Enter…' : block.type === 'divider' ? 'Divider' : "Type '/' for commands…"}

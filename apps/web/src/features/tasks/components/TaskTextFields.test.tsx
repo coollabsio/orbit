@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'bun:test'
 import { fireEvent, render } from '@testing-library/react'
-import type { Task } from '../api/models'
+import type { Task } from '@/features/tasks/api/models'
 import { TaskTextFields } from './TaskTextFields'
 
 function task(version: number, title: string, description: string): Task {

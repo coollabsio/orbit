@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { createApiClient } from '../../api/client'
-import type { MemberRecord } from '../../api/generated/types.gen'
+import { createApiClient } from '@/api/client'
+import type { MemberRecord } from '@/api/generated/types.gen'
 import { memberFromRecord, workspacesQueryOptions } from './api'
 
 test('workspaces are loaded through the generated client boundary', async () => {

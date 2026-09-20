@@ -2,25 +2,33 @@ import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { ArrowLeft, Ellipsis, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { EmojiPicker } from '../../../components/ui/EmojiPicker'
-import { relativeTime } from '../../../lib/format'
-import { createDoc, updateDocContent, updateDocCover, updateDocIcon, updateDocTitle } from '../../../mock/actions'
-import { nextId } from '../../../mock/store'
-import type { Doc, DocBlock, User } from '../../../mock/types'
-import { ancestorsOf, numberedIndex } from '../lib'
-import { fileToAttachment } from '../../chat/attachmentLib'
-import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
-import { descendantsOf } from '../lib'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { EmojiPicker } from '@/components/common/EmojiPicker'
+import { relativeTime } from '@/lib/format'
+import { createDoc, updateDocContent, updateDocCover, updateDocIcon, updateDocTitle } from '@/mock/actions'
+import { nextId } from '@/mock/store'
+import type { Doc, DocBlock, User } from '@/mock/types'
+import { ancestorsOf, numberedIndex } from '@/features/docs/docsLib'
+import { fileToAttachment } from '@/lib/attachmentLib'
+import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { descendantsOf } from '@/features/docs/docsLib'
 import { BlockEditor } from './BlockEditor'
 import { CoverBanner } from './CoverBanner'
 import { MediaBlock } from './MediaBlock'
-import { Emoji } from '../../../components/ui/Emoji'
+import { Emoji } from '@/components/common/Emoji'
 import { CoverSourcePanel } from './CoverSourcePanel'
 import { BlockView } from './BlockView'
-import { buildMentionTokens } from '../../chat/chatLib'
+import { buildMentionTokens } from '@/lib/mentions'
 import { PageBlock } from './PageBlock'
 import { PageLinkDialog } from './PageLinkDialog'
+
+// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
+const menuItemClass =
+  'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm leading-5 text-foreground focus:bg-muted data-[danger=true]:text-destructive data-[danger=true]:focus:bg-muted data-[danger=true]:focus:text-destructive'
+/** The emoji picker panel brings its own chrome, so the popover is just an anchored frame. */
+const emojiPanelClass = 'w-auto gap-0 rounded-xl border border-border bg-popover p-0 text-foreground shadow-xl ring-0'
 
 interface DocEditorProps {
   doc: Doc
@@ -37,6 +45,8 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   // "Add cover" panel for a page without a cover (with a cover, the banner hosts its own panel)
   const [coverPanelOpen, setCoverPanelOpen] = useState(false)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
+  const [addIconOpen, setAddIconOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   // "/image" and "/file": the hidden picker fills this block (or replaces it when empty)
   const mediaInput = useRef<HTMLInputElement>(null)
@@ -220,79 +230,73 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
         <span className="whitespace-nowrap text-xs text-muted-foreground/70 max-[899px]:hidden">
           Updated {relativeTime(doc.updatedAt)} by {updatedBy?.name ?? 'Unknown'}
         </span>
-        <Dropdown
-          align="right"
-          trigger={() => (
-            <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Document options">
-              <Ellipsis className="size-4" />
-            </Button>
-          )}
-        >
-          {(close) => (
-            <button
-              type="button"
-              className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm leading-5 text-destructive hover:bg-muted"
-              onClick={() => {
-                close()
-                setConfirmDelete(true)
-              }}
-            >
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Document options" />
+            }
+          >
+            <Ellipsis className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-32">
+            <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => setConfirmDelete(true)}>
               <Trash2 className="size-[14px]" />
               Delete
-            </button>
-          )}
-        </Dropdown>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
         {doc.cover ? <CoverBanner key={`${doc.id}:${doc.cover}:${doc.coverPos ?? ''}`} doc={doc} /> : null}
         <div className="mx-auto max-w-[760px]">
           {doc.icon ? (
             <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={doc.cover ? 'true' : undefined}>
-              <Dropdown
-                trigger={() => (
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-xl p-0.5 text-[60px] leading-none drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02]"
-                    aria-label="Change icon"
-                  >
-                    <Emoji value={doc.icon ?? ""} size={56} />
-                  </button>
-                )}
-              >
-                {(close) => (
+              <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] dark:hover:bg-foreground/[0.02]"
+                      aria-label="Change icon"
+                    />
+                  }
+                >
+                  <Emoji value={doc.icon ?? ''} size={56} />
+                </PopoverTrigger>
+                <PopoverContent align="start" className={emojiPanelClass}>
                   <EmojiPicker
                     onPick={(emoji) => {
                       updateDocIcon(doc.id, emoji)
-                      close()
+                      setIconPickerOpen(false)
                     }}
                     onRemove={() => {
                       updateDocIcon(doc.id, null)
-                      close()
+                      setIconPickerOpen(false)
                     }}
                   />
-                )}
-              </Dropdown>
+                </PopoverContent>
+              </Popover>
             </div>
           ) : null}
           {!doc.icon || !doc.cover ? (
             <div className="flex gap-2 pt-1.5 pb-2.5">
               {!doc.icon ? (
-                <Dropdown
-                  trigger={() => (
-                    <Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground">
-                      😀 Add icon
-                    </Button>
-                  )}
-                >
-                  {(close) => (
+                <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
+                  <PopoverTrigger
+                    render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground" />}
+                  >
+                    😀 Add icon
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className={emojiPanelClass}>
                     <EmojiPicker
                       onPick={(emoji) => {
                         updateDocIcon(doc.id, emoji)
-                        close()
+                        setAddIconOpen(false)
                       }}
                     />
-                  )}
-                </Dropdown>
+                  </PopoverContent>
+                </Popover>
               ) : null}
               {!doc.cover ? (
                 <Button
@@ -317,8 +321,8 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
               />
             </div>
           ) : null}
-          <input
-            className="mb-5 w-full border-none bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground outline-none placeholder:text-muted-foreground/70 focus:outline-none max-[899px]:mb-3.5 max-[899px]:text-[22px]"
+          <Input
+            className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
             value={title}
             placeholder="Untitled"
             onChange={(e) => setTitle(e.target.value)}
@@ -404,7 +408,13 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
               ),
             )}
           </div>
-          <button type="button" className="block min-h-40 w-full cursor-text" aria-label="Continue writing" onClick={addBlock} />
+          <Button
+            type="button"
+            variant="ghost"
+            className="block h-auto min-h-40 w-full cursor-text rounded-none border-0 p-0 hover:bg-transparent dark:hover:bg-transparent"
+            aria-label="Continue writing"
+            onClick={addBlock}
+          />
           <input
             ref={mediaInput}
             type="file"

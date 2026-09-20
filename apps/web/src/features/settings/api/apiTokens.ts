@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '../../../api/client'
-import { queryKeys } from '../../../api/queryKeys'
-import { createApiToken, listApiTokens, revokeApiToken } from '../../../api/generated/sdk.gen'
-import type { ApiTokenScope } from '../../../api/generated/types.gen'
+import { apiClient } from '@/api/client'
+import { queryKeys } from '@/api/queryKeys'
+import { createApiToken, listApiTokens, revokeApiToken } from '@/api/generated/sdk.gen'
+import type { ApiTokenScope } from '@/api/generated/types.gen'
 
 export function useApiTokens(workspaceId: string, enabled = true) {
   return useQuery({

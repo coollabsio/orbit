@@ -1,5 +1,5 @@
-import { ago } from '../../lib/format'
-import type { Notification } from '../types'
+import { ago } from '@/lib/format'
+import type { Notification } from '@/mock/types'
 
 export const notifications: Notification[] = [
   {

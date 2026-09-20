@@ -1,9 +1,13 @@
 // Port of the chat reference PinnedMessages: header popover with search; each row jumps to the message.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type RefObject } from 'react'
 import { Search } from 'lucide-react'
-import { PinIcon } from '../../../components/ui/icons/PinIcon'
-import type { AppState, Channel } from '../../../mock/types'
-import { authorUser, displayName, extractPreview, jumpToMessage } from '../chatLib'
+import { Button } from '@/components/ui/button'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
+import { PopoverContent } from '@/components/ui/popover'
+import { PinIcon } from '@/components/common/icons/PinIcon'
+import type { AppState, Channel } from '@/mock/types'
+import { authorUser, displayName, jumpToMessage } from '@/features/chat/chatLib'
+import { extractPreview } from '@/lib/messagePreview'
 
 function formatRelative(iso: string): string {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime())
@@ -15,9 +19,33 @@ function formatRelative(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-export function PinnedMessages({ state, channel, onClose }: { state: AppState; channel: Channel; onClose: () => void }) {
+interface PinnedMessagesProps {
+  state: AppState
+  channel: Channel
+  onClose: () => void
+}
+
+/** Popover content for the header Pins button; render inside a `Popover` whose trigger is that button.
+    The panel body mounts only while open, so the search resets on each open. */
+export function PinnedMessages({ anchor, ...props }: PinnedMessagesProps & { anchor: RefObject<HTMLElement | null> }) {
+  const searchRef = useRef<HTMLInputElement>(null)
+  return (
+    <PopoverContent
+      anchor={anchor}
+      side="bottom"
+      align="end"
+      sideOffset={0}
+      alignOffset={16}
+      initialFocus={searchRef}
+      className="flex max-h-[78vh] w-[544px] max-w-[calc(100vw-32px)] flex-col gap-0 rounded-xl border border-border bg-popover p-0 shadow-xl ring-0 max-[899px]:max-h-[calc(100dvh-108px)] max-[899px]:w-[calc(100vw-16px)] max-[899px]:max-w-none max-[899px]:rounded-[10px]"
+    >
+      <PinnedPanel {...props} searchRef={searchRef} />
+    </PopoverContent>
+  )
+}
+
+function PinnedPanel({ state, channel, onClose, searchRef }: PinnedMessagesProps & { searchRef: RefObject<HTMLInputElement | null> }) {
   const [query, setQuery] = useState('')
-  const panelRef = useRef<HTMLDivElement>(null)
 
   const pins = useMemo(
     () =>
@@ -35,37 +63,25 @@ export function PinnedMessages({ state, channel, onClose }: { state: AppState; c
       )
     : pins
 
-  useEffect(() => {
-    function onPointerDown(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose()
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [onClose])
 
   return (
-    <div ref={panelRef} className="absolute top-12 right-4 z-40 flex max-h-[78vh] w-[544px] max-w-[calc(100vw-32px)] flex-col rounded-xl border border-border bg-popover shadow-xl max-[899px]:top-11 max-[899px]:right-2 max-[899px]:max-h-[calc(100dvh-108px)] max-[899px]:w-[calc(100vw-16px)] max-[899px]:max-w-none max-[899px]:rounded-[10px]">
+    <>
       <div className="flex items-center gap-2 border-b border-border p-3 max-[899px]:gap-1.5 max-[899px]:p-2">
         <div className="flex shrink-0 items-center gap-2 text-sm font-bold text-foreground max-[899px]:text-xs [&>svg]:text-muted-foreground">
           <PinIcon size={16} />
           Pins
         </div>
-        <div className="flex h-8 flex-1 items-center gap-2 rounded-lg border border-input bg-muted px-2.5 text-muted-foreground/70 max-[899px]:h-[30px] max-[899px]:gap-1.5 max-[899px]:px-2">
-          <Search className="size-3.5 shrink-0" />
-          <input value={query} placeholder="Search pinned messages" autoFocus onChange={(e) => setQuery(e.target.value)} className="min-w-0 flex-1 border-none bg-transparent text-[13px] text-foreground outline-none max-[899px]:text-xs" />
-        </div>
+        <InputGroup className="h-8 flex-1 bg-muted text-muted-foreground/70 max-[899px]:h-[30px] dark:bg-muted">
+          <InputGroupAddon className="text-muted-foreground/70 max-[899px]:pl-2">
+            <Search className="size-3.5" />
+          </InputGroupAddon>
+          <InputGroupInput ref={searchRef} value={query} placeholder="Search pinned messages" onChange={(e) => setQuery(e.target.value)} className="h-auto pr-2.5 text-[13px] text-foreground md:text-[13px] max-[899px]:pr-2 max-[899px]:text-xs!" />
+        </InputGroup>
       </div>
       <div className="min-h-0 overflow-y-auto p-4 max-[899px]:p-1.5">
         {pins.length === 0 ? (
           <div className="flex flex-col items-center gap-1 p-10 text-center text-muted-foreground/70">
-            <PinIcon size={40} style={{ opacity: 0.3 }} />
+            <PinIcon size={40} className="opacity-30" />
             <h3 className="mt-2 text-[15px] font-semibold text-foreground">No pinned messages</h3>
             <p className="text-[13px] text-muted-foreground">Pinned messages in this channel will appear here.</p>
           </div>
@@ -83,10 +99,11 @@ export function PinnedMessages({ state, channel, onClose }: { state: AppState; c
             {filtered.map((msg) => {
               const author = authorUser(state, msg)
               return (
-                <button
+                <Button
                   key={msg.id}
                   type="button"
-                  className="flex w-full items-center gap-3 rounded-lg border border-border bg-muted/20 p-3 text-left transition-colors hover:bg-muted/50 max-[899px]:gap-2 max-[899px]:p-[7px]"
+                  variant="ghost"
+                  className="flex h-auto w-full items-center justify-start gap-3 rounded-lg border border-border bg-muted/20 bg-clip-border p-3 text-left font-normal whitespace-normal transition-colors hover:bg-muted/50 active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-muted/50 max-[899px]:gap-2 max-[899px]:p-[7px]"
                   onClick={() => {
                     onClose()
                     requestAnimationFrame(() => jumpToMessage(msg.id))
@@ -104,12 +121,12 @@ export function PinnedMessages({ state, channel, onClose }: { state: AppState; c
                       <span className="font-semibold text-primary">{displayName(state, msg)}</span> · {formatRelative(msg.createdAt)}
                     </span>
                   </span>
-                </button>
+                </Button>
               )
             })}
           </div>
         )}
       </div>
-    </div>
+    </>
   )
 }

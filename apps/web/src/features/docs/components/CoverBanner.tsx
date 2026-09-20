@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
-import { updateDocCover } from '../../../mock/actions'
-import type { Doc } from '../../../mock/types'
+import { cn } from 'cn'
+import { Button } from '@/components/ui/button'
+import { updateDocCover } from '@/mock/actions'
+import type { Doc } from '@/mock/types'
 import {
   coverObjectPosition,
   coverSlack,
@@ -10,7 +12,7 @@ import {
   parseCoverPos,
   type CoverPos,
   type Size,
-} from '../coverLib'
+} from '@/features/docs/coverLib'
 import { CoverSourcePanel } from './CoverSourcePanel'
 
 /**
@@ -103,18 +105,19 @@ export function CoverBanner({ doc }: { doc: Doc }) {
       >
         {repositioning ? (
           <>
-            <button type="button" className={COVER_BTN} data-primary="true" onClick={saveFraming}>
+            <Button type="button" className={cn(COVER_BTN, COVER_BTN_PRIMARY)} onClick={saveFraming}>
               Save position
-            </button>
-            <button type="button" className={COVER_BTN} onClick={cancelFraming}>
+            </Button>
+            <Button type="button" variant="outline" className={cn(COVER_BTN, COVER_BTN_OUTLINE)} onClick={cancelFraming}>
               Cancel
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
+            <Button
               type="button"
-              className={COVER_BTN}
+              variant="outline"
+              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
               onClick={() => {
                 setSourceOpen(false)
                 setRepositioning(true)
@@ -122,13 +125,23 @@ export function CoverBanner({ doc }: { doc: Doc }) {
               }}
             >
               Reposition
-            </button>
-            <button type="button" className={COVER_BTN} onClick={() => setSourceOpen((o) => !o)}>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
+              onClick={() => setSourceOpen((o) => !o)}
+            >
               Change
-            </button>
-            <button type="button" className={COVER_BTN} onClick={() => updateDocCover(doc.id, { cover: null, coverPos: null })}>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
+              onClick={() => updateDocCover(doc.id, { cover: null, coverPos: null })}
+            >
               Remove
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -160,5 +173,7 @@ export function CoverBanner({ doc }: { doc: Doc }) {
   )
 }
 
-const COVER_BTN =
-  'min-h-[26px] rounded-md border border-border bg-background/80 px-2.5 py-[3px] text-xs font-medium text-foreground backdrop-blur-[4px] hover:bg-background data-[primary=true]:border-primary data-[primary=true]:bg-primary data-[primary=true]:text-primary-foreground'
+const COVER_BTN = 'h-auto min-h-[26px] rounded-md px-2.5 py-[3px] text-xs font-medium backdrop-blur-[4px]'
+const COVER_BTN_OUTLINE =
+  'border-border bg-background/80 text-foreground hover:bg-background dark:border-border dark:bg-background/80 dark:hover:bg-background'
+const COVER_BTN_PRIMARY = 'border-primary bg-primary text-primary-foreground hover:bg-primary'

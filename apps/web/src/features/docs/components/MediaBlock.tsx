@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Globe, Paperclip, X } from 'lucide-react'
 import { cn } from 'cn'
-import { appNavigate } from '../../../lib/navigateBridge'
-import type { DocBlock } from '../../../mock/types'
-import { formatSize } from '../../chat/attachmentLib'
-import { ImageViewer } from '../../chat/components/ImageViewer'
+import { Button } from '@/components/ui/button'
+import { appNavigate } from '@/lib/navigateBridge'
+import type { DocBlock } from '@/mock/types'
+import { formatSize } from '@/lib/attachmentLib'
+import { ImageViewer } from '@/components/common/ImageViewer'
 
 function domainOf(url: string): string {
   try {
@@ -22,10 +23,12 @@ export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () 
   const [viewerOpen, setViewerOpen] = useState(false)
 
   const remove = (extra?: string) => (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-xs"
       className={cn(
-        'absolute top-1.5 right-1.5 z-[2] inline-flex size-[22px] items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-[opacity,background-color] duration-150 group-hover/media:opacity-100 hover:bg-destructive focus-visible:opacity-100',
+        'absolute top-1.5 right-1.5 z-[2] inline-flex size-[22px] items-center justify-center rounded-full border-0 bg-black/60 text-white opacity-0 transition-[opacity,background-color] duration-150 group-hover/media:opacity-100 hover:bg-destructive hover:text-white focus-visible:opacity-100 dark:hover:bg-destructive',
         extra,
       )}
       aria-label="Remove block"
@@ -37,15 +40,16 @@ export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () 
       }}
     >
       <X className="size-3" />
-    </button>
+    </Button>
   )
 
   if (block.type === 'image' && block.url) {
     return (
       <div className={cn(MEDIA_BASE, 'w-full')}>
-        <button
+        <Button
           type="button"
-          className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border"
+          variant="ghost"
+          className="block h-auto w-full cursor-zoom-in overflow-hidden rounded-lg border border-border p-0 hover:bg-transparent dark:hover:bg-transparent"
           aria-label={`Open image ${block.fileName ?? ''}`}
           onClick={() => setViewerOpen(true)}
         >
@@ -55,7 +59,7 @@ export function MediaBlock({ block, onRemove }: { block: DocBlock; onRemove: () 
             alt={block.fileName ?? ''}
             loading={block.url.startsWith('data:') ? 'eager' : 'lazy'}
           />
-        </button>
+        </Button>
         {remove()}
         {viewerOpen ? (
           <ImageViewer

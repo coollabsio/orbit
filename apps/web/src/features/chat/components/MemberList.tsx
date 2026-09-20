@@ -1,8 +1,9 @@
 // Port of the chat reference MemberList: role groups, Online/Offline sections, presence dots, resizable.
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import type { AppState, User } from '../../../mock/types'
-import { primaryRole } from '../chatLib'
+import { Button } from '@/components/ui/button'
+import type { AppState, User } from '@/mock/types'
+import { primaryRole } from '@/features/chat/chatLib'
 
 const WIDTH_KEY = 'orbit:member_list_width'
 const MIN_WIDTH = 220
@@ -66,16 +67,16 @@ export function MemberList({
   const colorOf = (member: User) => primaryRole(state, member.id)?.color
 
   const content = (
-    <div className="relative flex shrink-0 flex-col border-l border-border bg-background text-foreground" style={isMobile ? { height: '100%', width: 240 } : { width }}>
+    <div className={`relative flex shrink-0 flex-col border-l border-border bg-background text-foreground ${isMobile ? 'h-full w-60' : ''}`} style={isMobile ? undefined : { width }}>
       {!isMobile ? (
         <div className="absolute top-0 bottom-0 -left-px z-20 w-1 cursor-col-resize transition-colors hover:bg-primary/40" onPointerDown={handleResizeStart} title="Resize member list" />
       ) : null}
       {isMobile ? (
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
           <span className="text-sm font-semibold">Members</span>
-          <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" title="Close" onClick={onClose}>
+          <Button type="button" variant="ghost" size="icon-sm" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted" title="Close" onClick={onClose}>
             <X className="size-3.5" />
-          </button>
+          </Button>
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto [overscroll-behavior:none]">
@@ -140,9 +141,9 @@ function MemberItem({ member, online, nameColor }: { member: User; online: boole
         {online ? <span className="absolute -right-0.5 -bottom-0.5 flex size-3 rounded-full border-2 border-background bg-green-500" /> : null}
       </div>
       <span
-        className="min-w-0 truncate text-foreground data-[online=false]:text-muted-foreground"
+        className={`min-w-0 truncate text-foreground data-[online=false]:text-muted-foreground ${nameColor && !online ? 'opacity-65' : ''}`}
         data-online={online ? 'true' : 'false'}
-        style={nameColor ? { color: nameColor, opacity: online ? 1 : 0.65 } : undefined}
+        style={nameColor ? { color: nameColor } : undefined}
       >
         {member.name}
       </span>

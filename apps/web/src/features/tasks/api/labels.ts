@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient, type createApiClient } from '../../../api/client'
-import { createLabel, listLabels } from '../../../api/generated/sdk.gen'
-import type { LabelBody, LabelRecord } from '../../../api/generated/types.gen'
-import { queryKeys } from '../../../api/queryKeys'
+import { apiClient, type createApiClient } from '@/api/client'
+import { createLabel, listLabels } from '@/api/generated/sdk.gen'
+import type { LabelBody, LabelRecord } from '@/api/generated/types.gen'
+import { queryKeys } from '@/api/queryKeys'
 
 type ApiClient = ReturnType<typeof createApiClient>
 

@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { Paperclip, Star } from 'lucide-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { UserAvatar } from '../../../components/ui/UserAvatar'
-import { relativeTime } from '../../../lib/format'
-import { toggleThreadStar } from '../../../mock/actions'
-import type { MailThread } from '../../../mock/types'
-import { threadSender } from '../mailLib'
+import { UserAvatar } from '@/components/common/UserAvatar'
+import { relativeTime } from '@/lib/format'
+import { toggleThreadStar } from '@/mock/actions'
+import type { MailThread } from '@/mock/types'
+import { threadSender } from '@/features/mail/mailLib'
 
 interface ThreadRowProps {
   thread: MailThread
@@ -29,24 +29,8 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
         e.dataTransfer.setData('text/mail-thread-id', thread.id)
         // drag image: a small pill with the subject, not the whole translucent row
         const ghost = document.createElement('div')
-        Object.assign(ghost.style, {
-          position: 'fixed',
-          top: '-100px',
-          left: '-100px',
-          zIndex: '100',
-          maxWidth: '260px',
-          overflow: 'hidden',
-          border: '1px solid var(--border)',
-          borderRadius: '8px',
-          background: 'var(--card)',
-          padding: '6px 10px',
-          fontSize: '12px',
-          fontWeight: '500',
-          color: 'var(--foreground)',
-          whiteSpace: 'nowrap',
-          textOverflow: 'ellipsis',
-          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.16)',
-        })
+        ghost.className =
+          'fixed top-[-100px] left-[-100px] z-100 max-w-[260px] overflow-hidden rounded-[8px] border border-border bg-card px-2.5 py-1.5 text-[12px] font-medium text-ellipsis whitespace-nowrap text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.16)]'
         ghost.textContent = `✉️ ${thread.subject}`
         document.body.appendChild(ghost)
         e.dataTransfer.setDragImage(ghost, 12, 12)

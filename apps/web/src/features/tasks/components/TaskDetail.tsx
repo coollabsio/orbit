@@ -1,28 +1,41 @@
-import { useRef } from 'react'
-import { confirmAction } from '../../../components/ui/confirmAction'
+import { useRef, useState } from 'react'
+import { confirmAction } from '@/components/common/confirmAction'
 import { ArrowLeft, Calendar, Paperclip, SquareCheck, X } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { UserAvatar, UserAvatarStack } from '../../../components/ui/UserAvatar'
-import { DatePicker } from '../../../components/ui/DatePicker'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { EmptyState } from '../../../components/ui/EmptyState'
-import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
-import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../components/workspace/taskMeta'
-import type { Project, Task, TaskViewState } from '../api/models'
-import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '../api/tasks'
-import { useWorkspace } from '../../workspaces/workspaceContext'
-import { Attachments } from '../../chat/components/Attachments'
+import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { DatePicker } from '@/components/common/DatePicker'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { EmptyState } from '@/components/common/EmptyState'
+import { PriorityIcon } from './PriorityIcon'
+import { TaskStatusIcon } from './TaskStatusIcon'
+import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
+import type { Project, Task, TaskViewState } from '@/features/tasks/api/models'
+import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '@/features/tasks/api/tasks'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
 
-const MENU = 'flex min-w-[180px] flex-col gap-px p-1'
+const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
 const OPTION =
-  'group flex w-full min-h-8 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent data-[selected]:bg-accent data-[selected]:font-medium'
+  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[selected]:bg-accent data-[selected]:font-medium`
+/** Multi-select rows keep room on the right for the checked indicator. */
+const CHECK_OPTION =
+  `group min-h-8 cursor-pointer gap-2 py-1.5 pr-8 pl-2 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-checked:bg-accent data-checked:font-medium`
 const HEADING = 'px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase'
-const PILL = 'inline-flex h-[22px] items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
+const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
 const SIDE_PROP = '-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:min-h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs'
 const SIDE_GROUP = 'mb-6 flex flex-col items-start gap-0.5 max-[899px]:mb-0 max-[899px]:min-w-0'
 const SIDE_HEADING = 'mb-1.5 text-xs font-medium text-muted-foreground/70'
@@ -55,6 +68,8 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   const deleteTask = useDeleteTask(workspace.id)
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // the date panel needs to close itself from Clear/Done, so the popover stays controlled
+  const [dueDateOpen, setDueDateOpen] = useState(false)
   const attach = (files: FileList | File[] | null) => {
     if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
@@ -126,103 +141,92 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
           <aside className="col-start-2 w-60 shrink-0 pt-1.5 [grid-row:1/span_2] max-[899px]:col-start-1 max-[899px]:row-auto max-[899px]:grid max-[899px]:w-full max-[899px]:grid-cols-2 max-[899px]:gap-x-3 max-[899px]:gap-y-3.5 max-[899px]:border-y max-[899px]:border-border max-[899px]:py-3.5">
             <div className={`${SIDE_GROUP} max-[899px]:col-span-full max-[899px]:flex-row max-[899px]:flex-wrap max-[899px]:items-center max-[899px]:gap-1`}>
               <h4 className={`${SIDE_HEADING} max-[899px]:w-full`}>Properties</h4>
-              <Dropdown
-                trigger={() => (
-                  <Button variant="ghost" className={SIDE_PROP}>
-                    <TaskStatusIcon status={status} />
-                    {status?.name ?? 'No status'}
-                  </Button>
-                )}
-              >
-                {(close) => (
-                  <div className={MENU}>
-                    {statusOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        className={OPTION}
-                        data-selected={option.id === task.statusId || undefined}
-                        onClick={() => {
-                          updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })
-                          close()
-                        }}
-                      >
-                        <TaskStatusIcon status={option} />
-                        {option.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </Dropdown>
-              <Dropdown
-                trigger={() => (
-                  <Button variant="ghost" className={SIDE_PROP}>
-                    <PriorityIcon priority={task.priority} />
-                    {task.priority === 'none' ? 'Set priority' : PRIORITY_LABEL[task.priority]}
-                  </Button>
-                )}
-              >
-                {(close) => (
-                  <div className={MENU}>
-                    {PRIORITY_ORDER.map((priority) => (
-                      <button
-                        key={priority}
-                        className={OPTION}
-                        data-selected={priority === task.priority || undefined}
-                        onClick={() => {
-                          updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })
-                          close()
-                        }}
-                      >
-                        <PriorityIcon priority={priority} />
-                        {PRIORITY_LABEL[priority]}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </Dropdown>
-              {/* Multi-assignee options toggle individually; active ones show an × at the end. */}
-              <Dropdown
-                trigger={() => (
-                  <Button variant="ghost" className={SIDE_PROP}>
-                    {assignees.length > 0 ? (
-                      <>
-                        <UserAvatarStack users={assignees} size={16} />
-                        <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <UserAvatar user={undefined} size={16} name="—" />
-                        Assign
-                      </>
-                    )}
-                  </Button>
-                )}
-              >
-                {(close) => (
-                  <div className={MENU}>
-                    <div className={HEADING}>Assignees</div>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" className={SIDE_PROP}>
+                      <TaskStatusIcon status={status} />
+                      {status?.name ?? 'No status'}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className={MENU}>
+                  {statusOptions.map((option) => (
+                    <DropdownMenuItem
+                      key={option.id}
+                      className={OPTION}
+                      data-selected={option.id === task.statusId || undefined}
+                      onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
+                    >
+                      <TaskStatusIcon status={option} />
+                      {option.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" className={SIDE_PROP}>
+                      <PriorityIcon priority={task.priority} />
+                      {task.priority === 'none' ? 'Set priority' : PRIORITY_LABEL[task.priority]}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className={MENU}>
+                  {PRIORITY_ORDER.map((priority) => (
+                    <DropdownMenuItem
+                      key={priority}
+                      className={OPTION}
+                      data-selected={priority === task.priority || undefined}
+                      onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })}
+                    >
+                      <PriorityIcon priority={priority} />
+                      {PRIORITY_LABEL[priority]}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* Multi-assignee options toggle individually; the checked indicator marks the active ones. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" className={SIDE_PROP}>
+                      {assignees.length > 0 ? (
+                        <>
+                          <UserAvatarStack users={assignees} size={16} />
+                          <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserAvatar user={undefined} size={16} name="—" />
+                          Assign
+                        </>
+                      )}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className={MENU}>
+                  <DropdownMenuGroup className="flex flex-col gap-px">
+                    <DropdownMenuLabel className={HEADING}>Assignees</DropdownMenuLabel>
                     {users.map((u) => {
                       const active = task.assigneeIds.includes(u.id)
                       return (
-                        <button
+                        <DropdownMenuCheckboxItem
                           key={u.id}
-                          className={OPTION}
-                          data-selected={active || undefined}
-                          aria-pressed={active}
-                          onClick={() => {
-                            updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })
-                            close()
-                          }}
+                          className={CHECK_OPTION}
+                          checked={active}
+                          closeOnClick
+                          onCheckedChange={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
                         >
                           <UserAvatar user={u} size={16} />
                           {u.name}
-                          {active ? <X className="ml-auto size-3.5 shrink-0 text-muted-foreground/70 group-hover:text-foreground" aria-hidden="true" /> : null}
-                        </button>
+                        </DropdownMenuCheckboxItem>
                       )
                     })}
-                  </div>
-                )}
-              </Dropdown>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <div className={SIDE_GROUP}>
@@ -233,10 +237,10 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
             <div className={SIDE_GROUP}>
               <h4 className={SIDE_HEADING}>Project</h4>
               {project ? (
-                <span className={PILL}>
+                <Badge variant="outline" className={PILL}>
                   <span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
                   {project.name}
-                </span>
+                </Badge>
               ) : (
                 <span className="text-xs text-muted-foreground/70">—</span>
               )}
@@ -244,23 +248,22 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
 
             <div className={SIDE_GROUP}>
               <h4 className={SIDE_HEADING}>Due date</h4>
-              <Dropdown
-                className="max-h-none overflow-visible"
-                direction="up"
-                trigger={(open) => (
-                  <button
-                    type="button"
-                    className="-ml-2 inline-flex min-h-8 items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground transition-colors hover:bg-accent aria-expanded:bg-accent"
-                    aria-label="Due date"
-                    aria-expanded={open}
-                    disabled={updateTask.isPending}
-                  >
-                    <Calendar className="size-3.5" aria-hidden="true" />
-                    <span>{dueDateLabel(task.dueAt)}</span>
-                  </button>
-                )}
-              >
-                {(close) => (
+              <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="-ml-2 inline-flex h-auto min-h-8 items-center gap-2 rounded-md border-0 px-2 py-1.5 text-[13px] font-normal text-foreground transition-colors hover:bg-accent aria-expanded:bg-accent dark:hover:bg-accent"
+                      aria-label="Due date"
+                      disabled={updateTask.isPending}
+                    >
+                      <Calendar className="size-3.5" aria-hidden="true" />
+                      <span>{dueDateLabel(task.dueAt)}</span>
+                    </Button>
+                  }
+                />
+                <PopoverContent align="start" side="top" className="w-auto gap-0 p-0">
                   <DatePicker
                     value={task.dueAt}
                     onChange={(dueAt) => updateTask.mutate({
@@ -272,12 +275,12 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                         taskId: task.id,
                         body: { expected_version: task.version, due_at: null },
                       })
-                      close()
+                      setDueDateOpen(false)
                     }}
-                    onDone={close}
+                    onDone={() => setDueDateOpen(false)}
                   />
-                )}
-              </Dropdown>
+                </PopoverContent>
+              </Popover>
             </div>
           </aside>
 

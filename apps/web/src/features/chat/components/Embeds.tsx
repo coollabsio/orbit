@@ -1,8 +1,8 @@
 // Port of the chat reference DiscordEmbeds / DiscordEmbedCard (MessageItem.tsx L616-770):
 // up to 10 cards, 4px accent left border, author/title/description/fields/image/footer + thumbnail.
-import type { Embed } from '../../../mock/types'
-import type { MentionToken } from '../chatLib'
-import { renderMarkdownBlocks, renderMarkdownText } from '../markdown'
+import type { Embed } from '@/mock/types'
+import type { MentionToken } from '@/lib/mentions'
+import { renderMarkdownBlocks, renderMarkdownText } from '@/lib/markdown'
 
 function hasVisibleEmbedContent(embed: Embed): boolean {
   return Boolean(

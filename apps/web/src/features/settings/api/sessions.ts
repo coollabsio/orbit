@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '../../../api/client'
-import { queryKeys } from '../../../api/queryKeys'
-import { listSessions, revokeSession } from '../../../api/generated/sdk.gen'
-import type { SessionRecord } from '../../../api/generated/types.gen'
+import { apiClient } from '@/api/client'
+import { queryKeys } from '@/api/queryKeys'
+import { listSessions, revokeSession } from '@/api/generated/sdk.gen'
+import type { SessionRecord } from '@/api/generated/types.gen'
 
 export interface SessionView extends SessionRecord {
   current: boolean

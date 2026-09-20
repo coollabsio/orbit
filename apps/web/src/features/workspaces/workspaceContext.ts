@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { WorkspaceRecord } from '../../api/generated/types.gen'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
 
 export interface WorkspaceContextValue {
   workspace: WorkspaceRecord

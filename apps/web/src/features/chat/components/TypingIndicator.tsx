@@ -1,6 +1,6 @@
 // Port of the chat reference TypingIndicator (bouncing dots above the composer)
 import { useEffect, useState } from 'react'
-import type { AppState } from '../../../mock/types'
+import type { AppState } from '@/mock/types'
 
 export function TypingIndicator({ state, channelId }: { state: AppState; channelId: string }) {
   const [now, setNow] = useState(() => Date.now())

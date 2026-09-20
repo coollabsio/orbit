@@ -1,11 +1,12 @@
 import { useNavigate } from 'react-router'
 import { Plus, Settings, SquareCheck } from 'lucide-react'
 import { useState } from 'react'
-import type { Project } from '../api/models'
+import type { Project } from '@/features/tasks/api/models'
+import { Button } from '@/components/ui/button'
 import { NewProjectModal } from './NewProjectModal'
 
 const MENU_ITEM =
-  'relative flex h-8 w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground'
+  'relative flex h-8 w-full min-w-0 shrink items-center justify-start gap-2.5 overflow-hidden rounded-md border-0 px-2.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground dark:hover:bg-sidebar-accent/50'
 
 interface ProjectRailProps {
   projects: Project[]
@@ -23,32 +24,35 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
         <span className="truncate text-[13px] font-semibold text-foreground">Projects</span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-        <button className={MENU_ITEM} data-active={projectId === null || undefined} onClick={() => onSelect(null)}>
+        <Button variant="ghost" className={MENU_ITEM} data-active={projectId === null || undefined} onClick={() => onSelect(null)}>
           <SquareCheck className="size-4.5 shrink-0 opacity-90" />
           <span className="min-w-0 flex-1 truncate">All projects</span>
-        </button>
+        </Button>
         {projects.map((project) => (
           <div key={project.id} className="group/row relative flex items-center">
-            <button
+            <Button
+              variant="ghost"
               className={`${MENU_ITEM} flex-1 pr-8`}
               data-active={project.id === projectId || undefined}
               onClick={() => onSelect(project.id)}
             >
               <span className="mx-[5px] size-2 shrink-0 rounded-[2px]" style={{ background: project.color }} />
               <span className="min-w-0 flex-1 truncate">{project.name}</span>
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="absolute right-1.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition hover:bg-accent hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100"
+              variant="ghost"
+              size="icon-xs"
+              className="absolute right-1.5 size-6 rounded-md border-0 text-muted-foreground/70 opacity-0 transition hover:bg-accent hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 dark:hover:bg-accent"
               aria-label={`${project.name} settings`}
               title="Project settings"
               onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}
             >
               <Settings className="size-3.5" />
-            </button>
+            </Button>
           </div>
         ))}
-        <button className={MENU_ITEM} onClick={() => setShowNewProject(true)}><Plus className="size-4.5 shrink-0 opacity-90" /><span className="min-w-0 flex-1 truncate">New project</span></button>
+        <Button variant="ghost" className={MENU_ITEM} onClick={() => setShowNewProject(true)}><Plus className="size-4.5 shrink-0 opacity-90" /><span className="min-w-0 flex-1 truncate">New project</span></Button>
       </div>
       {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { onSelect(project.id); setShowNewProject(false) }} /> : null}
     </section>

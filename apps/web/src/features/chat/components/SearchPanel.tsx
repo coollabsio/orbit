@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Hash, Search } from 'lucide-react'
-import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
-import type { AppState, ChatMessage } from '../../../mock/types'
-import { authorUser, displayName, jumpToMessage, threadTitleOf } from '../chatLib'
+import { Button } from '@/components/ui/button'
+import { ThreadIcon } from '@/components/common/icons/ThreadIcon'
+import type { AppState, ChatMessage } from '@/mock/types'
+import { authorUser, displayName, jumpToMessage } from '@/features/chat/chatLib'
+import { threadTitleOf } from '@/lib/messagePreview'
 
 const WIDTH_KEY = 'orbit:search_panel_width'
 const MIN_WIDTH = 240
@@ -174,7 +176,7 @@ export function SearchPanel({ state, query, onClose }: { state: AppState; query:
                 const name = displayName(state, result)
                 const preview = result.startsThread && !result.threadRootId ? threadTitleOf(result) : result.content
                 return (
-                  <button key={result.id} type="button" className="flex w-full items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 p-2.5 text-left transition-colors hover:bg-muted/60" onClick={() => openResult(result)}>
+                  <Button key={result.id} type="button" variant="ghost" className="flex h-auto w-full items-start justify-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 bg-clip-border p-2.5 text-left font-normal whitespace-normal transition-colors hover:bg-muted/60 active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-muted/60" onClick={() => openResult(result)}>
                     <span
                       className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground"
                       style={author ? { background: `color-mix(in srgb, ${author.color} 22%, transparent)`, color: author.color } : undefined}
@@ -188,7 +190,7 @@ export function SearchPanel({ state, query, onClose }: { state: AppState; query:
                       </span>
                       <span className="mt-0.5 line-clamp-3 text-xs leading-5 text-foreground [overflow-wrap:anywhere]">{renderPreviewText(preview)}</span>
                     </span>
-                  </button>
+                  </Button>
                 )
               })}
             </div>

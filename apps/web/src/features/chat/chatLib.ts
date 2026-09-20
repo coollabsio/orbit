@@ -1,6 +1,7 @@
 // Helpers copied from the chat reference (frontend/src/components/chat/MessageItem.tsx
 // and frontend/src/lib/time.ts), adapted from JSON content to plain text.
-import type { AppState, Channel, ChatMessage, Role, User } from '../../mock/types'
+import { isMentionBoundary } from '@/lib/mentions'
+import type { AppState, ChatMessage, Role, User } from '@/mock/types'
 
 /* ---------- time (the chat reference lib/time.ts) ---------- */
 
@@ -53,22 +54,7 @@ export function authorColor(state: AppState, message: ChatMessage): string | und
   return message.authorType === 'user' ? roleColor(state, message.authorId) : undefined
 }
 
-/* ---------- mentions ---------- */
-
-export type MentionToken = { label: string; color: string; kind: 'user' | 'global' | 'channel'; href?: string }
-
-export function buildMentionTokens(users: User[], channels: Channel[] = []): MentionToken[] {
-  return [
-    { label: 'everyone', color: '#dee0fc', kind: 'global' },
-    { label: 'here', color: '#dee0fc', kind: 'global' },
-    ...users.flatMap((user): MentionToken[] => [
-      { label: user.name, color: '#dee0fc', kind: 'user' },
-      { label: user.handle, color: '#dee0fc', kind: 'user' },
-    ]),
-    // "#channel" renders like a mention and navigates to the channel
-    ...channels.map((channel): MentionToken => ({ label: channel.name, color: '#dee0fc', kind: 'channel', href: `/chat/${channel.id}` })),
-  ]
-}
+/* ---------- mentions (generic mention helpers live in @/lib/mentions) ---------- */
 
 export function messageMentionsCurrentUser(message: ChatMessage, me: User | undefined): boolean {
   if (!me) return false
@@ -89,10 +75,6 @@ function mentionsToken(content: string, label: string): boolean {
   return false
 }
 
-export function isMentionBoundary(char: string | undefined): boolean {
-  return !char || /\s|[.,!?;:()[\]{}"'`]/.test(char)
-}
-
 /* ---------- reply jump (the chat reference ReplyReference.scrollToReply) ---------- */
 
 export function jumpToMessage(messageId: string): void {
@@ -103,27 +85,4 @@ export function jumpToMessage(messageId: string): void {
   void target.getBoundingClientRect()
   target.classList.add('reply-jump-highlight')
   window.setTimeout(() => target.classList.remove('reply-jump-highlight'), 1800)
-}
-
-/* ---------- threads (the chat reference extractPreview / thread title resolution) ---------- */
-
-/** Plain one-line preview of a markdown message (the chat reference extractPreview) for thread cards and lists. */
-export function extractPreview(content: string): string {
-  const line = content
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((l) => l.trim())
-    .find((l) => l && !l.startsWith('```'))
-  if (!line) return ''
-  return line
-    .replace(/^#{1,6}\s+/, '')
-    .replace(/^>\s?/, '')
-    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
-    .replace(/\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_|`([^`]+)`/g, (_, a, b, c, d, e) => a ?? b ?? c ?? d ?? e)
-    .replace(/\[([^\]]+)\]\(https?:\/\/[^\s)]+\)/g, '$1')
-}
-
-/** the chat reference thread title resolution: thread_title || plain text of content || "Thread". */
-export function threadTitleOf(message: ChatMessage): string {
-  return message.threadTitle?.trim() || extractPreview(message.content) || 'Thread'
 }

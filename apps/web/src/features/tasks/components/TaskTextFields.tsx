@@ -1,6 +1,9 @@
 import { useState, type ReactNode } from 'react'
-import { clipboardFiles } from '../../chat/attachmentLib'
-import type { Task } from '../api/models'
+import { cn } from 'cn'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { clipboardFiles } from '@/lib/attachmentLib'
+import type { Task } from '@/features/tasks/api/models'
 import { LinkifiedText } from './LinkifiedText'
 
 const TITLE = 'w-full border-none bg-transparent p-0 text-2xl leading-8 font-semibold text-foreground outline-none placeholder:text-muted-foreground max-[899px]:text-xl max-[899px]:leading-[26px]'
@@ -31,8 +34,8 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
   return (
     <>
       {editingTitle ? (
-        <input
-          className={TITLE}
+        <Input
+          className={cn(TITLE, 'h-auto rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-2xl md:max-[899px]:text-xl')}
           value={title}
           placeholder="Task title"
           aria-label="Task title"
@@ -75,8 +78,8 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
         }}
       >
         {editingDescription ? (
-          <textarea
-            className={DESC}
+          <Textarea
+            className={cn(DESC, 'inline-block rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-[13px] md:max-[899px]:text-sm')}
             value={description}
             placeholder="Add description… (paste or drop images and files)"
             aria-label="Description"

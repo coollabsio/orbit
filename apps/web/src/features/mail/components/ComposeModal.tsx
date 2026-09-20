@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Modal } from '../../../components/ui/Modal'
-import { composeMail } from '../../../mock/actions'
+import { Textarea } from '@/components/ui/textarea'
+import { Modal } from '@/components/common/Modal'
+import { composeMail } from '@/mock/actions'
 
 interface ComposeModalProps {
   onClose: () => void
@@ -57,9 +58,9 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
           <Label htmlFor="mail-compose-body" className="mb-1.5 h-4 text-[13px] leading-4 text-muted-foreground">
             Message
           </Label>
-          <textarea
+          <Textarea
             id="mail-compose-body"
-            className="block min-h-20 w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+            className="block field-sizing-fixed min-h-20 resize-y px-3 py-2 text-sm leading-5 text-foreground"
             placeholder="Write your message…"
             value={body}
             onChange={(e) => setBody(e.target.value)}

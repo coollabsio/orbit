@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { queryKeys } from '../../../api/queryKeys'
-import type { PageTaskRecord, TaskRecord } from '../../../api/generated/types.gen'
+import { queryKeys } from '@/api/queryKeys'
+import type { PageTaskRecord, TaskRecord } from '@/api/generated/types.gen'
 import { useBulkTasks, useCreateTaskComment, useTasks, useUploadTaskAttachments } from './tasks'
 
 const originalFetch = globalThis.fetch

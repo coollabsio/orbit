@@ -1,10 +1,10 @@
 import { SquarePen } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
-import { EmptyState } from '../../../components/ui/EmptyState'
-import { setThreadRead } from '../../../mock/actions'
-import type { MailFolder, MailThread } from '../../../mock/types'
-import { FOLDER_ICONS } from '../mailLib'
+import { EmptyState } from '@/components/common/EmptyState'
+import { setThreadRead } from '@/mock/actions'
+import type { MailFolder, MailThread } from '@/mock/types'
+import { FOLDER_ICONS } from '@/features/mail/mailLib'
 import { ThreadRow } from './ThreadRow'
 
 interface ThreadListProps {
@@ -46,14 +46,16 @@ export function ThreadList({ folders, folder, threads, activeThreadId, onCompose
       </div>
       <div className="hidden min-h-10 items-center gap-1.5 overflow-x-auto border-b border-border px-3 py-1 [scrollbar-width:none] max-[899px]:flex">
         {folders.map((f) => (
-          <button
+          <Button
             key={f.id}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[active]:bg-primary/10 data-[active]:text-primary data-[active]:ring-1 data-[active]:ring-primary/25 data-[active]:ring-inset"
+            type="button"
+            variant="ghost"
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border-0 px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground dark:hover:bg-accent data-[active]:bg-primary/10 data-[active]:text-primary data-[active]:ring-1 data-[active]:ring-primary/25 data-[active]:ring-inset"
             data-active={f.id === folder.id || undefined}
             onClick={() => navigate(`/mail?folder=${f.id}`)}
           >
             {f.name}
-          </button>
+          </Button>
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">

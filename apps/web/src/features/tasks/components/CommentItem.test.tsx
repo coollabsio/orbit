@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
-import type { WorkspaceRecord } from '../../../api/generated/types.gen'
-import { WorkspaceContext } from '../../workspaces/workspaceContext'
-import type { TaskComment, TaskViewState, User } from '../api/models'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import type { TaskComment, TaskViewState } from '@/features/tasks/api/models'
+import type { User } from '@/features/workspaces/models'
 import { CommentItem } from './CommentItem'
 
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
@@ -67,6 +68,7 @@ test('edit mode replaces the body with a save/cancel textarea', () => {
 
   fireEvent.click(view.getByRole('button', { name: 'Edit comment' }))
   expect(view.getByLabelText('Edit comment')).toBeTruthy()
-  expect(view.getByText(/escape to/)).toBeTruthy()
+  expect(view.getByText('escape').tagName).toBe('KBD')
+  expect(view.getByText('cancel')).toBeTruthy()
   expect(view.queryByRole('button', { name: 'Copy text' })).toBeNull()
 })

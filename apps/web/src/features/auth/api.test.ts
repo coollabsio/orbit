@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createApiClient } from '../../api/client'
+import { createApiClient } from '@/api/client'
 import { currentUserQueryOptions } from './api'
 
 test('current user reads the generated endpoint and never falls back to mock identity', async () => {

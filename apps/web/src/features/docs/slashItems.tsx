@@ -17,7 +17,7 @@ import {
   Quote,
   type LucideIcon,
 } from 'lucide-react'
-import type { DocBlock } from '../../mock/types'
+import type { DocBlock } from '@/mock/types'
 
 export interface SlashItem {
   title: string

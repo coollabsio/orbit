@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { Archive, Folder, Inbox, Send, Star, StickyNote, Trash2 } from 'lucide-react'
-import type { MailFolder, MailThread } from '../../mock/types'
+import type { MailFolder, MailThread } from '@/mock/types'
 
 export const DEFAULT_FOLDER_ID = 'f_inbox'
 export const STARRED_FOLDER_ID = 'f_starred'

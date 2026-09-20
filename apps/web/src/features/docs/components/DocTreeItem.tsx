@@ -1,9 +1,13 @@
 import { ChevronRight, Ellipsis, FileText, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { Emoji } from '../../../components/ui/Emoji'
-import type { Doc } from '../../../mock/types'
-import { childrenOf } from '../lib'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Emoji } from '@/components/common/Emoji'
+import type { Doc } from '@/mock/types'
+import { childrenOf } from '@/features/docs/docsLib'
+
+// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
+const menuItemClass =
+  'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm leading-5 text-foreground focus:bg-muted data-[danger=true]:text-destructive data-[danger=true]:focus:bg-muted data-[danger=true]:focus:text-destructive'
 
 export type DocDropZone = 'before' | 'after' | 'inside'
 
@@ -88,9 +92,11 @@ export function DocTreeItem({
         }}
       >
         {children.length > 0 ? (
-          <button
+          <Button
             type="button"
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-muted hover:text-foreground [&>svg]:transition-transform [&>svg]:duration-[120ms] data-[expanded=true]:[&>svg]:rotate-90"
+            variant="ghost"
+            size="icon-xs"
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md border-0 text-muted-foreground/70 hover:bg-muted hover:text-foreground dark:hover:bg-muted [&>svg]:transition-transform [&>svg]:duration-[120ms] data-[expanded=true]:[&>svg]:rotate-90"
             data-expanded={expanded}
             aria-label={expanded ? 'Collapse' : 'Expand'}
             onClick={(e) => {
@@ -99,7 +105,7 @@ export function DocTreeItem({
             }}
           >
             <ChevronRight className="size-3" />
-          </button>
+          </Button>
         ) : (
           <span className="inline-flex size-5 shrink-0" aria-hidden="true" />
         )}
@@ -121,28 +127,21 @@ export function DocTreeItem({
           >
             <Plus className="size-[13px]" />
           </Button>
-          <Dropdown
-            align="right"
-            trigger={() => (
-              <Button type="button" variant="ghost" size="icon-sm" className="size-[22px] text-muted-foreground/70" aria-label="Page options">
-                <Ellipsis className="size-[13px]" />
-              </Button>
-            )}
-          >
-            {(close) => (
-              <button
-                type="button"
-                className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm leading-5 text-destructive hover:bg-muted"
-                onClick={() => {
-                  close()
-                  onDelete(doc.id)
-                }}
-              >
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button type="button" variant="ghost" size="icon-sm" className="size-[22px] text-muted-foreground/70" aria-label="Page options" />
+              }
+            >
+              <Ellipsis className="size-[13px]" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-auto min-w-32">
+              <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onDelete(doc.id)}>
                 <Trash2 className="size-[14px]" />
                 Delete
-              </button>
-            )}
-          </Dropdown>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
       </div>
       {expanded

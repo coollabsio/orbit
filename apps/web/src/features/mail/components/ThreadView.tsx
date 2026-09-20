@@ -2,14 +2,24 @@ import { useRef, useState } from 'react'
 import { Archive, ArrowLeft, Folder, Mail, Star, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { cn } from 'cn'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { moveThread, setThreadRead, toggleThreadStar } from '../../../mock/actions'
-import type { MailFolder, MailThread } from '../../../mock/types'
-import { FOLDER_ICONS, threadSender } from '../mailLib'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { moveThread, setThreadRead, toggleThreadStar } from '@/mock/actions'
+import type { MailFolder, MailThread } from '@/mock/types'
+import { FOLDER_ICONS, threadSender } from '@/features/mail/mailLib'
 import { MessageItem } from './MessageItem'
 import { ReplyComposer } from './ReplyComposer'
 import { ComposeModal } from './ComposeModal'
+
+const moveItemClass = 'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm text-foreground focus:bg-accent focus:text-foreground'
 
 interface ThreadViewProps {
   thread: MailThread
@@ -72,41 +82,31 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
         >
           <Mail className="size-4" />
         </Button>
-        <Dropdown
-          align="right"
-          trigger={() => (
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Move conversation">
-              <Folder className="size-4" />
-            </Button>
-          )}
-        >
-          {(close) => (
-            <div className="p-1">
-              <span className="block px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Move conversation" />}
+          >
+            <Folder className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-32">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase">
                 Move to
-              </span>
+              </DropdownMenuLabel>
               {folders
                 .filter((candidate) => candidate.id !== 'f_starred' && candidate.id !== thread.folderId)
                 .map((candidate) => {
                   const Icon = FOLDER_ICONS[candidate.icon]
                   return (
-                    <button
-                      key={candidate.id}
-                      type="button"
-                      className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent"
-                      onClick={() => {
-                        close()
-                        moveTo(candidate.id)
-                      }}
-                    >
+                    <DropdownMenuItem key={candidate.id} className={moveItemClass} onClick={() => moveTo(candidate.id)}>
                       <Icon className="size-3.5" />
                       {candidate.name}
-                    </button>
+                    </DropdownMenuItem>
                   )
                 })}
-            </div>
-          )}
-        </Dropdown>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -135,9 +135,12 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
           <div className="flex flex-wrap items-center gap-2.5 pb-2">
             <h1 className="m-0 text-xl font-semibold text-foreground">{thread.subject}</h1>
             {folder ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] leading-[14px] font-medium text-muted-foreground">
+              <Badge
+                variant="secondary"
+                className="h-auto gap-1 rounded-full border-0 bg-muted px-2 py-0.5 text-[10px] leading-[14px] font-medium text-muted-foreground"
+              >
                 {folder.name}
-              </span>
+              </Badge>
             ) : null}
           </div>
           {thread.messages.map((message, index) => {

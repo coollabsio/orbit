@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { Task } from './api/models'
+import type { Task } from '@/features/tasks/api/models'
 import { SORT_OPTIONS, boardDropUpdates, filterTasks, needsExhaustiveTaskList, taskApiSort } from './tasksLib'
 
 function task(id: string, statusId: string, position: number, version: number): Task {

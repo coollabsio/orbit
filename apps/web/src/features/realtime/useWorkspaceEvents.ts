@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { queryKeys } from '../../api/queryKeys'
+import { queryKeys } from '@/api/queryKeys'
 import { parseEvent } from './events'
 
 export function useWorkspaceEvents(workspaceId: string) {
