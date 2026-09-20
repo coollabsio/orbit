@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Add as Plus, Xmark as X } from 'reicon-react'
 import type { LabelRecord } from '@/api/generated/types.gen'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

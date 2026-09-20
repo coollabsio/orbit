@@ -1,6 +1,6 @@
 // Port of the chat reference PinnedMessages: header popover with search; each row jumps to the message.
 import { useMemo, useRef, useState, type RefObject } from 'react'
-import { Search } from 'lucide-react'
+import { SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { PopoverContent } from '@/components/ui/popover'

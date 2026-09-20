@@ -1,17 +1,5 @@
 import { NavLink, useLocation } from 'react-router'
-import {
-  Calendar,
-  Inbox,
-  Home,
-  MessageSquare,
-  MessagesSquare,
-  FileText,
-  Search,
-  Settings,
-  Mail,
-  SquareCheck,
-  Timer,
-} from 'lucide-react'
+import { Calendar, DirectInbox as Inbox, Home2 as Home, Message as MessageSquare, Messages2 as MessagesSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'

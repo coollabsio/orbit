@@ -1,7 +1,7 @@
 // Port of the chat reference ThreadsPopover: header dropdown listing the channel's threads,
 // grouped into Active (activity within 24h) and Inactive, with search and Create.
 import { useMemo, useRef, useState, type RefObject } from 'react'
-import { Search } from 'lucide-react'
+import { SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { PopoverContent } from '@/components/ui/popover'

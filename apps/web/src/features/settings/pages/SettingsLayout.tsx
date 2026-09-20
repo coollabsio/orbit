@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router'
-import { Key, Settings, ShieldCheck, TriangleAlert, Trash2, Users } from 'lucide-react'
+import { Key, Setting2 as Settings, ShieldTick as ShieldCheck, Danger as TriangleAlert, Trash as Trash2, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 

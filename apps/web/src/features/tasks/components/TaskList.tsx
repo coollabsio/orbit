@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, Plus, SquareCheck, X } from 'lucide-react'
+import { ChevronRight, Add as Plus, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

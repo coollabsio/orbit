@@ -1,4 +1,4 @@
-import { Info } from 'lucide-react'
+import { InfoCircle as Info } from 'reicon-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 /** Small info icon with a hover/focus tooltip. */

@@ -1,7 +1,7 @@
 // the chat reference CodeBlock + highlightCode (MessageItem.tsx): fenced code with copy button and
 // hand-rolled JS/Rust token colors.
 import { useState } from 'react'
-import { Copy } from 'lucide-react'
+import { Copy } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 
 /* ---------- code block (the chat reference CodeBlock + highlightCode) ---------- */

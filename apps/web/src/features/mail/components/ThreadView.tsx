@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Archive, ArrowLeft, Folder, Mail, Star, Trash2 } from 'lucide-react'
+import { Archive, ArrowLeft, Folder, Sms as Mail, Star, Trash as Trash2 } from 'reicon-react'
 import { useNavigate } from 'react-router'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'

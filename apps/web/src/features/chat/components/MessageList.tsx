@@ -1,7 +1,7 @@
 // Port of the chat reference MessageList (grouping, date separators, jump-to-present, enter animation)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { MessageSquare, Trash2 } from 'lucide-react'
+import { Message as MessageSquare, Trash as Trash2 } from 'reicon-react'
 import { PinIcon } from '@/components/common/icons/PinIcon'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'

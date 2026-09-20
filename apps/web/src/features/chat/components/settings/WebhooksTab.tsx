@@ -1,7 +1,7 @@
 // Server settings › Webhooks: accordion rows (icon, name, created; expanded: icon upload,
 // name, channel, copy URL, delete).
 import { useState } from 'react'
-import { Check, ChevronRight, Copy, Trash2 } from 'lucide-react'
+import { Check, ChevronRight, Copy, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

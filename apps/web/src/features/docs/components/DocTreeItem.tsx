@@ -1,4 +1,4 @@
-import { ChevronRight, Ellipsis, FileText, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, MoreH as Ellipsis, DocumentText as FileText, Add as Plus, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Emoji } from '@/components/common/Emoji'

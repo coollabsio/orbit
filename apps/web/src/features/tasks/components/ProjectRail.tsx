@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router'
-import { Plus, Settings, SquareCheck } from 'lucide-react'
+import { Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { useState } from 'react'
 import type { Project } from '@/features/tasks/api/models'
 import { Button } from '@/components/ui/button'

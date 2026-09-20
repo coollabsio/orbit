@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { ChevronDown, Menu, Plus, Settings, SquareCheck } from 'lucide-react'
+import { ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -17,6 +17,7 @@ import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { projectSettingsLabel, projectSettingsPath } from '@/features/tasks/api/projectDraft'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
+import type { TaskPriority } from '@/features/tasks/api/models'
 import {
   useCommentAttachments,
   useCreateTask,
@@ -56,6 +57,8 @@ export function TasksPage() {
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
+  const [labelFilter, setLabelFilter] = useState<string | null>(null)
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(null)
   const [searchFilter, setSearchFilter] = useState('')
   const projectFilter = searchParams.get('project')
   const viewFilter = ['mine', 'overdue', 'due_soon', 'current_week'].includes(searchParams.get('view') ?? '')
@@ -66,6 +69,8 @@ export function TasksPage() {
     project_id: projectFilter ?? undefined,
     status_id: statusFilter ? apiStatus : undefined,
     assignee_id: assigneeFilter ?? undefined,
+    label_id: labelFilter ?? undefined,
+    priority: priorityFilter ?? undefined,
     view: viewFilter,
     ...taskApiSort(sort),
     limit: 50,
@@ -168,6 +173,8 @@ export function TasksPage() {
     projectId: projectFilter,
     statusKey: statusFilter,
     assigneeId: assigneeFilter,
+    labelId: labelFilter,
+    priority: priorityFilter,
     statuses: statusesQuery.data,
     search: searchFilter,
   })
@@ -211,7 +218,7 @@ export function TasksPage() {
             </DropdownMenu>
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
-            <TaskFilters users={users} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onSortChange={setSort} onLayoutChange={setLayout} />
+            <TaskFilters users={users} labels={labelsQuery.data ?? []} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} labelId={labelFilter} priority={priorityFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onLabelChange={setLabelFilter} onPriorityChange={setPriorityFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>

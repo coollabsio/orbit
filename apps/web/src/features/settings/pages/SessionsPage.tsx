@@ -1,4 +1,4 @@
-import { Monitor, Smartphone } from 'lucide-react'
+import { Monitor, Mobile as Smartphone } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { relativeTime } from '@/lib/format'

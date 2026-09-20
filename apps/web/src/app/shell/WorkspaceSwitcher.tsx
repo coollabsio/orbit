@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { Plus, ChevronDown } from 'lucide-react'
+import { Add as Plus, ChevronDown } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

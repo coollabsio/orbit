@@ -2,7 +2,7 @@
 // Display (name + color) and Manage Members tabs.
 import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useSearchParams } from 'react-router'
-import { ArrowLeft, Check, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react'
+import { ArrowLeft, Check, Edit as Pencil, Add as Plus, SearchNormal as Search, Trash as Trash2, People as Users, Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

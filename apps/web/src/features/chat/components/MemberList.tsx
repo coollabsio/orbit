@@ -1,6 +1,6 @@
 // Port of the chat reference MemberList: role groups, Online/Offline sections, presence dots, resizable.
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import type { AppState, User } from '@/mock/types'
 import { primaryRole } from '@/features/chat/chatLib'

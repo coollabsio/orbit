@@ -1,15 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import {
-  Inbox,
-  Home,
-  Users,
-  Settings,
-  ShieldCheck,
-  SquareCheck,
-  Trash2,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { DirectInbox as Inbox, Home2 as Home, People as Users, Setting2 as Settings, ShieldTick as ShieldCheck, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
+import type { IconComponent as LucideIcon } from 'reicon-react'
 import {
   Command,
   CommandDialog,

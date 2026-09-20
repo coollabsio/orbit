@@ -10,7 +10,7 @@ import {
 } from "react-day-picker"
 
 import { Button, buttonVariants } from "./button"
-import { ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "lucide-react"
+import { ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown as ChevronDownIcon } from 'reicon-react'
 
 function Calendar({
   className,
@@ -144,7 +144,10 @@ function Calendar({
             />
           )
         },
-        Chevron: ({ className, orientation, ...props }) => {
+        Chevron: (iconProps) => {
+          const { className, orientation, children: _children, ...props } = iconProps as typeof iconProps & {
+            children?: React.ReactNode
+          }
           if (orientation === "left") {
             return (
               <ChevronLeftIcon className={cn("size-4", className)} {...props} />

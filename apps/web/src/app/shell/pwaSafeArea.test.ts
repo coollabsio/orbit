@@ -34,3 +34,14 @@ test('mobile chrome has no outer or dock hairlines', async () => {
   const shell = await Bun.file(new URL('./AppShell.tsx', import.meta.url)).text()
   expect(shell).toMatch(/border-r border-border[^"]*max-\[899px\]:hidden/)
 })
+
+test('mobile drawer stays below portalled workspace and profile menus', async () => {
+  const shell = await Bun.file(new URL('./AppShell.tsx', import.meta.url)).text()
+  const popover = await Bun.file(new URL('../../components/ui/popover.tsx', import.meta.url)).text()
+  const menu = await Bun.file(new URL('../../components/ui/dropdown-menu.tsx', import.meta.url)).text()
+
+  expect(shell).toContain('z-40 bg-black/50')
+  expect(shell).toContain('z-[41] flex w-[min(280px,84vw)]')
+  expect(popover).toContain('isolate z-50')
+  expect(menu).toContain('isolate z-50')
+})

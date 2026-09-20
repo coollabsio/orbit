@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeSlash as EyeOff } from 'reicon-react'
 import { ApiProblem } from '@/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { Field, FieldLabel } from '@/components/ui/field'

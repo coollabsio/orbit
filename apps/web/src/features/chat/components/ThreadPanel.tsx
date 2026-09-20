@@ -2,7 +2,7 @@
 // inline-renamable title, the root message, a separator, grouped replies, and a composer.
 // With `fullScreen` it fills the chat area instead (route /chat/:channelId/thread/:rootId).
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pencil, X } from 'lucide-react'
+import { Edit as Pencil, Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'

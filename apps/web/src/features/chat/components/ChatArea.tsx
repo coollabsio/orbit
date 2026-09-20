@@ -2,7 +2,7 @@
 // search box) over MessageList + TypingIndicator + MessageInput, with file drag & drop.
 import { useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
-import { ArrowLeft, Folder, Hash, Paperclip, Search, Users, X } from 'lucide-react'
+import { ArrowLeft, Folder, Hashtag as Hash, Paperclip2 as Paperclip, SearchNormal as Search, People as Users, Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverTrigger } from '@/components/ui/popover'

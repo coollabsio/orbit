@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Copy, Key } from 'lucide-react'
+import { Copy, Key } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -1,7 +1,7 @@
 // Port of the chat reference MessageInput: autosize textarea, @mention autocomplete with keyboard
 // navigation, grouped emoji picker with search, + actions menu, reply bar.
 import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from 'react'
-import { Paperclip, Plus, Reply, SmilePlus, X } from 'lucide-react'
+import { Paperclip2 as Paperclip, Add as Plus, Reply, SmileCircle as SmilePlus, Xmark as X } from 'reicon-react'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { ThreadIcon } from '@/components/common/icons/ThreadIcon'
 import { sendChatMessage } from '@/mock/actions'

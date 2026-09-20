@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Check, ChevronDown, LogOut, Settings, User } from 'lucide-react'
+import { Check, ChevronDown, Logout as LogOut, Setting2 as Settings, User } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import {

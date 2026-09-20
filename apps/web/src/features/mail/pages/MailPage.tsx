@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Mail } from 'lucide-react'
+import { Sms as Mail } from 'reicon-react'
 import { useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '@/components/common/EmptyState'
 import { useAppState } from '@/mock/store'

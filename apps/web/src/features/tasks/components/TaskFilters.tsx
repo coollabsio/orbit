@@ -1,4 +1,4 @@
-import { ArrowUpDown, Columns3, Filter, List, Search, SlidersHorizontal } from 'lucide-react'
+import { Sort as ArrowUpDown, Kanban as Columns3, Filter, List, SearchNormal as Search, Setting4 as SlidersHorizontal } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,7 +12,11 @@ import {
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { TaskStatusIcon } from './TaskStatusIcon'
+import { PriorityIcon } from './PriorityIcon'
 import type { User } from '@/features/workspaces/models'
+import type { LabelRecord } from '@/api/generated/types.gen'
+import type { TaskPriority } from '@/features/tasks/api/models'
+import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import { SORT_OPTIONS, type SortKey, type StatusGroup } from '@/features/tasks/tasksLib'
 
 const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
@@ -28,14 +32,19 @@ const SEARCH_GROUP =
 
 interface TaskFiltersProps {
   users: User[]
+  labels: LabelRecord[]
   groups: StatusGroup[]
   statusKey: string | null
   assigneeId: string | null
+  labelId: string | null
+  priority: TaskPriority | null
   sort: SortKey
   layout: 'list' | 'board'
   search: string
   onStatusChange: (key: string | null) => void
   onAssigneeChange: (assigneeId: string | null) => void
+  onLabelChange: (labelId: string | null) => void
+  onPriorityChange: (priority: TaskPriority | null) => void
   onSortChange: (sort: SortKey) => void
   onLayoutChange: (layout: 'list' | 'board') => void
   onSearchChange: (search: string) => void
@@ -44,19 +53,24 @@ interface TaskFiltersProps {
 /** Header dropdowns: "Filter" (status + assignee), "Sort" (order inside groups) and "Display" (layout). */
 export function TaskFilters({
   users,
+  labels,
   groups,
   statusKey,
   assigneeId,
+  labelId,
+  priority,
   sort,
   layout,
   onStatusChange,
   onAssigneeChange,
+  onLabelChange,
+  onPriorityChange,
   onSortChange,
   onLayoutChange,
   search,
   onSearchChange,
 }: TaskFiltersProps) {
-  const activeCount = (statusKey ? 1 : 0) + (assigneeId ? 1 : 0)
+  const activeCount = (statusKey ? 1 : 0) + (assigneeId ? 1 : 0) + (labelId ? 1 : 0) + (priority ? 1 : 0)
   const sortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label ?? 'Sort'
 
   return (
@@ -94,6 +108,36 @@ export function TaskFilters({
           </DropdownMenuGroup>
           <DropdownMenuSeparator className={SEP} />
           <DropdownMenuGroup className="flex flex-col gap-px">
+            <DropdownMenuLabel className={HEADING}>Label</DropdownMenuLabel>
+            {labels.map((label) => (
+              <DropdownMenuItem
+                key={label.id}
+                className={OPTION}
+                data-selected={label.id === labelId || undefined}
+                onClick={() => onLabelChange(label.id === labelId ? null : label.id)}
+              >
+                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: label.color }} />
+                {label.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator className={SEP} />
+          <DropdownMenuGroup className="flex flex-col gap-px">
+            <DropdownMenuLabel className={HEADING}>Priority</DropdownMenuLabel>
+            {PRIORITY_ORDER.map((option) => (
+              <DropdownMenuItem
+                key={option}
+                className={OPTION}
+                data-selected={option === priority || undefined}
+                onClick={() => onPriorityChange(option === priority ? null : option)}
+              >
+                <PriorityIcon priority={option} />
+                {PRIORITY_LABEL[option]}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator className={SEP} />
+          <DropdownMenuGroup className="flex flex-col gap-px">
             <DropdownMenuLabel className={HEADING}>Assignee</DropdownMenuLabel>
             {users.map((u) => (
               <DropdownMenuItem
@@ -115,6 +159,8 @@ export function TaskFilters({
                 onClick={() => {
                   onStatusChange(null)
                   onAssigneeChange(null)
+                  onLabelChange(null)
+                  onPriorityChange(null)
                 }}
               >
                 Clear filters

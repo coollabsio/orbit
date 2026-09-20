@@ -1,4 +1,4 @@
-import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from '@/features/tasks/api/models'
+import type { StatusCategory, Task, TaskActivity, TaskComment, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 import type { BulkItem } from '@/api/generated/types.gen'
 import { relativeTime } from '@/lib/format'
 import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from './taskMeta'
@@ -9,6 +9,8 @@ export interface TaskFilterState {
   /** Status group key (see `statusKeyOf`), so "Todo" matches across projects. */
   statusKey: string | null
   assigneeId: string | null
+  labelId?: string | null
+  priority?: TaskPriority | null
   search?: string
   statuses: TaskStatusDef[]
 }
@@ -19,6 +21,8 @@ export function filterTasks(tasks: Task[], f: TaskFilterState): Task[] {
     if (f.projectId && t.projectId !== f.projectId) return false
     if (f.statusKey && keyById.get(t.statusId) !== f.statusKey) return false
     if (f.assigneeId && !t.assigneeIds.includes(f.assigneeId)) return false
+    if (f.labelId && !t.labels.includes(f.labelId)) return false
+    if (f.priority && t.priority !== f.priority) return false
     const search = f.search?.trim().toLowerCase()
     if (search && ![t.title, t.description, t.identifier].some((value) => value.toLowerCase().includes(search))) return false
     return true

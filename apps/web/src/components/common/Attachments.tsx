@@ -1,7 +1,7 @@
 // Port of the chat reference Attachments: image grid (1 / 2 / 3-hero / 4+N) that opens the ImageViewer,
 // plus file cards for non-images (paperclip, name, size, download on hover). Self-contained Tailwind styling.
 import { useState } from 'react'
-import { Download, Paperclip, X } from 'lucide-react'
+import { Download, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import type { Attachment } from '@/mock/types'
 import { formatSize, isImage } from '@/lib/attachmentLib'
 import { ImageViewer } from './ImageViewer'

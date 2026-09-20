@@ -1,4 +1,4 @@
-import { RotateCcw, Trash2 } from 'lucide-react'
+import { Refresh as RotateCcw, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/common/EmptyState'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'

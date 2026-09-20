@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { ArrowLeft, Ellipsis, Trash2 } from 'lucide-react'
+import { ArrowLeft, MoreH as Ellipsis, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'

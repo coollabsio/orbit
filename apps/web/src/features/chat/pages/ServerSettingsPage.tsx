@@ -2,7 +2,7 @@
 // Roles / Webhooks / Emoji tabs; the content column fills the rest.
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { Smile, Users } from 'lucide-react'
+import { SmileCircle as Smile, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { WebhookIcon } from '@/components/common/icons/WebhookIcon'

@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { Hash } from 'lucide-react'
+import { Hashtag as Hash } from 'reicon-react'
 import { useAppState } from '@/mock/store'
 import { relativeTime } from '@/lib/format'
 import { cn } from 'cn'

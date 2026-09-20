@@ -1,6 +1,6 @@
 // Port of the chat reference MessageItem (the chat reference frontend/src/components/chat/MessageItem.tsx)
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
-import { Copy, MoreHorizontal, Pencil, Reply, SmilePlus, Trash2 } from 'lucide-react'
+import { Copy, MoreH as MoreHorizontal, Edit as Pencil, Reply, SmileCircle as SmilePlus, Trash as Trash2 } from 'reicon-react'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { PinIcon } from '@/components/common/icons/PinIcon'
 import { ThreadIcon } from '@/components/common/icons/ThreadIcon'

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MessagesSquare } from 'lucide-react'
+import { Messages2 as MessagesSquare } from 'reicon-react'
 import { useParams } from 'react-router'
 import { EmptyState } from '@/components/common/EmptyState'
 import { markDirectMessageRead } from '@/mock/actions'

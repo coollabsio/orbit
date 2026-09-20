@@ -47,6 +47,10 @@ test('inbox lists assignment notifications and opens the linked task', async () 
   )
 
   expect(await view.findByText('You were assigned a task')).toBeTruthy()
+  let openedSidebar = false
+  window.addEventListener('open-sidebar', () => { openedSidebar = true }, { once: true })
+  fireEvent.click(view.getByRole('button', { name: 'Menu' }))
+  expect(openedSidebar).toBe(true)
   fireEvent.click(view.getByText('You were assigned a task'))
   await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/tasks/task-9'))
 })

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Inbox } from 'lucide-react'
+import { DirectInbox as Inbox, Menu } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -28,22 +28,20 @@ export function InboxPage() {
   })
   const unreadCount = unreadQuery.data?.length ?? items.filter((notification) => !notification.read_at).length
 
-  if (allQuery.isPending) {
-    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><EmptyState icon={Inbox} title="Loading inbox" description="Loading your notifications." /></div>
-  }
-  if (allQuery.isError) {
-    return (
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-        <EmptyState icon={Inbox} title="Inbox unavailable" description="Notifications could not be loaded." />
-        <Button variant="outline" type="button" onClick={() => void allQuery.refetch()}>Retry</Button>
-      </div>
-    )
-  }
-
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
         <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex"
+            aria-label="Menu"
+            onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}
+          >
+            <Menu className="size-[18px]" />
+          </Button>
           <span className="truncate text-[13px] font-semibold text-foreground">Inbox</span>
           {unreadCount > 0 ? <Badge className="h-4 min-w-4 rounded-full border-0 px-1 py-0 text-[10px] font-semibold">{unreadCount}</Badge> : null}
           <span className="flex-1" />
@@ -70,7 +68,14 @@ export function InboxPage() {
           </TabsList>
         </Tabs>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {items.length === 0 ? (
+          {allQuery.isPending ? (
+            <EmptyState icon={Inbox} title="Loading inbox" description="Loading your notifications." />
+          ) : allQuery.isError ? (
+            <div className="flex h-full flex-col items-center justify-center">
+              <EmptyState icon={Inbox} title="Inbox unavailable" description="Notifications could not be loaded." />
+              <Button variant="outline" type="button" onClick={() => void allQuery.refetch()}>Retry</Button>
+            </div>
+          ) : items.length === 0 ? (
             <EmptyState icon={Inbox} title="You're all caught up" description="Assignments and mentions appear here." />
           ) : (
             items.map((notification) => {

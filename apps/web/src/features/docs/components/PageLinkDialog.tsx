@@ -2,7 +2,7 @@
 // Built on the shadcn Command (cmdk): it owns the highlight, arrow-key navigation and Enter.
 // Filtering stays ours (`shouldFilter={false}`) so the substring match is unchanged.
 import { useMemo, useState } from 'react'
-import { FileText } from 'lucide-react'
+import { DocumentText as FileText } from 'reicon-react'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Modal } from '@/components/common/Modal'
 import type { Doc } from '@/mock/types'

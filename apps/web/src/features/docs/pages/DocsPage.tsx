@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router'
-import { FileText } from 'lucide-react'
+import { DocumentText as FileText } from 'reicon-react'
 import { EmptyState } from '@/components/common/EmptyState'
 import { deleteDoc } from '@/mock/actions'
 import { useAppState } from '@/mock/store'

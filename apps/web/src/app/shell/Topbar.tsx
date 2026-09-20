@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Plus, Menu, Moon, Search, Settings, Sun } from 'lucide-react'
+import { Add as Plus, Menu, Moon, SearchNormal as Search, Setting2 as Settings, Sun } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { useTheme } from '@/lib/themeContext'

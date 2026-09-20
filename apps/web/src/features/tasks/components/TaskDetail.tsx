@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowLeft, Calendar, Paperclip, SquareCheck, X } from 'lucide-react'
+import { ArrowLeft, Calendar, Paperclip2 as Paperclip, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'

@@ -1,5 +1,5 @@
-import type { LucideIcon } from 'lucide-react'
-import { Archive, Folder, Inbox, Send, Star, StickyNote, Trash2 } from 'lucide-react'
+import type { IconComponent as LucideIcon } from 'reicon-react'
+import { Archive, Folder, DirectInbox as Inbox, Send2 as Send, Star, Note2 as StickyNote, Trash as Trash2 } from 'reicon-react'
 import type { MailFolder, MailThread } from '@/mock/types'
 
 export const DEFAULT_FOLDER_ID = 'f_inbox'

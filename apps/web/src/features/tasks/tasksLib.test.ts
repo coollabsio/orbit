@@ -63,3 +63,17 @@ test('task search filters title description and identifier entirely in memory', 
   expect(filterTasks([title, description], filters).map(({ id }) => id)).toEqual(['ORB-2'])
   expect(filterTasks([title, description], { ...filters, search: 'orb-1' }).map(({ id }) => id)).toEqual(['ORB-1'])
 })
+
+test('task filters match label and priority', () => {
+  const urgent = task('ORB-1', 'todo', 0, 1)
+  urgent.priority = 'urgent'
+  urgent.labels = ['bug']
+  const low = task('ORB-2', 'todo', 1, 1)
+  low.priority = 'low'
+  low.labels = ['feature']
+  const filters = { currentUserId: 'user-1', projectId: null, statusKey: null, assigneeId: null, statuses: [] }
+
+  expect(filterTasks([urgent, low], { ...filters, labelId: 'bug' }).map(({ id }) => id)).toEqual(['ORB-1'])
+  expect(filterTasks([urgent, low], { ...filters, priority: 'low' }).map(({ id }) => id)).toEqual(['ORB-2'])
+  expect(filterTasks([urgent, low], { ...filters, labelId: 'feature', priority: 'urgent' })).toEqual([])
+})

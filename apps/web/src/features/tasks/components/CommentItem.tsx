@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Pencil, Trash2 } from 'lucide-react'
+import { Copy, Edit as Pencil, Trash as Trash2 } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'

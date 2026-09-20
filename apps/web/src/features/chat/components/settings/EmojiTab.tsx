@@ -1,6 +1,6 @@
 // Chat settings › Emoji: upload custom emojis usable across the whole app as :name:.
 import { useRef, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { createCustomEmoji, deleteCustomEmoji, renameCustomEmoji } from '@/mock/actions'

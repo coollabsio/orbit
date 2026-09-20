@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { ArrowLeft, Check, MoreHorizontal, Pencil, Plus, SquareCheck, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

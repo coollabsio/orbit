@@ -2,7 +2,7 @@
 // workspace-wide message matches grouped by channel / thread; a card click jumps to the message.
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Hash, Search } from 'lucide-react'
+import { Hashtag as Hash, SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { ThreadIcon } from '@/components/common/icons/ThreadIcon'
 import type { AppState, ChatMessage } from '@/mock/types'

@@ -1,22 +1,7 @@
 // Slash-command items — the docs reference workflow (references/the docs reference web/src/components/Editor.tsx):
 // custom "Basic" items first, then the reference editor's default slash-menu items
 // (titles / subtexts / aliases / groups copied from the reference editor's en dictionary).
-import {
-  Code,
-  FileText,
-  Globe,
-  Heading,
-  Image,
-  Link2,
-  List,
-  ListChecks,
-  ListOrdered,
-  Minus,
-  Paperclip,
-  Pilcrow,
-  Quote,
-  type LucideIcon,
-} from 'lucide-react'
+import { Code, DocumentText as FileText, Global as Globe, Text as Heading, Image, Link2, List, ListCheck as ListChecks, OrderedList as ListOrdered, Minus, Paperclip2 as Paperclip, Text as Pilcrow, QuoteUp as Quote, type IconComponent as LucideIcon } from 'reicon-react'
 import type { DocBlock } from '@/mock/types'
 
 export interface SlashItem {

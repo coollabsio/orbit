@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { SquarePen } from 'lucide-react'
+import { Edit as SquarePen } from 'reicon-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/common/UserAvatar'

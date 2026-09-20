@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/common/UserAvatar'

@@ -1,6 +1,6 @@
 // Port of the chat reference ImageViewer: full-screen overlay with filename, zoom %, download, ± / reset / close.
 import { useState, type KeyboardEvent } from 'react'
-import { Download, X } from 'lucide-react'
+import { Download, Xmark as X } from 'reicon-react'
 import type { Attachment } from '@/mock/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'

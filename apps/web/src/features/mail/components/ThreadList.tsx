@@ -1,4 +1,4 @@
-import { SquarePen } from 'lucide-react'
+import { Edit as SquarePen } from 'reicon-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/common/EmptyState'

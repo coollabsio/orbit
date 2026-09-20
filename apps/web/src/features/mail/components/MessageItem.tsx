@@ -1,4 +1,4 @@
-import { Forward, Reply } from 'lucide-react'
+import { Forward, Reply } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { fullDate, timeOfDay } from '@/lib/format'

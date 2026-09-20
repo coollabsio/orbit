@@ -2,7 +2,7 @@
 // with the app modal shell and shadcn form controls.
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Smile } from 'lucide-react'
+import { SmileCircle as Smile } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

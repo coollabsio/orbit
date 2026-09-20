@@ -1,4 +1,4 @@
-import { ArrowRight, FileText, Trash2 } from 'lucide-react'
+import { ArrowRight, DocumentText as FileText, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import type { Doc, DocBlock } from '@/mock/types'
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessagesSquare, Search } from 'lucide-react'
+import { Messages2 as MessagesSquare, SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserAvatar } from '@/components/common/UserAvatar'

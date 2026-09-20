@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { FileText, Plus } from 'lucide-react'
+import { DocumentText as FileText, Add as Plus } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/common/EmptyState'
 import { createDoc, deleteDoc, moveDoc } from '@/mock/actions'

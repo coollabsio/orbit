@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { Outlet } from 'react-router'
-import { PanelLeft } from 'lucide-react'
+import { SidebarLeft as PanelLeft } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -121,8 +121,8 @@ export function AppShell() {
 
       {drawerOpen ? (
         <>
-          <div className="fixed inset-0 z-[80] bg-black/50" onClick={() => setDrawerOpen(false)} />
-          <aside className="fixed top-0 bottom-0 left-0 z-[81] flex w-[min(280px,84vw)] flex-col overflow-hidden border-r border-border bg-sidebar px-3 pt-[env(safe-area-inset-top,0px)] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground duration-200 animate-in fade-in slide-in-from-left-6">
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setDrawerOpen(false)} />
+          <aside className="fixed top-0 bottom-0 left-0 z-[41] flex w-[min(280px,84vw)] flex-col overflow-hidden border-r border-border bg-sidebar px-3 pt-[env(safe-area-inset-top,0px)] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground duration-200 animate-in fade-in slide-in-from-left-6">
             <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
               <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
             </div>

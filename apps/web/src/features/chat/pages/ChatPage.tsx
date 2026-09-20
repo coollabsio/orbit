@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Hash } from 'lucide-react'
+import { Hashtag as Hash } from 'reicon-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '@/components/common/EmptyState'
 import { useAppState } from '@/mock/store'

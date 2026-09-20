@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowRight, Bell, Copy, Plus, Search, Users, X } from 'lucide-react'
+import { ArrowRight, Notification as Bell, Copy, Add as Plus, SearchNormal as Search, People as Users, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Badge } from '@/components/ui/badge'

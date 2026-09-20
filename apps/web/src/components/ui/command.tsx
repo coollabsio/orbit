@@ -15,7 +15,7 @@ import {
   InputGroup,
   InputGroupAddon,
 } from "./input-group"
-import { SearchIcon, CheckIcon } from "lucide-react"
+import { SearchNormal as SearchIcon, Check as CheckIcon } from 'reicon-react'
 
 function Command({
   className,

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Globe, Paperclip, X } from 'lucide-react'
+import { Global as Globe, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { appNavigate } from '@/lib/navigateBridge'

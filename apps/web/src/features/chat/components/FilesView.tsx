@@ -1,7 +1,7 @@
 // Port of the chat reference FilesView: replaces the message area; search + kind filter + sort,
 // Media grid cards and Document rows with download / delete.
 import { useMemo, useState } from 'react'
-import { ArrowLeft, Download, Folder, Paperclip, Search, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, Folder, Paperclip2 as Paperclip, SearchNormal as Search, Trash as Trash2 } from 'reicon-react'
 import { cn } from 'cn'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'

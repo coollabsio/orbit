@@ -2,7 +2,7 @@
 // and hand-rolled mouse drag-and-drop reorder for categories and channels (no DnD library).
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate } from 'react-router'
-import { ChevronDown, FolderPlus, Hash, Pencil, Plus, Settings, Trash2 } from 'lucide-react'
+import { ChevronDown, FolderAdd as FolderPlus, Hashtag as Hash, Edit as Pencil, Add as Plus, Setting2 as Settings, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Paperclip, X } from 'lucide-react'
+import { Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

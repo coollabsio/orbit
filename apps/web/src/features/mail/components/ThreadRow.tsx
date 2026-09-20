@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Paperclip, Star } from 'lucide-react'
+import { Paperclip2 as Paperclip, Star } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/common/UserAvatar'

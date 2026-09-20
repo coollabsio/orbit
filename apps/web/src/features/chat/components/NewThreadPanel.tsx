@@ -1,7 +1,7 @@
 // Port of the chat reference NewThreadPanel: title input above a composer; sending creates the
 // thread-starter root plus the first reply, then opens the thread.
 import { useId, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router'
-import { Home, MessageSquare, MessagesSquare, FileText, Settings, Mail, SquareCheck } from 'lucide-react'
+import { Home2 as Home, Message as MessageSquare, Messages2 as MessagesSquare, DocumentText as FileText, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { mobileDockPaths } from './productNavigation'

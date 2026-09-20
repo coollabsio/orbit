@@ -1,6 +1,6 @@
 import type { RefObject } from 'react'
 import { useRef, useState } from 'react'
-import { Paperclip, X } from 'lucide-react'
+import { Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'

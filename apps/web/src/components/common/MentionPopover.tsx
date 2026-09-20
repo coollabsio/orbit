@@ -1,4 +1,4 @@
-import { Hash, User } from 'lucide-react'
+import { Hashtag as Hash, User } from 'reicon-react'
 import type { MentionSuggestion } from '@/lib/useMentionAutocomplete'
 import { Button } from '@/components/ui/button'
 

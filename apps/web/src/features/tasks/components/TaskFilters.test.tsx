@@ -7,8 +7,9 @@ import { TaskFilters } from './TaskFilters'
 test('task search is accessible and reports changes', async () => {
   function View() {
     const [value, setValue] = useState('')
-    return <TaskFilters users={[]} groups={[]} statusKey={null} assigneeId={null} sort="manual" layout="list"
+    return <TaskFilters users={[]} labels={[]} groups={[]} statusKey={null} assigneeId={null} labelId={null} priority={null} sort="manual" layout="list"
       search={value} onSearchChange={setValue} onStatusChange={() => {}} onAssigneeChange={() => {}}
+      onLabelChange={() => {}} onPriorityChange={() => {}}
       onSortChange={() => {}} onLayoutChange={() => {}} />
   }
   const view = render(<View />)
