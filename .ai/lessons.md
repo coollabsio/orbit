@@ -47,3 +47,28 @@
 
 ## SUPERSEDED (2026-09-19): purple accent
 - The earlier notes in this file that insist on the Coolify PURPLE accent (light purple / dark purple, "use purple", brand-purple gradients) are SUPERSEDED. The app migrated to shadcn/ui (Base UI) + Tailwind v4 with preset `b1YmtCU1y` (style base-nova, baseColor neutral, theme PINK, Noto Sans). Per the user's explicit decision ("preset wins entirely"), the accent is now PINK (`--primary`), Coolify purple is retired, and all hand-written CSS/design tokens are gone (only src/index.css remains). Do NOT reintroduce purple. Theme lives in src/index.css :root/.dark; components use Tailwind theme utilities (bg-primary, text-foreground, bg-sidebar-accent, etc.). Branch: shadcn-tailwind.
+
+## Prefer registry components over hand-maintained wrappers
+- After a shadcn migration, converting raw HTML to Tailwind classes is only half the job: also check whether the registry
+  already has the component we hand-maintain (`shadcn search @shadcn -l 100`). The user had to point this out for the
+  command palette (2026-09-20).
+- Concretely replaced: custom `Dropdown` wrapper → `DropdownMenu`/`Popover`, custom `Listbox` → `Select`,
+  hand-rolled command palette → `Command`/`CommandDialog`, CSS spinner → `Spinner`, ⌘K spans → `Kbd`,
+  icon+input search boxes → `InputGroup`, label+control rows → `Field`.
+- Keep custom only where the primitive fights the interaction: 2-D emoji grid, slash menu that must keep the caret in the
+  editor, @mention list that must not take focus.
+
+## shadcn layout primitives carry `w-full` — override it when replacing content-sized markup
+- The tasks top-bar search stretched across the header after the `InputGroup` migration: `InputGroup`'s base class list contains
+  `w-full`, while the old `<label>` wrapper had no width and sized to `min-w-[180px]` (2026-09-20, user reported).
+- `Input`, `Textarea` and `SelectTrigger` carry `w-full` too. When porting a flex-row control, diff the old wrapper's width
+  classes against the primitive's base and add an explicit `w-auto`/`w-56`/`flex-1` override; `cn()` then drops `w-full`.
+- Guard it with a source-level assertion in the layout tests, since the failure is invisible to tsc and jsdom-style tests.
+
+## Verifying layout without a dev server
+- Chromium for Playwright is installed at `~/.cache/ms-playwright/chromium_headless_shell-1234/...`, but `playwright-core`
+  expects a newer revision, so pass `executablePath` explicitly to `chromium.launch()`.
+- Working recipe: `vite build`, then `page.setContent()` with `<style>` = `dist/assets/*.css` and a small markup reproduction,
+  then `getBoundingClientRect()` on before/after variants.
+- **Build the class string with the real `cn()`** (import it from node_modules). Hand-concatenating base + override classes
+  lets both survive, and the stylesheet order decides the winner, so the probe silently disagrees with the app.
