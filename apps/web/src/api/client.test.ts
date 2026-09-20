@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { CONTRACT_ID, createApiClient } from './client'
-import { login, me, setupComplete, setupStatus } from './generated/sdk.gen'
+import { login, me, setupComplete, setupStatus } from '@/api/generated/sdk.gen'
 
 test('API client sends cookies and the contract identifier', async () => {
   let captured: Request | undefined

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { StatusRecord } from '../../../api/generated/types.gen'
+import type { StatusRecord } from '@/api/generated/types.gen'
 import { statusFromRecord } from './projects'
 
 test('generated status records preserve project, category, order, and version', () => {

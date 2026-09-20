@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient, type createApiClient } from '../../api/client'
-import { queryKeys } from '../../api/queryKeys'
+import { apiClient, type createApiClient } from '@/api/client'
+import { queryKeys } from '@/api/queryKeys'
 import {
   changePassword,
   login,
@@ -11,7 +11,7 @@ import {
   setupComplete,
   setupStatus,
   updateMe,
-} from '../../api/generated/sdk.gen'
+} from '@/api/generated/sdk.gen'
 import type {
   ChangePasswordBody,
   LoginBody,
@@ -19,8 +19,8 @@ import type {
   RecoveryRequestBody,
   SetupBody,
   UpdateMeBody,
-} from '../../api/generated/types.gen'
-import { ApiProblem } from '../../api/problem'
+} from '@/api/generated/types.gen'
+import { ApiProblem } from '@/api/problem'
 
 type ApiClient = ReturnType<typeof createApiClient>
 

@@ -3,9 +3,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
-import type { WorkspaceRecord } from '../../../api/generated/types.gen'
-import { WorkspaceContext } from '../../workspaces/workspaceContext'
-import type { Task, TaskViewState } from '../api/models'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { TaskDetail } from './TaskDetail'
 
 const originalFetch = globalThis.fetch

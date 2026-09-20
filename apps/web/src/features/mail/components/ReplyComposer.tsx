@@ -1,10 +1,13 @@
 import type { RefObject } from 'react'
 import { useRef, useState } from 'react'
-import { Paperclip2, Xmark } from 'reicon-react'
-import { sendReply } from '../../../mock/actions'
-import type { Attachment } from '../../../mock/types'
-import { clipboardFiles, fileToAttachment } from '../../chat/attachmentLib'
-import { Attachments } from '../../chat/components/Attachments'
+import { Paperclip, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Kbd, KbdGroup } from '@/components/ui/kbd'
+import { Textarea } from '@/components/ui/textarea'
+import { sendReply } from '@/mock/actions'
+import type { Attachment } from '@/mock/types'
+import { clipboardFiles, fileToAttachment } from '@/lib/attachmentLib'
+import { Attachments } from '@/components/common/Attachments'
 
 interface ReplyComposerProps {
   threadId: string
@@ -35,7 +38,7 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
 
   return (
     <div
-      className="mail-reply"
+      className="mt-6 border-t border-border pt-5 duration-150 animate-in fade-in slide-in-from-bottom-1 data-[drop-over]:bg-primary/10 data-[drop-over]:ring-1 data-[drop-over]:ring-inset data-[drop-over]:ring-primary/25"
       data-drop-over={dropOver || undefined}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return
@@ -52,10 +55,10 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
         attach(event.dataTransfer.files)
       }}
     >
-      <div className="mail-reply-label">Reply to {replyToName}</div>
-      <textarea
+      <div className="text-xs font-medium text-muted-foreground">Reply to {replyToName}</div>
+      <Textarea
         ref={textareaRef}
-        className="mail-reply-textarea"
+        className="block field-sizing-fixed min-h-24 w-full resize-y rounded-none border-0 bg-transparent px-0 py-2.5 text-[13px] leading-[1.5] text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:outline-none md:text-[13px] dark:bg-transparent"
         placeholder="Write a reply…"
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -79,18 +82,33 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
           onRemove={(id) => setAttachments((current) => current.filter((attachment) => attachment.id !== id))}
         />
       ) : null}
-      <div className="mail-reply-footer">
+      <div className="flex items-center gap-2.5 pt-2">
         <input ref={fileInput} type="file" multiple hidden onChange={(event) => attach(event.target.files)} />
-        <button className="button button-primary" disabled={!canSend} onClick={send}>
+        <Button disabled={!canSend} onClick={send}>
           Send
-        </button>
-        <button type="button" className="icon-button" aria-label="Attach files" onClick={() => fileInput.current?.click()}>
-          <Paperclip2 size={16} />
-        </button>
-        <span className="text-xs text-faint">⌘⏎ to send</span>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="icon-button mail-reply-discard"
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground/70"
+          aria-label="Attach files"
+          onClick={() => fileInput.current?.click()}
+        >
+          <Paperclip className="size-4" />
+        </Button>
+        <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
+          <KbdGroup>
+            <Kbd>⌘</Kbd>
+            <Kbd>⏎</Kbd>
+          </KbdGroup>
+          to send
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="ml-auto text-muted-foreground/70"
           aria-label="Close reply"
           onClick={() => {
             setBody('')
@@ -98,8 +116,8 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
             onClose()
           }}
         >
-          <Xmark size={16} />
-        </button>
+          <X className="size-4" />
+        </Button>
       </div>
     </div>
   )

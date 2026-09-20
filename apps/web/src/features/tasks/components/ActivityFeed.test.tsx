@@ -2,9 +2,9 @@ import { expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import type { WorkspaceRecord } from '../../../api/generated/types.gen'
-import { WorkspaceContext } from '../../workspaces/workspaceContext'
-import type { Task, TaskViewState } from '../api/models'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { ActivityFeed } from './ActivityFeed'
 
 const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }

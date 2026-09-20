@@ -1,14 +1,14 @@
-import { ConfirmationModalHost } from '../../../components/ui/ConfirmationModal'
+import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
-import type { WorkspaceRecord } from '../../../api/generated/types.gen'
-import { WorkspaceSwitcher } from '../../../components/shell/WorkspaceSwitcher'
-import { WorkspaceContext } from '../../workspaces/workspaceContext'
-import type { Task, TaskViewState } from '../api/models'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
+import { WorkspaceSwitcher } from '@/app/shell/WorkspaceSwitcher'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { ProjectRail } from './ProjectRail'
 import { TaskDetail } from './TaskDetail'
 
@@ -109,7 +109,7 @@ test('task deletion retry returns to the task list after success', async () => {
   const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={onBack} />, { wrapper: Wrapper })
 
   const deleteButton = view.getByRole('button', { name: 'Delete' })
-  expect(deleteButton.classList.contains('button-danger')).toBe(true)
+  expect(deleteButton.className).toContain('text-destructive')
   fireEvent.click(deleteButton)
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
   expect(calls).toBe(0)

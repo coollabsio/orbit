@@ -1,9 +1,9 @@
-import { confirmAction } from '../../../components/ui/confirmAction'
+import { confirmAction } from '@/components/common/confirmAction'
 import { keepPreviousData, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
-import { apiClient } from '../../../api/client'
-import type { createApiClient } from '../../../api/client'
-import { fetchAllPages } from '../../../api/pagination'
+import { apiClient } from '@/api/client'
+import type { createApiClient } from '@/api/client'
+import { fetchAllPages } from '@/api/pagination'
 import {
   bulkTasks,
   createAttachmentComment,
@@ -25,7 +25,7 @@ import {
   updateTask,
   uploadCommentAttachments,
   uploadTaskAttachments,
-} from '../../../api/generated/sdk.gen'
+} from '@/api/generated/sdk.gen'
 import type {
   BulkItem,
   CreateTaskBody,
@@ -35,8 +35,8 @@ import type {
   TaskRecord,
   TaskUpdateBody,
   CommentRecord,
-} from '../../../api/generated/types.gen'
-import { queryKeys } from '../../../api/queryKeys'
+} from '@/api/generated/types.gen'
+import { queryKeys } from '@/api/queryKeys'
 import { isTaskVersionConflict } from './conflicts'
 import { commentUploadMode } from './commentUpload'
 import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, type WorkspaceTaskSnapshot } from './optimistic'

@@ -1,5 +1,5 @@
-import { ago } from '../../lib/format'
-import type { Doc, DocBlock } from '../types'
+import { ago } from '@/lib/format'
+import type { Doc, DocBlock } from '@/mock/types'
 
 let b = 0
 

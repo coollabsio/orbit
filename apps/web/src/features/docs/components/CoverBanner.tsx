@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
-import { updateDocCover } from '../../../mock/actions'
-import type { Doc } from '../../../mock/types'
+import { cn } from 'cn'
+import { Button } from '@/components/ui/button'
+import { updateDocCover } from '@/mock/actions'
+import type { Doc } from '@/mock/types'
 import {
   coverObjectPosition,
   coverSlack,
@@ -10,7 +12,7 @@ import {
   parseCoverPos,
   type CoverPos,
   type Size,
-} from '../coverLib'
+} from '@/features/docs/coverLib'
 import { CoverSourcePanel } from './CoverSourcePanel'
 
 /**
@@ -48,7 +50,7 @@ export function CoverBanner({ doc }: { doc: Doc }) {
   return (
     <div
       ref={boxRef}
-      className="doc-cover"
+      className="group/cover relative mx-[-24px] mt-[-32px] mb-6 h-[224px] shrink-0 overflow-hidden data-[repositioning]:cursor-grab data-[repositioning]:touch-none data-[repositioning]:select-none data-[repositioning]:outline-none data-[repositioning]:active:cursor-grabbing"
       data-repositioning={repositioning || undefined}
       tabIndex={repositioning ? 0 : undefined}
       aria-label={repositioning ? 'Drag the image to reposition it (arrow keys to fine-tune)' : undefined}
@@ -87,23 +89,35 @@ export function CoverBanner({ doc }: { doc: Doc }) {
         else if (e.key === 'Escape') cancelFraming()
       }}
     >
-      <img ref={imgRef} src={doc.cover ?? ''} alt="" draggable={false} style={{ objectPosition: coverObjectPosition(pos) }} />
+      <img
+        ref={imgRef}
+        className="pointer-events-none size-full object-cover"
+        src={doc.cover ?? ''}
+        alt=""
+        draggable={false}
+        style={{ objectPosition: coverObjectPosition(pos) }}
+      />
 
-      <div className="doc-cover-actions" data-cover-actions="" data-open={repositioning || sourceOpen || undefined}>
+      <div
+        className="absolute top-2 right-2 z-[5] hidden gap-1 group-hover/cover:flex data-[open]:flex"
+        data-cover-actions=""
+        data-open={repositioning || sourceOpen || undefined}
+      >
         {repositioning ? (
           <>
-            <button type="button" className="doc-cover-btn" data-primary="true" onClick={saveFraming}>
+            <Button type="button" className={cn(COVER_BTN, COVER_BTN_PRIMARY)} onClick={saveFraming}>
               Save position
-            </button>
-            <button type="button" className="doc-cover-btn" onClick={cancelFraming}>
+            </Button>
+            <Button type="button" variant="outline" className={cn(COVER_BTN, COVER_BTN_OUTLINE)} onClick={cancelFraming}>
               Cancel
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
+            <Button
               type="button"
-              className="doc-cover-btn"
+              variant="outline"
+              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
               onClick={() => {
                 setSourceOpen(false)
                 setRepositioning(true)
@@ -111,19 +125,32 @@ export function CoverBanner({ doc }: { doc: Doc }) {
               }}
             >
               Reposition
-            </button>
-            <button type="button" className="doc-cover-btn" onClick={() => setSourceOpen((o) => !o)}>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
+              onClick={() => setSourceOpen((o) => !o)}
+            >
               Change
-            </button>
-            <button type="button" className="doc-cover-btn" onClick={() => updateDocCover(doc.id, { cover: null, coverPos: null })}>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
+              onClick={() => updateDocCover(doc.id, { cover: null, coverPos: null })}
+            >
               Remove
-            </button>
+            </Button>
           </>
         )}
       </div>
 
       {sourceOpen && !repositioning ? (
-        <div className="doc-cover-source" data-cover-actions="">
+        <div
+          className="absolute inset-x-2 top-[44px] z-[6] mx-auto max-w-[420px] rounded-lg border border-border bg-background/95 p-3 shadow-md backdrop-blur-[6px]"
+          data-cover-actions=""
+        >
           <CoverSourcePanel
             onPicked={(url) => {
               setSourceOpen(false)
@@ -136,10 +163,17 @@ export function CoverBanner({ doc }: { doc: Doc }) {
       ) : null}
 
       {repositioning ? (
-        <div className="doc-cover-hint">
-          <span>Drag the image to reposition it (arrow keys to fine-tune)</span>
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+          <span className="rounded-full bg-background/85 px-3 py-1 text-xs text-foreground shadow-md backdrop-blur-[4px]">
+            Drag the image to reposition it (arrow keys to fine-tune)
+          </span>
         </div>
       ) : null}
     </div>
   )
 }
+
+const COVER_BTN = 'h-auto min-h-[26px] rounded-md px-2.5 py-[3px] text-xs font-medium backdrop-blur-[4px]'
+const COVER_BTN_OUTLINE =
+  'border-border bg-background/80 text-foreground hover:bg-background dark:border-border dark:bg-background/80 dark:hover:bg-background'
+const COVER_BTN_PRIMARY = 'border-primary bg-primary text-primary-foreground hover:bg-primary'

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
-import { createApiClient } from '../api/client'
-import { listWorkspaces } from '../api/generated/sdk.gen'
+import { createApiClient } from '@/api/client'
+import { listWorkspaces } from '@/api/generated/sdk.gen'
 import { clearExpiredSession } from './authSession'
 
 test('a 401 from an unrelated request clears the authenticated user and navigates to login', async () => {

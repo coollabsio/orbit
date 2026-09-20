@@ -1,5 +1,5 @@
-import { ago } from '../../lib/format'
-import type { Webhook } from '../types'
+import { ago } from '@/lib/format'
+import type { Webhook } from '@/mock/types'
 
 export const webhooks: Webhook[] = [
   {

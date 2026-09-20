@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import babel from '@rolldown/plugin-babel'
 import openapi from './src/api/generated/openapi.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 const buildRevision = process.env.ORBIT_BUILD_REVISION ?? 'development'
 const sourceHtml = readFileSync(new URL('./index.html', import.meta.url), 'utf8')
@@ -13,8 +15,14 @@ const cspScriptHash = `sha256-${createHash('sha256').update(bootstrapScript).dig
 
 // https://vite.dev/config/
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   plugins: [
     react(),
+    tailwindcss(),
     babel({ presets: [reactCompilerPreset()] }),
     {
       name: 'orbit-build-manifest',

@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { AvatarStack } from '../../../components/ui/Avatar'
-import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import type { Task, TaskStatusDef, User } from '../api/models'
-import type { LabelRecord } from '../../../api/generated/types.gen'
-import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '../api/tasks'
-import { useWorkspace } from '../../workspaces/workspaceContext'
-import { boardDropUpdates, resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '../tasksLib'
+import { Button } from '@/components/ui/button'
+import { UserAvatarStack } from '@/components/common/UserAvatar'
+import { TaskStatusIcon } from './TaskStatusIcon'
+import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { User } from '@/features/workspaces/models'
+import type { LabelRecord } from '@/api/generated/types.gen'
+import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { boardDropUpdates, resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '@/features/tasks/tasksLib'
 import { PriorityPicker } from './PriorityPicker'
 import { LabelPill } from './TaskLabels'
 
@@ -35,7 +37,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
 
   /** Index in the column's card list where the pointer currently is (cards' vertical midpoints). */
   const indexAt = (column: HTMLElement, clientY: number) => {
-    const cards = Array.from(column.querySelectorAll<HTMLElement>('.tasks-board-card:not([data-dragging="true"])'))
+    const cards = Array.from(column.querySelectorAll<HTMLElement>('[data-board-card]:not([data-dragging="true"])'))
     const below = cards.findIndex((card) => {
       const rect = card.getBoundingClientRect()
       return clientY < rect.top + rect.height / 2
@@ -53,7 +55,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
   }
 
   return (
-    <div className="tasks-board" style={{ gridTemplateColumns: `repeat(${groups.length}, 320px)` }}>
+    <div className="grid min-h-full min-w-max gap-3 p-3" style={{ gridTemplateColumns: `repeat(${groups.length}, 320px)` }}>
       {groups.map((group) => {
         const columnTasks = sortTasks(
           tasks.filter((task) => group.statusIds.includes(task.statusId)),
@@ -65,7 +67,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
         return (
           <section
             key={group.key}
-            className="tasks-board-column"
+            className="group/col min-w-0 rounded-md bg-muted/40 transition-shadow data-[drop-over]:ring-1 data-[drop-over]:ring-primary/40 data-[drop-over]:ring-inset"
             data-drop-over={placeholderIndex !== null || undefined}
             onDragOver={(event) => {
               if (!dragging) return
@@ -83,24 +85,25 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
               endDrag()
             }}
           >
-            <header className="tasks-board-column-header">
+            <header className="flex h-[38px] items-center gap-[7px] px-2.5 text-xs font-semibold text-muted-foreground group-data-[drop-over]/col:text-primary">
               <TaskStatusIcon status={group.status} />
               <span>{group.name}</span>
-              <span className="tasks-board-count">{columnTasks.length}</span>
+              <span className="ml-auto font-normal text-muted-foreground/70">{columnTasks.length}</span>
             </header>
-            <div className="tasks-board-cards">
+            <div className="flex min-h-[120px] flex-col gap-[7px] px-[7px] pb-[7px]">
               {columnTasks.map((task) => {
                 const assignees = users.filter((user) => task.assigneeIds.includes(user.id))
                 const isDragged = dragging?.id === task.id
                 // placeholder slot index counts only the cards that can receive the drop
                 const slot = isDragged ? -1 : others.indexOf(task)
                 return (
-                  <div key={task.id} style={{ display: 'contents' }}>
+                  <div key={task.id} className="contents">
                     {!isDragged && placeholderIndex === slot ? (
-                      <div className="tasks-board-placeholder" style={{ height: dragging?.height }} />
+                      <div className="min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10" style={{ height: dragging?.height }} />
                     ) : null}
                     <article
-                      className="tasks-board-card"
+                      data-board-card
+                      className="cursor-pointer rounded-md border border-border bg-card p-2.5 transition-all hover:-translate-y-px hover:border-foreground/20 hover:bg-accent hover:shadow-md data-[dragging]:border-dashed data-[dragging]:opacity-35 data-[active]:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none"
                       data-active={task.id === activeTaskId || undefined}
                       data-dragging={isDragged || undefined}
                       draggable
@@ -117,16 +120,16 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
                       }}
                     >
                       {/* id … assignees · priority (priority changes in place) */}
-                      <div className="tasks-board-card-topline">
+                      <div className="flex min-h-5 items-center justify-between text-[11px] text-muted-foreground/70">
                         <span>{task.identifier}</span>
-                        <span className="tasks-board-card-meta">
-                          {assignees.length > 0 ? <AvatarStack users={assignees} size={18} /> : null}
+                        <span className="flex items-center gap-1">
+                          {assignees.length > 0 ? <UserAvatarStack users={assignees} size={18} /> : null}
                           <PriorityPicker task={task} align="right" />
                         </span>
                       </div>
-                      <h3>{task.title || 'Untitled'}</h3>
+                      <h3 className="mt-[5px] mb-[9px] text-[13px] leading-[18px] font-medium text-foreground">{task.title || 'Untitled'}</h3>
                       {task.labels.length > 0 ? (
-                        <div className="tasks-board-labels">
+                        <div className="mb-[9px] flex flex-wrap gap-1">
                           {task.labels.map((labelId) => {
                             const label = labels.find((item) => item.id === labelId)
                             return label ? <LabelPill key={label.id} label={label} /> : null
@@ -138,15 +141,15 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
                 )
               })}
               {placeholderIndex !== null && placeholderIndex >= others.length ? (
-                <div className="tasks-board-placeholder" style={{ height: dragging?.height }} />
+                <div className="min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10" style={{ height: dragging?.height }} />
               ) : null}
-              {others.length === 0 && placeholderIndex === null ? <div className="tasks-board-empty">No tasks</div> : null}
+              {others.length === 0 && placeholderIndex === null ? <div className="flex h-[72px] items-center justify-center text-xs text-muted-foreground/70">No tasks</div> : null}
             </div>
           </section>
         )
       })}
-      {bulkTasks.isPending ? <p role="status" className="text-faint text-xs">Saving board order…</p> : null}
-      {bulkTasks.isError ? <p role="alert" className="text-danger text-xs">{limitError ? `This move would update ${limitError.count} tasks. Move it in smaller steps so each drop affects at most ${MAX_BULK_TASK_UPDATES} tasks.` : <>Board reorder failed. <button className="button button-ghost" onClick={bulkTasks.retry}>Retry</button></>}</p> : null}
+      {bulkTasks.isPending ? <p role="status" className="text-xs text-muted-foreground/70">Saving board order…</p> : null}
+      {bulkTasks.isError ? <p role="alert" className="text-xs text-destructive">{limitError ? `This move would update ${limitError.count} tasks. Move it in smaller steps so each drop affects at most ${MAX_BULK_TASK_UPDATES} tasks.` : <>Board reorder failed. <Button variant="ghost" onClick={bulkTasks.retry}>Retry</Button></>}</p> : null}
     </div>
   )
 }

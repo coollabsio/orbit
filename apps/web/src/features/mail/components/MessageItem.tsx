@@ -1,8 +1,10 @@
-import { Avatar } from '../../../components/ui/Avatar'
-import { fullDate, timeOfDay } from '../../../lib/format'
-import type { MailMessage } from '../../../mock/types'
-import { firstLine } from '../mailLib'
-import { Attachments } from '../../chat/components/Attachments'
+import { Forward, Reply } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { UserAvatar } from '@/components/common/UserAvatar'
+import { fullDate, timeOfDay } from '@/lib/format'
+import type { MailMessage } from '@/mock/types'
+import { firstLine } from '@/features/mail/mailLib'
+import { Attachments } from '@/components/common/Attachments'
 
 interface MessageItemProps {
   message: MailMessage
@@ -14,9 +16,13 @@ interface MessageItemProps {
 
 export function MessageItem({ message, expanded, onToggle, onReply, onForward }: MessageItemProps) {
   return (
-    <div className="mail-message" data-expanded={expanded ? 'true' : undefined}>
+    <div
+      data-slot="mail-message"
+      className="py-4 [[data-slot=mail-message]+&]:border-t [[data-slot=mail-message]+&]:border-t-border"
+      data-expanded={expanded ? 'true' : undefined}
+    >
       <div
-        className="mail-message-header"
+        className="-m-1 flex cursor-pointer items-center gap-2.5 rounded-md p-1 transition-colors hover:bg-muted/45"
         role="button"
         tabIndex={0}
         onClick={onToggle}
@@ -24,37 +30,36 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
           if (e.key === 'Enter' && e.target === e.currentTarget) onToggle()
         }}
       >
-        <Avatar user={null} name={message.from.name} size={32} />
-        <div className="mail-message-meta">
-          <span className="mail-message-sender truncate">{message.from.name}</span>
-          <span className="text-xs text-faint truncate">{message.from.email}</span>
+        <UserAvatar user={null} name={message.from.name} size={32} />
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-[13px] font-semibold text-foreground">{message.from.name}</span>
+          <span className="truncate text-xs text-muted-foreground/70">{message.from.email}</span>
         </div>
-        <span className="spacer" />
-        <span className="text-xs text-faint mail-message-date">
+        <span className="flex-1" />
+        <span className="shrink-0 text-xs text-muted-foreground/70">
           {fullDate(message.createdAt)}, {timeOfDay(message.createdAt)}
         </span>
       </div>
       {expanded ? (
         <>
-          <div className="mail-message-body">{message.body}</div>
+          <div className="mt-3 text-sm leading-[1.6] whitespace-pre-wrap text-foreground">{message.body}</div>
           {message.attachments && message.attachments.length > 0 ? (
             <Attachments attachments={message.attachments} hasTextContent={!!message.body.trim()} />
           ) : null}
-          <div className="mail-message-actions">
-            <button type="button" className="button button-ghost" onClick={onReply}>
-              <Reply size={15} />
+          <div className="mt-3 ml-[38px] flex gap-1">
+            <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground" onClick={onReply}>
+              <Reply className="size-3.5" />
               Reply
-            </button>
-            <button type="button" className="button button-ghost" onClick={onForward}>
-              <Forward size={15} />
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground" onClick={onForward}>
+              <Forward className="size-3.5" />
               Forward
-            </button>
+            </Button>
           </div>
         </>
       ) : (
-        <div className="mail-message-preview truncate">{firstLine(message.body)}</div>
+        <div className="mt-1.5 truncate pl-[42px] text-[13px] text-muted-foreground">{firstLine(message.body)}</div>
       )}
     </div>
   )
 }
-import { Forward, Reply } from 'reicon-react'

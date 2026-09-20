@@ -1,8 +1,13 @@
-import { CaretRight, MoreH, Note2, Plus, Trash } from 'reicon-react'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { Emoji } from '../../../components/ui/Emoji'
-import type { Doc } from '../../../mock/types'
-import { childrenOf } from '../lib'
+import { ChevronRight, Ellipsis, FileText, Plus, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Emoji } from '@/components/common/Emoji'
+import type { Doc } from '@/mock/types'
+import { childrenOf } from '@/features/docs/docsLib'
+
+// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
+const menuItemClass =
+  'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm leading-5 text-foreground focus:bg-muted data-[danger=true]:text-destructive data-[danger=true]:focus:bg-muted data-[danger=true]:focus:text-destructive'
 
 export type DocDropZone = 'before' | 'after' | 'inside'
 
@@ -57,7 +62,7 @@ export function DocTreeItem({
   return (
     <>
       <div
-        className="menu-item doc-tree-row"
+        className="group/row relative flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors select-none hover:bg-sidebar-accent/50 data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground data-[dragging]:bg-foreground/5 data-[dragging]:text-foreground data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-1.5 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-[''] data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-1.5 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-['']"
         data-active={doc.id === activeId || undefined}
         data-dragging={dnd.dragId === doc.id || undefined}
         data-drop={dnd.dropAt?.id === doc.id ? dnd.dropAt.zone : undefined}
@@ -87,9 +92,11 @@ export function DocTreeItem({
         }}
       >
         {children.length > 0 ? (
-          <button
+          <Button
             type="button"
-            className="doc-tree-chevron"
+            variant="ghost"
+            size="icon-xs"
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md border-0 text-muted-foreground/70 hover:bg-muted hover:text-foreground dark:hover:bg-muted [&>svg]:transition-transform [&>svg]:duration-[120ms] data-[expanded=true]:[&>svg]:rotate-90"
             data-expanded={expanded}
             aria-label={expanded ? 'Collapse' : 'Expand'}
             onClick={(e) => {
@@ -97,45 +104,44 @@ export function DocTreeItem({
               onToggle(doc.id)
             }}
           >
-            <CaretRight size={12} />
-          </button>
+            <ChevronRight className="size-3" />
+          </Button>
         ) : (
-          <span className="doc-tree-chevron" aria-hidden="true" />
+          <span className="inline-flex size-5 shrink-0" aria-hidden="true" />
         )}
-        <span className="doc-tree-icon">{doc.icon ? <Emoji value={doc.icon} size={15} /> : <Note2 size={15} />}</span>
-        <span className="menu-item-label truncate">{doc.title || 'Untitled'}</span>
-        <span className="doc-tree-actions" onClick={(e) => e.stopPropagation()}>
-          <button
+        <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-sm leading-none text-muted-foreground/70">
+          {doc.icon ? <Emoji value={doc.icon} size={15} /> : <FileText className="size-[15px]" />}
+        </span>
+        <span className="min-w-0 flex-1 truncate">{doc.title || 'Untitled'}</span>
+        <span
+          className="invisible relative z-20 flex shrink-0 items-center gap-0.5 group-hover/row:visible group-focus-within/row:visible"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button
             type="button"
-            className="icon-button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-[22px] text-muted-foreground/70"
             aria-label="Add child page"
             onClick={() => onCreateChild(doc.id)}
           >
-            <Plus size={13} />
-          </button>
-          <Dropdown
-            align="right"
-            trigger={() => (
-              <button type="button" className="icon-button" aria-label="Page options">
-                <MoreH size={13} />
-              </button>
-            )}
-          >
-            {(close) => (
-              <button
-                type="button"
-                className="popover-option"
-                style={{ color: 'var(--danger)' }}
-                onClick={() => {
-                  close()
-                  onDelete(doc.id)
-                }}
-              >
-                <Trash size={14} />
+            <Plus className="size-[13px]" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button type="button" variant="ghost" size="icon-sm" className="size-[22px] text-muted-foreground/70" aria-label="Page options" />
+              }
+            >
+              <Ellipsis className="size-[13px]" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-auto min-w-32">
+              <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onDelete(doc.id)}>
+                <Trash2 className="size-[14px]" />
                 Delete
-              </button>
-            )}
-          </Dropdown>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
       </div>
       {expanded

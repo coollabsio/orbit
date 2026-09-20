@@ -1,4 +1,4 @@
-import type { Role, User } from '../types'
+import type { Role, User } from '@/mock/types'
 
 // Coolify team as mock users
 export const users: User[] = [

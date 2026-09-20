@@ -1,15 +1,24 @@
 // Port of the chat reference MessageInput: autosize textarea, @mention autocomplete with keyboard
 // navigation, grouped emoji picker with search, + actions menu, reply bar.
 import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent, type Ref } from 'react'
-import { Add, SmileCircle, Paperclip2, Reply, Xmark } from 'reicon-react'
-import { EmojiPicker } from '../../../components/ui/EmojiPicker'
-import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
-import { sendChatMessage } from '../../../mock/actions'
-import type { AppState, Attachment, Channel, ChatMessage } from '../../../mock/types'
-import { clipboardFiles, fileToAttachment } from '../attachmentLib'
-import { displayName, roleColor } from '../chatLib'
-import { useMentionAutocomplete } from '../useMentionAutocomplete'
-import { MentionPopover } from './MentionPopover'
+import { Paperclip, Plus, Reply, SmilePlus, X } from 'lucide-react'
+import { EmojiPicker } from '@/components/common/EmojiPicker'
+import { ThreadIcon } from '@/components/common/icons/ThreadIcon'
+import { sendChatMessage } from '@/mock/actions'
+import type { AppState, Attachment, Channel, ChatMessage } from '@/mock/types'
+import { clipboardFiles, fileToAttachment } from '@/lib/attachmentLib'
+import { displayName, roleColor } from '@/features/chat/chatLib'
+import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
+import { MentionPopover } from '@/components/common/MentionPopover'
+import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Textarea } from '@/components/ui/textarea'
+
+const inputButtonClass =
+  'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/90 transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted data-[active=true]:text-primary'
+const actionsItemClass =
+  'gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-foreground transition-colors focus:bg-muted focus:text-foreground [&>svg]:size-4 [&>svg]:text-muted-foreground!'
 
 export interface MessageInputHandle {
   addFiles: (files: FileList | File[]) => void
@@ -61,13 +70,10 @@ export function MessageInput({
   const mention = useMentionAutocomplete(state.users, text, setText, inputRef, resizeTextarea, (user) => roleColor(state, user.id), state.channels)
   const closeMention = mention.close
 
+  // the + menu and emoji picker dismiss themselves (shadcn overlays); the mention list still closes here
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (composerRef.current && !composerRef.current.contains(e.target as Node)) {
-        setActionsOpen(false)
-        setEmojiOpen(false)
-        closeMention()
-      }
+      if (composerRef.current && !composerRef.current.contains(e.target as Node)) closeMention()
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -177,90 +183,98 @@ useEffect(() => {
   }
 
   return (
-    <div ref={composerRef} className="fc-composer">
+    <div ref={composerRef} className="relative shrink-0 px-3 pb-2">
       {attachments.length > 0 ? (
-        <div className="fc-composer-attachments">
-          <div className="fc-composer-attachments-grid">
+        <div className="rounded-t-lg border border-b-0 border-border bg-muted/25 p-2">
+          <div className="grid grid-cols-2 gap-1 min-[900px]:grid-cols-4">
             {attachments.map((a) => (
-              <div key={a.id} className="fc-pending-attachment">
-                {a.mimeType.startsWith('image/') ? <img src={a.url} alt="" /> : <Paperclip2 size={32} />}
-                <span className="fc-pending-attachment-name">{a.fileName}</span>
-                <button type="button" className="fc-pending-attachment-remove" title="Remove" onClick={() => removeAttachment(a.id)}>
-                  <Xmark size={14} />
-                </button>
+              <div key={a.id} className="flex items-center gap-2 rounded-lg bg-background p-2 transition-colors hover:bg-muted">
+                {a.mimeType.startsWith('image/') ? <img src={a.url} alt="" className="size-14 shrink-0 rounded-md border border-border object-cover" /> : <Paperclip className="size-8 shrink-0 text-muted-foreground" />}
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{a.fileName}</span>
+                <Button type="button" variant="ghost" size="icon-sm" className="size-7 rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted" title="Remove" onClick={() => removeAttachment(a.id)}>
+                  <X className="size-3.5" />
+                </Button>
               </div>
             ))}
           </div>
         </div>
       ) : null}
       {replyTarget ? (
-        <div className="fc-composer-reply">
-          <div className="fc-composer-reply-row">
-            <Reply size={16} />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="fc-composer-reply-title">Replying to {displayName(state, replyTarget)}</div>
-              <div className="fc-composer-reply-preview">{replyTarget.content || 'No message content'}</div>
+        <div className="rounded-t-lg border border-b-0 border-border bg-muted/25 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Reply className="size-4 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs leading-5 font-bold text-foreground">Replying to {displayName(state, replyTarget)}</div>
+              <div className="truncate text-xs leading-5 font-semibold text-muted-foreground">{replyTarget.content || 'No message content'}</div>
             </div>
-            <button type="button" className="fc-composer-reply-close" title="Cancel reply" onClick={onCancelReply}>
-              <Xmark />
-            </button>
+            <Button type="button" variant="ghost" size="icon-sm" className="size-7 rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted" title="Cancel reply" onClick={onCancelReply}>
+              <X className="size-3.5" />
+            </Button>
           </div>
         </div>
       ) : null}
 
-      <div className="fc-input-row" data-attached={replyTarget || attachments.length > 0 ? 'true' : undefined}>
+      <div
+        className="relative flex min-h-11 items-start gap-2 rounded-lg border border-border bg-muted/25 px-2 py-1.5 transition-[border-color,box-shadow] focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/15 data-[attached=true]:rounded-t-none"
+        data-attached={replyTarget || attachments.length > 0 ? 'true' : undefined}
+      >
         <input ref={fileInputRef} type="file" multiple hidden aria-label="File upload" onChange={(e) => addFiles(e.target.files)} />
         {/* left plus menu */}
-        <div style={{ position: 'relative', flexShrink: 0 }}>
-          <button
-            type="button"
-            className="fc-input-button"
-            data-active={actionsOpen ? 'true' : undefined}
-            title="Add attachment or action"
-            onClick={() => {
-              setActionsOpen((prev) => !prev)
-              setEmojiOpen(false)
-            }}
+        <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={inputButtonClass}
+                data-active={actionsOpen ? 'true' : undefined}
+                title="Add attachment or action"
+              />
+            }
           >
-            <Add size={14} />
-          </button>
-          {actionsOpen ? (
-            <div className="fc-composer-popover fc-actions-popover">
-              <button type="button" onClick={() => fileInputRef.current?.click()}>
-                <Paperclip2 size={16} />
-                Upload Files
-              </button>
-              {showThreadAction ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onCreateThread) onCreateThread()
-                    else setThreadModeImmediate(true)
-                    setActionsOpen(false)
-                    inputRef.current?.focus()
-                  }}
-                >
-                  <ThreadIcon size={16} />
-                  {threadActionLabel}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+            <Plus className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="top"
+            align="start"
+            sideOffset={16}
+            finalFocus={inputRef}
+            className="w-56 rounded-lg border border-border bg-popover p-1.5 shadow-xl ring-0"
+          >
+            <DropdownMenuItem className={actionsItemClass} onClick={() => fileInputRef.current?.click()}>
+              <Paperclip size={16} />
+              Upload Files
+            </DropdownMenuItem>
+            {showThreadAction ? (
+              <DropdownMenuItem
+                className={actionsItemClass}
+                onClick={() => {
+                  if (onCreateThread) onCreateThread()
+                  else setThreadModeImmediate(true)
+                  setActionsOpen(false)
+                  inputRef.current?.focus()
+                }}
+              >
+                <ThreadIcon size={16} />
+                {threadActionLabel}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {threadMode ? (
-          <button type="button" className="fc-thread-pill" title="Cancel thread mode" onClick={() => setThreadModeImmediate(false)}>
-            <ThreadIcon size={12} />
+          <Button type="button" variant="ghost" className="mt-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border-0 bg-primary/10 px-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/20" title="Cancel thread mode" onClick={() => setThreadModeImmediate(false)}>
+            <ThreadIcon size={12} className="size-3" />
             Thread
-          </button>
+          </Button>
         ) : null}
 
-        <textarea
+        <Textarea
           ref={inputRef}
-          className="fc-input"
+          className="h-6 max-h-80 min-h-6 w-auto min-w-0 flex-1 resize-none overflow-y-hidden rounded-none border-0 bg-transparent px-0 py-1 text-sm leading-6 font-semibold text-foreground shadow-none outline-none field-sizing-fixed placeholder:font-semibold placeholder:text-muted-foreground/45 focus-visible:ring-0 dark:bg-transparent max-[899px]:text-[13px] md:max-[899px]:text-[13px]"
           value={text}
           rows={1}
-          style={{ height: 24, overflowY: 'hidden' }}
           placeholder={placeholder ?? (channel ? `${threadMode ? 'Start a thread' : 'Message'} #${channel.name}` : 'Message')}
           onChange={(e) => handleChange(e.target.value, e.target.selectionStart)}
           onClick={(e) => mention.update(text, e.currentTarget.selectionStart)}
@@ -280,24 +294,32 @@ useEffect(() => {
         ) : null}
 
         {/* right emoji menu */}
-        <div style={{ position: 'relative', display: 'flex', flexShrink: 0, alignItems: 'center', gap: 2 }}>
-          <button
-            type="button"
-            className="fc-input-button"
-            data-active={emojiOpen ? 'true' : undefined}
-            title="Emoji"
-            onClick={() => {
-              setEmojiOpen((prev) => !prev)
-              setActionsOpen(false)
-            }}
-          >
-            <SmileCircle size={20} />
-          </button>
-          {emojiOpen ? (
-            <div className="fc-composer-popover fc-emoji-popover">
+        <div className="relative flex shrink-0 items-center gap-0.5">
+          <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={inputButtonClass}
+                  data-active={emojiOpen ? 'true' : undefined}
+                  title="Emoji"
+                />
+              }
+            >
+              <SmilePlus className="size-5" />
+            </PopoverTrigger>
+            <PopoverContent
+              side="top"
+              align="end"
+              sideOffset={16}
+              finalFocus={inputRef}
+              className="w-auto gap-0 rounded-xl border border-border bg-popover p-0 text-foreground shadow-xl ring-0"
+            >
               <EmojiPicker onPick={insertEmoji} />
-            </div>
-          ) : null}
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
     </div>

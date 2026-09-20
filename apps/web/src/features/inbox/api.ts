@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '../../api/client'
-import { queryKeys } from '../../api/queryKeys'
+import { apiClient } from '@/api/client'
+import { queryKeys } from '@/api/queryKeys'
 import {
   listNotifications,
   readAllNotifications,
   readNotification,
-} from '../../api/generated/sdk.gen'
-import type { NotificationRecord } from '../../api/generated/types.gen'
-import { fetchAllPages } from '../../api/pagination'
+} from '@/api/generated/sdk.gen'
+import type { NotificationRecord } from '@/api/generated/types.gen'
+import { fetchAllPages } from '@/api/pagination'
 
 function required<T>(data: T | undefined, message: string): T {
   if (data === undefined) throw new Error(message)

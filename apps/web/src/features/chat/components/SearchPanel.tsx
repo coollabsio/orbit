@@ -2,10 +2,12 @@
 // workspace-wide message matches grouped by channel / thread; a card click jumps to the message.
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Hashtag, Magnifier } from 'reicon-react'
-import { ThreadIcon } from '../../../components/ui/icons/ThreadIcon'
-import type { AppState, ChatMessage } from '../../../mock/types'
-import { authorUser, displayName, jumpToMessage, threadTitleOf } from '../chatLib'
+import { Hash, Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { ThreadIcon } from '@/components/common/icons/ThreadIcon'
+import type { AppState, ChatMessage } from '@/mock/types'
+import { authorUser, displayName, jumpToMessage } from '@/features/chat/chatLib'
+import { threadTitleOf } from '@/lib/messagePreview'
 
 const WIDTH_KEY = 'orbit:search_panel_width'
 const MIN_WIDTH = 240
@@ -56,7 +58,7 @@ function renderPreviewText(text: string): React.ReactNode {
     const url = trailing ? rawUrl.slice(0, -trailing.length) : rawUrl
     if (index > lastIndex) nodes.push(text.slice(lastIndex, index))
     nodes.push(
-      <span key={`${url}-${index}`} className="fc-search-url">
+      <span key={`${url}-${index}`} className="font-medium text-primary">
         {url}
       </span>,
     )
@@ -139,56 +141,56 @@ export function SearchPanel({ state, query, onClose }: { state: AppState; query:
   }
 
   return (
-    <div className="fc-search-panel" style={{ width }}>
-      <div className="fc-search-panel-resize" onPointerDown={handleResizeStart} title="Resize search panel" />
-      <div className="fc-search-results">
+    <div className="relative flex h-full shrink-0 flex-col border-l border-border bg-background max-[899px]:fixed max-[899px]:inset-x-0 max-[899px]:top-12 max-[899px]:bottom-0 max-[899px]:z-[45] max-[899px]:w-full! max-[899px]:border-l-0" style={{ width }}>
+      <div className="absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-primary/40" onPointerDown={handleResizeStart} title="Resize search panel" />
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {searched && results.length > 0 ? (
-          <div className="fc-search-count">
+          <div className="mb-2 px-1 text-xs leading-5 font-semibold tracking-wider text-muted-foreground uppercase">
             {results.length} result{results.length === 1 ? '' : 's'}
           </div>
         ) : null}
 
         {searched && results.length === 0 ? (
-          <div className="fc-search-empty">
-            <Magnifier size={48} />
-            <p>No results found for "{debounced.trim()}"</p>
+          <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
+            <Search className="size-12 opacity-30" />
+            <p className="text-sm text-muted-foreground">No results found for "{debounced.trim()}"</p>
           </div>
         ) : null}
 
         {!searched ? (
-          <div className="fc-search-empty">
-            <Magnifier size={48} />
-            <p>Type to search messages in this workspace</p>
+          <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
+            <Search className="size-12 opacity-30" />
+            <p className="text-sm text-muted-foreground">Type to search messages in this workspace</p>
           </div>
         ) : null}
 
         {groups.map((group) => (
-          <section key={group.key} className="fc-search-group">
-            <div className="fc-search-group-title">
-              {group.kind === 'thread' ? <ThreadIcon size={16} /> : <Hashtag size={16} />}
+          <section key={group.key} className="mb-4">
+            <div className="mb-2 flex min-w-0 items-center gap-1.5 px-0.5 text-xs leading-5 font-bold text-foreground [&>svg]:shrink-0 [&>svg]:text-muted-foreground">
+              {group.kind === 'thread' ? <ThreadIcon size={16} /> : <Hash size={16} />}
               <span className="truncate">{group.label}</span>
             </div>
-            <div className="fc-search-cards">
+            <div className="flex flex-col gap-2">
               {group.results.map((result) => {
                 const author = authorUser(state, result)
                 const name = displayName(state, result)
                 const preview = result.startsThread && !result.threadRootId ? threadTitleOf(result) : result.content
                 return (
-                  <button key={result.id} type="button" className="fc-search-card" onClick={() => openResult(result)}>
+                  <Button key={result.id} type="button" variant="ghost" className="flex h-auto w-full items-start justify-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 bg-clip-border p-2.5 text-left font-normal whitespace-normal transition-colors hover:bg-muted/60 active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-muted/60" onClick={() => openResult(result)}>
                     <span
-                      className="fc-search-avatar"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground"
                       style={author ? { background: `color-mix(in srgb, ${author.color} 22%, transparent)`, color: author.color } : undefined}
                     >
                       {name.charAt(0).toUpperCase()}
                     </span>
-                    <span className="fc-search-card-body">
-                      <span className="fc-search-card-head">
-                        <span className="fc-search-card-name">{name}</span>
-                        <span className="fc-search-card-time">{formatResultTime(result.createdAt)}</span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="flex min-w-0 items-baseline gap-1.5">
+                        <span className="min-w-0 truncate text-sm leading-5 font-semibold text-foreground">{name}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{formatResultTime(result.createdAt)}</span>
                       </span>
-                      <span className="fc-search-card-preview">{renderPreviewText(preview)}</span>
+                      <span className="mt-0.5 line-clamp-3 text-xs leading-5 text-foreground [overflow-wrap:anywhere]">{renderPreviewText(preview)}</span>
                     </span>
-                  </button>
+                  </Button>
                 )
               })}
             </div>

@@ -3,26 +3,28 @@
 // (titles / subtexts / aliases / groups copied from the reference editor's en dictionary).
 import {
   Code,
-  DocumentText,
-  Gallery,
-  Global,
+  FileText,
+  Globe,
+  Heading,
+  Image,
   Link2,
+  List,
+  ListChecks,
+  ListOrdered,
   Minus,
-  Paperclip2,
-  QuoteDown,
-  Smallcaps,
-  TaskSquare,
-  TextalignLeft,
-} from 'reicon-react'
-import type { IconComponent } from 'reicon-react'
-import type { DocBlock } from '../../mock/types'
+  Paperclip,
+  Pilcrow,
+  Quote,
+  type LucideIcon,
+} from 'lucide-react'
+import type { DocBlock } from '@/mock/types'
 
 export interface SlashItem {
   title: string
   subtext: string
   aliases: string[]
   group: string
-  icon: IconComponent
+  icon: LucideIcon
   /** 'turn-into' replaces the current block's type; others run a custom action. */
   action:
     | { kind: 'turn-into'; type: DocBlock['type'] }
@@ -37,7 +39,7 @@ function heading(level: 1 | 2 | 3, subtext: string, aliases: string[]): SlashIte
     subtext,
     aliases,
     group: 'Headings',
-    icon: Smallcaps,
+    icon: Heading,
     action: { kind: 'turn-into', type: `h${level}` as DocBlock['type'] },
   }
 }
@@ -49,7 +51,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'Create a page under this one',
     aliases: ['subpage', 'new', 'under', 'page'],
     group: 'Basic',
-    icon: DocumentText,
+    icon: FileText,
     action: { kind: 'subpage' },
   },
   {
@@ -69,7 +71,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'List with ordered items',
     aliases: ['ol', 'li', 'list', 'numberedlist', 'numbered list'],
     group: 'Basic blocks',
-    icon: TextalignLeft,
+    icon: ListOrdered,
     action: { kind: 'turn-into', type: 'numbered' },
   },
   {
@@ -77,7 +79,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'List with unordered items',
     aliases: ['ul', 'li', 'list', 'bulletlist', 'bullet list'],
     group: 'Basic blocks',
-    icon: TextalignLeft,
+    icon: List,
     action: { kind: 'turn-into', type: 'bullet' },
   },
   {
@@ -85,7 +87,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'List with checkboxes',
     aliases: ['ul', 'li', 'list', 'checklist', 'check list', 'checked list', 'checkbox'],
     group: 'Basic blocks',
-    icon: TaskSquare,
+    icon: ListChecks,
     action: { kind: 'turn-into', type: 'todo' },
   },
   {
@@ -93,7 +95,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'The body of your document',
     aliases: ['p', 'paragraph'],
     group: 'Basic blocks',
-    icon: TextalignLeft,
+    icon: Pilcrow,
     action: { kind: 'turn-into', type: 'p' },
   },
   {
@@ -101,7 +103,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'Quote or excerpt',
     aliases: ['quotation', 'blockquote', 'bq'],
     group: 'Basic blocks',
-    icon: QuoteDown,
+    icon: Quote,
     action: { kind: 'turn-into', type: 'quote' },
   },
   {
@@ -117,7 +119,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'Bookmark card for a link',
     aliases: ['embed', 'bookmark', 'url', 'link'],
     group: 'Media',
-    icon: Global,
+    icon: Globe,
     action: { kind: 'media', media: 'embed' },
   },
   {
@@ -125,7 +127,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'Upload an image',
     aliases: ['image', 'img', 'picture', 'photo'],
     group: 'Media',
-    icon: Gallery,
+    icon: Image,
     action: { kind: 'media', media: 'image' },
   },
   {
@@ -133,7 +135,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     subtext: 'Upload any file as an attachment',
     aliases: ['file', 'attachment', 'upload'],
     group: 'Media',
-    icon: Paperclip2,
+    icon: Paperclip,
     action: { kind: 'media', media: 'file' },
   },
   {

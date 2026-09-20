@@ -1,22 +1,26 @@
 // Port of the chat reference MessageList (grouping, date separators, jump-to-present, enter animation)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router'
-import { Messages, Trash } from 'reicon-react'
-import { PinIcon } from '../../../components/ui/icons/PinIcon'
-import { hidePinNotice } from '../../../mock/actions'
-import { ConfirmDeleteModal } from './ChannelModals'
-import type { AppState, Channel, ChatMessage } from '../../../mock/types'
+import { MessageSquare, Trash2 } from 'lucide-react'
+import { PinIcon } from '@/components/common/icons/PinIcon'
+import { Button } from '@/components/ui/button'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { hidePinNotice } from '@/mock/actions'
+import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import type { AppState, Channel, ChatMessage } from '@/mock/types'
 import {
-  buildMentionTokens,
   formatMessageDate,
   isSameDay,
   jumpToMessage,
   messageMentionsCurrentUser,
-} from '../chatLib'
+} from '@/features/chat/chatLib'
+import { buildMentionTokens } from '@/lib/mentions'
 import { MessageItem } from './MessageItem'
 
 const GROUP_WINDOW_MS = 300_000 // the chat reference: 300 seconds
+
+const menuItemClass =
+  'gap-2 rounded-lg px-2.5 py-1.5 font-medium text-destructive hover:bg-destructive/10 focus:text-destructive data-highlighted:text-destructive [&>svg]:text-destructive focus:*:[svg]:text-destructive'
 
 export function MessageList({
   state,
@@ -97,16 +101,16 @@ export function MessageList({
   }
 
   return (
-    <div className="fc-list-region">
-      <div ref={containerRef} className="fc-list-scroll" onScroll={updateJumpToPresent}>
+    <div className="relative min-h-0 flex-1">
+      <div ref={containerRef} className="h-full overflow-y-auto px-4 pt-2 pb-5 max-[899px]:px-2.5 max-[899px]:pt-1.5 max-[899px]:pb-3.5" onScroll={updateJumpToPresent}>
         {messages.length === 0 ? (
-          <div className="fc-empty">
-            <div className="fc-empty-inner">
-              <div className="fc-empty-icon">
-                <Messages size={28} />
+          <div className="flex min-h-full items-center justify-center px-4 py-16">
+            <div className="flex max-w-sm flex-col items-center text-center">
+              <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                <MessageSquare className="size-7" />
               </div>
-              <h2>No messages yet</h2>
-              <p>Start the conversation in #{channel.name}.</p>
+              <h2 className="text-lg font-semibold text-foreground">No messages yet</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">Start the conversation in #{channel.name}.</p>
             </div>
           </div>
         ) : (
@@ -129,7 +133,7 @@ export function MessageList({
                 key={msg.id}
                 data-message-created-at={new Date(msg.createdAt).getTime()}
                 data-message-index={i}
-                className="animate-message-row-enter"
+                className="duration-[120ms] animate-in fade-in slide-in-from-bottom-0.5 fill-mode-both motion-reduce:animate-none"
                 style={{ animationDelay: `${Math.min(i, 8) * 8}ms` }}
               >
                 {startsNewDay ? <DateSeparator iso={msg.createdAt} /> : null}
@@ -152,12 +156,12 @@ export function MessageList({
         <div ref={bottomRef} />
       </div>
       {showJumpToPresent ? (
-        <div className="fc-jump">
-          <div className="fc-jump-inner">
-            <span>You're Viewing Older Messages</span>
-            <button type="button" className="fc-jump-button" onClick={jumpToPresent}>
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-xl border border-border bg-popover/95 px-3 py-2 shadow-xl backdrop-blur-sm">
+            <span className="text-xs font-semibold text-foreground">You're Viewing Older Messages</span>
+            <Button type="button" className="h-auto rounded-lg px-3 py-1.5 text-xs font-bold transition hover:bg-primary hover:brightness-110" onClick={jumpToPresent}>
               Jump To Present
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
@@ -167,64 +171,36 @@ export function MessageList({
 
 function DateSeparator({ iso }: { iso: string }) {
   return (
-    <div className="fc-date-separator">
-      <span>{formatMessageDate(iso)}</span>
+    <div className="relative my-4 flex items-center justify-center before:absolute before:inset-x-0 before:top-1/2 before:h-px before:-translate-y-1/2 before:bg-border before:content-[''] max-[899px]:my-3">
+      <span className="relative rounded-full bg-background px-3 text-xs font-semibold text-muted-foreground max-[899px]:text-[10px]">{formatMessageDate(iso)}</span>
     </div>
   )
 }
 
 /** the chat reference PinnedNotice: "X pinned a message to this channel." with a right-click "Delete pin notice". */
 function PinnedNotice({ state, message }: { state: AppState; message: ChatMessage }) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const actor = state.users.find((u) => u.id === message.pinnedBy)
   const actorName = actor?.name ?? 'Someone'
 
-  useEffect(() => {
-    if (!menu) return
-    const close = () => setMenu(null)
-    document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', close)
-    return () => {
-      document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', close)
-    }
-  }, [menu])
-
   return (
     <>
-      <div
-        className="fc-pin-notice"
-        onContextMenu={(e) => {
-          e.preventDefault()
-          setMenu({ x: e.clientX, y: e.clientY })
-        }}
-      >
-        <div className="fc-pin-notice-icon">
-          <PinIcon size={20} />
-        </div>
-        <div className="fc-pin-notice-text">
-          <strong style={actor ? { color: actor.color } : undefined}>{actorName}</strong> pinned <strong>a message</strong> to this channel.
-        </div>
-      </div>
-      {menu
-        ? createPortal(
-            <div className="fc-menu fc-context-menu" style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
-              <button
-                className="fc-menu-item"
-                data-danger="true"
-                onClick={() => {
-                  setMenu(null)
-                  setConfirmOpen(true)
-                }}
-              >
-                <Trash size={16} />
-                Delete pin notice
-              </button>
-            </div>,
-            document.body,
-          )
-        : null}
+      <ContextMenu>
+        <ContextMenuTrigger className="my-1 flex items-center gap-4 px-0.5 py-2 text-sm leading-5 text-muted-foreground select-auto max-[899px]:my-0.5 max-[899px]:gap-2 max-[899px]:py-1 max-[899px]:text-[11px] max-[899px]:leading-[15px]">
+          <div className="flex w-10 justify-center [&>svg]:-rotate-[35deg] max-[899px]:w-[30px] max-[899px]:[&>svg]:size-3.5">
+            <PinIcon size={20} />
+          </div>
+          <div className="min-w-0 flex-1 truncate [&>strong]:text-foreground">
+            <strong style={actor ? { color: actor.color } : undefined}>{actorName}</strong> pinned <strong>a message</strong> to this channel.
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-44 p-1.5">
+          <ContextMenuItem className={menuItemClass} onClick={() => setConfirmOpen(true)}>
+            <Trash2 size={16} />
+            Delete pin notice
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {confirmOpen ? (
         <ConfirmDeleteModal
           title="Delete pin notice?"

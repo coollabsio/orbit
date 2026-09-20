@@ -1,6 +1,6 @@
-export { CONTRACT_ID } from './generated/contract'
-import { CONTRACT_ID } from './generated/contract'
-import { createClient } from './generated/client'
+export { CONTRACT_ID } from '@/api/generated/contract'
+import { CONTRACT_ID } from '@/api/generated/contract'
+import { createClient } from '@/api/generated/client/index'
 import { parseProblem } from './problem'
 
 interface ApiClientOptions {

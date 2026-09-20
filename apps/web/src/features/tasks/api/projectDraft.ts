@@ -1,4 +1,4 @@
-import type { ProjectBody } from '../../../api/generated/types.gen'
+import type { ProjectBody } from '@/api/generated/types.gen'
 
 export function projectDraft(name: string): ProjectBody {
   return {

@@ -1,21 +1,44 @@
-import { useRef } from 'react'
-import { confirmAction } from '../../../components/ui/confirmAction'
-import { ArrowLeft, Calendar, Paperclip2, TaskSquare, Xmark } from 'reicon-react'
-import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
-import { DatePicker } from '../../../components/ui/DatePicker'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { EmptyState } from '../../../components/ui/EmptyState'
-import { PriorityIcon } from '../../../components/workspace/PriorityIcon'
-import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '../../../components/workspace/taskMeta'
-import type { Project, Task, TaskViewState } from '../api/models'
-import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '../api/tasks'
-import { useWorkspace } from '../../workspaces/workspaceContext'
-import { Attachments } from '../../chat/components/Attachments'
+import { useRef, useState } from 'react'
+import { confirmAction } from '@/components/common/confirmAction'
+import { ArrowLeft, Calendar, Paperclip, SquareCheck, X } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { DatePicker } from '@/components/common/DatePicker'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { EmptyState } from '@/components/common/EmptyState'
+import { PriorityIcon } from './PriorityIcon'
+import { TaskStatusIcon } from './TaskStatusIcon'
+import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
+import type { Project, Task, TaskViewState } from '@/features/tasks/api/models'
+import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '@/features/tasks/api/tasks'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
+
+const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
+const OPTION =
+  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[selected]:bg-accent data-[selected]:font-medium`
+/** Multi-select rows keep room on the right for the checked indicator. */
+const CHECK_OPTION =
+  `group min-h-8 cursor-pointer gap-2 py-1.5 pr-8 pl-2 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-checked:bg-accent data-checked:font-medium`
+const HEADING = 'px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase'
+const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
+const SIDE_PROP = '-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:min-h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs'
+const SIDE_GROUP = 'mb-6 flex flex-col items-start gap-0.5 max-[899px]:mb-0 max-[899px]:min-w-0'
+const SIDE_HEADING = 'mb-1.5 text-xs font-medium text-muted-foreground/70'
 
 function dueDateLabel(value: string | null) {
   if (!value) return 'Set due date'
@@ -45,6 +68,8 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   const deleteTask = useDeleteTask(workspace.id)
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // the date panel needs to close itself from Clear/Done, so the popover stays controlled
+  const [dueDateOpen, setDueDateOpen] = useState(false)
   const attach = (files: FileList | File[] | null) => {
     if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
@@ -61,194 +86,184 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   }
 
   return (
-    <section className="pane tasks-detail-pane">
-      <div className="pane-header">
-        <button className="icon-button" onClick={onBack} aria-label="Back to tasks">
-          <ArrowLeft size={16} />
-        </button>
-        <span className="text-faint text-xs">{task?.identifier ?? 'Task'}</span>
-        <div className="spacer" />
-        {task ? <button type="button" className="button button-danger" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+      <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onBack} aria-label="Back to tasks">
+          <ArrowLeft className="size-4" />
+        </Button>
+        <span className="text-xs text-muted-foreground/70">{task?.identifier ?? 'Task'}</span>
+        <div className="flex-1" />
+        {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
           if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
           void deleteAndClose({ taskId: task.id, version: task.version })
-        }}>Delete</button> : null}
-        <button className="icon-button" onClick={onBack} aria-label="Close task">
-          <Xmark size={16} />
-        </button>
+        }}>Delete</Button> : null}
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onBack} aria-label="Close task">
+          <X className="size-4" />
+        </Button>
       </div>
       {!task ? (
-        <div className="pane-body">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <EmptyState
-            icon={TaskSquare}
+            icon={SquareCheck}
             title="Task not found"
             description="This task does not exist or was removed."
           />
         </div>
       ) : (
-        <div className="pane-body tasks-detail-body">
-          <div className="tasks-detail-main">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,760px)_240px] content-start items-start gap-x-12 overflow-y-auto px-10 pt-8 pb-12 max-[899px]:grid-cols-1 max-[899px]:gap-[14px] max-[899px]:px-3.5 max-[899px]:pt-4 max-[899px]:pb-7">
+          <div className="min-w-0 max-w-[760px]">
             <TaskTextFields
               task={task}
               onUpdate={(body) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...body } })}
               onAttachFiles={attach}
             >
               {task.attachments.length > 0 ? (
-                <Attachments attachments={task.attachments} onRemove={(id) => deleteAttachment.mutate(id)} />
+                <div className="max-w-[520px]">
+                  <Attachments attachments={task.attachments} onRemove={(id) => deleteAttachment.mutate(id)} />
+                </div>
               ) : null}
-              <div className="tasks-desc-tools">
+              <div className="mt-1.5">
                 <input ref={fileInputRef} type="file" multiple hidden aria-label="Attach files" onChange={(e) => attach(e.target.files)} />
-                <button type="button" className="button button-ghost tasks-attach" onClick={() => fileInputRef.current?.click()}>
-                  <Paperclip2 size={14} />
+                <Button variant="ghost" className="-ml-2 text-xs text-muted-foreground/70" onClick={() => fileInputRef.current?.click()}>
+                  <Paperclip className="size-3.5" />
                   Attach
-                </button>
-                {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-faint text-xs">Uploading {uploadAttachments.progress}%</span> : null}
-                {uploadAttachments.isError ? <span role="alert" className="text-danger text-xs">{uploadAttachments.remainingCount} file(s) remain. <button type="button" className="button button-ghost" onClick={uploadAttachments.retry}>Retry upload</button></span> : null}
+                </Button>
+                {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70">Uploading {uploadAttachments.progress}%</span> : null}
+                {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{uploadAttachments.remainingCount} file(s) remain. <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
               </div>
             </TaskTextFields>
-            {updateTask.isError ? <p role="alert" className="text-danger text-xs">Task update failed. <button type="button" className="button button-ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</button></p> : null}
-            {deleteAttachment.isError ? <p role="alert" className="text-danger text-xs">Attachment removal failed. <button type="button" className="button button-ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</button></p> : null}
-            {deleteTask.isError ? <p role="alert" className="text-danger text-xs">Task deletion failed. <button type="button" className="button button-ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</button></p> : null}
+            {updateTask.isError ? <p role="alert" className="text-xs text-destructive">Task update failed. <Button variant="ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</Button></p> : null}
+            {deleteAttachment.isError ? <p role="alert" className="text-xs text-destructive">Attachment removal failed. <Button variant="ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</Button></p> : null}
+            {deleteTask.isError ? <p role="alert" className="text-xs text-destructive">Task deletion failed. <Button variant="ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</Button></p> : null}
 
           </div>
 
-          <aside className="tasks-detail-side">
-            <div className="tasks-side-group">
-              <h4 className="tasks-side-heading">Properties</h4>
-              <Dropdown
-                trigger={() => (
-                  <button className="button button-ghost tasks-side-prop">
-                    <TaskStatusIcon status={status} />
-                    {status?.name ?? 'No status'}
-                  </button>
-                )}
-              >
-                {(close) => (
-                  <>
-                    {statusOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        className="popover-option"
-                        data-selected={option.id === task.statusId || undefined}
-                        onClick={() => {
-                          updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })
-                          close()
-                        }}
-                      >
-                        <TaskStatusIcon status={option} />
-                        {option.name}
-                      </button>
-                    ))}
-                  </>
-                )}
-              </Dropdown>
-              <Dropdown
-                trigger={() => (
-                  <button className="button button-ghost tasks-side-prop">
-                    <PriorityIcon priority={task.priority} />
-                    {task.priority === 'none' ? 'Set priority' : PRIORITY_LABEL[task.priority]}
-                  </button>
-                )}
-              >
-                {(close) => (
-                  <>
-                    {PRIORITY_ORDER.map((priority) => (
-                      <button
-                        key={priority}
-                        className="popover-option"
-                        data-selected={priority === task.priority || undefined}
-                        onClick={() => {
-                          updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })
-                          close()
-                        }}
-                      >
-                        <PriorityIcon priority={priority} />
-                        {PRIORITY_LABEL[priority]}
-                      </button>
-                    ))}
-                  </>
-                )}
-              </Dropdown>
-              {/* Multi-assignee options toggle individually; active ones show an × at the end. */}
-              <Dropdown
-                trigger={() => (
-                  <button className="button button-ghost tasks-side-prop">
-                    {assignees.length > 0 ? (
-                      <>
-                        <AvatarStack users={assignees} size={16} />
-                        <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Avatar user={undefined} size={16} name="—" />
-                        Assign
-                      </>
-                    )}
-                  </button>
-                )}
-              >
-                {(close) => (
-                  <>
-                    <div className="popover-heading">Assignees</div>
+          <aside className="col-start-2 w-60 shrink-0 pt-1.5 [grid-row:1/span_2] max-[899px]:col-start-1 max-[899px]:row-auto max-[899px]:grid max-[899px]:w-full max-[899px]:grid-cols-2 max-[899px]:gap-x-3 max-[899px]:gap-y-3.5 max-[899px]:border-y max-[899px]:border-border max-[899px]:py-3.5">
+            <div className={`${SIDE_GROUP} max-[899px]:col-span-full max-[899px]:flex-row max-[899px]:flex-wrap max-[899px]:items-center max-[899px]:gap-1`}>
+              <h4 className={`${SIDE_HEADING} max-[899px]:w-full`}>Properties</h4>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" className={SIDE_PROP}>
+                      <TaskStatusIcon status={status} />
+                      {status?.name ?? 'No status'}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className={MENU}>
+                  {statusOptions.map((option) => (
+                    <DropdownMenuItem
+                      key={option.id}
+                      className={OPTION}
+                      data-selected={option.id === task.statusId || undefined}
+                      onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
+                    >
+                      <TaskStatusIcon status={option} />
+                      {option.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" className={SIDE_PROP}>
+                      <PriorityIcon priority={task.priority} />
+                      {task.priority === 'none' ? 'Set priority' : PRIORITY_LABEL[task.priority]}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className={MENU}>
+                  {PRIORITY_ORDER.map((priority) => (
+                    <DropdownMenuItem
+                      key={priority}
+                      className={OPTION}
+                      data-selected={priority === task.priority || undefined}
+                      onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })}
+                    >
+                      <PriorityIcon priority={priority} />
+                      {PRIORITY_LABEL[priority]}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* Multi-assignee options toggle individually; the checked indicator marks the active ones. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" className={SIDE_PROP}>
+                      {assignees.length > 0 ? (
+                        <>
+                          <UserAvatarStack users={assignees} size={16} />
+                          <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserAvatar user={undefined} size={16} name="—" />
+                          Assign
+                        </>
+                      )}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className={MENU}>
+                  <DropdownMenuGroup className="flex flex-col gap-px">
+                    <DropdownMenuLabel className={HEADING}>Assignees</DropdownMenuLabel>
                     {users.map((u) => {
                       const active = task.assigneeIds.includes(u.id)
                       return (
-                        <button
+                        <DropdownMenuCheckboxItem
                           key={u.id}
-                          className="popover-option"
-                          data-selected={active || undefined}
-                          aria-pressed={active}
-                          onClick={() => {
-                            updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })
-                            close()
-                          }}
+                          className={CHECK_OPTION}
+                          checked={active}
+                          closeOnClick
+                          onCheckedChange={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
                         >
-                          <Avatar user={u} size={16} />
+                          <UserAvatar user={u} size={16} />
                           {u.name}
-                          {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
-                        </button>
+                        </DropdownMenuCheckboxItem>
                       )
                     })}
-                  </>
-                )}
-              </Dropdown>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
-            <div className="tasks-side-group">
-              <h4 className="tasks-side-heading">Labels</h4>
+            <div className={SIDE_GROUP}>
+              <h4 className={SIDE_HEADING}>Labels</h4>
               <TaskLabels workspaceId={workspace.id} labelIds={task.labels} labels={state.labels} onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })} />
             </div>
 
-            <div className="tasks-side-group">
-              <h4 className="tasks-side-heading">Project</h4>
+            <div className={SIDE_GROUP}>
+              <h4 className={SIDE_HEADING}>Project</h4>
               {project ? (
-                <span className="pill">
-                  <span className="pill-dot" style={{ background: project.color }} />
+                <Badge variant="outline" className={PILL}>
+                  <span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
                   {project.name}
-                </span>
+                </Badge>
               ) : (
-                <span className="text-faint text-xs">—</span>
+                <span className="text-xs text-muted-foreground/70">—</span>
               )}
             </div>
 
-            <div className="tasks-side-group">
-              <h4 className="tasks-side-heading">Due date</h4>
-              <Dropdown
-                className="tasks-date-dropdown"
-                direction="up"
-                trigger={(open) => (
-                  <button
-                    type="button"
-                    className="tasks-due-date"
-                    aria-label="Due date"
-                    aria-expanded={open}
-                    disabled={updateTask.isPending}
-                  >
-                    <Calendar size={15} aria-hidden="true" />
-                    <span>{dueDateLabel(task.dueAt)}</span>
-                  </button>
-                )}
-              >
-                {(close) => (
+            <div className={SIDE_GROUP}>
+              <h4 className={SIDE_HEADING}>Due date</h4>
+              <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="-ml-2 inline-flex h-auto min-h-8 items-center gap-2 rounded-md border-0 px-2 py-1.5 text-[13px] font-normal text-foreground transition-colors hover:bg-accent aria-expanded:bg-accent dark:hover:bg-accent"
+                      aria-label="Due date"
+                      disabled={updateTask.isPending}
+                    >
+                      <Calendar className="size-3.5" aria-hidden="true" />
+                      <span>{dueDateLabel(task.dueAt)}</span>
+                    </Button>
+                  }
+                />
+                <PopoverContent align="start" side="top" className="w-auto gap-0 p-0">
                   <DatePicker
                     value={task.dueAt}
                     onChange={(dueAt) => updateTask.mutate({
@@ -260,20 +275,20 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                         taskId: task.id,
                         body: { expected_version: task.version, due_at: null },
                       })
-                      close()
+                      setDueDateOpen(false)
                     }}
-                    onDone={close}
+                    onDone={() => setDueDateOpen(false)}
                   />
-                )}
-              </Dropdown>
+                </PopoverContent>
+              </Popover>
             </div>
           </aside>
 
-          <div className="tasks-detail-activity">
+          <div className="col-start-1 min-w-0 max-w-[760px] max-[899px]:w-full max-[899px]:max-w-none">
             <ActivityFeed task={task} state={state} />
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
-            <div className="tasks-comment-composer">
+            <div className="mt-4 max-[899px]:mt-3">
               <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentionedUserIds) => createComment.mutateAsync({ body, files, mentionedUserIds })} />
             </div>
           </div>

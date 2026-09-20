@@ -1,21 +1,35 @@
 // Port of the chat reference ChannelSidebar: resizable width, collapsible categories, context menus,
 // and hand-rolled mouse drag-and-drop reorder for categories and channels (no DnD library).
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate } from 'react-router'
-import { Add, ChevronDown, Edit, FolderAdd, Hashtag, Setting2, Trash } from 'reicon-react'
-import { deleteChatMessage, followThread, markChannelRead, renameThread, reorderChannels, reorderChatCategories } from '../../../mock/actions'
-import { Emoji } from '../../../components/ui/Emoji'
-import { FollowIcon } from '../../../components/ui/icons/FollowIcon'
-import { threadTitleOf } from '../chatLib'
-import type { AppState, Channel, ChatCategory, ChatMessage } from '../../../mock/types'
-import { ChannelModals, ConfirmDeleteModal, type ChannelModalState } from './ChannelModals'
+import { ChevronDown, FolderPlus, Hash, Pencil, Plus, Settings, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Modal } from '@/components/common/Modal'
+import { deleteChatMessage, followThread, markChannelRead, renameThread, reorderChannels, reorderChatCategories } from '@/mock/actions'
+import { Emoji } from '@/components/common/Emoji'
+import { FollowIcon } from '@/components/common/icons/FollowIcon'
+import { threadTitleOf } from '@/lib/messagePreview'
+import type { AppState, Channel, ChatCategory, ChatMessage } from '@/mock/types'
+import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { ChannelModals, type ChannelModalState } from './ChannelModals'
 
 const WIDTH_KEY = 'orbit:channel_sidebar_width'
 const COLLAPSE_KEY = 'orbit:category_collapsed'
 const MIN_WIDTH = 220
 const MAX_WIDTH = 420
 const DEFAULT_WIDTH = 240
+
+const menuClass = 'rounded-lg border border-border bg-popover p-1.5 shadow-xl ring-0'
+// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
+const menuItemClass =
+  'w-full gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors focus:bg-accent focus:text-accent-foreground data-[danger=true]:text-destructive data-[danger=true]:focus:bg-destructive/10 data-[danger=true]:focus:text-destructive [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground data-[danger=true]:[&>svg]:text-destructive'
+/** Resets the shadcn Button box so list rows keep their own layout (no fixed height, padding, radius or press nudge). */
+const rowButtonClass =
+  'h-auto justify-start rounded-none border-0 p-0 whitespace-normal hover:bg-transparent dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0'
 
 function clampWidth(width: number) {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width))
@@ -33,15 +47,6 @@ function storedCollapsed(): Set<string> {
   } catch {
     return new Set()
   }
-}
-
-interface ContextMenuState {
-  x: number
-  y: number
-  target:
-    | { kind: 'channel'; channel: Channel }
-    | { kind: 'category'; category: ChatCategory }
-    | { kind: 'thread'; thread: ChatMessage }
 }
 
 /* ---------- the chat reference drag helpers ---------- */
@@ -85,7 +90,13 @@ function moveItem<T extends { id: string }>(items: T[], draggedId: string, targe
 
 function DropLine({ position }: { position: DropPosition | null }) {
   if (!position) return null
-  return <span aria-hidden="true" className="fc-drop-line" data-position={position} />
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute right-0 left-0 z-10 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)] data-[position=before]:top-0 data-[position=after]:bottom-0"
+      data-position={position}
+    />
+  )
 }
 
 export function ChannelSidebar({
@@ -103,14 +114,10 @@ export function ChannelSidebar({
   const navigate = useNavigate()
   const [width, setWidth] = useState(storedWidth)
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsed)
-  const [serverMenuOpen, setServerMenuOpen] = useState(false)
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [modal, setModal] = useState<ChannelModalState>(null)
   const [deleteThread, setDeleteThread] = useState<ChatMessage | null>(null)
   const [renamingThread, setRenamingThread] = useState<ChatMessage | null>(null)
   const [threadNameDraft, setThreadNameDraft] = useState('')
-  const serverMenuRef = useRef<HTMLDivElement>(null)
-  const contextRef = useRef<HTMLDivElement>(null)
 
   const [dragChannel, setDragChannel] = useState<ChannelDragState | null>(null)
   const [dropIndicator, setDropIndicator] = useState<ChannelDropIndicator | null>(null)
@@ -124,26 +131,6 @@ export function ChannelSidebar({
   useEffect(() => {
     window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...collapsed]))
   }, [collapsed])
-
-  useEffect(() => {
-    if (!serverMenuOpen && !contextMenu) return
-    function onPointerDown(e: MouseEvent) {
-      if (serverMenuRef.current && !serverMenuRef.current.contains(e.target as Node)) setServerMenuOpen(false)
-      if (contextRef.current && !contextRef.current.contains(e.target as Node)) setContextMenu(null)
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setServerMenuOpen(false)
-        setContextMenu(null)
-      }
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [serverMenuOpen, contextMenu])
 
   function handleResizeStart(event: React.PointerEvent<HTMLDivElement>) {
     event.preventDefault()
@@ -207,7 +194,6 @@ export function ChannelSidebar({
     setDropIndicator(null)
     setDragCategoryId(null)
     setCategoryDropIndicator(null)
-    setContextMenu(null)
 
     function handleMouseUp(event: MouseEvent) {
       const target = getChannelDropTarget(event.clientX, event.clientY)
@@ -245,7 +231,6 @@ export function ChannelSidebar({
     setCategoryDropIndicator(null)
     setDragChannel(null)
     setDropIndicator(null)
-    setContextMenu(null)
 
     function handleMouseUp(event: MouseEvent) {
       const target = getCategoryDropTarget(event.clientX, event.clientY)
@@ -275,159 +260,223 @@ export function ChannelSidebar({
     setCategoryDropIndicator((current) => (current?.categoryId === categoryId ? null : current))
   }
 
+  function threadMenuItems(thread: ChatMessage) {
+    return (
+      <>
+        <ContextMenuItem className={menuItemClass} onClick={() => followThread(thread.id, !thread.threadFollowed)}>
+          <FollowIcon size={16} />
+          {thread.threadFollowed ? 'Unfollow Thread' : 'Follow Thread'}
+        </ContextMenuItem>
+        <ContextMenuItem
+          className={menuItemClass}
+          onClick={() => {
+            setRenamingThread(thread)
+            setThreadNameDraft(threadTitleOf(thread))
+          }}
+        >
+          <Pencil size={16} />
+          Rename Thread
+        </ContextMenuItem>
+        <ContextMenuItem className={menuItemClass} data-danger="true" onClick={() => setDeleteThread(thread)}>
+          <Trash2 size={16} />
+          Delete Thread
+        </ContextMenuItem>
+      </>
+    )
+  }
+
+  function channelMenuItems(channel: Channel) {
+    return (
+      <>
+        <ContextMenuItem className={menuItemClass} onClick={() => setModal({ kind: 'edit-channel', channel })}>
+          <Pencil size={16} />
+          Edit Channel
+        </ContextMenuItem>
+        <ContextMenuItem className={menuItemClass} data-danger="true" onClick={() => setModal({ kind: 'delete-channel', channel })}>
+          <Trash2 size={16} />
+          Delete Channel
+        </ContextMenuItem>
+      </>
+    )
+  }
+
+  function categoryMenuItems(category: ChatCategory) {
+    return (
+      <>
+        <ContextMenuItem className={menuItemClass} onClick={() => setModal({ kind: 'edit-category', category })}>
+          <Pencil size={16} />
+          Edit Category
+        </ContextMenuItem>
+        <ContextMenuItem
+          className={menuItemClass}
+          onClick={() => setModal({ kind: 'create-channel', categoryId: category.id, categoryName: category.name })}
+        >
+          <Plus size={16} />
+          Create Channel
+        </ContextMenuItem>
+        <ContextMenuItem
+          className={menuItemClass}
+          data-danger="true"
+          onClick={() => setModal({ kind: 'delete-category', id: category.id, name: category.name })}
+        >
+          <Trash2 size={16} />
+          Delete Category
+        </ContextMenuItem>
+      </>
+    )
+  }
+
   return (
-    <div className="fc-sidebar" style={{ width }}>
-      <div className="fc-sidebar-resize" onPointerDown={handleResizeStart} title="Resize channel sidebar" />
+    <div className="relative flex shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground max-[899px]:w-full! max-[899px]:border-r-0 max-[899px]:group-data-[view=conversation]/chat:hidden" style={{ width }}>
+      <div className="absolute top-0 -right-px bottom-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-primary/40 max-[899px]:hidden" onPointerDown={handleResizeStart} title="Resize channel sidebar" />
 
       {/* server header + dropdown */}
-      <div style={{ position: 'relative' }} ref={serverMenuRef}>
-        <button className="fc-server-header" onClick={() => setServerMenuOpen((prev) => !prev)}>
-          <span className="fc-server-name">Chat</span>
-          <ChevronDown size={14} style={{ flexShrink: 0 }} color="var(--text-muted)" />
-        </button>
-        {serverMenuOpen ? (
-          <div className="fc-menu fc-server-menu">
-            <button
-              className="fc-menu-item"
-              onClick={() => {
-                setServerMenuOpen(false)
-                const first = state.chatCategories[0]
-                if (first) setModal({ kind: 'create-channel', categoryId: first.id, categoryName: first.name })
-              }}
-            >
-              <Add size={16} />
-              Create channel
-            </button>
-            <button
-              className="fc-menu-item"
-              onClick={() => {
-                setServerMenuOpen(false)
-                setModal({ kind: 'create-category' })
-              }}
-            >
-              <FolderAdd size={16} />
-              Create category
-            </button>
-            <div className="fc-menu-separator" />
-            <button
-              className="fc-menu-item"
-              onClick={() => {
-                setServerMenuOpen(false)
-                navigate('/chat/settings')
-              }}
-            >
-              <Setting2 size={16} />
-              Chat Settings
-            </button>
-          </div>
-        ) : null}
-      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              className="relative flex h-12 w-full items-center justify-between gap-1 rounded-none border-0 border-b border-border px-3 font-semibold text-foreground/80 transition-colors hover:bg-transparent hover:text-foreground aria-expanded:bg-transparent dark:hover:bg-transparent"
+            />
+          }
+        >
+          <span className="truncate text-[13px] font-semibold text-foreground">Chat</span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent sideOffset={0} alignOffset={8} className={`w-[calc(var(--anchor-width)-1rem)] ${menuClass}`}>
+          <DropdownMenuItem
+            className={menuItemClass}
+            onClick={() => {
+              const first = state.chatCategories[0]
+              if (first) setModal({ kind: 'create-channel', categoryId: first.id, categoryName: first.name })
+            }}
+          >
+            <Plus size={16} />
+            Create channel
+          </DropdownMenuItem>
+          <DropdownMenuItem className={menuItemClass} onClick={() => setModal({ kind: 'create-category' })}>
+            <FolderPlus size={16} />
+            Create category
+          </DropdownMenuItem>
+          <DropdownMenuSeparator className="mx-1 my-1" />
+          <DropdownMenuItem className={menuItemClass} onClick={() => navigate('/chat/settings')}>
+            <Settings size={16} />
+            Chat Settings
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {/* channel list */}
-      <div className="fc-channel-scroll">
-        <div className="fc-channel-list">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto [overscroll-behavior:none]">
+        <div className="flex w-full min-w-0 flex-col gap-1 pt-2">
           {state.chatCategories.map((cat) => {
             const isCollapsed = collapsed.has(cat.id)
             const channels = state.channels.filter((c) => c.categoryId === cat.id)
             return (
-              <div key={cat.id} className="fc-category">
-                <div
-                  className="fc-category-row"
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    setContextMenu({ x: e.clientX, y: e.clientY, target: { kind: 'category', category: cat } })
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="fc-category-toggle"
-                    data-category-drop-id={cat.id}
-                    data-collapsed={isCollapsed ? 'true' : undefined}
-                    data-dragging={dragCategoryId === cat.id ? 'true' : undefined}
-                    onClick={() => toggleCategory(cat.id)}
-                    onMouseMove={(event: ReactMouseEvent<HTMLButtonElement>) =>
-                      handleCategoryDragOver(cat.id, event.currentTarget, event.clientY)
-                    }
-                    onMouseLeave={() => handleCategoryDragLeave(cat.id)}
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return
-                      startCategoryDrag(cat.id)
-                    }}
-                  >
-                    <DropLine
-                      position={categoryDropIndicator?.categoryId === cat.id ? categoryDropIndicator.position : null}
-                    />
-                    <span className="fc-category-label">
-                      {cat.emoji ? <span className="fc-emoji-icon" data-size="sm"><Emoji value={cat.emoji} size={13} /></span> : null}
-                      <span className="truncate">{cat.name}</span>
-                    </span>
-                    <ChevronDown className="fc-chevron" />
-                  </button>
-                  <button
-                    type="button"
-                    className="fc-category-add"
-                    title="Create Channel"
-                    onClick={() => setModal({ kind: 'create-channel', categoryId: cat.id, categoryName: cat.name })}
-                  >
-                    <Add />
-                  </button>
-                </div>
+              <div key={cat.id} className="flex min-w-0 flex-col px-2 pt-5 first:pt-3">
+                <ContextMenu>
+                  <ContextMenuTrigger render={<div className="group flex w-full items-center px-1 pb-1" />}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className={`${rowButtonClass} group/toggle relative flex min-w-0 flex-1 cursor-pointer items-center gap-1 text-xs leading-5 font-bold text-muted-foreground transition-colors select-none hover:text-foreground data-[dragging=true]:text-foreground`}
+                      data-category-drop-id={cat.id}
+                      data-collapsed={isCollapsed ? 'true' : undefined}
+                      data-dragging={dragCategoryId === cat.id ? 'true' : undefined}
+                      onClick={() => toggleCategory(cat.id)}
+                      onMouseMove={(event: ReactMouseEvent<HTMLButtonElement>) =>
+                        handleCategoryDragOver(cat.id, event.currentTarget, event.clientY)
+                      }
+                      onMouseLeave={() => handleCategoryDragLeave(cat.id)}
+                      onMouseDown={(event) => {
+                        if (event.button !== 0) return
+                        startCategoryDrag(cat.id)
+                      }}
+                    >
+                      <DropLine
+                        position={categoryDropIndicator?.categoryId === cat.id ? categoryDropIndicator.position : null}
+                      />
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        {cat.emoji ? <span className="inline-flex size-3.5 shrink-0 items-center justify-center text-[10.5px] leading-none"><Emoji value={cat.emoji} size={13} /></span> : null}
+                        <span className="truncate">{cat.name}</span>
+                      </span>
+                      <ChevronDown className="ml-0.5 size-2 shrink-0 transition-transform group-data-[collapsed=true]/toggle:-rotate-90" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className={`${rowButtonClass} flex items-center justify-center text-muted-foreground opacity-0 transition hover:text-foreground group-hover:opacity-100`}
+                      title="Create Channel"
+                      onClick={() => setModal({ kind: 'create-channel', categoryId: cat.id, categoryName: cat.name })}
+                    >
+                      <Plus className="size-2.5" />
+                    </Button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className={`min-w-44 ${menuClass}`}>{categoryMenuItems(cat)}</ContextMenuContent>
+                </ContextMenu>
                 {!isCollapsed ? (
-                  <div className="fc-category-channels">
+                  <div className="flex flex-col gap-0.5">
                     {channels.map((ch) => {
                       const isActive = ch.id === activeChannelId && !activeThreadId
                       const threads = threadsForChannel(ch.id)
                       return (
-                        <div key={ch.id} style={{ minWidth: 0 }}>
-                        <button
-                          type="button"
-                          className="fc-channel-row"
-                          data-channel-drop-id={ch.id}
-                          data-channel-category-id={cat.id}
-                          data-active={isActive ? 'true' : undefined}
-                          data-unread={ch.unreadCount > 0 ? 'true' : undefined}
-                          data-dragging={dragChannel?.channelId === ch.id ? 'true' : undefined}
-                          onClick={() => selectChannel(ch.id)}
-                          onMouseMove={(event: ReactMouseEvent<HTMLButtonElement>) =>
-                            handleChannelDragOver(ch.id, cat.id, event.currentTarget, event.clientY)
-                          }
-                          onMouseLeave={() => handleChannelDragLeave(ch.id)}
-                          onMouseDown={(event) => {
-                            if (event.button !== 0) return
-                            startChannelDrag(ch.id, cat.id)
-                          }}
-                          onContextMenu={(e) => {
-                            e.preventDefault()
-                            setContextMenu({ x: e.clientX, y: e.clientY, target: { kind: 'channel', channel: ch } })
-                          }}
-                        >
-                          <DropLine position={dropIndicator?.channelId === ch.id ? dropIndicator.position : null} />
-                          {ch.emoji ? <span className="fc-emoji-icon"><Emoji value={ch.emoji} size={16} /></span> : <Hashtag size={16} />}
-                          <span className="fc-channel-row-name">{ch.name}</span>
-                          {ch.unreadCount > 0 && !isActive ? (
-                            <span className="fc-unread-badge">{ch.unreadCount}</span>
-                          ) : null}
-                        </button>
+                        <div key={ch.id} className="min-w-0">
+                        <ContextMenu>
+                          <ContextMenuTrigger
+                            render={
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                className={`${rowButtonClass} relative flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm leading-5 font-semibold text-muted-foreground transition-colors select-none hover:bg-sidebar-accent/50 hover:text-foreground data-[unread=true]:font-medium data-[unread=true]:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[dragging=true]:bg-sidebar-accent data-[dragging=true]:text-foreground dark:hover:bg-sidebar-accent/50 dark:data-[active=true]:bg-sidebar-accent dark:data-[dragging=true]:bg-sidebar-accent [&>svg]:size-4 [&>svg]:shrink-0`}
+                                data-channel-drop-id={ch.id}
+                                data-channel-category-id={cat.id}
+                                data-active={isActive ? 'true' : undefined}
+                                data-unread={ch.unreadCount > 0 ? 'true' : undefined}
+                                data-dragging={dragChannel?.channelId === ch.id ? 'true' : undefined}
+                                onClick={() => selectChannel(ch.id)}
+                                onMouseMove={(event: ReactMouseEvent<HTMLButtonElement>) =>
+                                  handleChannelDragOver(ch.id, cat.id, event.currentTarget, event.clientY)
+                                }
+                                onMouseLeave={() => handleChannelDragLeave(ch.id)}
+                                onMouseDown={(event) => {
+                                  if (event.button !== 0) return
+                                  startChannelDrag(ch.id, cat.id)
+                                }}
+                              />
+                            }
+                          >
+                            <DropLine position={dropIndicator?.channelId === ch.id ? dropIndicator.position : null} />
+                            {ch.emoji ? <span className="inline-flex size-4 shrink-0 items-center justify-center text-xs leading-none"><Emoji value={ch.emoji} size={16} /></span> : <Hash size={16} />}
+                            <span className="min-w-0 truncate">{ch.name}</span>
+                            {ch.unreadCount > 0 && !isActive ? (
+                              <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-nums">{ch.unreadCount}</span>
+                            ) : null}
+                          </ContextMenuTrigger>
+                          <ContextMenuContent className={`min-w-44 ${menuClass}`}>{channelMenuItems(ch)}</ContextMenuContent>
+                        </ContextMenu>
                         {threads.length > 0 ? (
-                          <div className="fc-thread-rows">
+                          <div className="ml-3.5 py-0.5">
                             {threads.map((thread, index) => {
                               const isThreadActive = activeChannelId === ch.id && activeThreadId === thread.id
                               return (
-                                <button
-                                  key={thread.id}
-                                  type="button"
-                                  className="fc-thread-row"
-                                  data-active={isThreadActive ? 'true' : undefined}
-                                  onClick={() => onOpenThread?.(ch.id, thread.id)}
-                                  onContextMenu={(e) => {
-                                    e.preventDefault()
-                                    setContextMenu({ x: e.clientX, y: e.clientY, target: { kind: 'thread', thread } })
-                                  }}
-                                >
-                                  <span aria-hidden className="fc-thread-row-connector" data-last={index === threads.length - 1 ? 'true' : undefined} />
-                                  <span aria-hidden className="fc-thread-row-bg" />
-                                  <span className="fc-thread-row-label">{threadTitleOf(thread)}</span>
-                                </button>
+                                <ContextMenu key={thread.id}>
+                                  <ContextMenuTrigger
+                                    render={
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        className={`${rowButtonClass} group/row relative flex w-full min-w-0 items-center rounded-md py-1 pr-2 pl-6 text-left text-xs leading-5 font-semibold text-muted-foreground transition-colors hover:text-foreground data-[active=true]:text-foreground`}
+                                        data-active={isThreadActive ? 'true' : undefined}
+                                        onClick={() => onOpenThread?.(ch.id, thread.id)}
+                                      />
+                                    }
+                                  >
+                                    <span aria-hidden className="pointer-events-none absolute top-0 bottom-0 left-0 z-10 w-2.5 rounded-bl-md border-b-2 border-l-2 border-border/80 data-[last=true]:bottom-auto data-[last=true]:h-3" data-last={index === threads.length - 1 ? 'true' : undefined} />
+                                    <span aria-hidden className="pointer-events-none absolute inset-0 left-3.5 rounded-md transition-colors group-hover/row:bg-sidebar-accent/45 group-data-[active=true]/row:bg-sidebar-accent" />
+                                    <span className="relative z-10 min-w-0 truncate">{threadTitleOf(thread)}</span>
+                                  </ContextMenuTrigger>
+                                  <ContextMenuContent className={`min-w-44 ${menuClass}`}>{threadMenuItems(thread)}</ContextMenuContent>
+                                </ContextMenu>
                               )
                             })}
                           </div>
@@ -443,116 +492,6 @@ export function ChannelSidebar({
         </div>
       </div>
 
-      {/* context menus */}
-      {contextMenu
-        ? createPortal(
-        <div ref={contextRef} className="fc-menu fc-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          {contextMenu.target.kind === 'thread' ? (
-            <>
-              <button
-                className="fc-menu-item"
-                onClick={() => {
-                  const thread = (contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread
-                  followThread(thread.id, !thread.threadFollowed)
-                  setContextMenu(null)
-                }}
-              >
-                <FollowIcon size={16} />
-                {(contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread.threadFollowed ? 'Unfollow Thread' : 'Follow Thread'}
-              </button>
-              <button
-                className="fc-menu-item"
-                onClick={() => {
-                  const thread = (contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread
-                  setRenamingThread(thread)
-                  setThreadNameDraft(threadTitleOf(thread))
-                  setContextMenu(null)
-                }}
-              >
-                <Edit size={16} />
-                Rename Thread
-              </button>
-              <button
-                className="fc-menu-item"
-                data-danger="true"
-                onClick={() => {
-                  setDeleteThread((contextMenu.target as { kind: 'thread'; thread: ChatMessage }).thread)
-                  setContextMenu(null)
-                }}
-              >
-                <Trash size={16} />
-                Delete Thread
-              </button>
-            </>
-          ) : contextMenu.target.kind === 'channel' ? (
-            <>
-              <button
-                className="fc-menu-item"
-                onClick={() => {
-                  const channel = (contextMenu.target as { kind: 'channel'; channel: Channel }).channel
-                  setContextMenu(null)
-                  setModal({ kind: 'edit-channel', channel })
-                }}
-              >
-                <Edit size={16} />
-                Edit Channel
-              </button>
-              <button
-                className="fc-menu-item"
-                data-danger="true"
-                onClick={() => {
-                  const channel = (contextMenu.target as { kind: 'channel'; channel: Channel }).channel
-                  setContextMenu(null)
-                  setModal({ kind: 'delete-channel', channel })
-                }}
-              >
-                <Trash size={16} />
-                Delete Channel
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                className="fc-menu-item"
-                onClick={() => {
-                  const category = (contextMenu.target as { kind: 'category'; category: ChatCategory }).category
-                  setContextMenu(null)
-                  setModal({ kind: 'edit-category', category })
-                }}
-              >
-                <Edit size={16} />
-                Edit Category
-              </button>
-              <button
-                className="fc-menu-item"
-                onClick={() => {
-                  const category = (contextMenu.target as { kind: 'category'; category: ChatCategory }).category
-                  setContextMenu(null)
-                  setModal({ kind: 'create-channel', categoryId: category.id, categoryName: category.name })
-                }}
-              >
-                <Add size={16} />
-                Create Channel
-              </button>
-              <button
-                className="fc-menu-item"
-                data-danger="true"
-                onClick={() => {
-                  const category = (contextMenu.target as { kind: 'category'; category: ChatCategory }).category
-                  setContextMenu(null)
-                  setModal({ kind: 'delete-category', id: category.id, name: category.name })
-                }}
-              >
-                <Trash size={16} />
-                Delete Category
-              </button>
-            </>
-          )}
-        </div>,
-            document.body,
-          )
-        : null}
-
       <ChannelModals modal={modal} onClose={() => setModal(null)} activeChannelId={activeChannelId} />
       {deleteThread ? (
         <ConfirmDeleteModal
@@ -566,32 +505,31 @@ export function ChannelSidebar({
         />
       ) : null}
       {renamingThread ? (
-        <div className="fc-rename-overlay">
-          <div className="fc-rename-card">
-            <h2>Rename thread</h2>
-            <label className="fc-rename-label">
-              <span>Thread name</span>
-              <input
-                className="fc-rename-input"
-                value={threadNameDraft}
-                autoFocus
-                onChange={(e) => setThreadNameDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitThreadRename()
-                  if (e.key === 'Escape') setRenamingThread(null)
-                }}
-              />
-            </label>
-            <div className="fc-rename-actions">
-              <button type="button" className="button" onClick={() => setRenamingThread(null)}>
-                Cancel
-              </button>
-              <button type="button" className="button button-primary" disabled={!threadNameDraft.trim()} onClick={commitThreadRename}>
-                Save
-              </button>
-            </div>
+        <Modal title="Rename thread" onClose={() => setRenamingThread(null)} maxWidth={384}>
+          <div>
+            <Label htmlFor="rename-thread-name" className="mb-1.5 block text-xs font-bold tracking-wider text-muted-foreground uppercase">
+              Thread name
+            </Label>
+            <Input
+              id="rename-thread-name"
+              className="h-10 border-border bg-muted px-3 text-sm focus-visible:border-primary md:text-sm dark:bg-muted"
+              value={threadNameDraft}
+              autoFocus
+              onChange={(e) => setThreadNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitThreadRename()
+              }}
+            />
           </div>
-        </div>
+          <div className="mt-1 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setRenamingThread(null)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={!threadNameDraft.trim()} onClick={commitThreadRename}>
+              Save
+            </Button>
+          </div>
+        </Modal>
       ) : null}
     </div>
   )

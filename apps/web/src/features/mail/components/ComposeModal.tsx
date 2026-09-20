@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Modal } from '../../../components/ui/Modal'
-import { composeMail } from '../../../mock/actions'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Modal } from '@/components/common/Modal'
+import { composeMail } from '@/mock/actions'
 
 interface ComposeModalProps {
   onClose: () => void
@@ -24,14 +28,13 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
 
   return (
     <Modal title="New message" onClose={onClose}>
-      <div className="mail-compose">
+      <div className="flex flex-col gap-3">
         <div>
-          <label className="field-label" htmlFor="mail-compose-to">
+          <Label htmlFor="mail-compose-to" className="mb-1.5 h-4 text-[13px] leading-4 text-muted-foreground">
             To
-          </label>
-          <input
+          </Label>
+          <Input
             id="mail-compose-to"
-            className="input"
             type="text"
             placeholder="name@example.com"
             value={to}
@@ -40,12 +43,11 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
           />
         </div>
         <div>
-          <label className="field-label" htmlFor="mail-compose-subject">
+          <Label htmlFor="mail-compose-subject" className="mb-1.5 h-4 text-[13px] leading-4 text-muted-foreground">
             Subject
-          </label>
-          <input
+          </Label>
+          <Input
             id="mail-compose-subject"
-            className="input"
             type="text"
             placeholder="Subject"
             value={subject}
@@ -53,24 +55,24 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
           />
         </div>
         <div>
-          <label className="field-label" htmlFor="mail-compose-body">
+          <Label htmlFor="mail-compose-body" className="mb-1.5 h-4 text-[13px] leading-4 text-muted-foreground">
             Message
-          </label>
-          <textarea
+          </Label>
+          <Textarea
             id="mail-compose-body"
-            className="input"
+            className="block field-sizing-fixed min-h-20 resize-y px-3 py-2 text-sm leading-5 text-foreground"
             placeholder="Write your message…"
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
         </div>
-        <div className="modal-footer">
-          <button className="button button-ghost" onClick={onClose}>
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+          <Button variant="ghost" onClick={onClose}>
             Discard
-          </button>
-          <button className="button button-primary" disabled={!canSend} onClick={send}>
+          </Button>
+          <Button disabled={!canSend} onClick={send}>
             Send
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

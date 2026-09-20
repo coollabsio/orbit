@@ -1,25 +1,34 @@
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { ArrowLeft, MoreH, Trash } from 'reicon-react'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { EmojiPicker } from '../../../components/ui/EmojiPicker'
-import { relativeTime } from '../../../lib/format'
-import { createDoc, updateDocContent, updateDocCover, updateDocIcon, updateDocTitle } from '../../../mock/actions'
-import { nextId } from '../../../mock/store'
-import type { Doc, DocBlock, User } from '../../../mock/types'
-import { ancestorsOf, numberedIndex } from '../lib'
-import { fileToAttachment } from '../../chat/attachmentLib'
-import { ConfirmDeleteModal } from '../../chat/components/ChannelModals'
-import { descendantsOf } from '../lib'
+import { ArrowLeft, Ellipsis, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { EmojiPicker } from '@/components/common/EmojiPicker'
+import { relativeTime } from '@/lib/format'
+import { createDoc, updateDocContent, updateDocCover, updateDocIcon, updateDocTitle } from '@/mock/actions'
+import { nextId } from '@/mock/store'
+import type { Doc, DocBlock, User } from '@/mock/types'
+import { ancestorsOf, numberedIndex } from '@/features/docs/docsLib'
+import { fileToAttachment } from '@/lib/attachmentLib'
+import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { descendantsOf } from '@/features/docs/docsLib'
 import { BlockEditor } from './BlockEditor'
 import { CoverBanner } from './CoverBanner'
 import { MediaBlock } from './MediaBlock'
-import { Emoji } from '../../../components/ui/Emoji'
+import { Emoji } from '@/components/common/Emoji'
 import { CoverSourcePanel } from './CoverSourcePanel'
 import { BlockView } from './BlockView'
-import { buildMentionTokens } from '../../chat/chatLib'
+import { buildMentionTokens } from '@/lib/mentions'
 import { PageBlock } from './PageBlock'
 import { PageLinkDialog } from './PageLinkDialog'
+
+// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
+const menuItemClass =
+  'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm leading-5 text-foreground focus:bg-muted data-[danger=true]:text-destructive data-[danger=true]:focus:bg-muted data-[danger=true]:focus:text-destructive'
+/** The emoji picker panel brings its own chrome, so the popover is just an anchored frame. */
+const emojiPanelClass = 'w-auto gap-0 rounded-xl border border-border bg-popover p-0 text-foreground shadow-xl ring-0'
 
 interface DocEditorProps {
   doc: Doc
@@ -36,6 +45,8 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   // "Add cover" panel for a page without a cover (with a cover, the banner hosts its own panel)
   const [coverPanelOpen, setCoverPanelOpen] = useState(false)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
+  const [addIconOpen, setAddIconOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   // "/image" and "/file": the hidden picker fills this block (or replaces it when empty)
   const mediaInput = useRef<HTMLInputElement>(null)
@@ -186,115 +197,122 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
   }
 
   return (
-    <section className="pane docs-editor-pane">
-      <div className="pane-header">
-        <button
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=index]/docs:hidden">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
+        <Button
           type="button"
-          className="icon-button docs-back"
+          variant="ghost"
+          size="icon-sm"
+          className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
           aria-label="Back to docs"
           onClick={() => navigate('/docs')}
         >
-          <ArrowLeft size={16} />
-        </button>
-        <nav className="docs-breadcrumbs" aria-label="Page path">
+          <ArrowLeft className="size-4" />
+        </Button>
+        <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] text-muted-foreground/70" aria-label="Page path">
           {ancestors.map((a) => (
-            <span key={a.id} className="docs-crumb">
-              <Link className="docs-crumb-link truncate" to={`/docs/${a.id}`}>
+            <span key={a.id} className="flex min-w-0 items-center gap-1.5">
+              <Link className="block min-w-0 truncate rounded-[4px] text-muted-foreground/70 no-underline hover:text-foreground" to={`/docs/${a.id}`}>
                 {a.title || 'Untitled'}
               </Link>
-              <span className="docs-crumb-sep">/</span>
+              <span className="shrink-0">/</span>
             </span>
           ))}
-          <Link className="docs-crumb-current truncate" to={`/docs/${doc.id}`} aria-current="page">
+          <Link
+            className="block min-w-0 shrink truncate rounded-[4px] font-medium text-foreground no-underline"
+            to={`/docs/${doc.id}`}
+            aria-current="page"
+          >
             {title || 'Untitled'}
           </Link>
         </nav>
-        <span className="spacer" />
-        <span className="docs-updated-meta text-faint text-xs" style={{ whiteSpace: 'nowrap' }}>
+        <span className="flex-1" />
+        <span className="whitespace-nowrap text-xs text-muted-foreground/70 max-[899px]:hidden">
           Updated {relativeTime(doc.updatedAt)} by {updatedBy?.name ?? 'Unknown'}
         </span>
-        <Dropdown
-          align="right"
-          trigger={() => (
-            <button type="button" className="icon-button" aria-label="Document options">
-              <MoreH size={16} />
-            </button>
-          )}
-        >
-          {(close) => (
-            <button
-              type="button"
-              className="popover-option"
-              style={{ color: 'var(--danger)' }}
-              onClick={() => {
-                close()
-                setConfirmDelete(true)
-              }}
-            >
-              <Trash size={14} />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Document options" />
+            }
+          >
+            <Ellipsis className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-32">
+            <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="size-[14px]" />
               Delete
-            </button>
-          )}
-        </Dropdown>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-      <div className="pane-body docs-editor-scroll">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
         {doc.cover ? <CoverBanner key={`${doc.id}:${doc.cover}:${doc.coverPos ?? ''}`} doc={doc} /> : null}
-        <div className="docs-editor-column">
+        <div className="mx-auto max-w-[760px]">
           {doc.icon ? (
-            <div className="doc-icon-row" data-cover={doc.cover ? 'true' : undefined}>
-              <Dropdown
-                className="emoji-dropdown"
-                trigger={() => (
-                  <button type="button" className="doc-icon-button" aria-label="Change icon">
-                    <Emoji value={doc.icon ?? ""} size={56} />
-                  </button>
-                )}
-              >
-                {(close) => (
+            <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={doc.cover ? 'true' : undefined}>
+              <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] dark:hover:bg-foreground/[0.02]"
+                      aria-label="Change icon"
+                    />
+                  }
+                >
+                  <Emoji value={doc.icon ?? ''} size={56} />
+                </PopoverTrigger>
+                <PopoverContent align="start" className={emojiPanelClass}>
                   <EmojiPicker
                     onPick={(emoji) => {
                       updateDocIcon(doc.id, emoji)
-                      close()
+                      setIconPickerOpen(false)
                     }}
                     onRemove={() => {
                       updateDocIcon(doc.id, null)
-                      close()
+                      setIconPickerOpen(false)
                     }}
                   />
-                )}
-              </Dropdown>
+                </PopoverContent>
+              </Popover>
             </div>
           ) : null}
           {!doc.icon || !doc.cover ? (
-            <div className="doc-decor-actions">
+            <div className="flex gap-2 pt-1.5 pb-2.5">
               {!doc.icon ? (
-                <Dropdown
-                  className="emoji-dropdown"
-                  trigger={() => (
-                    <button type="button" className="button button-ghost doc-decor-btn">
-                      😀 Add icon
-                    </button>
-                  )}
-                >
-                  {(close) => (
+                <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
+                  <PopoverTrigger
+                    render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground" />}
+                  >
+                    😀 Add icon
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className={emojiPanelClass}>
                     <EmojiPicker
                       onPick={(emoji) => {
                         updateDocIcon(doc.id, emoji)
-                        close()
+                        setAddIconOpen(false)
                       }}
                     />
-                  )}
-                </Dropdown>
+                  </PopoverContent>
+                </Popover>
               ) : null}
               {!doc.cover ? (
-                <button type="button" className="button button-ghost doc-decor-btn" onClick={() => setCoverPanelOpen((o) => !o)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground/70 hover:text-foreground"
+                  onClick={() => setCoverPanelOpen((o) => !o)}
+                >
                   🖼️ Add cover
-                </button>
+                </Button>
               ) : null}
             </div>
           ) : null}
           {!doc.cover && coverPanelOpen ? (
-            <div className="doc-cover-source-inline">
+            <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3">
               <CoverSourcePanel
                 onPicked={(url) => {
                   setCoverPanelOpen(false)
@@ -303,8 +321,8 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
               />
             </div>
           ) : null}
-          <input
-            className="doc-title-input"
+          <Input
+            className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
             value={title}
             placeholder="Untitled"
             onChange={(e) => setTitle(e.target.value)}
@@ -327,7 +345,7 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
             }}
           />
           <div
-            className="doc-blocks"
+            className="flex flex-col text-[15px] leading-[1.7] text-foreground max-[899px]:text-xs max-[899px]:leading-[17px]"
             onDragOver={(e) => {
               if (e.dataTransfer.types.includes('Files')) e.preventDefault()
             }}
@@ -390,7 +408,13 @@ export function DocEditor({ doc, docs, users, onDelete }: DocEditorProps) {
               ),
             )}
           </div>
-          <button type="button" className="doc-editor-tail" aria-label="Continue writing" onClick={addBlock} />
+          <Button
+            type="button"
+            variant="ghost"
+            className="block h-auto min-h-40 w-full cursor-text rounded-none border-0 p-0 hover:bg-transparent dark:hover:bg-transparent"
+            aria-label="Continue writing"
+            onClick={addBlock}
+          />
           <input
             ref={mediaInput}
             type="file"

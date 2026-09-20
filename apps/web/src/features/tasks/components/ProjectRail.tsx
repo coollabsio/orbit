@@ -1,8 +1,12 @@
 import { useNavigate } from 'react-router'
-import { Add, Setting2, TaskSquare } from 'reicon-react'
+import { Plus, Settings, SquareCheck } from 'lucide-react'
 import { useState } from 'react'
-import type { Project } from '../api/models'
+import type { Project } from '@/features/tasks/api/models'
+import { Button } from '@/components/ui/button'
 import { NewProjectModal } from './NewProjectModal'
+
+const MENU_ITEM =
+  'relative flex h-8 w-full min-w-0 shrink items-center justify-start gap-2.5 overflow-hidden rounded-md border-0 px-2.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground dark:hover:bg-sidebar-accent/50'
 
 interface ProjectRailProps {
   projects: Project[]
@@ -15,37 +19,40 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
   const navigate = useNavigate()
   const [showNewProject, setShowNewProject] = useState(false)
   return (
-    <section className="pane tasks-rail-pane">
-      <div className="pane-header">
-        <span className="pane-title">Projects</span>
+    <section className="flex h-full min-h-0 w-60 shrink-0 flex-col bg-background">
+      <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+        <span className="truncate text-[13px] font-semibold text-foreground">Projects</span>
       </div>
-      <div className="pane-body tasks-rail-body">
-        <button className="menu-item" data-active={projectId === null || undefined} onClick={() => onSelect(null)}>
-          <TaskSquare size={16} />
-          <span className="menu-item-label">All projects</span>
-        </button>
+      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
+        <Button variant="ghost" className={MENU_ITEM} data-active={projectId === null || undefined} onClick={() => onSelect(null)}>
+          <SquareCheck className="size-4.5 shrink-0 opacity-90" />
+          <span className="min-w-0 flex-1 truncate">All projects</span>
+        </Button>
         {projects.map((project) => (
-          <div key={project.id} className="tasks-rail-row">
-            <button
-              className="menu-item"
+          <div key={project.id} className="group/row relative flex items-center">
+            <Button
+              variant="ghost"
+              className={`${MENU_ITEM} flex-1 pr-8`}
               data-active={project.id === projectId || undefined}
               onClick={() => onSelect(project.id)}
             >
-              <span className="pill-dot tasks-rail-dot" style={{ background: project.color }} />
-              <span className="menu-item-label">{project.name}</span>
-            </button>
-            <button
+              <span className="mx-[5px] size-2 shrink-0 rounded-[2px]" style={{ background: project.color }} />
+              <span className="min-w-0 flex-1 truncate">{project.name}</span>
+            </Button>
+            <Button
               type="button"
-              className="icon-button tasks-rail-settings"
+              variant="ghost"
+              size="icon-xs"
+              className="absolute right-1.5 size-6 rounded-md border-0 text-muted-foreground/70 opacity-0 transition hover:bg-accent hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 dark:hover:bg-accent"
               aria-label={`${project.name} settings`}
               title="Project settings"
               onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}
             >
-              <Setting2 size={14} />
-            </button>
+              <Settings className="size-3.5" />
+            </Button>
           </div>
         ))}
-        <button className="menu-item" onClick={() => setShowNewProject(true)}><Add size={16} /><span className="menu-item-label">New project</span></button>
+        <Button variant="ghost" className={MENU_ITEM} onClick={() => setShowNewProject(true)}><Plus className="size-4.5 shrink-0 opacity-90" /><span className="min-w-0 flex-1 truncate">New project</span></Button>
       </div>
       {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { onSelect(project.id); setShowNewProject(false) }} /> : null}
     </section>

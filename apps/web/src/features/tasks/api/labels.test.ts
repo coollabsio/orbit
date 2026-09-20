@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createApiClient } from '../../../api/client'
+import { createApiClient } from '@/api/client'
 import { labelsQueryOptions } from './labels'
 
 test('workspace labels include unused records with their real names and colors', async () => {

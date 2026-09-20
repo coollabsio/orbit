@@ -1,15 +1,35 @@
-import { Xmark } from 'reicon-react'
-import { Avatar, AvatarStack } from '../../../components/ui/Avatar'
-import { Dropdown } from '../../../components/ui/Dropdown'
-import { TaskStatusIcon } from '../../../components/workspace/TaskStatusIcon'
-import { projectStatuses } from '../../../components/workspace/taskMeta'
-import { shortDate } from '../../../lib/format'
-import type { Task, TaskStatusDef, User } from '../api/models'
-import type { LabelRecord } from '../../../api/generated/types.gen'
-import { useUpdateTask } from '../api/tasks'
-import { useWorkspace } from '../../workspaces/workspaceContext'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { TaskStatusIcon } from './TaskStatusIcon'
+import { projectStatuses } from '@/features/tasks/taskMeta'
+import { shortDate } from '@/lib/format'
+import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { User } from '@/features/workspaces/models'
+import type { LabelRecord } from '@/api/generated/types.gen'
+import { useUpdateTask } from '@/features/tasks/api/tasks'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { PriorityPicker } from './PriorityPicker'
 import { LinkifiedText } from './LinkifiedText'
+
+const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
+const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
+const OPTION =
+  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[selected]:bg-accent data-[selected]:font-medium`
+/** Multi-select rows keep room on the right for the checked indicator. */
+const CHECK_OPTION =
+  `group min-h-8 cursor-pointer gap-2 py-1.5 pr-8 pl-2 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-checked:bg-accent data-checked:font-medium`
+const HEADING = 'px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase'
 
 interface TaskRowProps {
   task: Task
@@ -33,7 +53,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
   const options = projectStatuses(statuses, task.projectId)
   return (
     <div
-      className="list-row tasks-row"
+      className="group/row flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2 border-b border-border px-3 py-1.5 text-left transition-colors hover:bg-foreground/[0.02] data-[dragging]:bg-muted data-[selected]:bg-primary/10 max-[480px]:gap-1.5"
       data-selected={selected || undefined}
       data-dragging={dragging || undefined}
       role="button"
@@ -50,101 +70,96 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
         if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(task.id)
       }}
     >
-      <label className="checkbox-box tasks-row-check" onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" checked={selected} aria-label={`Select ${task.identifier}`} onChange={() => onToggleSelect(task.id)} />
-        <span className="checkbox-box-visual" />
-        <svg className="checkbox-box-tick" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-          <path d="M2.5 6.5 5 9l4.5-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </label>
-      <PriorityPicker task={task} />
-      <span className="tasks-row-id">{task.identifier}</span>
-      <div onClick={(e) => e.stopPropagation()}>
-        <Dropdown
-          trigger={() => (
-            <button className="icon-button tasks-row-status" aria-label={`Status: ${status?.name ?? 'None'}`}>
-              <TaskStatusIcon status={status} />
-            </button>
-          )}
-        >
-          {(close) => (
-            <>
-              {options.map((option) => (
-                <button
-                  key={option.id}
-                  className="popover-option"
-                  data-selected={option.id === task.statusId || undefined}
-                  onClick={() => {
-                    updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })
-                    close()
-                  }}
-                >
-                  <TaskStatusIcon status={option} />
-                  {option.name}
-                </button>
-              ))}
-            </>
-          )}
-        </Dropdown>
+      <div className="relative -my-1.5 -ml-3 flex w-7 shrink-0 cursor-pointer self-stretch" onClick={(e) => e.stopPropagation()}>
+        {/* the ::after overlay stretches the hit area over the whole 28px strip (the old label click target) */}
+        <Checkbox
+          checked={selected}
+          aria-label={`Select ${task.identifier}`}
+          onCheckedChange={() => onToggleSelect(task.id)}
+          className="absolute top-1/2 left-3 size-4 -translate-y-1/2 cursor-pointer rounded border-foreground/20 bg-background opacity-0 transition-opacity group-hover/row:opacity-100 group-data-[selected]/row:opacity-100 after:-top-3 after:-bottom-3 after:-left-3 after:right-0 focus-visible:opacity-100 dark:bg-background"
+        />
       </div>
-      <span className="tasks-row-title truncate"><LinkifiedText text={task.title || 'Untitled'} /></span>
+      <PriorityPicker task={task} />
+      <span className="w-[72px] shrink-0 text-xs whitespace-nowrap text-muted-foreground/70 tabular-nums max-[480px]:hidden">{task.identifier}</span>
+      <div onClick={(e) => e.stopPropagation()}>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="ghost" size="icon-sm" className="size-[22px]" aria-label={`Status: ${status?.name ?? 'None'}`}>
+                <TaskStatusIcon status={status} />
+              </Button>
+            }
+          />
+          <DropdownMenuContent className={MENU}>
+            {options.map((option) => (
+              <DropdownMenuItem
+                key={option.id}
+                className={OPTION}
+                data-selected={option.id === task.statusId || undefined}
+                onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
+              >
+                <TaskStatusIcon status={option} />
+                {option.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
       {task.labels.length > 0 ? (
-        <span className="tasks-row-labels">
+        <span className="flex shrink-0 gap-1 max-[1099px]:hidden">
           {task.labels.map((labelId) => {
             const label = labels.find((item) => item.id === labelId)
-            return label ? <span key={label.id} className="pill"><span className="pill-dot" style={{ background: label.color }} />{label.name}</span> : null
+            return label ? <Badge key={label.id} variant="outline" className={PILL}><span className="size-1.5 shrink-0 rounded-full" style={{ background: label.color }} />{label.name}</Badge> : null
           })}
         </span>
       ) : null}
       <div onClick={(e) => e.stopPropagation()}>
-        <Dropdown
-          align="right"
-          trigger={() => (
-            <button
-              type="button"
-              className="tasks-row-assignees"
-              aria-label={assignees.length > 0 ? `Assignees: ${assignees.map((user) => user.name).join(', ')}` : 'Assign task'}
-            >
-              <AvatarStack users={assignees} size={18} />
-            </button>
-          )}
-        >
-          {(close) => (
-            <>
-              <div className="popover-heading">Assignees</div>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                className="inline-flex h-auto cursor-pointer rounded-none border-0 bg-transparent p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
+                aria-label={assignees.length > 0 ? `Assignees: ${assignees.map((user) => user.name).join(', ')}` : 'Assign task'}
+              >
+                <UserAvatarStack users={assignees} size={18} />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className={MENU}>
+            <DropdownMenuGroup className="flex flex-col gap-px">
+              <DropdownMenuLabel className={HEADING}>Assignees</DropdownMenuLabel>
               {users.map((user) => {
                 const active = task.assigneeIds.includes(user.id)
                 return (
-                  <button
+                  <DropdownMenuCheckboxItem
                     key={user.id}
-                    className="popover-option"
-                    data-selected={active || undefined}
-                    aria-pressed={active}
-                    onClick={() => {
-                      updateTask.mutate({
-                        taskId: task.id,
-                        body: {
-                          expected_version: task.version,
-                          assignee_ids: active
-                            ? task.assigneeIds.filter((id) => id !== user.id)
-                            : [...task.assigneeIds, user.id],
-                        },
-                      })
-                      close()
-                    }}
+                    className={CHECK_OPTION}
+                    checked={active}
+                    closeOnClick
+                    onCheckedChange={() => updateTask.mutate({
+                      taskId: task.id,
+                      body: {
+                        expected_version: task.version,
+                        assignee_ids: active
+                          ? task.assigneeIds.filter((id) => id !== user.id)
+                          : [...task.assigneeIds, user.id],
+                      },
+                    })}
                   >
-                    <Avatar user={user} size={16} />
+                    <UserAvatar user={user} size={16} />
                     {user.name}
-                    {active ? <Xmark size={14} className="popover-option-remove" aria-hidden="true" /> : null}
-                  </button>
+                  </DropdownMenuCheckboxItem>
                 )
               })}
-            </>
-          )}
-        </Dropdown>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-      <span className="tasks-row-date">{shortDate(task.createdAt)}</span>
-      {updateTask.isError ? <span role="alert" className="text-danger text-xs">Status update failed. <button className="button button-ghost" onClick={(event) => { event.stopPropagation(); if (updateTask.variables) updateTask.mutate(updateTask.variables) }}>Retry</button></span> : null}
+      <span className="min-w-[44px] shrink-0 text-right text-xs text-muted-foreground/70 tabular-nums max-[480px]:hidden">{shortDate(task.createdAt)}</span>
+      {updateTask.isError ? <span role="alert" className="text-xs text-destructive">Status update failed. <Button variant="ghost" onClick={(event) => { event.stopPropagation(); if (updateTask.variables) updateTask.mutate(updateTask.variables) }}>Retry</Button></span> : null}
     </div>
   )
 }
