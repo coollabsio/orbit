@@ -32,6 +32,7 @@ import { TaskDetail } from '@/features/tasks/components/TaskDetail'
 import { TaskFilters } from '@/features/tasks/components/TaskFilters'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
+import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from '@/features/tasks/tasksLib'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
 
@@ -190,8 +191,14 @@ export function TasksPage() {
   if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
-  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.isError || detailQuery.isError || commentsQuery.isError || activityQuery.isError || attachmentsQuery.isError || commentAttachments.isError) {
-    return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace. No mock data was substituted." />
+  if (detailQuery.isError) {
+    return <TaskBoundary title="Task unavailable" description={taskUnavailableDescription(detailQuery.error)} />
+  }
+  if (taskId && (commentsQuery.isError || activityQuery.isError || attachmentsQuery.isError || commentAttachments.isError)) {
+    return <TaskBoundary title="Task unavailable" description="The server could not load this task." />
+  }
+  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.isError) {
+    return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace." />
   }
 
   return (
