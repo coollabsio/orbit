@@ -192,6 +192,7 @@ pub struct TaskFilter {
     pub project_id: Option<Id>,
     pub status_id: Option<Id>,
     pub assignee_id: Option<Id>,
+    pub unassigned: bool,
     pub label_id: Option<Id>,
     pub priority: Option<String>,
     pub search: Option<String>,
@@ -1005,6 +1006,9 @@ impl TaskRepository {
                 .push(" AND EXISTS (SELECT 1 FROM task_assignees JOIN memberships ON memberships.id = task_assignees.membership_id JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id AND memberships.workspace_id = tasks.workspace_id AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL AND task_assignees.user_id = ")
                 .push_bind(assignee_id.to_string())
                 .push(")");
+        }
+        if filter.unassigned {
+            query.push(" AND NOT EXISTS (SELECT 1 FROM task_assignees JOIN memberships ON memberships.id = task_assignees.membership_id JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id AND memberships.workspace_id = tasks.workspace_id AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL)");
         }
         if matches!(
             filter.view.as_deref(),
@@ -2033,7 +2037,7 @@ fn cursor_i64_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(i64
 
 fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
     format!(
-        "tasks:w={workspace_id}:p={}:s={}:a={}:l={}:r={}:q={}:v={}:sort={:?}:order={:?}",
+        "tasks:w={workspace_id}:p={}:s={}:a={}:u={}:l={}:r={}:q={}:v={}:sort={:?}:order={:?}",
         filter
             .project_id
             .map_or_else(String::new, |id| id.to_string()),
@@ -2043,6 +2047,7 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
         filter
             .assignee_id
             .map_or_else(String::new, |id| id.to_string()),
+        filter.unassigned,
         filter
             .label_id
             .map_or_else(String::new, |id| id.to_string()),

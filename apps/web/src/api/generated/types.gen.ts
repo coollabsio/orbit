@@ -3708,6 +3708,7 @@ export type ListTasksData = {
         project_id?: string;
         status_id?: string;
         assignee_id?: string;
+        unassigned?: boolean;
         label_id?: string;
         priority?: string;
         search?: string;

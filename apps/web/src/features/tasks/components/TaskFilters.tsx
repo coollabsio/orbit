@@ -36,6 +36,7 @@ interface TaskFiltersProps {
   groups: StatusGroup[]
   statusKey: string | null
   assigneeId: string | null
+  unassigned: boolean
   labelId: string | null
   priority: TaskPriority | null
   sort: SortKey
@@ -43,6 +44,7 @@ interface TaskFiltersProps {
   search: string
   onStatusChange: (key: string | null) => void
   onAssigneeChange: (assigneeId: string | null) => void
+  onUnassignedChange: (unassigned: boolean) => void
   onLabelChange: (labelId: string | null) => void
   onPriorityChange: (priority: TaskPriority | null) => void
   onSortChange: (sort: SortKey) => void
@@ -57,12 +59,14 @@ export function TaskFilters({
   groups,
   statusKey,
   assigneeId,
+  unassigned,
   labelId,
   priority,
   sort,
   layout,
   onStatusChange,
   onAssigneeChange,
+  onUnassignedChange,
   onLabelChange,
   onPriorityChange,
   onSortChange,
@@ -70,7 +74,7 @@ export function TaskFilters({
   search,
   onSearchChange,
 }: TaskFiltersProps) {
-  const activeCount = (statusKey ? 1 : 0) + (assigneeId ? 1 : 0) + (labelId ? 1 : 0) + (priority ? 1 : 0)
+  const activeCount = (statusKey ? 1 : 0) + (assigneeId || unassigned ? 1 : 0) + (labelId ? 1 : 0) + (priority ? 1 : 0)
   const sortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label ?? 'Sort'
 
   return (
@@ -139,12 +143,26 @@ export function TaskFilters({
           <DropdownMenuSeparator className={SEP} />
           <DropdownMenuGroup className="flex flex-col gap-px">
             <DropdownMenuLabel className={HEADING}>Assignee</DropdownMenuLabel>
+            <DropdownMenuItem
+              className={OPTION}
+              data-selected={unassigned || undefined}
+              onClick={() => {
+                onAssigneeChange(null)
+                onUnassignedChange(!unassigned)
+              }}
+            >
+              <span className="size-4 shrink-0 rounded-full border border-dashed border-muted-foreground" />
+              Unassigned
+            </DropdownMenuItem>
             {users.map((u) => (
               <DropdownMenuItem
                 key={u.id}
                 className={OPTION}
                 data-selected={u.id === assigneeId || undefined}
-                onClick={() => onAssigneeChange(u.id === assigneeId ? null : u.id)}
+                onClick={() => {
+                  onUnassignedChange(false)
+                  onAssigneeChange(u.id === assigneeId ? null : u.id)
+                }}
               >
                 <UserAvatar user={u} size={16} />
                 {u.name}
@@ -159,6 +177,7 @@ export function TaskFilters({
                 onClick={() => {
                   onStatusChange(null)
                   onAssigneeChange(null)
+                  onUnassignedChange(false)
                   onLabelChange(null)
                   onPriorityChange(null)
                 }}

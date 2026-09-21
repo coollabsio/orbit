@@ -766,6 +766,8 @@ struct TaskQuery {
     project_id: Option<String>,
     status_id: Option<String>,
     assignee_id: Option<String>,
+    #[serde(default)]
+    unassigned: bool,
     label_id: Option<String>,
     priority: Option<String>,
     search: Option<String>,
@@ -857,6 +859,7 @@ async fn list_tasks(
         project_id: optional_id(query.project_id, &instance, request_id.as_ref())?,
         status_id: optional_id(query.status_id, &instance, request_id.as_ref())?,
         assignee_id: optional_id(query.assignee_id, &instance, request_id.as_ref())?,
+        unassigned: query.unassigned,
         label_id: optional_id(query.label_id, &instance, request_id.as_ref())?,
         priority: query
             .priority

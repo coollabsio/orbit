@@ -9,6 +9,7 @@ export interface TaskFilterState {
   /** Status group key (see `statusKeyOf`), so "Todo" matches across projects. */
   statusKey: string | null
   assigneeId: string | null
+  unassigned?: boolean
   labelId?: string | null
   priority?: TaskPriority | null
   search?: string
@@ -21,6 +22,7 @@ export function filterTasks(tasks: Task[], f: TaskFilterState): Task[] {
     if (f.projectId && t.projectId !== f.projectId) return false
     if (f.statusKey && keyById.get(t.statusId) !== f.statusKey) return false
     if (f.assigneeId && !t.assigneeIds.includes(f.assigneeId)) return false
+    if (f.unassigned && t.assigneeIds.length > 0) return false
     if (f.labelId && !t.labels.includes(f.labelId)) return false
     if (f.priority && t.priority !== f.priority) return false
     const search = f.search?.trim().toLowerCase()

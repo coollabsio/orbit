@@ -59,6 +59,7 @@ export function TasksPage() {
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
+  const [unassignedFilter, setUnassignedFilter] = useState(false)
   const [labelFilter, setLabelFilter] = useState<string | null>(null)
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(null)
   const [searchFilter, setSearchFilter] = useState('')
@@ -76,6 +77,7 @@ export function TasksPage() {
     project_id: projectFilter ?? undefined,
     status_id: statusFilter ? apiStatus : undefined,
     assignee_id: assigneeFilter ?? undefined,
+    unassigned: unassignedFilter || undefined,
     label_id: labelFilter ?? undefined,
     priority: priorityFilter ?? undefined,
     view: viewFilter,
@@ -182,6 +184,7 @@ export function TasksPage() {
     projectId: projectFilter,
     statusKey: statusFilter,
     assigneeId: assigneeFilter,
+    unassigned: unassignedFilter,
     labelId: labelFilter,
     priority: priorityFilter,
     statuses: statusesQuery.data,
@@ -233,7 +236,7 @@ export function TasksPage() {
             </DropdownMenu>
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
-            <TaskFilters users={users} labels={labelsQuery.data ?? []} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} labelId={labelFilter} priority={priorityFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onLabelChange={setLabelFilter} onPriorityChange={setPriorityFilter} onSortChange={setSort} onLayoutChange={setLayout} />
+            <TaskFilters users={users} labels={labelsQuery.data ?? []} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} unassigned={unassignedFilter} labelId={labelFilter} priority={priorityFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onUnassignedChange={setUnassignedFilter} onLabelChange={setLabelFilter} onPriorityChange={setPriorityFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>

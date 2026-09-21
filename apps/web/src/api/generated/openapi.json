@@ -6815,6 +6815,14 @@
             }
           },
           {
+            "name": "unassigned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "label_id",
             "in": "query",
             "required": false,

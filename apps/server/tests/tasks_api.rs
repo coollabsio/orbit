@@ -1380,6 +1380,23 @@ async fn suspended_assignees_are_removed_from_reads_and_filters() {
     )
     .await;
     assert_eq!(filtered["items"], json!([]));
+    let unassigned = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks?unassigned=true",
+                    fixture.workspace_id
+                ),
+                &fixture.owner_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(unassigned["items"][0]["id"], task["id"]);
 }
 
 #[tokio::test]

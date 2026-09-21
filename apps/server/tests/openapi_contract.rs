@@ -94,6 +94,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
             "project_id",
             "status_id",
             "assignee_id",
+            "unassigned",
             "label_id",
             "priority",
             "search",

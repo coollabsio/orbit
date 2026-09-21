@@ -77,3 +77,12 @@ test('task filters match label and priority', () => {
   expect(filterTasks([urgent, low], { ...filters, priority: 'low' }).map(({ id }) => id)).toEqual(['ORB-2'])
   expect(filterTasks([urgent, low], { ...filters, labelId: 'feature', priority: 'urgent' })).toEqual([])
 })
+
+test('task filters match tasks without an assignee', () => {
+  const unassigned = task('ORB-1', 'todo', 0, 1)
+  const assigned = task('ORB-2', 'todo', 1, 1)
+  assigned.assigneeIds = ['user-1']
+  const filters = { currentUserId: 'user-1', projectId: null, statusKey: null, assigneeId: null, statuses: [], unassigned: true }
+
+  expect(filterTasks([unassigned, assigned], filters).map(({ id }) => id)).toEqual(['ORB-1'])
+})
