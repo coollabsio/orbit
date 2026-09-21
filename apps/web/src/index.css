@@ -143,6 +143,15 @@
   #root {
     @apply h-[var(--app-height,100svh)] max-h-[var(--app-height,100svh)];
   }
+  /* Installed apps: 100vh fills the window. svh/dvh stay one status bar short. */
+  @media (display-mode: standalone) {
+    html,
+    body,
+    #root {
+      height: var(--app-height, 100vh);
+      max-height: var(--app-height, 100vh);
+    }
+  }
   body {
     @apply overflow-hidden bg-background text-[14px] leading-[1.45] text-foreground antialiased [text-rendering:optimizeLegibility];
   }

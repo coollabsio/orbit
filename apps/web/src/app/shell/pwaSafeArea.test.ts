@@ -16,6 +16,11 @@ test('the app shell fills the webview and only pads the dock in standalone mode'
   expect(shell).toContain('h-[var(--app-height,100svh)]')
   expect(shell).toContain('pt-[env(safe-area-inset-top,0px)]')
   expect(shell).not.toMatch(/100dvh/)
+  const css = await Bun.file(new URL('../../index.css', import.meta.url)).text()
+  expect(css).toContain('@media (display-mode: standalone)')
+  expect(css).toContain('height: var(--app-height, 100vh)')
+  const viewport = await Bun.file(new URL('../../lib/visibleViewport.ts', import.meta.url)).text()
+  expect(viewport).toContain('full - visual > KEYBOARD_SHORTFALL')
   const dock = await Bun.file(new URL('./MobileDock.tsx', import.meta.url)).text()
   expect(dock).toContain('min-h-14') // --dock-height (56px)
   expect(dock).toContain('pt-3') // padding-top 12px
