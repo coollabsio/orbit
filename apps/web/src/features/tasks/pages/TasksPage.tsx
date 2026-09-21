@@ -33,6 +33,7 @@ import { TaskFilters } from '@/features/tasks/components/TaskFilters'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from '@/features/tasks/tasksLib'
+import { taskRedirect } from '@/features/tasks/taskNavigation'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 
@@ -64,6 +65,11 @@ export function TasksPage() {
   const viewFilter = ['mine', 'overdue', 'due_soon', 'current_week'].includes(searchParams.get('view') ?? '')
     ? searchParams.get('view') ?? undefined
     : undefined
+
+  useEffect(() => {
+    setSearchFilter('')
+  }, [viewFilter])
+
   const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
   const tasksQuery = useTasks(workspace.id, {
     project_id: projectFilter ?? undefined,
@@ -105,9 +111,11 @@ export function TasksPage() {
 
   const taskProjectId = activeTask?.projectId
   const closeParams = new URLSearchParams(detailParams)
+  closeParams.delete('redirect')
   if (taskProjectId) closeParams.set('project', taskProjectId)
   const closeSearch = closeParams.toString()
   const closeSearchSuffix = closeSearch ? `?${closeSearch}` : ''
+  const redirect = taskRedirect(searchParams)
 
   const setProjectFilter = (projectId: string | null) => {
     const next = new URLSearchParams(searchParams)
@@ -118,7 +126,7 @@ export function TasksPage() {
     else setSearchParams(next, { replace: true })
   }
   const openTask = (id: string) => navigate(`/tasks/${id}${detailSearchSuffix}`)
-  const closeTask = () => navigate(`/tasks${closeSearchSuffix}`)
+  const closeTask = () => navigate(redirect ?? `/tasks${closeSearchSuffix}`)
 
   useEffect(() => {
     if (!taskId || !searchParams.has('project')) return
@@ -128,11 +136,11 @@ export function TasksPage() {
   useEffect(() => {
     if (!taskId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') navigate(`/tasks${closeSearchSuffix}`)
+      if (event.key === 'Escape') navigate(redirect ?? `/tasks${closeSearchSuffix}`)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [closeSearchSuffix, navigate, taskId])
+  }, [closeSearchSuffix, navigate, redirect, taskId])
 
   const creating = useRef(false)
   const startNewTask = async (statusKey: string | null = null, replace = false) => {

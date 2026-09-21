@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { DirectInbox as Inbox, Menu } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,7 @@ type InboxTab = 'all' | 'unread' | 'mentions'
 export function InboxPage() {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
+  const location = useLocation()
   const [tab, setTab] = useState<InboxTab>('all')
   const allQuery = useNotifications(workspace.id, false)
   const unreadQuery = useNotifications(workspace.id, true)
@@ -88,7 +89,8 @@ export function InboxPage() {
                   className="flex h-auto min-h-14 w-full min-w-0 cursor-pointer justify-start gap-2.5 rounded-none border-0 border-b border-border px-3 py-1.5 text-left font-normal hover:bg-foreground/[0.02] active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-foreground/[0.02]"
                   onClick={() => {
                     if (!notification.read_at) markRead.mutate(notification.id)
-                    navigate(`/tasks/${notification.task_id}`)
+                    const params = new URLSearchParams({ redirect: `${location.pathname}${location.search}` })
+                    navigate(`/tasks/${notification.task_id}?${params}`)
                   }}
                 >
                   <span className="flex w-2 shrink-0 justify-center">

@@ -11,7 +11,7 @@ afterEach(() => { globalThis.fetch = originalFetch })
 
 function Location() {
   const location = useLocation()
-  return <output data-testid="location">{location.pathname}</output>
+  return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
 test('inbox lists assignment notifications and opens the linked task', async () => {
@@ -52,5 +52,5 @@ test('inbox lists assignment notifications and opens the linked task', async () 
   fireEvent.click(view.getByRole('button', { name: 'Menu' }))
   expect(openedSidebar).toBe(true)
   fireEvent.click(view.getByText('You were assigned a task'))
-  await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/tasks/task-9'))
+  await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/tasks/task-9?redirect=%2Finbox%3Fworkspace%3Dworkspace-1'))
 })
