@@ -16,7 +16,18 @@ const WORKSPACE_LINKS = [
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
 export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const location = useLocation()
-  const view = new URLSearchParams(location.search).get('view')
+  const currentParams = new URLSearchParams(location.search)
+  const view = currentParams.get('view')
+  const selectedProject = currentParams.get('project')
+
+  const taskViewPath = (nextView?: string) => {
+    const params = new URLSearchParams()
+    if (selectedProject) params.set('project', selectedProject)
+    if (nextView) params.set('view', nextView)
+    return `/tasks${params.size > 0 ? `?${params}` : ''}`
+  }
+
+  const inboxPath = selectedProject ? `/inbox?project=${encodeURIComponent(selectedProject)}` : '/inbox'
 
   const itemClass = (active: boolean) =>
     cn(
@@ -77,7 +88,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
         {WORKSPACE_LINKS.map((link) => link.enabled ? (
           <NavLink
             key={link.to}
-            to={link.to}
+            to={link.to === '/tasks' ? taskViewPath() : link.to}
             className={({ isActive }) => itemClass(isActive && !view)}
             aria-label={link.label}
             title={collapsed ? link.label : undefined}
@@ -95,7 +106,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
         ))}
         <Section label="Personal" />
         <NavLink
-          to="/inbox"
+          to={inboxPath}
           className={({ isActive }) => itemClass(isActive)}
           aria-label="Inbox"
           title={collapsed ? 'Inbox' : undefined}
@@ -105,7 +116,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <span className={labelClass}>Inbox</span>
         </NavLink>
         <NavLink
-          to="/tasks?view=mine"
+          to={taskViewPath('mine')}
           className={itemClass(taskViewActive('mine'))}
           aria-label="My tasks"
           title={collapsed ? 'My tasks' : undefined}
@@ -115,7 +126,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <span className={labelClass}>My tasks</span>
         </NavLink>
         <NavLink
-          to="/tasks?view=current_week"
+          to={taskViewPath('current_week')}
           className={itemClass(taskViewActive('current_week'))}
           aria-label="This week"
           title={collapsed ? 'This week' : undefined}
@@ -125,7 +136,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <span className={labelClass}>This week</span>
         </NavLink>
         <NavLink
-          to="/tasks?view=overdue"
+          to={taskViewPath('overdue')}
           className={itemClass(taskViewActive('overdue'))}
           aria-label="Overdue"
           title={collapsed ? 'Overdue' : undefined}
@@ -135,7 +146,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <span className={labelClass}>Overdue</span>
         </NavLink>
         <NavLink
-          to="/tasks?view=due_soon"
+          to={taskViewPath('due_soon')}
           className={itemClass(taskViewActive('due_soon'))}
           aria-label="Due soon"
           title={collapsed ? 'Due soon' : undefined}

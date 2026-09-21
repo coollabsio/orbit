@@ -21,6 +21,27 @@ test('the task navigation includes a current calendar week view', () => {
   expect(view.getByRole('link', { name: 'This week' }).classList.contains('bg-sidebar-accent')).toBe(true)
 })
 
+test('task views and the inbox keep the selected project', () => {
+  const view = render(
+    <MemoryRouter initialEntries={['/tasks?project=project-r']}>
+      <SidebarNav />
+      <Location />
+    </MemoryRouter>,
+  )
+
+  fireEvent.click(view.getByRole('link', { name: 'My tasks' }))
+  expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r&view=mine')
+
+  fireEvent.click(view.getByRole('link', { name: 'Inbox' }))
+  expect(view.getByTestId('location').textContent).toBe('/inbox?project=project-r')
+
+  fireEvent.click(view.getByRole('link', { name: 'This week' }))
+  expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r&view=current_week')
+
+  fireEvent.click(view.getByRole('link', { name: 'Tasks' }))
+  expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r')
+})
+
 test('settings pages are not duplicated in the main sidebar', () => {
   const view = render(
     <MemoryRouter>
