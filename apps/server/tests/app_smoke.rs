@@ -2,12 +2,12 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
-use axum::http::{Request, StatusCode, header};
+use axum::http::{header, Request, StatusCode};
 use base64::Engine;
 use http_body_util::BodyExt;
 use orbit_platform::{Config, EnvironmentMode};
 use orbit_server::app::App;
-use orbit_server::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
+use orbit_server::static_assets::{StaticAssetError, StaticAssets, FRONTEND_REVISION};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -342,6 +342,15 @@ async fn trusted_https_proxy_produces_a_secure_host_only_session_cookie() {
     let cookie = response.headers()[header::SET_COOKIE].to_str().unwrap();
     assert!(cookie.starts_with("__Host-orbit_session="));
     assert!(cookie.contains("; Secure; HttpOnly; SameSite=Lax"));
+    let max_age = cookie
+        .split(';')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("Max-Age="))
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    let ninety_days = 90 * 24 * 60 * 60;
+    assert!((ninety_days - 60..=ninety_days).contains(&max_age));
     assert!(response.headers().contains_key("strict-transport-security"));
 }
 

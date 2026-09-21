@@ -4,13 +4,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::Json;
-use axum::Router;
 use axum::extract::{Extension, FromRequest, Path, Request, State};
 use axum::http::header::{CONTENT_TYPE, COOKIE, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
+use axum::Json;
+use axum::Router;
 use orbit_platform::{
     AuthenticatedUser, ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor,
     PasswordService, RequestId, ThrottleDecision, TimestampMillis,
@@ -288,8 +288,12 @@ async fn setup_complete(
         .into_response();
     response.headers_mut().insert(
         SET_COOKIE,
-        HeaderValue::from_str(&session_cookie(state.cookie_mode, &session.token, false))
-            .expect("generated tokens are valid cookie values"),
+        HeaderValue::from_str(&issued_session_cookie(
+            state.cookie_mode,
+            &session.token,
+            session.absolute_expires_at,
+        ))
+        .expect("generated tokens are valid cookie values"),
     );
     Ok(response)
 }
@@ -465,8 +469,12 @@ async fn login(
     .into_response();
     response.headers_mut().insert(
         SET_COOKIE,
-        HeaderValue::from_str(&session_cookie(state.cookie_mode, &session.token, false))
-            .expect("generated tokens are valid cookie values"),
+        HeaderValue::from_str(&issued_session_cookie(
+            state.cookie_mode,
+            &session.token,
+            session.absolute_expires_at,
+        ))
+        .expect("generated tokens are valid cookie values"),
     );
     Ok(response)
 }
@@ -499,7 +507,7 @@ async fn logout(
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(
         SET_COOKIE,
-        HeaderValue::from_str(&session_cookie(state.cookie_mode, "", true)).unwrap(),
+        HeaderValue::from_str(&clear_session_cookie(state.cookie_mode)).unwrap(),
     );
     Ok(response)
 }
@@ -509,15 +517,28 @@ async fn me(
     State(state): State<AuthState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-) -> Result<Json<AuthUserResponse>, ApiError> {
-    let user = authenticate(&state, &headers, "/api/v1/auth/me", request_id.as_ref())
-        .await?
-        .user;
-    Ok(Json(AuthUserResponse {
-        id: user.id.to_string(),
-        email: user.email,
-        display_name: user.display_name,
-    }))
+) -> Result<Response, ApiError> {
+    let session = authenticate(&state, &headers, "/api/v1/auth/me", request_id.as_ref()).await?;
+    let token = cookie_value(&headers, cookie_name(state.cookie_mode))
+        .expect("authenticate requires the session cookie");
+    let mut response = Json(AuthUserResponse {
+        id: session.user.id.to_string(),
+        email: session.user.email,
+        display_name: session.user.display_name,
+    })
+    .into_response();
+    // Rewrite the cookie on each profile read. A browser that still has the old
+    // session cookie then stores it with an expiry before the process stops.
+    response.headers_mut().insert(
+        SET_COOKIE,
+        HeaderValue::from_str(&issued_session_cookie(
+            state.cookie_mode,
+            &token,
+            session.absolute_expires_at,
+        ))
+        .expect("session cookie is a valid header"),
+    );
+    Ok(response)
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -804,7 +825,7 @@ async fn revoke_session(
     if id == session.id {
         response.headers_mut().insert(
             SET_COOKIE,
-            HeaderValue::from_str(&session_cookie(state.cookie_mode, "", true))
+            HeaderValue::from_str(&clear_session_cookie(state.cookie_mode))
                 .expect("session cookie is a valid header"),
         );
     }
@@ -851,20 +872,38 @@ fn cookie_name(mode: CookieMode) -> &'static str {
     mode.session_cookie_name()
 }
 
-fn session_cookie(mode: CookieMode, token: &str, expired: bool) -> String {
+fn session_cookie(mode: CookieMode, token: &str, max_age_seconds: u64) -> String {
     let mut cookie = format!("{}={token}; Path=/", cookie_name(mode));
     if mode.secure {
         cookie.push_str("; Secure");
     }
+    // No Max-Age makes a session cookie. Mobile Chrome deletes it when the
+    // browser process stops. Desktop Chrome usually stays open, so the same
+    // cookie appears to last. Keep the browser lifetime equal to the server
+    // absolute session lifetime.
     cookie.push_str("; HttpOnly; SameSite=Lax");
-    if expired {
-        cookie.push_str("; Max-Age=0");
-    }
+    cookie.push_str(&format!("; Max-Age={max_age_seconds}"));
     cookie
 }
 
-pub(crate) fn issued_session_cookie(mode: CookieMode, token: &str) -> String {
-    session_cookie(mode, token, false)
+fn max_age_until(expires_at: TimestampMillis) -> u64 {
+    let remaining_ms = expires_at
+        .as_millis()
+        .saturating_sub(TimestampMillis::now().as_millis());
+    let seconds = remaining_ms.saturating_add(999) / 1_000;
+    u64::try_from(seconds).unwrap_or(u64::MAX)
+}
+
+pub(crate) fn issued_session_cookie(
+    mode: CookieMode,
+    token: &str,
+    absolute_expires_at: TimestampMillis,
+) -> String {
+    session_cookie(mode, token, max_age_until(absolute_expires_at))
+}
+
+fn clear_session_cookie(mode: CookieMode) -> String {
+    session_cookie(mode, "", 0)
 }
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -994,15 +1033,15 @@ impl IntoResponse for ApiError {
 mod tests {
     use std::sync::Arc;
 
-    use axum::body::{Body, to_bytes};
-    use axum::http::{Request, StatusCode, header};
+    use axum::body::{to_bytes, Body};
+    use axum::http::{header, Request, StatusCode};
     use orbit_platform::{
         HttpPlatformLayer, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
     };
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
     use tower::ServiceExt;
 
-    use super::{AuthState, CookieMode, SetupLaunch, auth_router, initialize_auth};
+    use super::{auth_router, initialize_auth, AuthState, CookieMode, SetupLaunch};
     use crate::repositories::identity::{IdentityRepository, SetupRequest};
 
     #[tokio::test]
@@ -1029,6 +1068,7 @@ mod tests {
         assert!(cookie.contains("; HttpOnly"));
         assert!(cookie.contains("; SameSite=Lax"));
         assert!(!cookie.contains("Domain="));
+        assert_persistent_max_age(cookie);
     }
 
     #[tokio::test]
@@ -1100,12 +1140,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::ACCEPTED);
-        assert!(
-            repository
-                .recovery_token_valid("admin-issued-token", TimestampMillis::now())
-                .await
-                .unwrap()
-        );
+        assert!(repository
+            .recovery_token_valid("admin-issued-token", TimestampMillis::now())
+            .await
+            .unwrap());
         let response: Value = serde_json::from_slice(&body(response).await).unwrap();
         assert_eq!(
             response["detail"],
@@ -1311,15 +1349,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        assert!(
-            response
-                .headers()
-                .get(header::SET_COOKIE)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with("__Host-orbit_session=")
-        );
+        assert!(response
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("__Host-orbit_session="));
+        assert_persistent_max_age(response.headers()[header::SET_COOKIE].to_str().unwrap());
     }
 
     #[tokio::test]
@@ -1346,6 +1383,7 @@ mod tests {
         assert!(!cookie.contains("__Host-"));
         assert!(!cookie.contains("; Secure"));
         assert!(cookie.contains("; HttpOnly; SameSite=Lax"));
+        assert_persistent_max_age(cookie);
     }
 
     #[tokio::test]
@@ -1496,6 +1534,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(me.status(), StatusCode::OK);
+        assert_persistent_max_age(me.headers()[header::SET_COOKIE].to_str().unwrap());
     }
 
     #[tokio::test]
@@ -1553,11 +1592,9 @@ mod tests {
         assert!(rows.contains(&("authentication.login".to_owned(), "failure".to_owned())));
         assert!(rows.contains(&("authentication.login".to_owned(), "success".to_owned())));
         assert!(rows.contains(&("session.logout".to_owned(), "success".to_owned())));
-        assert!(
-            !rows
-                .iter()
-                .any(|(action, _)| action == "recovery.requested")
-        );
+        assert!(!rows
+            .iter()
+            .any(|(action, _)| action == "recovery.requested"));
     }
 
     #[tokio::test]
@@ -1892,6 +1929,21 @@ mod tests {
             .header(header::ORIGIN, "https://orbit.test")
             .body(Body::from(value.to_string()))
             .unwrap()
+    }
+
+    fn assert_persistent_max_age(cookie: &str) {
+        let max_age = cookie
+            .split(';')
+            .map(str::trim)
+            .find_map(|part| part.strip_prefix("Max-Age="))
+            .unwrap_or_else(|| panic!("session cookie has no Max-Age: {cookie}"))
+            .parse::<u64>()
+            .unwrap();
+        let ninety_days = 90 * 24 * 60 * 60;
+        assert!(
+            (ninety_days - 60..=ninety_days).contains(&max_age),
+            "Max-Age {max_age} is not the 90-day absolute session lifetime"
+        );
     }
 
     fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::ReceiverStream;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::auth_routes::{CookieMode, issued_session_cookie};
+use crate::auth_routes::{issued_session_cookie, CookieMode};
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
 };
@@ -890,7 +890,11 @@ async fn accept_invitation(
         .lock()
         .expect("registration throttler mutex poisoned")
         .finish_success(reservation);
-    let cookie = issued_session_cookie(state.cookie_mode, &registered.session.token);
+    let cookie = issued_session_cookie(
+        state.cookie_mode,
+        &registered.session.token,
+        registered.session.absolute_expires_at,
+    );
     let mut response = (StatusCode::CREATED, Json(registered.acceptance)).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
