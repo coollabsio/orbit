@@ -79,6 +79,8 @@ pub struct TaskRecord {
     #[schema(value_type = Vec<String>)]
     pub label_ids: Vec<Id>,
     #[schema(value_type = Option<String>, format = DateTime)]
+    pub due_start_at: Option<TimestampMillis>,
+    #[schema(value_type = Option<String>, format = DateTime)]
     pub due_at: Option<TimestampMillis>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
@@ -140,6 +142,7 @@ pub struct CreateTask {
     pub position: Option<i64>,
     pub assignee_ids: Vec<Id>,
     pub label_ids: Vec<Id>,
+    pub due_start_at: Option<TimestampMillis>,
     pub due_at: Option<TimestampMillis>,
 }
 
@@ -162,6 +165,7 @@ pub struct TaskChanges {
     pub position: Option<i64>,
     pub assignee_ids: Option<Vec<Id>>,
     pub label_ids: Option<Vec<Id>>,
+    pub due_start_at: Option<Option<TimestampMillis>>,
     pub due_at: Option<Option<TimestampMillis>>,
 }
 
@@ -974,7 +978,7 @@ impl TaskRepository {
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
-             tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, \
+             tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
              JOIN projects ON projects.id = tasks.project_id \
              WHERE tasks.workspace_id = ",
@@ -1120,7 +1124,7 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let row = sqlx::query(
             "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
-             tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, \
+             tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, \
              tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
              JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
@@ -1142,6 +1146,9 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<TaskRecord, TaskError> {
         let id = Id::new_v7();
+        if input.due_start_at.is_some_and(|start| input.due_at.is_none_or(|end| start > end)) {
+            return Err(TaskError::Invalid { field: "due_start_at" });
+        }
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
@@ -1159,8 +1166,8 @@ impl TaskRepository {
             .await?,
         };
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, priority, position, creator_id, due_at, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, priority, position, creator_id, due_start_at, due_at, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -1171,6 +1178,7 @@ impl TaskRepository {
         .bind(&input.priority)
         .bind(position)
         .bind(actor_id.to_string())
+        .bind(input.due_start_at.map(TimestampMillis::as_millis))
         .bind(input.due_at.map(TimestampMillis::as_millis))
         .bind(now.as_millis())
         .bind(now.as_millis())
@@ -1217,6 +1225,7 @@ impl TaskRepository {
             creator_service_account_name: None,
             assignee_ids: input.assignee_ids,
             label_ids: input.label_ids,
+            due_start_at: input.due_start_at,
             due_at: input.due_at,
             version: 0,
             deleted_at: None,
@@ -1543,7 +1552,7 @@ impl TaskRepository {
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
              FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
         );
         query
@@ -1897,8 +1906,16 @@ async fn update_task_in_tx(
         .unwrap_or(current.priority.clone());
     let position = update.changes.position.unwrap_or(current.position);
     let due_at = update.changes.due_at.unwrap_or(current.due_at);
-    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, priority = ?, position = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
-        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&priority).bind(position).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    let due_start_at = if matches!(update.changes.due_at, Some(None)) && update.changes.due_start_at.is_none() {
+        None
+    } else {
+        update.changes.due_start_at.unwrap_or(current.due_start_at)
+    };
+    if due_start_at.is_some_and(|start| due_at.is_none_or(|end| start > end)) {
+        return Err(TaskError::Invalid { field: "due_start_at" });
+    }
+    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
+        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
     if let Some(assignees) = &update.changes.assignee_ids {
         let added: Vec<Id> = assignees
             .iter()
@@ -1930,6 +1947,7 @@ async fn update_task_in_tx(
         description,
         priority,
         position,
+        due_start_at,
         due_at,
         assignee_ids: update
             .changes
@@ -2551,7 +2569,7 @@ async fn task_in_tx(
     deleted: bool,
 ) -> Result<TaskRecord, TaskError> {
     let row = sqlx::query(
-        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
          FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
          AND ((? = 1 AND tasks.deleted_at IS NOT NULL) OR (? = 0 AND tasks.deleted_at IS NULL)) AND (? = 1 OR projects.deleted_at IS NULL)",
     )
@@ -2703,6 +2721,9 @@ fn task_record_from_row(
         creator_service_account_name: row.get("creator_service_account_name"),
         assignee_ids,
         label_ids,
+        due_start_at: row
+            .get::<Option<i64>, _>("due_start_at")
+            .map(TimestampMillis::from_millis),
         due_at: row
             .get::<Option<i64>, _>("due_at")
             .map(TimestampMillis::from_millis),

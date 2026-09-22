@@ -40,8 +40,12 @@ const SIDE_PROP = '-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:min-h-7 max-[89
 const SIDE_GROUP = 'mb-6 flex flex-col items-start gap-0.5 max-[899px]:mb-0 max-[899px]:min-w-0'
 const SIDE_HEADING = 'mb-1.5 text-xs font-medium text-muted-foreground/70'
 
-function dueDateLabel(value: string | null) {
+function dueDateLabel(value: string | null, startValue?: string | null) {
   if (!value) return 'Set due date'
+  if (startValue) {
+    const format = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    return `${format.format(new Date(startValue))} – ${format.format(new Date(value))}`
+  }
   return new Date(value).toLocaleString(undefined, {
     year: 'numeric',
     month: 'short',
@@ -259,25 +263,28 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                       disabled={updateTask.isPending}
                     >
                       <Calendar className="size-3.5" aria-hidden="true" />
-                      <span>{dueDateLabel(task.dueAt)}</span>
+                      <span>{dueDateLabel(task.dueAt, task.dueStartAt)}</span>
                     </Button>
                   }
                 />
                 <PopoverContent align="start" side="top" className="w-auto gap-0 p-0">
                   <DatePicker
+                    startValue={task.dueStartAt ?? null}
                     value={task.dueAt}
-                    onChange={(dueAt) => updateTask.mutate({
-                      taskId: task.id,
-                      body: { expected_version: task.version, due_at: dueAt },
-                    })}
                     onClear={() => {
                       updateTask.mutate({
                         taskId: task.id,
-                        body: { expected_version: task.version, due_at: null },
+                        body: { expected_version: task.version, due_start_at: null, due_at: null },
                       })
                       setDueDateOpen(false)
                     }}
-                    onDone={() => setDueDateOpen(false)}
+                    onDone={({ start, end }) => {
+                      updateTask.mutate({
+                        taskId: task.id,
+                        body: { expected_version: task.version, due_start_at: start, due_at: end },
+                      })
+                      setDueDateOpen(false)
+                    }}
                   />
                 </PopoverContent>
               </Popover>

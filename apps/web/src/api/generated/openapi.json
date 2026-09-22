@@ -10768,6 +10768,13 @@
             ],
             "format": "date-time"
           },
+          "due_start_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "expected_version": {
             "type": "integer",
             "format": "int64",
@@ -11004,6 +11011,13 @@
             "type": "string"
           },
           "due_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "due_start_at": {
             "type": [
               "string",
               "null"
@@ -11955,6 +11969,13 @@
                   ],
                   "format": "date-time"
                 },
+                "due_start_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
                 "id": {
                   "type": "string"
                 },
@@ -12685,6 +12706,13 @@
             ],
             "format": "date-time"
           },
+          "due_start_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "id": {
             "type": "string"
           },
@@ -12746,6 +12774,13 @@
             ]
           },
           "due_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "due_start_at": {
             "type": [
               "string",
               "null"

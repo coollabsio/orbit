@@ -93,6 +93,7 @@ impl Fixture {
 #[tokio::test]
 async fn task_due_date_can_be_created_changed_and_cleared_with_version_checks() {
     let fixture = Fixture::new().await;
+    let due_start_at = "2029-12-30T00:00:00Z";
     let due_at = "2030-01-02T12:30:00Z";
     let response = fixture
         .app
@@ -105,6 +106,7 @@ async fn task_due_date_can_be_created_changed_and_cleared_with_version_checks() 
                 "project_id": fixture.project_id,
                 "status_id": fixture.status_id,
                 "title": "Ship release",
+                "due_start_at": due_start_at,
                 "due_at": due_at
             }),
         ))
@@ -112,6 +114,7 @@ async fn task_due_date_can_be_created_changed_and_cleared_with_version_checks() 
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
     let task = response_json(response).await;
+    assert_eq!(task["due_start_at"], "2029-12-30T00:00:00.000Z");
     assert_eq!(task["due_at"], "2030-01-02T12:30:00.000Z");
 
     let uri = format!(
@@ -132,6 +135,7 @@ async fn task_due_date_can_be_created_changed_and_cleared_with_version_checks() 
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let cleared = response_json(response).await;
+    assert!(cleared["due_start_at"].is_null());
     assert!(cleared["due_at"].is_null());
     assert_eq!(cleared["version"], 1);
 

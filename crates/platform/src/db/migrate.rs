@@ -181,6 +181,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    19,
+                    include_str!("../../../../apps/server/migrations/0019_task_due_date_ranges.sql"),
+                    false,
+                ),
             ],
         )
     }

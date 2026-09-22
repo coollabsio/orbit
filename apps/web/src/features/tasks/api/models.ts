@@ -62,6 +62,7 @@ export interface Task {
   projectId: string
   labels: string[]
   attachments: Attachment[]
+  dueStartAt?: string | null
   dueAt: string | null
   createdAt: string
   updatedAt: string
@@ -112,6 +113,7 @@ export function taskFromRecord(
     projectId: record.project_id,
     labels: record.label_ids,
     attachments: attachments.filter((attachment) => !attachment.comment_id).map(attachmentView),
+    dueStartAt: record.due_start_at ?? null,
     dueAt: record.due_at ?? null,
     createdAt: record.created_at,
     updatedAt: record.updated_at,

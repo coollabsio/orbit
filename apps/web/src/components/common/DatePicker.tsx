@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { DateRange } from 'react-day-picker'
 import { Clock } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
@@ -20,58 +21,73 @@ function withTime(day: Date, time: string) {
   return next
 }
 
-interface DatePickerProps {
-  /** ISO string or null. */
-  value: string | null
-  onChange: (iso: string) => void
-  onClear: () => void
-  onDone: () => void
+function startOfLocalDay(day: Date) {
+  const next = new Date(day)
+  next.setHours(0, 0, 0, 0)
+  return next
 }
 
-/** Calendar + time picker for a popover (shadcn Calendar month grid + half-hour time list). */
-export function DatePicker({ value, onChange, onClear, onDone }: DatePickerProps) {
-  const selected = value ? new Date(value) : undefined
-  const [month, setMonth] = useState(() => selected ?? new Date())
-  // time used for the next picked day when nothing is selected yet
-  const [timeDraft, setTimeDraft] = useState('09:00')
-  const time = selected ? timeOf(selected) : timeDraft
+function currentWeek(): DateRange & { from: Date; to: Date } {
+  const today = new Date()
+  const mondayOffset = (today.getDay() + 6) % 7
+  const from = startOfLocalDay(today)
+  from.setDate(from.getDate() - mondayOffset)
+  const to = new Date(from)
+  to.setDate(to.getDate() + 6)
+  return { from, to }
+}
+
+interface DatePickerProps {
+  /** ISO range start, or null for a single due date. */
+  startValue: string | null
+  /** ISO range end or single due date. */
+  value: string | null
+  onClear: () => void
+  onDone: (value: { start: string | null; end: string }) => void
+}
+
+/** Calendar + time picker that supports one date, a date range, and a current-week shortcut. */
+export function DatePicker({ startValue, value, onClear, onDone }: DatePickerProps) {
+  const initialEnd = value ? new Date(value) : undefined
+  const [range, setRange] = useState<DateRange | undefined>(() => initialEnd
+    ? { from: startValue ? new Date(startValue) : initialEnd, to: startValue ? initialEnd : undefined }
+    : undefined)
+  const [month, setMonth] = useState(() => range?.from ?? new Date())
+  const [time, setTime] = useState(() => initialEnd ? timeOf(initialEnd) : '09:00')
   const timeOptions = HALF_HOURS.includes(time) ? HALF_HOURS : [...HALF_HOURS, time].sort()
 
-  const pickDay = (day: Date | undefined) => {
-    if (day) onChange(withTime(day, time).toISOString())
+  const selectThisWeek = () => {
+    const week = currentWeek()
+    setRange(week)
+    setMonth(week.from)
   }
-  const pickTime = (next: string | null) => {
-    if (!next) return
-    if (selected) onChange(withTime(selected, next).toISOString())
-    else setTimeDraft(next)
+  const save = () => {
+    if (!range?.from) return
+    const endDay = range.to ?? range.from
+    onDone({
+      start: range.to ? startOfLocalDay(range.from).toISOString() : null,
+      end: withTime(endDay, time).toISOString(),
+    })
   }
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <Calendar mode="single" selected={selected} onSelect={pickDay} month={month} onMonthChange={setMonth} />
+      <Button type="button" variant="secondary" className="w-full" onClick={selectThisWeek}>This week</Button>
+      <Calendar mode="range" selected={range} onSelect={setRange} month={month} onMonthChange={setMonth} />
       <div className="flex items-center gap-2">
         <Clock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <Select value={time} onValueChange={pickTime}>
-          <SelectTrigger
-            aria-label="Time"
-            className="w-full rounded-md bg-background px-3 font-normal shadow-xs hover:bg-muted data-[size=default]:h-9 dark:bg-background dark:hover:bg-muted"
-          >
+        <Select value={time} onValueChange={(next) => next && setTime(next)}>
+          <SelectTrigger aria-label="Time" className="w-full rounded-md bg-background px-3 font-normal shadow-xs hover:bg-muted data-[size=default]:h-9 dark:bg-background dark:hover:bg-muted">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {timeOptions.map((option) => (
-              <SelectItem key={option} value={option}>
-                {option}
-              </SelectItem>
-            ))}
+            {timeOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
       <div className="flex justify-between">
-        <Button variant="ghost" onClick={onClear} disabled={!value}>
-          Clear
-        </Button>
-        <Button onClick={onDone}>Done</Button>
+        <Button variant="ghost" onClick={onClear} disabled={!value}>Clear</Button>
+        <Button onClick={save} disabled={!range?.from}>Done</Button>
       </div>
     </div>
   )

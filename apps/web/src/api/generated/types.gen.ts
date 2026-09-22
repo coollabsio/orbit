@@ -119,6 +119,7 @@ export type BulkItem = {
     assignee_ids?: Array<string> | null;
     description?: string | null;
     due_at?: string | null;
+    due_start_at?: string | null;
     expected_version: number;
     id: string;
     label_ids?: Array<string> | null;
@@ -175,6 +176,7 @@ export type CreateTaskBody = {
     assignee_ids?: Array<string>;
     description?: string;
     due_at?: string | null;
+    due_start_at?: string | null;
     label_ids?: Array<string>;
     position?: number | null;
     priority?: string;
@@ -407,6 +409,7 @@ export type PageTaskRecord = {
         deleted_at?: string | null;
         description: string;
         due_at?: string | null;
+        due_start_at?: string | null;
         id: string;
         label_ids: Array<string>;
         position: number;
@@ -600,6 +603,7 @@ export type TaskRecord = {
     deleted_at?: string | null;
     description: string;
     due_at?: string | null;
+    due_start_at?: string | null;
     id: string;
     label_ids: Array<string>;
     position: number;
@@ -616,6 +620,7 @@ export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
     description?: string | null;
     due_at?: string | null;
+    due_start_at?: string | null;
     expected_version: number;
     label_ids?: Array<string> | null;
     position?: number | null;

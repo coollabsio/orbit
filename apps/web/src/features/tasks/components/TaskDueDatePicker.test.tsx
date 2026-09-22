@@ -54,5 +54,36 @@ test('task due date uses the custom picker and can clear the saved value', async
   expect(clearButton.disabled).toBe(false)
   fireEvent.click(clearButton)
 
-  await waitFor(() => expect(requestBody).toEqual({ expected_version: 1, due_at: null }))
+  await waitFor(() => expect(requestBody).toEqual({ expected_version: 1, due_start_at: null, due_at: null }))
+})
+
+test('This week saves a Monday through Sunday due-date range', async () => {
+  let requestBody: Record<string, unknown> | undefined
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requestBody = await (input as Request).json()
+    return Response.json({
+      id: 'task-1', workspace_id: workspace.id, project_id: 'project-1', status_id: 'todo',
+      title: 'Schedule me', description: '', position: 0, priority: 'none', assignee_ids: [],
+      creator_id: 'user-1', label_ids: [], due_start_at: requestBody?.due_start_at,
+      due_at: requestBody?.due_at, created_at: '', updated_at: '', version: 2,
+    })
+  }) as unknown as typeof fetch
+  const task: Task = {
+    id: 'task-1', identifier: 'ORB-1', title: 'Schedule me', description: '', statusId: 'todo',
+    position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
+    labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
+  }
+  const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }
+  const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={() => {}} />, { wrapper: Wrapper })
+
+  fireEvent.click(view.getByRole('button', { name: 'Due date' }))
+  fireEvent.click(view.getByRole('button', { name: 'This week' }))
+  fireEvent.click(view.getByRole('button', { name: 'Done' }))
+
+  await waitFor(() => expect(requestBody).toBeDefined())
+  const start = new Date(requestBody?.due_start_at as string)
+  const end = new Date(requestBody?.due_at as string)
+  expect(start.getDay()).toBe(1)
+  expect(end.getDay()).toBe(0)
+  expect(Math.round((end.getTime() - start.getTime()) / 86_400_000)).toBe(6)
 })
