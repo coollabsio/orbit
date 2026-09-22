@@ -1,4 +1,28 @@
+import type { CreateTaskBody } from '@/api/generated'
 import type { StatusCategory, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
+
+export type TaskView = 'mine' | 'overdue' | 'due_soon' | 'current_week'
+
+/** Defaults that keep a newly created task in the personal view it came from. */
+export function taskViewCreateDefaults(view: TaskView | undefined, currentUserId: string, now = new Date()): Partial<CreateTaskBody> {
+  if (view === 'mine') return currentUserId ? { assignee_ids: [currentUserId] } : {}
+  if (!view) return {}
+
+  const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  if (view === 'current_week') {
+    const start = new Date(now)
+    start.setHours(0, 0, 0, 0)
+    start.setDate(start.getDate() - (start.getDay() + 6) % 7)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 6)
+    end.setHours(12, 0, 0, 0)
+    return { due_start_at: start.toISOString(), due_at: end.toISOString() }
+  }
+  const dueAt = view === 'overdue'
+    ? new Date(startOfToday - 1).toISOString()
+    : new Date(startOfToday + 12 * 60 * 60 * 1_000).toISOString()
+  return { due_at: dueAt }
+}
 
 /** Status categories (workflow stages). Every status belongs to one; the glyph shape comes from it. */
 export const CATEGORY_ORDER: StatusCategory[] = ['unstarted', 'started', 'completed', 'cancelled']

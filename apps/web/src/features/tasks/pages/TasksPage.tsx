@@ -33,6 +33,7 @@ import { TaskFilters } from '@/features/tasks/components/TaskFilters'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
+import { taskViewCreateDefaults, type TaskView } from '@/features/tasks/taskMeta'
 import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from '@/features/tasks/tasksLib'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
 
@@ -65,7 +66,7 @@ export function TasksPage() {
   const [searchFilter, setSearchFilter] = useState('')
   const projectFilter = searchParams.get('project')
   const viewFilter = ['mine', 'overdue', 'due_soon', 'current_week'].includes(searchParams.get('view') ?? '')
-    ? searchParams.get('view') ?? undefined
+    ? searchParams.get('view') as TaskView
     : undefined
 
   useEffect(() => {
@@ -152,7 +153,12 @@ export function TasksPage() {
     if (!projectId || !statusId || creating.current) return
     creating.current = true
     try {
-      const task = await createTask.mutateAsync({ title: 'Untitled', project_id: projectId, status_id: statusId })
+      const task = await createTask.mutateAsync({
+        title: 'Untitled',
+        project_id: projectId,
+        status_id: statusId,
+        ...taskViewCreateDefaults(viewFilter, state.currentUserId),
+      })
       navigate(`/tasks/${task.id}${detailSearchSuffix}`, { replace })
     } catch {
       // The mutation exposes the server problem beside the create action.
