@@ -65,7 +65,9 @@ test('plain task text stays editable when clicked', () => {
   fireEvent.click(view.getByText('Editable title'))
   expect(view.getByLabelText('Task title')).toBeTruthy()
   fireEvent.click(view.getByText('Editable description'))
-  expect(view.getByLabelText('Description')).toBeTruthy()
+  const description = view.getByLabelText('Description')
+  expect(description.classList.contains('block')).toBe(true)
+  expect(description.classList.contains('inline-block')).toBe(false)
 })
 
 test('new untitled task opens with an empty focused title field', () => {
