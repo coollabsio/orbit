@@ -47,6 +47,18 @@ test('web addresses in task titles and descriptions become safe links', () => {
   expect(links.every((link) => link.rel === 'noreferrer')).toBe(true)
 })
 
+test('edit fields keep the display text size on a narrow screen', async () => {
+  const css = await Bun.file(new URL('../../../index.css', import.meta.url)).text()
+  expect(css).toContain('input:not([data-keep-font-size])')
+  expect(css).toContain('textarea:not([data-keep-font-size])')
+
+  const view = render(<TaskTextFields task={task(1, 'Editable title', 'Editable description')} onUpdate={() => {}} />)
+  fireEvent.click(view.getByText('Editable title'))
+  expect(view.getByLabelText('Task title').hasAttribute('data-keep-font-size')).toBe(true)
+  fireEvent.click(view.getByText('Editable description'))
+  expect(view.getByLabelText('Description').hasAttribute('data-keep-font-size')).toBe(true)
+})
+
 test('plain task text stays editable when clicked', () => {
   const view = render(<TaskTextFields task={task(1, 'Editable title', 'Editable description')} onUpdate={() => {}} />)
 

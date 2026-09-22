@@ -22,6 +22,19 @@ test('opens an image in a modal and closes it from the backdrop', () => {
   expect(view.queryByRole('dialog')).toBeNull()
 })
 
+test('the image viewer uses the usable screen height on a phone', () => {
+  const view = render(<Attachments attachments={[image]} />)
+  fireEvent.click(view.getByRole('button', { name: 'Open image diagram.png' }))
+
+  const dialog = view.getByRole('dialog', { name: 'diagram.png' })
+  expect(dialog.className).toContain('h-[var(--app-height,100svh)]')
+  expect(dialog.className).toContain('pt-[env(safe-area-inset-top,0px)]')
+  expect(dialog.className).toContain('pb-[env(safe-area-inset-bottom,0px)]')
+  const img = dialog.querySelector('img')
+  expect(img?.className).toContain('max-h-full')
+  expect(img?.className).not.toContain('100vh')
+})
+
 test('closes the image modal with Escape', () => {
   const view = render(<Attachments attachments={[image]} />)
   fireEvent.click(view.getByRole('button', { name: 'Open image diagram.png' }))

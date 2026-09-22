@@ -36,6 +36,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
       {editingTitle ? (
         <Input
           className={cn(TITLE, 'h-auto rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-2xl md:max-[899px]:text-xl')}
+          data-keep-font-size=""
           value={title}
           placeholder="Task title"
           aria-label="Task title"
@@ -80,6 +81,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
         {editingDescription ? (
           <Textarea
             className={cn(DESC, 'inline-block rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-[13px] md:max-[899px]:text-sm')}
+            data-keep-font-size=""
             value={description}
             placeholder="Add description… (paste or drop images and files)"
             aria-label="Description"

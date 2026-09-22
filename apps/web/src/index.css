@@ -181,10 +181,11 @@
     @apply bg-primary/30;
   }
 
-  /* prevent iOS zoom on focus for small screens */
-  input,
-  textarea,
-  select {
+  /* Keep inputs at 16px below the md breakpoint. This stops iOS zoom on focus.
+     A field with data-keep-font-size keeps its own text size. */
+  input:not([data-keep-font-size]),
+  textarea:not([data-keep-font-size]),
+  select:not([data-keep-font-size]) {
     @apply max-md:text-[16px]!;
   }
 

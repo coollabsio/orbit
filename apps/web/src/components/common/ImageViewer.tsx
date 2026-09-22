@@ -29,9 +29,9 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
         showCloseButton={false}
         aria-label={attachment.fileName}
         onKeyDown={handleKeyDown}
-        className="inset-0 top-0 left-0 z-[100] flex h-full w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none bg-black/90 p-0 text-white ring-0 backdrop-blur-sm duration-150 motion-reduce:animate-none sm:max-w-none"
+        className="top-0 right-0 left-0 z-[100] flex h-[var(--app-height,100svh)] max-h-[var(--app-height,100svh)] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-black/90 p-0 pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] text-white ring-0 backdrop-blur-sm duration-150 motion-reduce:animate-none sm:max-w-none"
       >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4 duration-200 animate-in slide-in-from-top-2 motion-reduce:animate-none">
+        <div className="flex h-14 shrink-0 items-center justify-between gap-3 overflow-x-auto border-b border-white/10 px-4 duration-200 animate-in slide-in-from-top-2 motion-reduce:animate-none">
           <div className="min-w-0">
             <div className="truncate text-sm font-bold">{attachment.fileName}</div>
             <div className="text-xs font-semibold text-white/55">{Math.round(zoom * 100)}%</div>
@@ -54,17 +54,15 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
             </Button>
           </div>
         </div>
-        <Button type="button" variant="ghost" className="block h-auto min-h-0 flex-1 cursor-zoom-out overflow-auto rounded-none border-0 p-6 font-normal whitespace-normal select-auto hover:bg-transparent dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0" title="Close image viewer" onClick={onClose}>
-          <div className="flex min-h-full items-center justify-center">
-            <img
-              src={attachment.url}
-              alt={attachment.fileName}
-              draggable={false}
-              className="max-h-[calc(100vh-7rem)] max-w-[calc(100vw-3rem)] origin-center rounded-md object-contain shadow-[0_25px_50px_-12px_rgba(0,0,0,0.6)] transition-transform select-none duration-200 animate-in fade-in zoom-in-95 motion-reduce:animate-none"
-              style={{ transform: `scale(${zoom})` }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
+        <Button type="button" variant="ghost" className="flex h-auto min-h-0 w-full flex-1 shrink! cursor-zoom-out items-center justify-center overflow-auto rounded-none border-0 p-2 font-normal whitespace-normal select-auto hover:bg-transparent sm:p-6 dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0" title="Close image viewer" onClick={onClose}>
+          <img
+            src={attachment.url}
+            alt={attachment.fileName}
+            draggable={false}
+            className="max-h-full max-w-full origin-center rounded-md object-contain shadow-[0_25px_50px_-12px_rgba(0,0,0,0.6)] transition-transform select-none duration-200 animate-in fade-in zoom-in-95 motion-reduce:animate-none"
+            style={{ transform: `scale(${zoom})` }}
+            onClick={(e) => e.stopPropagation()}
+          />
         </Button>
       </DialogContent>
     </Dialog>
