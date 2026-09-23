@@ -156,3 +156,18 @@ test('remembers collapsed groups after the task list reloads', () => {
   expect(reloadedView.getByRole('button', { name: 'Expand Todo' }).getAttribute('aria-expanded')).toBe('false')
   expect(reloadedView.queryByText('Task 1')).toBeNull()
 })
+
+test('bulk toolbar Escape closes an open menu first, then clears the selection', async () => {
+  const view = viewFor([task(1), task(2)])
+  for (const checkbox of view.getAllByRole('checkbox')) fireEvent.click(checkbox)
+  const toolbar = view.getByRole('toolbar', { name: 'Selected tasks' })
+
+  fireEvent.click(within(toolbar).getByRole('button', { name: 'Status' }))
+  await view.findByRole('menu', {}, { timeout: 5000 })
+  fireEvent.keyDown(document.body, { key: 'Escape' })
+  expect(view.queryByRole('toolbar', { name: 'Selected tasks' })).not.toBeNull()
+
+  await waitFor(() => expect(within(toolbar).getByRole('button', { name: 'Status' }).getAttribute('aria-expanded')).toBe('false'))
+  fireEvent.keyDown(document.body, { key: 'Escape' })
+  expect(view.queryByRole('toolbar', { name: 'Selected tasks' })).toBeNull()
+}, 20000)

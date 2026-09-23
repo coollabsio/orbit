@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ChevronRight, Add as Plus, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
+import { useEffect, useState } from 'react'
+import { ChevronRight, Danger, Flag, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,7 +30,10 @@ const OPTION =
 const CHECK_OPTION =
   `group min-h-8 cursor-pointer gap-2 py-1.5 pr-8 pl-2 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-checked:bg-accent data-checked:font-medium`
 const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
-const BULK_BTN = 'max-[899px]:min-w-0 max-[899px]:px-1.5 max-[899px]:text-[11px]'
+const BULK_BTN = 'shrink-0 gap-1.5 px-2 text-[13px] font-medium text-muted-foreground hover:text-foreground aria-expanded:text-foreground'
+const BULK_ICON = 'size-3.5 opacity-80'
+/** Below 640px the actions collapse to icons; the label stays as the accessible name. */
+const BULK_LABEL = 'max-sm:sr-only'
 
 interface TaskListProps {
   tasks: Task[]
@@ -204,6 +207,19 @@ function BulkBar({
   const bulkTasks = useBulkTasks(workspace.id)
   const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
 
+  // Esc clears the selection, unless it belongs to a field, an open menu or a dialog
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]')) return
+      // closed Base UI popups stay mounted with data-closed until their exit animation ends
+      if (document.querySelector(['menu', 'dialog', 'alertdialog', 'listbox'].map((role) => `[role="${role}"]:not([data-closed])`).join())) return
+      onClear()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClear])
+
   const bulkStatus = (key: string) => {
     const updates = tasks.flatMap((task) => {
       const statusId = resolveStatusId(statuses, task.projectId, key)
@@ -236,70 +252,90 @@ function BulkBar({
   }
 
   return (
-    <div
-      className="absolute bottom-4 left-1/2 z-40 flex w-max max-w-[calc(100%-48px)] -translate-x-1/2 items-center gap-1 rounded-[10px] border border-border bg-card px-2 py-1.5 shadow-lg max-[899px]:left-2 max-[899px]:right-2 max-[899px]:bottom-2.5 max-[899px]:w-auto max-[899px]:max-w-none max-[899px]:translate-x-0"
-      role="toolbar"
-      aria-label="Selected tasks"
-    >
-      <span className="px-2 text-xs font-semibold whitespace-nowrap text-foreground max-[899px]:px-1">
-        {tasks.length} selected
-      </span>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}>Status</Button>} />
-        <DropdownMenuContent side="top" className={MENU}>
-          {groups.map((group) => (
-            <DropdownMenuItem key={group.key} className={OPTION} onClick={() => bulkStatus(group.key)}>
-              <TaskStatusIcon status={group.status} />
-              {group.name}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}>Priority</Button>} />
-        <DropdownMenuContent side="top" className={MENU}>
-          {PRIORITY_ORDER.map((priority) => (
-            <DropdownMenuItem key={priority} className={OPTION} onClick={() => bulkPriority(priority)}>
-              <PriorityIcon priority={priority} />
-              {PRIORITY_LABEL[priority]}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}>Assignee</Button>} />
-        <DropdownMenuContent side="top" align="end" className={MENU}>
-          {users.map((u) => {
-            const everyone = tasks.every((t) => t.assigneeIds.includes(u.id))
-            return (
-              <DropdownMenuCheckboxItem key={u.id} className={CHECK_OPTION} checked={everyone} closeOnClick onCheckedChange={() => bulkAssign(u.id)}>
-                <UserAvatar user={u} size={16} />
-                {u.name}
-              </DropdownMenuCheckboxItem>
-            )
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {/* label toggles keep the menu open (closeOnClick defaults to false on checkbox items) so several can be flipped in a row */}
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}>Labels</Button>} />
-        <DropdownMenuContent side="top" align="end" className={MENU}>
-          {labels.map((label) => {
-            const everyone = tasks.every((t) => t.labels.includes(label.id))
-            return (
-              <DropdownMenuCheckboxItem key={label.id} className={CHECK_OPTION} checked={everyone} onCheckedChange={() => bulkLabel(label.id)}>
-                <Badge variant="outline" className={PILL}><span className="size-1.5 shrink-0 rounded-full" style={{ background: label.color }} />{label.name}</Badge>
-              </DropdownMenuCheckboxItem>
-            )
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <div className="flex-1" />
-      {bulkTasks.isPending ? <span role="status" className="text-xs text-muted-foreground/70">Updating selected tasks…</span> : null}
-      {bulkTasks.isError ? <span role="alert" className="text-xs text-destructive">{limitError ? `This update includes ${limitError.count} tasks. Select ${MAX_BULK_TASK_UPDATES} or fewer and try again.` : <>Bulk update failed. <Button variant="ghost" onClick={bulkTasks.retry}>Retry</Button></>}</span> : null}
-      <Button variant="ghost" size="icon-sm" aria-label="Clear selection" title="Clear selection" onClick={onClear}>
-        <X className="size-4" />
-      </Button>
+    // outer layer centres the bar, so the enter animation can own the bar's transform
+    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-6 max-[899px]:bottom-2.5 max-[899px]:px-2">
+      <div
+        className="pointer-events-auto flex max-w-full items-center gap-0.5 overflow-x-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-[0_12px_32px_-8px_rgb(0_0_0/0.35),0_2px_6px_-2px_rgb(0_0_0/0.18)] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] animate-in fade-in-0 slide-in-from-bottom-2 zoom-in-97 max-[899px]:w-full [scrollbar-width:none] dark:ring-1 dark:ring-white/5"
+        role="toolbar"
+        aria-label="Selected tasks"
+      >
+        <div className="flex h-8 shrink-0 items-center rounded-lg bg-primary/12 pl-3 text-primary dark:bg-primary/25 dark:text-primary-foreground">
+          <span className="text-xs font-semibold whitespace-nowrap tabular-nums">{tasks.length} selected</span>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="mx-1 text-current opacity-70 hover:bg-primary/15 hover:text-current hover:opacity-100 dark:hover:bg-white/10"
+            aria-label="Clear selection"
+            title="Clear selection (Esc)"
+            onClick={onClear}
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+        <div className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}><RecordCircle aria-hidden className={BULK_ICON} /><span className={BULK_LABEL}>Status</span></Button>} />
+          <DropdownMenuContent side="top" className={MENU}>
+            {groups.map((group) => (
+              <DropdownMenuItem key={group.key} className={OPTION} onClick={() => bulkStatus(group.key)}>
+                <TaskStatusIcon status={group.status} />
+                {group.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}><Flag aria-hidden className={BULK_ICON} /><span className={BULK_LABEL}>Priority</span></Button>} />
+          <DropdownMenuContent side="top" className={MENU}>
+            {PRIORITY_ORDER.map((priority) => (
+              <DropdownMenuItem key={priority} className={OPTION} onClick={() => bulkPriority(priority)}>
+                <PriorityIcon priority={priority} />
+                {PRIORITY_LABEL[priority]}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}><UserAdd aria-hidden className={BULK_ICON} /><span className={BULK_LABEL}>Assignee</span></Button>} />
+          <DropdownMenuContent side="top" align="end" className={MENU}>
+            {users.map((u) => {
+              const everyone = tasks.every((t) => t.assigneeIds.includes(u.id))
+              return (
+                <DropdownMenuCheckboxItem key={u.id} className={CHECK_OPTION} checked={everyone} closeOnClick onCheckedChange={() => bulkAssign(u.id)}>
+                  <UserAvatar user={u} size={16} />
+                  {u.name}
+                </DropdownMenuCheckboxItem>
+              )
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* label toggles keep the menu open (closeOnClick defaults to false on checkbox items) so several can be flipped in a row */}
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}><Tag aria-hidden className={BULK_ICON} /><span className={BULK_LABEL}>Labels</span></Button>} />
+          <DropdownMenuContent side="top" align="end" className={MENU}>
+            {labels.map((label) => {
+              const everyone = tasks.every((t) => t.labels.includes(label.id))
+              return (
+                <DropdownMenuCheckboxItem key={label.id} className={CHECK_OPTION} checked={everyone} onCheckedChange={() => bulkLabel(label.id)}>
+                  <Badge variant="outline" className={PILL}><span className="size-1.5 shrink-0 rounded-full" style={{ background: label.color }} />{label.name}</Badge>
+                </DropdownMenuCheckboxItem>
+              )
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {bulkTasks.isPending ? (
+          <span role="status" className="flex shrink-0 items-center gap-1.5 px-2 text-xs whitespace-nowrap text-muted-foreground">
+            <Loader aria-hidden className="size-3.5 animate-spin" />
+            Updating…
+          </span>
+        ) : null}
+        {bulkTasks.isError ? (
+          <span role="alert" className="flex min-w-0 items-center gap-1.5 rounded-lg bg-destructive/10 py-1 pr-1 pl-2 text-xs text-destructive">
+            <Danger aria-hidden className="size-3.5 shrink-0" />
+            {limitError ? `This update includes ${limitError.count} tasks. Select ${MAX_BULK_TASK_UPDATES} or fewer and try again.` : <>Bulk update failed. <Button variant="ghost" size="xs" className="text-destructive hover:bg-destructive/15 hover:text-destructive" onClick={bulkTasks.retry}>Retry</Button></>}
+          </span>
+        ) : null}
+      </div>
     </div>
   )
 }
