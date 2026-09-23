@@ -350,3 +350,24 @@ test('the timeline centres on today when tasks appear after an empty result', ()
   const scroller = view.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
   expect(scroller.scrollLeft).toBe(dayIndex(range, today) * 10 + 5)
 })
+
+test('a due-only task that is overdue puts its label after the overdue tail, not on it', () => {
+  const late = task('late', { dueAt: local(2026, 9, 20, 9).toISOString() })
+  const view = renderTimeline([late])
+  const range = computeRange(rowDates([late]), today)
+  const label = view.container.querySelector<HTMLElement>('[data-timeline-bar="late"] [data-bar-label]')!
+  const barLeft = parseFloat(view.container.querySelector<HTMLElement>('[data-timeline-bar="late"]')!.style.left)
+  const tailEnd = (dayIndex(range, today) + 1) * 10
+  // bar box starts at the diamond; the label's own offset pushes it past the tail
+  expect(barLeft + 12 + 6 + parseFloat(label.style.marginLeft)).toBe(tailEnd + 6)
+})
+
+test('a row can jump the timeline to its bar', () => {
+  const view = renderTimeline([ranged])
+  const scroller = view.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  const calls: ScrollToOptions[] = []
+  scroller.scrollTo = ((options: ScrollToOptions) => { calls.push(options) }) as typeof scroller.scrollTo
+  fireEvent.click(view.getByRole('button', { name: 'Show WEB-a on the timeline' }))
+  const range = computeRange(rowDates([ranged]), today)
+  expect(calls[0]!.left).toBe(dayIndex(range, local(2026, 9, 1)) * 10 - 48)
+})

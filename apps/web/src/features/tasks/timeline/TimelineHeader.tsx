@@ -1,5 +1,5 @@
 import { format } from 'date-fns'
-import { monthMarks, tickMarks, xOf, type TimeRange } from './timelineLib'
+import { dayAt, monthMarks, tickMarks, xOf, type TimeRange } from './timelineLib'
 
 /** Sticky month row + day tick row with the pink "today" pill. */
 export function TimelineHeader({ range, pxPerDay, today }: { range: TimeRange; pxPerDay: number; today: Date }) {
@@ -12,7 +12,12 @@ export function TimelineHeader({ range, pxPerDay, today }: { range: TimeRange; p
         </div>
       ))}
       {tickMarks(range, pxPerDay).map((tick) => (
-        <span key={tick.x} className="absolute top-7 h-6 text-center text-[11px] leading-6 text-muted-foreground tabular-nums" style={{ left: tick.x, width: pxPerDay }}>
+        <span
+          key={tick.x}
+          // weekends step back so the working week reads first
+          className={`absolute top-7 h-6 text-center text-[11px] leading-6 tabular-nums ${[0, 6].includes(dayAt(range, Math.round(tick.x / pxPerDay)).getDay()) ? 'text-muted-foreground/50' : 'text-muted-foreground'}`}
+          style={{ left: tick.x, width: pxPerDay }}
+        >
           {tick.label}
         </span>
       ))}

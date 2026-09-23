@@ -14,7 +14,7 @@ export function TimelineControls({ pxPerDay, onZoomChange, onToday }: { pxPerDay
             key={preset}
             type="button"
             aria-pressed={preset === active}
-            className="h-full rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+            className="h-full rounded-md px-2 text-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:text-foreground active:scale-[0.97] aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
             onClick={() => onZoomChange(ZOOM_PRESETS[preset])}
           >
             {LABEL[preset]}

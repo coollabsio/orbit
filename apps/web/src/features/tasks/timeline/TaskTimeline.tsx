@@ -20,6 +20,9 @@ import {
 export const LEFT_PANE = 280
 export const ROW_HEIGHT = 32
 export const HEADER_HEIGHT = 52
+const REVEAL_MARGIN = 48
+/** Opaque so the sticky left cell matches the band behind the track. */
+const GROUP_ROW = 'bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]'
 
 export interface TimelineHandle {
   scrollToToday: () => void
@@ -77,6 +80,16 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
     scrollLeftRef.current = left
   }
   useImperativeHandle(ref, () => ({ scrollToToday }))
+
+  /** Brings an off-screen bar into view, a little in from the left edge. */
+  const reveal = (start: Date) => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const left = Math.max(0, xOf(range, start, pxPerDay) - REVEAL_MARGIN)
+    scrollLeftRef.current = left
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    scroller.scrollTo({ left, behavior: reduced ? 'auto' : 'smooth' })
+  }
 
   const save = (task: Task, edit: DateEdit) => {
     // one save per task at a time: the next edit needs the version the server returns
@@ -164,10 +177,10 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   // Monday lines and weekend shading are repeating gradients: no DOM per day
   const firstMonday = (8 - dayAt(range, 0).getDay()) % 7
   const weekLines = showsWeeklyLines(pxPerDay)
-    ? `repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px ${7 * pxPerDay}px)`
+    ? `repeating-linear-gradient(to right, color-mix(in oklch, var(--border) 55%, transparent) 0 1px, transparent 1px ${7 * pxPerDay}px)`
     : null
   const weekends = showsDailyTicks(pxPerDay)
-    ? `repeating-linear-gradient(to right, color-mix(in oklch, var(--muted) 55%, transparent) 0 ${2 * pxPerDay}px, transparent ${2 * pxPerDay}px ${7 * pxPerDay}px)`
+    ? `repeating-linear-gradient(to right, color-mix(in oklch, var(--foreground) 2.5%, transparent) 0 ${2 * pxPerDay}px, transparent ${2 * pxPerDay}px ${7 * pxPerDay}px)`
     : null
   const saturdayOffset = ((firstMonday + 5) % 7) * pxPerDay
   const background = [weekLines, weekends].filter(Boolean).join(', ')
@@ -194,7 +207,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
           style={{ width: trackWidth, backgroundImage: background || undefined, backgroundPosition: backgroundPosition || undefined }}
         >
           {monthMarks(range, pxPerDay).map((month) => <div key={month.x} className="absolute inset-y-0 w-px bg-border" style={{ left: month.x }} />)}
-          <div data-today-line className="absolute inset-y-0 z-[5] w-px bg-primary" style={{ left: todayX }} />
+          <div data-today-line className="absolute inset-y-0 z-[5] w-px bg-primary/70" style={{ left: todayX }} />
         </div>
 
         <div className="sticky top-0 z-20 flex border-b border-border bg-background">
@@ -210,8 +223,15 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
           const preview = row.kind === 'task' && drag?.taskId === row.task.id && (drag.moved || drag.kind === 'draw') ? editFor(drag, row.task) : null
           const span = row.kind === 'task' ? (preview ? taskSpan(preview) : row.span) : null
           return (
-            <div key={row.key} className={`relative flex h-8 ${row.kind === 'group' ? 'bg-muted/30' : ''}`}>
-              <TimelineRowLabel row={row} status={status} assignee={assignee} onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))} onOpen={onOpen} />
+            <div key={row.key} className={`group/row relative flex h-8 ${row.kind === 'group' ? GROUP_ROW : 'hover:bg-foreground/[0.03]'}`}>
+              <TimelineRowLabel
+                row={row}
+                status={status}
+                assignee={assignee}
+                onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}
+                onOpen={onOpen}
+                onReveal={row.kind === 'task' && row.span ? () => reveal(row.span!.start) : undefined}
+              />
               <div
                 className={`relative shrink-0 ${undated ? 'cursor-crosshair' : ''}`}
                 style={{ width: trackWidth }}
@@ -226,7 +246,8 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
               >
                 {row.kind === 'group' && row.span ? (
                   <div
-                    className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full opacity-70"
+                    aria-hidden="true"
+                    className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full opacity-45"
                     style={{ left: xOf(range, row.span.start, pxPerDay), width: (differenceInCalendarDays(row.span.end, row.span.start) + 1) * pxPerDay, background: row.project.color }}
                   />
                 ) : null}
