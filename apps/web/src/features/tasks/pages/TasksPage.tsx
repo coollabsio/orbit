@@ -33,7 +33,10 @@ import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { taskViewCreateDefaults, type TaskView } from '@/features/tasks/taskMeta'
-import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey, type TaskLayout } from '@/features/tasks/tasksLib'
+import { filterTasks, parseLayout, resolveStatusId, statusGroups, taskApiSort, type SortKey, type TaskLayout } from '@/features/tasks/tasksLib'
+import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
+import { TimelineControls } from '@/features/tasks/timeline/TimelineControls'
+import { useTimelineZoom } from '@/features/tasks/timeline/useTimelineZoom'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
@@ -55,7 +58,15 @@ export function TasksPage() {
   const createTask = useCreateTask(workspace.id)
   const [showNewProject, setShowNewProject] = useState(false)
 
-  const [layout, setLayout] = useState<TaskLayout>(() => searchParams.get('layout') === 'board' ? 'board' : 'list')
+  const layout = parseLayout(searchParams.get('layout'))
+  const setLayout = (next: TaskLayout) => {
+    const params = new URLSearchParams(searchParams)
+    if (next === 'list') params.delete('layout')
+    else params.set('layout', next)
+    setSearchParams(params, { replace: true })
+  }
+  const [pxPerDay, setPxPerDay] = useTimelineZoom()
+  const timelineRef = useRef<TimelineHandle>(null)
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
@@ -106,7 +117,6 @@ export function TasksPage() {
 
   const persisted = new URLSearchParams(searchParams)
   persisted.delete('new')
-  persisted.delete('layout')
   const detailParams = new URLSearchParams(persisted)
   detailParams.delete('project')
   const detailSearch = detailParams.toString()
@@ -243,15 +253,18 @@ export function TasksPage() {
             </DropdownMenu>
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
+            {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
             <TaskFilters users={users} labels={labelsQuery.data ?? []} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} unassigned={unassignedFilter} labelId={labelFilter} priority={priorityFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onUnassignedChange={setUnassignedFilter} onLabelChange={setLabelFilter} onPriorityChange={setPriorityFilter} onSortChange={setSort} onLayoutChange={setLayout} />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {layout === 'board'
-              ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
-              : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
+          <div className={`min-h-0 flex-1 ${layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+            {layout === 'timeline'
+              ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} grouped={!projectFilter} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
+              : layout === 'board'
+                ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
+                : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
             {tasksQuery.hasNextPage ? <div className="flex justify-center p-4"><Button variant="outline" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</Button></div> : null}
           </div>
         </section>
