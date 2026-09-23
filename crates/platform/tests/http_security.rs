@@ -462,6 +462,7 @@ async fn security_headers_are_added_to_every_response() {
         .unwrap();
     assert!(csp.contains("default-src 'self'"));
     assert!(csp.contains("frame-ancestors 'none'"));
+    assert!(csp.contains("form-action 'self' https://github.com"));
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
     assert_eq!(
         response.headers()["referrer-policy"],
