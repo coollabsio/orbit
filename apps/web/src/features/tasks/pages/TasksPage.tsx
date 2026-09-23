@@ -33,7 +33,7 @@ import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { taskViewCreateDefaults, type TaskView } from '@/features/tasks/taskMeta'
-import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey } from '@/features/tasks/tasksLib'
+import { filterTasks, resolveStatusId, statusGroups, taskApiSort, type SortKey, type TaskLayout } from '@/features/tasks/tasksLib'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
@@ -55,7 +55,7 @@ export function TasksPage() {
   const createTask = useCreateTask(workspace.id)
   const [showNewProject, setShowNewProject] = useState(false)
 
-  const [layout, setLayout] = useState<'list' | 'board'>(() => searchParams.get('layout') === 'board' ? 'board' : 'list')
+  const [layout, setLayout] = useState<TaskLayout>(() => searchParams.get('layout') === 'board' ? 'board' : 'list')
   const [sort, setSort] = useState<SortKey>('manual')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
