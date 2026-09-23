@@ -1397,10 +1397,34 @@ async fn discord_events_select_one_project_allowed_by_a_multi_project_token() {
 
     let missing = fixture
         .app
+        .clone()
         .oneshot(request(Some(&issued.token), valid_body("missing-project")))
         .await
         .unwrap();
     assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response_json(missing).await["detail"],
+        "Select a project that the API token can write to."
+    );
+
+    let forbidden = fixture
+        .app
+        .oneshot(request(
+            Some(&issued.token),
+            json!({
+                "event_id": "forbidden-project",
+                "message": "Discord message",
+                "message_url": "https://discord.com/channels/1/2/3",
+                "project_id": orbit_platform::Id::new_v7(),
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response_json(forbidden).await["detail"],
+        "Select a project that the API token can write to."
+    );
 }
 
 struct Fixture {

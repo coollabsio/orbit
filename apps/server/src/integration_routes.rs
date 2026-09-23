@@ -1457,6 +1457,7 @@ fn validation(field: &'static str, request_id: Option<&RequestId>) -> ApiError {
         "Validation failed",
         match field {
             "event_id" => "Event IDs must contain between 1 and 200 characters.",
+            "project_id" => "Select a project that the API token can write to.",
             "message_url" => {
                 "Message URLs must be Discord channel message URLs of at most 2048 characters."
             }
