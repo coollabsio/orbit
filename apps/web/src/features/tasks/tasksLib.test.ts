@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Task } from '@/features/tasks/api/models'
-import { SORT_OPTIONS, boardDropUpdates, filterTasks, needsExhaustiveTaskList, taskApiSort } from './tasksLib'
+import { SORT_OPTIONS, boardDropUpdates, filterTasks, needsExhaustiveTaskList, parseLayout, taskApiSort } from './tasksLib'
 
 function task(id: string, statusId: string, position: number, version: number): Task {
   return {
@@ -85,4 +85,11 @@ test('task filters match tasks without an assignee', () => {
   const filters = { currentUserId: 'user-1', projectId: null, statusKey: null, assigneeId: null, statuses: [], unassigned: true }
 
   expect(filterTasks([unassigned, assigned], filters).map(({ id }) => id)).toEqual(['ORB-1'])
+})
+
+test('parseLayout accepts known layouts and defaults to list', () => {
+  expect(parseLayout('timeline')).toBe('timeline')
+  expect(parseLayout('board')).toBe('board')
+  expect(parseLayout('gantt')).toBe('list')
+  expect(parseLayout(null)).toBe('list')
 })

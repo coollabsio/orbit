@@ -1,4 +1,4 @@
-import { Sort as ArrowUpDown, Kanban as Columns3, Filter, List, SearchNormal as Search, Setting4 as SlidersHorizontal } from 'reicon-react'
+import { Calendar, Sort as ArrowUpDown, Kanban as Columns3, Filter, List, SearchNormal as Search, Setting4 as SlidersHorizontal } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -17,7 +17,7 @@ import type { User } from '@/features/workspaces/models'
 import type { LabelRecord } from '@/api/generated/types.gen'
 import type { TaskPriority } from '@/features/tasks/api/models'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
-import { SORT_OPTIONS, type SortKey, type StatusGroup } from '@/features/tasks/tasksLib'
+import { SORT_OPTIONS, type SortKey, type StatusGroup, type TaskLayout } from '@/features/tasks/tasksLib'
 
 const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
 const OPTION =
@@ -40,7 +40,7 @@ interface TaskFiltersProps {
   labelId: string | null
   priority: TaskPriority | null
   sort: SortKey
-  layout: 'list' | 'board'
+  layout: TaskLayout
   search: string
   onStatusChange: (key: string | null) => void
   onAssigneeChange: (assigneeId: string | null) => void
@@ -48,7 +48,7 @@ interface TaskFiltersProps {
   onLabelChange: (labelId: string | null) => void
   onPriorityChange: (priority: TaskPriority | null) => void
   onSortChange: (sort: SortKey) => void
-  onLayoutChange: (layout: 'list' | 'board') => void
+  onLayoutChange: (layout: TaskLayout) => void
   onSearchChange: (search: string) => void
 }
 
@@ -189,7 +189,8 @@ export function TaskFilters({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <DropdownMenu>
+      {/* Timeline rows always sort by date, so manual/priority sort does not apply. */}
+      {layout === 'timeline' ? null : <DropdownMenu>
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" className={FILTER_BTN} data-active={sort !== 'manual' || undefined} aria-label={`Sort tasks: ${sortLabel}`}>
@@ -213,7 +214,7 @@ export function TaskFilters({
             ))}
           </DropdownMenuGroup>
         </DropdownMenuContent>
-      </DropdownMenu>
+      </DropdownMenu>}
 
       <DropdownMenu>
         <DropdownMenuTrigger
@@ -234,6 +235,10 @@ export function TaskFilters({
             <DropdownMenuItem className={OPTION} data-selected={layout === 'board' || undefined} onClick={() => onLayoutChange('board')}>
               <Columns3 className="size-3.5" />
               Board
+            </DropdownMenuItem>
+            <DropdownMenuItem className={OPTION} data-selected={layout === 'timeline' || undefined} onClick={() => onLayoutChange('timeline')}>
+              <Calendar className="size-3.5" />
+              Timeline
             </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>

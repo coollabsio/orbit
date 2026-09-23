@@ -186,3 +186,9 @@ export function boardDropUpdates(
     }]
   })
 }
+
+export type TaskLayout = 'list' | 'board' | 'timeline'
+
+export function parseLayout(value: string | null): TaskLayout {
+  return value === 'board' || value === 'timeline' ? value : 'list'
+}

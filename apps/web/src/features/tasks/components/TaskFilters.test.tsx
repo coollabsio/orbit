@@ -31,3 +31,18 @@ test('unassigned is available as an assignee filter', async () => {
   await userEvent.click(await view.findByRole('menuitem', { name: 'Unassigned' }))
   expect(view.getByRole('button', { name: 'Filter tasks' }).textContent).toContain('1')
 })
+
+test('display offers a timeline layout and hides sort while it is active', async () => {
+  function View() {
+    const [layout, setLayout] = useState<'list' | 'board' | 'timeline'>('list')
+    return <TaskFilters users={[]} labels={[]} groups={[]} statusKey={null} assigneeId={null} unassigned={false} labelId={null} priority={null} sort="manual" layout={layout}
+      search="" onSearchChange={() => {}} onStatusChange={() => {}} onAssigneeChange={() => {}}
+      onUnassignedChange={() => {}} onLabelChange={() => {}} onPriorityChange={() => {}}
+      onSortChange={() => {}} onLayoutChange={setLayout} />
+  }
+  const view = render(<View />)
+  expect(view.getByRole('button', { name: /^Sort tasks/ })).toBeTruthy()
+  fireEvent.click(view.getByRole('button', { name: 'Display options' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Timeline' }))
+  expect(view.queryByRole('button', { name: /^Sort tasks/ })).toBeNull()
+})
