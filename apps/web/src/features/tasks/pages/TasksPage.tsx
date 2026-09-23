@@ -33,12 +33,13 @@ import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { taskViewCreateDefaults, type TaskView } from '@/features/tasks/taskMeta'
-import { filterTasks, parseLayout, resolveStatusId, statusGroups, taskApiSort, type SortKey, type TaskLayout } from '@/features/tasks/tasksLib'
+import { filterTasks, resolveLayout, resolveStatusId, statusGroups, taskApiSort, type SortKey, type TaskLayout } from '@/features/tasks/tasksLib'
 import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
 import { TimelineControls } from '@/features/tasks/timeline/TimelineControls'
 import { useTimelineZoom } from '@/features/tasks/timeline/useTimelineZoom'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
 
+const LAYOUT_KEY = 'orbit:task_layout'
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 
 const OPTION =
@@ -58,8 +59,9 @@ export function TasksPage() {
   const createTask = useCreateTask(workspace.id)
   const [showNewProject, setShowNewProject] = useState(false)
 
-  const layout = parseLayout(searchParams.get('layout'))
+  const layout = resolveLayout(searchParams.get('layout'), localStorage.getItem(LAYOUT_KEY))
   const setLayout = (next: TaskLayout) => {
+    localStorage.setItem(LAYOUT_KEY, next)
     const params = new URLSearchParams(searchParams)
     if (next === 'list') params.delete('layout')
     else params.set('layout', next)

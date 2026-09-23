@@ -192,3 +192,8 @@ export type TaskLayout = 'list' | 'board' | 'timeline'
 export function parseLayout(value: string | null): TaskLayout {
   return value === 'board' || value === 'timeline' ? value : 'list'
 }
+
+/** The URL wins; without a `layout` param (sidebar and breadcrumb links) the last chosen layout applies. */
+export function resolveLayout(urlValue: string | null, storedValue: string | null): TaskLayout {
+  return parseLayout(urlValue ?? storedValue)
+}

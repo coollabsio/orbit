@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Task } from '@/features/tasks/api/models'
-import { SORT_OPTIONS, boardDropUpdates, filterTasks, needsExhaustiveTaskList, parseLayout, taskApiSort } from './tasksLib'
+import { SORT_OPTIONS, boardDropUpdates, filterTasks, needsExhaustiveTaskList, parseLayout, resolveLayout, taskApiSort } from './tasksLib'
 
 function task(id: string, statusId: string, position: number, version: number): Task {
   return {
@@ -92,4 +92,11 @@ test('parseLayout accepts known layouts and defaults to list', () => {
   expect(parseLayout('board')).toBe('board')
   expect(parseLayout('gantt')).toBe('list')
   expect(parseLayout(null)).toBe('list')
+})
+
+test('resolveLayout prefers the URL, then the remembered layout', () => {
+  expect(resolveLayout('board', 'timeline')).toBe('board')
+  expect(resolveLayout(null, 'timeline')).toBe('timeline')
+  expect(resolveLayout(null, 'nonsense')).toBe('list')
+  expect(resolveLayout(null, null)).toBe('list')
 })

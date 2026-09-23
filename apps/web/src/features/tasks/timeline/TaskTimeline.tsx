@@ -49,6 +49,10 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   const updateTask = useUpdateTask(workspace.id)
   const scrollKey = `orbit:timeline_scroll:${workspace.id}`
   const prevPx = useRef(pxPerDay)
+  // last known scroll position; zoom anchoring must not read the live value, which the browser
+  // has already lowered once a narrower track is laid out
+  const scrollLeftRef = useRef(0)
+  const pendingSaves = useRef(new Set<string>())
   const pendingAnchor = useRef<number | null>(null)
   const empty = tasks.length === 0
 
@@ -65,17 +69,24 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
     const track = trackRef.current
     if (!scroller || !track) return
     const visible = scroller.clientWidth - track.offsetLeft
-    scroller.scrollLeft = Math.max(0, todayX - visible / 2)
+    setScrollLeft(scroller, Math.max(0, todayX - visible / 2))
+  }
+
+  const setScrollLeft = (scroller: HTMLElement, left: number) => {
+    scroller.scrollLeft = left
+    scrollLeftRef.current = left
   }
   useImperativeHandle(ref, () => ({ scrollToToday }))
 
   const save = (task: Task, edit: DateEdit) => {
-    if (isSameEdit(task, edit)) return
-    updateTask.mutate(
-      { taskId: task.id, body: { due_start_at: edit.dueStartAt, due_at: edit.dueAt, expected_version: task.version } },
+    // one save per task at a time: the next edit needs the version the server returns
+    if (isSameEdit(task, edit) || pendingSaves.current.has(task.id)) return
+    pendingSaves.current.add(task.id)
+    updateTask
+      .mutateAsync({ taskId: task.id, body: { due_start_at: edit.dueStartAt, due_at: edit.dueAt, expected_version: task.version } })
       // useUpdateTask already rolls back and handles 409 with "Refresh task?"
-      { onError: (error) => { if (!isTaskVersionConflict(error)) toast.error('Could not save the new dates.') } },
-    )
+      .catch((error: unknown) => { if (!isTaskVersionConflict(error)) toast.error('Could not save the new dates.') })
+      .finally(() => pendingSaves.current.delete(task.id))
   }
 
   const editFor = (state: DragState, task: Task): DateEdit | null => {
@@ -93,18 +104,21 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
     },
   })
 
-  // restore the last position (coming back from a task), else centre on today
+  // restore the last position (coming back from a task), else centre on today; again when
+  // the scroller remounts after an empty result
   useLayoutEffect(() => {
     const scroller = scrollRef.current
+    if (!scroller) return
     const saved = sessionStorage.getItem(scrollKey)
-    if (scroller && saved) {
-      const { left, top } = JSON.parse(saved) as { left: number; top: number }
-      scroller.scrollLeft = left
+    if (saved) {
+      // saved against its own range start, so a different range still shows the same dates
+      const { start, left, top, px } = JSON.parse(saved) as { start: string; left: number; top: number; px: number }
+      setScrollLeft(scroller, (left / px + dayIndex(range, new Date(start))) * pxPerDay)
       scroller.scrollTop = top
     } else scrollToToday()
-    // mount only; later centring is explicit (Today button, `T`)
+    // later centring is explicit (Today button, `T`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [empty])
 
   // keep the anchor date fixed when zoom changes (pointer for ctrl+wheel, centre for presets)
   useLayoutEffect(() => {
@@ -112,7 +126,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
     const track = trackRef.current
     if (!scroller || !track || prevPx.current === pxPerDay) return
     const anchor = pendingAnchor.current ?? (scroller.clientWidth - track.offsetLeft) / 2
-    scroller.scrollLeft = anchoredScrollLeft(scroller.scrollLeft, anchor, prevPx.current, pxPerDay)
+    setScrollLeft(scroller, anchoredScrollLeft(scrollLeftRef.current, anchor, prevPx.current, pxPerDay))
     pendingAnchor.current = null
     prevPx.current = pxPerDay
   }, [pxPerDay])
@@ -164,7 +178,11 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
       ref={scrollRef}
       data-timeline-scroller
       className="relative h-full overflow-auto overscroll-x-contain [--timeline-left:280px] max-[899px]:[--timeline-left:0px]"
-      onScroll={(event) => sessionStorage.setItem(scrollKey, JSON.stringify({ left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }))}
+      onScroll={(event) => {
+        const { scrollLeft, scrollTop } = event.currentTarget
+        scrollLeftRef.current = scrollLeft
+        sessionStorage.setItem(scrollKey, JSON.stringify({ start: range.start.toISOString(), left: scrollLeft, top: scrollTop, px: pxPerDay }))
+      }}
     >
       <div className="relative min-h-full" style={{ width: `calc(var(--timeline-left) + ${trackWidth}px)` }}>
         {/* grid layer behind the rows; its left edge is the track origin for pointer maths */}
@@ -237,6 +255,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
                       if (event.key === 'Enter') { onOpen(row.task.id); return }
                       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
                       event.preventDefault()
+                      if (event.repeat) return
                       const step = event.key === 'ArrowRight' ? 1 : -1
                       const edit = applyDrag(row.task, event.shiftKey ? 'end' : 'move', step)
                       if (edit) save(row.task, edit)

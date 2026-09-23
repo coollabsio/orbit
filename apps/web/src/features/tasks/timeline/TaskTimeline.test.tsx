@@ -36,7 +36,16 @@ const statuses: TaskStatusDef[] = [
 ]
 const projects = [{ id: 'p1', name: 'Web', key: 'WEB', color: '#e0457b', version: 1 }] as Project[]
 
-function renderTimeline(tasks: Task[], extra: { onOpen?: (id: string) => void; grouped?: boolean; pxPerDay?: number } = {}) {
+type Extra = { onOpen?: (id: string) => void; grouped?: boolean; pxPerDay?: number }
+
+function timelineElement(tasks: Task[], extra: Extra = {}) {
+  return (
+    <TaskTimeline tasks={tasks} projects={projects} statuses={statuses} users={[]} grouped={extra.grouped ?? true}
+      pxPerDay={extra.pxPerDay ?? 10} onZoomChange={() => {}} onOpen={extra.onOpen ?? (() => {})} today={today} />
+  )
+}
+
+function renderTimeline(tasks: Task[], extra: Extra = {}) {
   const workspace: WorkspaceRecord = { id: 'ws', name: 'Orbit', role: 'owner', version: 1 }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -44,11 +53,7 @@ function renderTimeline(tasks: Task[], extra: { onOpen?: (id: string) => void; g
       <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider>
     </QueryClientProvider>
   )
-  return render(
-    <TaskTimeline tasks={tasks} projects={projects} statuses={statuses} users={[]} grouped={extra.grouped ?? true}
-      pxPerDay={extra.pxPerDay ?? 10} onZoomChange={() => {}} onOpen={extra.onOpen ?? (() => {})} today={today} />,
-    { wrapper },
-  )
+  return render(timelineElement(tasks, extra), { wrapper })
 }
 
 const ranged = task('a', { dueStartAt: local(2026, 9, 1).toISOString(), dueAt: local(2026, 9, 10, 9).toISOString() })
@@ -247,4 +252,101 @@ test('scroll position is saved and restored on the next mount', () => {
   const restored = second.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
   expect(restored.scrollLeft).toBe(480)
   expect(restored.scrollTop).toBe(64)
+})
+
+test('zoom keeps the anchor date even after the browser lowers scrollLeft for the narrower track', () => {
+  const view = renderTimeline([ranged], { pxPerDay: 10 })
+  const scroller = view.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  scroller.scrollLeft = 1000
+  fireEvent.scroll(scroller)
+  scroller.scrollLeft = 300 // what a browser does once the narrower track is laid out
+  view.rerender(timelineElement([ranged], { pxPerDay: 5 }))
+  expect(scroller.scrollLeft).toBe(500) // anchor at the (zero-width) viewport centre: day 100 stays put
+})
+
+test('a drawn range does not swallow the next click on a bar', async () => {
+  captureFetch()
+  const opened: string[] = []
+  const view = renderTimeline([ranged, task('b')], { onOpen: (id) => opened.push(id) })
+  fireEvent.click(view.getByRole('button', { name: 'No dates (1)' }))
+  const track = view.container.querySelector<HTMLElement>('[data-row-track="b"]')!
+  fireEvent.pointerDown(track, { ...pointer, clientX: 50 })
+  fireEvent.pointerMove(window, { ...pointer, clientX: 90 })
+  fireEvent.pointerUp(window, { ...pointer, clientX: 90 }) // no click: press and release hit different elements
+  await flush()
+  fireEvent.click(view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!)
+  expect(opened).toEqual(['a'])
+})
+
+test('pointercancel ends a drag without saving', async () => {
+  const requests = captureFetch()
+  const view = renderTimeline([ranged])
+  const bar = view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!
+  fireEvent.pointerDown(bar, { ...pointer, clientX: 100 })
+  fireEvent.pointerMove(window, { ...pointer, clientX: 160 })
+  fireEvent.pointerCancel(window, { ...pointer, clientX: 160 })
+  fireEvent.pointerUp(window, { ...pointer, clientX: 160 })
+  await flush()
+  expect(requests).toHaveLength(0)
+})
+
+test('leaving the window mid-drag cancels it', async () => {
+  const requests = captureFetch()
+  const view = renderTimeline([ranged])
+  const bar = view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!
+  fireEvent.pointerDown(bar, { ...pointer, clientX: 100 })
+  fireEvent.pointerMove(window, { ...pointer, clientX: 160 })
+  fireEvent.blur(window)
+  fireEvent.pointerUp(window, { ...pointer, clientX: 160 })
+  await flush()
+  expect(requests).toHaveLength(0)
+})
+
+test('unmounting mid-drag stops the drag', async () => {
+  const requests = captureFetch()
+  const view = renderTimeline([ranged])
+  const bar = view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!
+  fireEvent.pointerDown(bar, { ...pointer, clientX: 100 })
+  fireEvent.pointerMove(window, { ...pointer, clientX: 160 })
+  view.unmount()
+  fireEvent.pointerUp(window, { ...pointer, clientX: 160 })
+  await flush()
+  expect(requests).toHaveLength(0)
+})
+
+test('arrow keys ignore auto-repeat and wait for the pending save of that task', async () => {
+  const requests: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requests.push((input as Request).url)
+    return new Promise<Response>(() => {}) // server never answers during this test
+  }) as unknown as typeof fetch
+  const view = renderTimeline([ranged])
+  const bar = view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!
+  fireEvent.keyDown(bar, { key: 'ArrowRight' })
+  fireEvent.keyDown(bar, { key: 'ArrowRight', repeat: true })
+  fireEvent.keyDown(bar, { key: 'ArrowRight' })
+  await flush()
+  expect(requests).toHaveLength(1)
+})
+
+test('scroll restore keeps the same dates when the range changes', () => {
+  const first = renderTimeline([ranged])
+  const scroller = first.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  scroller.scrollLeft = 480
+  fireEvent.scroll(scroller)
+  first.unmount()
+  const older = task('old', { dueAt: local(2025, 1, 10, 9).toISOString() })
+  const second = renderTimeline([ranged, older])
+  const before = computeRange(rowDates([ranged]), today)
+  const after = computeRange(rowDates([ranged, older]), today)
+  const restored = second.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  expect(restored.scrollLeft).toBe(480 + dayIndex(after, before.start) * 10)
+})
+
+test('the timeline centres on today when tasks appear after an empty result', () => {
+  const view = renderTimeline([])
+  view.rerender(timelineElement([ranged]))
+  const range = computeRange(rowDates([ranged]), today)
+  const scroller = view.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  expect(scroller.scrollLeft).toBe(dayIndex(range, today) * 10 + 5)
 })
