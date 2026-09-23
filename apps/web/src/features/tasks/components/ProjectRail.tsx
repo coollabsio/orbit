@@ -14,7 +14,7 @@ interface ProjectRailProps {
   onSelect: (projectId: string | null) => void
 }
 
-/** Second sidebar for Tasks: "All projects" + one row per project (color square, name, hover gear → settings). */
+/** Second sidebar for Tasks: "All projects" + one row per project (color square, name, settings gear). */
 export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps) {
   const navigate = useNavigate()
   const [showNewProject, setShowNewProject] = useState(false)
@@ -29,7 +29,7 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
           <span className="min-w-0 flex-1 truncate">All projects</span>
         </Button>
         {projects.map((project) => (
-          <div key={project.id} className="group/row relative flex items-center">
+          <div key={project.id} className="relative flex items-center">
             <Button
               variant="ghost"
               className={`${MENU_ITEM} flex-1 pr-8`}
@@ -43,7 +43,7 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="absolute right-1.5 size-6 rounded-md border-0 text-muted-foreground/70 opacity-0 transition hover:bg-accent hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 dark:hover:bg-accent"
+              className="absolute right-1.5 size-6 rounded-md border-0 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground dark:hover:bg-accent"
               aria-label={`${project.name} settings`}
               title="Project settings"
               onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}

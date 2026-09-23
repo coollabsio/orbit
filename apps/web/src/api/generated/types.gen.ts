@@ -126,6 +126,7 @@ export type BulkItem = {
     position?: number | null;
     priority?: string | null;
     project_id?: string | null;
+    source_url?: string | null;
     status_id?: string | null;
     title?: string | null;
 };
@@ -181,6 +182,7 @@ export type CreateTaskBody = {
     position?: number | null;
     priority?: string;
     project_id: string;
+    source_url?: string | null;
     status_id: string;
     title: string;
 };
@@ -201,6 +203,52 @@ export type DiscordEventBody = {
 export type DiscordEventResponse = {
     duplicate: boolean;
     task: TaskRecord;
+};
+
+export type GithubLink = {
+    kind: string;
+    source: boolean;
+    state: string;
+    title: string;
+    url: string;
+};
+
+export type GithubManifestBody = {
+    organization?: string | null;
+};
+
+export type GithubManifestStart = {
+    action: string;
+    manifest: unknown;
+};
+
+export type GithubProjectConnectionBody = {
+    installation_id: number;
+    label: string;
+    repository: string;
+};
+
+export type GithubProjectSettings = {
+    app_slug?: string | null;
+    can_manage: boolean;
+    install_url?: string | null;
+    key_configured: boolean;
+    label?: string | null;
+    repositories: Array<GithubRepositoryOption>;
+    repository?: string | null;
+};
+
+export type GithubRepositoryOption = {
+    installation_id: number;
+    repository: string;
+};
+
+export type GithubWorkspaceSettings = {
+    app_slug?: string | null;
+    can_manage: boolean;
+    install_url?: string | null;
+    key_configured: boolean;
+    repositories: Array<GithubRepositoryOption>;
 };
 
 export type InvitationBody = {
@@ -415,6 +463,7 @@ export type PageTaskRecord = {
         position: number;
         priority: string;
         project_id: string;
+        source_url?: string | null;
         status_id: string;
         title: string;
         updated_at: string;
@@ -609,6 +658,7 @@ export type TaskRecord = {
     position: number;
     priority: string;
     project_id: string;
+    source_url?: string | null;
     status_id: string;
     title: string;
     updated_at: string;
@@ -626,6 +676,7 @@ export type TaskUpdateBody = {
     position?: number | null;
     priority?: string | null;
     project_id?: string | null;
+    source_url?: string | null;
     status_id?: string | null;
     title?: string | null;
 };
@@ -1425,6 +1476,133 @@ export type CreateDiscordEventResponses = {
 
 export type CreateDiscordEventResponse = CreateDiscordEventResponses[keyof CreateDiscordEventResponses];
 
+export type GithubManifestCallbackData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query: {
+        code: string;
+        state: string;
+    };
+    url: '/api/v1/integrations/github/manifest/callback';
+};
+
+export type GithubManifestCallbackErrors = {
+    /**
+     * invalid_proxy_headers, invalid_github_registration
+     */
+    400: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_app_exists
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_registration_failed
+     */
+    502: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GithubManifestCallbackError = GithubManifestCallbackErrors[keyof GithubManifestCallbackErrors];
+
+export type GithubManifestCallbackResponses = {
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GithubManifestCallbackResponse = GithubManifestCallbackResponses[keyof GithubManifestCallbackResponses];
+
+export type GithubWebhookData = {
+    body: unknown;
+    headers: {
+        /**
+         * GitHub HMAC-SHA256 signature
+         */
+        'X-Hub-Signature-256': string;
+        /**
+         * GitHub event type
+         */
+        'X-GitHub-Event': string;
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/integrations/github/webhook';
+};
+
+export type GithubWebhookErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * invalid_github_signature
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_labels_ambiguous
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing, app_key_invalid
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GithubWebhookError = GithubWebhookErrors[keyof GithubWebhookErrors];
+
+export type GithubWebhookResponses = {
+    /**
+     * Webhook processed
+     */
+    200: unknown;
+    /**
+     * Event ignored
+     */
+    202: unknown;
+};
+
 export type SetupCompleteData = {
     body: SetupBody;
     headers?: {
@@ -2205,6 +2383,130 @@ export type ListAuditResponses = {
 };
 
 export type ListAuditResponse = ListAuditResponses[keyof ListAuditResponses];
+
+export type GithubWorkspaceSettingsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github';
+};
+
+export type GithubWorkspaceSettingsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GithubWorkspaceSettingsError = GithubWorkspaceSettingsErrors[keyof GithubWorkspaceSettingsErrors];
+
+export type GithubWorkspaceSettingsResponses = {
+    200: GithubWorkspaceSettings;
+};
+
+export type GithubWorkspaceSettingsResponse = GithubWorkspaceSettingsResponses[keyof GithubWorkspaceSettingsResponses];
+
+export type StartGithubManifestData = {
+    body: GithubManifestBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/manifest';
+};
+
+export type StartGithubManifestErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_manager_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_app_exists
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_https_required, invalid_github_organization
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type StartGithubManifestError = StartGithubManifestErrors[keyof StartGithubManifestErrors];
+
+export type StartGithubManifestResponses = {
+    200: GithubManifestStart;
+};
+
+export type StartGithubManifestResponse = StartGithubManifestResponses[keyof StartGithubManifestResponses];
 
 export type ListInvitationsData = {
     body?: never;
@@ -3271,6 +3573,191 @@ export type UpdateProjectResponses = {
 
 export type UpdateProjectResponse = UpdateProjectResponses[keyof UpdateProjectResponses];
 
+export type DeleteGithubProjectConnectionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/github';
+};
+
+export type DeleteGithubProjectConnectionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, github_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * github_project_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, github_label_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * github_repository_not_installed, invalid_github_connection
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteGithubProjectConnectionError = DeleteGithubProjectConnectionErrors[keyof DeleteGithubProjectConnectionErrors];
+
+export type DeleteGithubProjectConnectionResponses = {
+    204: void;
+};
+
+export type DeleteGithubProjectConnectionResponse = DeleteGithubProjectConnectionResponses[keyof DeleteGithubProjectConnectionResponses];
+
+export type GithubProjectSettingsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/github';
+};
+
+export type GithubProjectSettingsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * github_project_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GithubProjectSettingsError = GithubProjectSettingsErrors[keyof GithubProjectSettingsErrors];
+
+export type GithubProjectSettingsResponses = {
+    200: GithubProjectSettings;
+};
+
+export type GithubProjectSettingsResponse = GithubProjectSettingsResponses[keyof GithubProjectSettingsResponses];
+
+export type SaveGithubProjectConnectionData = {
+    body: GithubProjectConnectionBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/github';
+};
+
+export type SaveGithubProjectConnectionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, github_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * github_project_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, github_label_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * github_repository_not_installed, invalid_github_connection
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SaveGithubProjectConnectionError = SaveGithubProjectConnectionErrors[keyof SaveGithubProjectConnectionErrors];
+
+export type SaveGithubProjectConnectionResponses = {
+    200: GithubProjectSettings;
+};
+
+export type SaveGithubProjectConnectionResponse = SaveGithubProjectConnectionResponses[keyof SaveGithubProjectConnectionResponses];
+
 export type RestoreProjectData = {
     body: RestoreBody;
     headers?: {
@@ -3864,7 +4351,7 @@ export type BulkTasksErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict
+     * contract_mismatch, task_conflict, conflict, github_content_read_only
      */
     409: TaskProblem;
     /**
@@ -4162,7 +4649,7 @@ export type UpdateTaskErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict
+     * contract_mismatch, task_conflict, conflict, github_content_read_only
      */
     409: TaskProblem;
     /**
@@ -5032,6 +5519,57 @@ export type DownloadCommentAttachmentResponses = {
 };
 
 export type DownloadCommentAttachmentResponse = DownloadCommentAttachmentResponses[keyof DownloadCommentAttachmentResponses];
+
+export type ListGithubLinksData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/github-links';
+};
+
+export type ListGithubLinksErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListGithubLinksError = ListGithubLinksErrors[keyof ListGithubLinksErrors];
+
+export type ListGithubLinksResponses = {
+    200: Array<GithubLink>;
+};
+
+export type ListGithubLinksResponse = ListGithubLinksResponses[keyof ListGithubLinksResponses];
 
 export type RestoreTaskData = {
     body: RestoreBody;

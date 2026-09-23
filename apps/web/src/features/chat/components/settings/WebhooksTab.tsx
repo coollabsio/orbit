@@ -197,7 +197,6 @@ export function WebhooksTab() {
                               <SelectTrigger
                                 id={`webhook-channel-${wh.id}`}
                                 aria-label="Channel"
-                                className="w-full justify-between gap-2 rounded-md border-input bg-background px-3 font-normal shadow-xs data-[size=default]:h-9 dark:bg-background dark:hover:bg-muted"
                               >
                                 <SelectValue placeholder="Select…" />
                               </SelectTrigger>

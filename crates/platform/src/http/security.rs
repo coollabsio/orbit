@@ -81,7 +81,10 @@ impl OriginPolicy {
     }
 
     pub(crate) fn permits(&self, method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
-        if uri.path() == "/api/v1/integrations/discord/events" {
+        if matches!(
+            uri.path(),
+            "/api/v1/integrations/discord/events" | "/api/v1/integrations/github/webhook"
+        ) {
             return true;
         }
         if matches!(

@@ -92,6 +92,7 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
     case 'settings': {
       const crumbs: Crumb[] = [{ label: 'Settings', to: '/settings' }]
       if (id === 'members') crumbs.push({ label: 'Members' })
+      else if (id === 'github') crumbs.push({ label: 'GitHub' })
       else if (id === 'sessions') crumbs.push({ label: 'Sessions' })
       else if (id === 'danger-zone') crumbs.push({ label: 'Danger zone' })
       return { crumbs }

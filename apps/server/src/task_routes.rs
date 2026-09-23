@@ -11,6 +11,7 @@ use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::Row;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
@@ -112,6 +113,10 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity",
             get(list_task_activity),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/github-links",
+            get(list_github_links),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/restore",
@@ -792,6 +797,7 @@ struct CreateTaskBody {
     title: String,
     #[serde(default)]
     description: String,
+    source_url: Option<String>,
     #[serde(default = "default_priority")]
     priority: String,
     position: Option<i64>,
@@ -813,6 +819,8 @@ struct TaskUpdateBody {
     status_id: Option<String>,
     title: Option<String>,
     description: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    source_url: Option<Option<String>>,
     priority: Option<String>,
     position: Option<i64>,
     assignee_ids: Option<Vec<String>>,
@@ -840,6 +848,8 @@ struct BulkItem {
     status_id: Option<String>,
     title: Option<String>,
     description: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    source_url: Option<Option<String>>,
     priority: Option<String>,
     position: Option<i64>,
     assignee_ids: Option<Vec<String>>,
@@ -929,6 +939,49 @@ async fn get_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct GithubLink {
+    kind: String,
+    title: String,
+    url: String,
+    state: String,
+    source: bool,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/github-links", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = Vec<GithubLink>)))]
+pub(crate) async fn list_github_links(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<GithubLink>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/github-links");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .get_task(workspace_id, task_id, actor_id)
+        .await
+        .map_err(|error| task_problem(error, instance.clone(), request_id.as_ref()))?;
+    let rows = sqlx::query("SELECT kind, repository || '#' || issue_number AS title, 'https://github.com/' || repository || CASE kind WHEN 'pull_request' THEN '/pull/' ELSE '/issues/' END || issue_number AS url, CASE WHEN sync_paused = 1 THEN 'paused' WHEN kind = 'pull_request' THEN pull_state ELSE 'active' END AS state, 1 AS source FROM github_issue_links WHERE workspace_id = ? AND task_id = ? UNION ALL SELECT 'pull_request' AS kind, title, url, state, 0 AS source FROM github_pull_links WHERE workspace_id = ? AND task_id = ? ORDER BY kind, title")
+        .bind(workspace_id.to_string()).bind(task_id.to_string())
+        .bind(workspace_id.to_string()).bind(task_id.to_string())
+        .fetch_all(state.tasks.database().pool()).await
+        .map_err(|error| task_problem(TaskError::Unavailable(error), instance, request_id.as_ref()))?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|row| GithubLink {
+                kind: row.get("kind"),
+                title: row.get("title"),
+                url: row.get("url"),
+                state: row.get("state"),
+                source: row.get::<i64, _>("source") != 0,
+            })
+            .collect(),
+    ))
+}
+
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity", params(PageQuery, ("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = Page<crate::audit::AuditEvent>)))]
 async fn list_task_activity(
     State(state): State<TaskState>,
@@ -985,6 +1038,7 @@ async fn create_task(
             &instance,
             request_id.as_ref(),
         )?,
+        source_url: source_url(body.source_url, &instance, request_id.as_ref())?,
         priority: priority(body.priority, &instance, request_id.as_ref())?,
         position: body.position,
         assignee_ids: parse_ids(body.assignee_ids, &instance, request_id.as_ref())?,
@@ -1058,6 +1112,7 @@ async fn bulk_tasks(
                     status_id: item.status_id,
                     title: item.title,
                     description: item.description,
+                    source_url: item.source_url,
                     priority: item.priority,
                     position: item.position,
                     assignee_ids: item.assignee_ids,
@@ -1457,6 +1512,10 @@ fn task_update(
                 .description
                 .map(|value| bounded(value, 100_000, 100_000, "description", instance, request_id))
                 .transpose()?,
+            source_url: body
+                .source_url
+                .map(|value| source_url(value, instance, request_id))
+                .transpose()?,
             priority: body
                 .priority
                 .map(|value| priority(value, instance, request_id))
@@ -1474,6 +1533,32 @@ fn task_update(
             due_at: body.due_at,
         },
     })
+}
+
+fn source_url(
+    value: Option<String>,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Option<String>, ApiError> {
+    value
+        .map(|url| {
+            let url = bounded(url, 2048, 2048, "source_url", instance, request_id)?;
+            let valid = reqwest::Url::parse(&url).is_ok_and(|parsed| {
+                matches!(parsed.scheme(), "https" | "http") && parsed.host_str().is_some()
+            });
+            if !valid || url.chars().any(char::is_whitespace) {
+                return Err(validation("source_url", instance, request_id));
+            }
+            Ok(url)
+        })
+        .transpose()
+}
+
+fn deserialize_source_patch<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_due_patch<'de, D>(
@@ -1767,6 +1852,14 @@ fn task_problem(
             instance,
             request_id,
         ),
+        TaskError::GithubContentReadOnly => ApiError::new(
+            StatusCode::CONFLICT,
+            "github_content_read_only",
+            "GitHub content is read-only",
+            "GitHub controls this task's title and description.",
+            instance,
+            request_id,
+        ),
         TaskError::RestoreConflict { field } => {
             ApiError::restore_conflict(field, instance, request_id)
         }
@@ -1836,7 +1929,7 @@ pub(crate) struct ConflictBody {
     field: Option<&'static str>,
 }
 
-struct ApiError {
+pub(crate) struct ApiError {
     status: StatusCode,
     body: Box<ProblemBody>,
 }

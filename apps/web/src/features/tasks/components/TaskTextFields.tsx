@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { clipboardFiles } from '@/lib/attachmentLib'
+import { renderMarkdownBlocks } from '@/lib/markdown'
 import type { Task } from '@/features/tasks/api/models'
 import { LinkifiedText } from './LinkifiedText'
 
@@ -14,26 +15,30 @@ export function TaskTextFields({
   task,
   onUpdate,
   onAttachFiles,
+  readOnly = false,
   children,
 }: {
   task: Task
   onUpdate: (update: { title?: string; description?: string }) => void
   onAttachFiles?: (files: File[]) => void
+  readOnly?: boolean
   children?: ReactNode
 }) {
-  return <TaskTextDraft key={`${task.id}:${task.version}:${task.title}:${task.description}`} task={task} onUpdate={onUpdate} onAttachFiles={onAttachFiles}>{children}</TaskTextDraft>
+  return <TaskTextDraft key={`${task.id}:${task.version}:${task.title}:${task.description}:${readOnly}`} task={task} onUpdate={onUpdate} onAttachFiles={onAttachFiles} readOnly={readOnly}>{children}</TaskTextDraft>
 }
 
-function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<typeof TaskTextFields>[0]) {
+function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, children }: Parameters<typeof TaskTextFields>[0]) {
   const isUntitled = task.title === 'Untitled'
   const [title, setTitle] = useState(isUntitled ? '' : task.title)
   const [description, setDescription] = useState(task.description)
-  const [editingTitle, setEditingTitle] = useState(isUntitled)
+  const [editingTitle, setEditingTitle] = useState(isUntitled && !readOnly)
   const [editingDescription, setEditingDescription] = useState(false)
   const [dropOver, setDropOver] = useState(false)
   return (
     <>
-      {editingTitle ? (
+      {readOnly ? (
+        <div className={`${TITLE} whitespace-pre-wrap [overflow-wrap:anywhere]`} aria-label="Task title"><LinkifiedText text={title} /></div>
+      ) : editingTitle ? (
         <Input
           className={cn(TITLE, 'h-auto rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-2xl md:max-[899px]:text-xl')}
           data-keep-font-size=""
@@ -58,7 +63,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
           }}
         />
       ) : (
-        <EditableLinkifiedText className={`${TITLE} ${DISPLAY}`} text={title} ariaLabel="Task title" onEdit={() => setEditingTitle(true)} />
+        <EditablePreview className={`${TITLE} ${DISPLAY}`} ariaLabel="Task title" onEdit={() => setEditingTitle(true)}><LinkifiedText text={title} /></EditablePreview>
       )}
       <div
         className="mt-4 rounded-lg transition-[box-shadow,background-color] data-[drop-over]:bg-primary/10 data-[drop-over]:ring-2 data-[drop-over]:ring-primary/40"
@@ -78,7 +83,9 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
           onAttachFiles?.(Array.from(event.dataTransfer.files))
         }}
       >
-        {editingDescription ? (
+        {readOnly ? (
+          <div className={`${DESC} [overflow-wrap:anywhere]`} aria-label="Description">{description ? renderMarkdownBlocks(description, 'task-description') : 'No description'}</div>
+        ) : editingDescription ? (
           <Textarea
             className={cn(DESC, 'block rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-[13px] md:max-[899px]:text-sm')}
             data-keep-font-size=""
@@ -99,13 +106,12 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
             }}
           />
         ) : (
-          <EditableLinkifiedText
+          <EditablePreview
             className={`${DESC} ${DISPLAY}`}
-            text={description || 'Add description… (paste or drop images and files)'}
             muted={!description}
             ariaLabel="Description"
             onEdit={() => setEditingDescription(true)}
-          />
+          >{description ? renderMarkdownBlocks(description, 'task-description') : 'Add description… (paste or drop images and files)'}</EditablePreview>
         )}
         {children}
       </div>
@@ -113,9 +119,9 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, children }: Parameters<t
   )
 }
 
-function EditableLinkifiedText({ className, text, muted, ariaLabel, onEdit }: {
+function EditablePreview({ className, children, muted, ariaLabel, onEdit }: {
   className: string
-  text: string
+  children: ReactNode
   muted?: boolean
   ariaLabel: string
   onEdit: () => void
@@ -128,12 +134,15 @@ function EditableLinkifiedText({ className, text, muted, ariaLabel, onEdit }: {
       aria-label={ariaLabel}
       aria-readonly="true"
       tabIndex={0}
-      onClick={onEdit}
+      onClick={(event) => {
+        if (event.target instanceof Element && event.target.closest('a, button')) return
+        onEdit()
+      }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') onEdit()
+        if (event.key === 'Enter' && event.target === event.currentTarget) onEdit()
       }}
     >
-      <LinkifiedText text={text} />
+      {children}
     </div>
   )
 }

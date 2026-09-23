@@ -643,6 +643,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
                     status_id: status_id.parse().map_err(operation)?,
                     title: TASK_TITLE.to_owned(),
                     description: TASK_DESCRIPTION.to_owned(),
+                    source_url: None,
                     priority: "medium".to_owned(),
                     position: None,
                     assignee_ids: vec![user_id],

@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowLeft, Calendar, Paperclip2 as Paperclip, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
+import { ArrowLeft, Calendar, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
 import { DatePicker } from '@/components/common/DatePicker'
 import {
@@ -20,7 +21,7 @@ import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
 import type { Project, Task, TaskViewState } from '@/features/tasks/api/models'
-import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useUpdateTask, useUploadTaskAttachments } from '@/features/tasks/api/tasks'
+import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useTaskGithubLinks, useUpdateTask, useUploadTaskAttachments } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
@@ -70,10 +71,15 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   const deleteAttachment = useDeleteTaskAttachment(workspace.id, task?.id ?? '')
   const createComment = useCreateTaskComment(workspace.id, task?.id ?? '')
   const deleteTask = useDeleteTask(workspace.id)
+  const githubLinks = useTaskGithubLinks(workspace.id, task?.id)
+  const githubContentReadOnly = !githubLinks.isSuccess || githubLinks.data.some((link) => link.source)
+  const githubSyncPaused = githubLinks.data?.some((link) => link.source && link.state === 'paused')
+  const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request' && !link.source) ?? []
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
   // the date panel needs to close itself from Clear/Done, so the popover stays controlled
   const [dueDateOpen, setDueDateOpen] = useState(false)
+  const [sourceOpen, setSourceOpen] = useState(false)
   const attach = (files: FileList | File[] | null) => {
     if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
@@ -96,6 +102,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
           <ArrowLeft className="size-4" />
         </Button>
         <span className="text-xs text-muted-foreground/70">{task?.identifier ?? 'Task'}</span>
+        {githubSyncPaused ? <Badge variant="secondary">GitHub sync paused</Badge> : null}
         <div className="flex-1" />
         {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
           if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
@@ -118,6 +125,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
           <div className="min-w-0 max-w-[760px]">
             <TaskTextFields
               task={task}
+              readOnly={githubContentReadOnly}
               onUpdate={(body) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...body } })}
               onAttachFiles={attach}
             >
@@ -136,9 +144,22 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                 {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{uploadAttachments.remainingCount} file(s) remain. <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
               </div>
             </TaskTextFields>
+            {githubLinks.data?.some((link) => link.source) ? <p className="mt-2 text-xs text-muted-foreground">This task's title and description are read-only while it is linked to GitHub.</p> : null}
+            {githubSyncPaused ? <p className="mt-2 text-xs text-muted-foreground">Add the project label to the GitHub issue or pull request again to resume updates.</p> : null}
             {updateTask.isError ? <p role="alert" className="text-xs text-destructive">Task update failed. <Button variant="ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</Button></p> : null}
             {deleteAttachment.isError ? <p role="alert" className="text-xs text-destructive">Attachment removal failed. <Button variant="ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</Button></p> : null}
             {deleteTask.isError ? <p role="alert" className="text-xs text-destructive">Task deletion failed. <Button variant="ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</Button></p> : null}
+
+            {githubPullRequests.length > 0 ? <section aria-label="GitHub links" className="mt-6 border-t border-border pt-4">
+              <h3 className="mb-2 text-xs font-semibold text-muted-foreground">GitHub</h3>
+              <div className="grid gap-1">
+                {githubPullRequests.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground hover:bg-muted">
+                  <Link2 className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{link.title}</span>
+                  <span className="ml-auto shrink-0 text-muted-foreground">{link.state === 'paused' ? 'Paused PR' : link.state === 'merged' ? 'Merged PR' : link.state === 'closed' ? 'Closed PR' : 'Open PR'}</span>
+                </a>)}
+              </div>
+            </section> : null}
 
           </div>
 
@@ -248,6 +269,30 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
               ) : (
                 <span className="text-xs text-muted-foreground/70">—</span>
               )}
+            </div>
+
+            <div className={SIDE_GROUP}>
+              <h4 className={SIDE_HEADING}>Source</h4>
+              {task.sourceUrl ? (
+                <a href={task.sourceUrl} target="_blank" rel="noopener noreferrer" className={`${SIDE_PROP} inline-flex h-8 max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-foreground hover:bg-accent`}>
+                  <Link2 className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{task.sourceUrl.replace(/^https?:\/\//, '').split('/')[0]}</span>
+                </a>
+              ) : null}
+              <Popover open={sourceOpen} onOpenChange={setSourceOpen}>
+                <PopoverTrigger render={<Button type="button" variant="ghost" className={`${SIDE_PROP} h-7 text-muted-foreground`} disabled={updateTask.isPending}>{task.sourceUrl ? 'Edit source' : 'Add source'}</Button>} />
+                <PopoverContent align="start" className="w-72 gap-2 p-3">
+                  <form onSubmit={(event) => {
+                    event.preventDefault()
+                    updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, source_url: new FormData(event.currentTarget).get('source_url')?.toString().trim() || null } })
+                    setSourceOpen(false)
+                  }} className="flex flex-col gap-2">
+                    <label htmlFor="task-source-url" className="text-xs font-medium">Source URL</label>
+                    <Input id="task-source-url" name="source_url" type="url" placeholder="https://..." defaultValue={task.sourceUrl ?? ''} />
+                    <Button type="submit" size="sm">Save</Button>
+                  </form>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className={SIDE_GROUP}>

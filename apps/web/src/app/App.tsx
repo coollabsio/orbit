@@ -9,6 +9,7 @@ import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
 import { SettingsLayout } from '@/features/settings/pages/SettingsLayout'
 import { GeneralPage } from '@/features/settings/pages/GeneralPage'
+import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
@@ -58,6 +59,7 @@ export default function App() {
               <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
+                <Route path="github" element={<GithubPage />} />
                 <Route path="danger-zone" element={<DangerZonePage />} />
                 <Route path="members" element={<MembersPage />} />
                 <Route path="invitations" element={<Navigate to="/settings/members" replace />} />

@@ -91,6 +91,109 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn github_issue_link_reports_paused_sync_state() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("GitHub task").await;
+    let task_id = task["id"].as_str().unwrap();
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, sync_paused) VALUES (?, 'acme/repo', 12, ?, 1)")
+        .bind(&fixture.workspace_id)
+        .bind(task_id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let path = format!(
+        "/api/v1/workspaces/{}/tasks/{task_id}/github-links",
+        fixture.workspace_id
+    );
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&path)
+                .header(header::COOKIE, &fixture.owner_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let link = response_json(response).await;
+    assert_eq!(link[0]["state"], "paused");
+    assert_eq!(link[0]["source"], true);
+
+    sqlx::query("UPDATE github_issue_links SET sync_paused = 0 WHERE task_id = ?")
+        .bind(task_id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&path)
+                .header(header::COOKIE, &fixture.owner_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await[0]["state"], "active");
+}
+
+#[tokio::test]
+async fn github_pull_task_reports_its_source_and_state() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Pull request task").await;
+    let task_id = task["id"].as_str().unwrap();
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind, pull_state) VALUES (?, 'acme/repo', 8, ?, 'pull_request', 'merged')")
+        .bind(&fixture.workspace_id).bind(task_id).execute(fixture.database.pool()).await.unwrap();
+    let path = format!(
+        "/api/v1/workspaces/{}/tasks/{task_id}/github-links",
+        fixture.workspace_id
+    );
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&path)
+                .header(header::COOKIE, &fixture.owner_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let links = response_json(response).await;
+    assert_eq!(links[0]["kind"], "pull_request");
+    assert_eq!(links[0]["url"], "https://github.com/acme/repo/pull/8");
+    assert_eq!(links[0]["state"], "merged");
+    assert_eq!(links[0]["source"], true);
+    let edit = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{task_id}",
+                fixture.workspace_id
+            ),
+            &fixture.owner_cookie,
+            json!({"expected_version":0,"title":"Orbit edit"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(edit.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(edit).await["code"],
+        "github_content_read_only"
+    );
+}
+
+#[tokio::test]
 async fn task_due_date_can_be_created_changed_and_cleared_with_version_checks() {
     let fixture = Fixture::new().await;
     let due_start_at = "2029-12-30T00:00:00Z";
@@ -151,6 +254,74 @@ async fn task_due_date_can_be_created_changed_and_cleared_with_version_checks() 
         .await
         .unwrap();
     assert_eq!(stale.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn task_source_url_can_be_created_changed_and_cleared() {
+    let fixture = Fixture::new().await;
+    let tasks_uri = format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id);
+    let created = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &tasks_uri,
+            &fixture.owner_cookie,
+            json!({"project_id": fixture.project_id, "status_id": fixture.status_id,
+            "title": "Linked task", "description": "Only the details",
+            "source_url": "https://example.com/issues/1"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let task = response_json(created).await;
+    assert_eq!(task["description"], "Only the details");
+    assert_eq!(task["source_url"], "https://example.com/issues/1");
+
+    let uri = format!("{tasks_uri}/{}", task["id"].as_str().unwrap());
+    let changed = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &uri,
+            &fixture.owner_cookie,
+            json!({"expected_version": 0, "source_url": "https://example.com/issues/2"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(changed).await["source_url"],
+        "https://example.com/issues/2"
+    );
+
+    let invalid = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &uri,
+            &fixture.owner_cookie,
+            json!({"expected_version": 1, "source_url": "javascript:alert(1)"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let cleared = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &uri,
+            &fixture.owner_cookie,
+            json!({"expected_version": 1, "source_url": null}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cleared.status(), StatusCode::OK);
+    assert!(response_json(cleared).await["source_url"].is_null());
 }
 
 #[tokio::test]
@@ -767,6 +938,123 @@ async fn removing_a_membership_removes_its_task_assignments() {
             .await
             .unwrap();
     assert_eq!(assignments, 0);
+}
+
+#[tokio::test]
+async fn github_issue_task_text_is_read_only_but_other_fields_can_change() {
+    let fixture = Fixture::new().await;
+    let github_task = fixture.create_task("GitHub title").await;
+    let ordinary_task = fixture.create_task("Orbit title").await;
+    let github_id = github_task["id"].as_str().unwrap();
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id) VALUES (?, ?, ?, ?)")
+        .bind(&fixture.workspace_id)
+        .bind("owner/repo")
+        .bind(7)
+        .bind(github_id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    for body in [
+        json!({"expected_version":0,"title":"Orbit edit"}),
+        json!({"expected_version":0,"description":"Orbit edit"}),
+    ] {
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "PATCH",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks/{github_id}",
+                    fixture.workspace_id
+                ),
+                &fixture.owner_cookie,
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response_json(response).await["code"],
+            "github_content_read_only"
+        );
+    }
+
+    let bulk = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks/bulk", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({"updates":[
+                {"id":ordinary_task["id"],"expected_version":0,"priority":"high"},
+                {"id":github_id,"expected_version":0,"title":"Orbit edit"}
+            ]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(bulk.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(bulk).await["code"],
+        "github_content_read_only"
+    );
+
+    let ordinary_priority: String = sqlx::query_scalar("SELECT priority FROM tasks WHERE id = ?")
+        .bind(ordinary_task["id"].as_str().unwrap())
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(ordinary_priority, "none", "bulk update must roll back");
+
+    let changed = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{github_id}",
+                fixture.workspace_id
+            ),
+            &fixture.owner_cookie,
+            json!({"expected_version":0,"priority":"high"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::OK);
+    let changed = response_json(changed).await;
+    assert_eq!(changed["priority"], "high");
+    assert_eq!(changed["title"], "GitHub title");
+
+    sqlx::query("INSERT INTO github_pull_links (workspace_id, repository, pull_number, task_id, title, url, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&fixture.workspace_id)
+        .bind("owner/repo")
+        .bind(8)
+        .bind(ordinary_task["id"].as_str().unwrap())
+        .bind("Pull request")
+        .bind("https://github.com/owner/repo/pull/8")
+        .bind("open")
+        .bind(TimestampMillis::now().as_millis())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    let ordinary = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}",
+                fixture.workspace_id,
+                ordinary_task["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!({"expected_version":0,"title":"Orbit edit"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ordinary.status(), StatusCode::OK);
 }
 
 #[tokio::test]

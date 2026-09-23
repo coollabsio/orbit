@@ -1,7 +1,7 @@
 use orbit_domain::{StatusCategory, WorkspaceDefaults};
 use orbit_platform::{
-    generate_opaque_token, normalize_email, AuthenticatedUser, Database, Id, IssuedSession,
-    IssuedToken, SessionRecord, TimestampMillis,
+    AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, SessionRecord, TimestampMillis,
+    generate_opaque_token, normalize_email,
 };
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
@@ -615,6 +615,28 @@ impl IdentityRepository {
             now,
         )
         .await?;
+        let workspaces: Vec<String> =
+            sqlx::query_scalar("SELECT workspace_id FROM memberships WHERE user_id = ?")
+                .bind(user_id.to_string())
+                .fetch_all(&mut *transaction)
+                .await?;
+        for workspace in workspaces {
+            audit::record(
+                &mut transaction,
+                workspace
+                    .parse()
+                    .map_err(|_| IdentityError::InvalidCredential)?,
+                Some(user_id),
+                "member.profile_updated",
+                AuditOutcome::Success,
+                "user",
+                Some(user_id),
+                request_id,
+                serde_json::json!({"fields":["display_name"]}),
+                now,
+            )
+            .await?;
+        }
         transaction.commit().await?;
         Ok(())
     }
@@ -1411,14 +1433,16 @@ mod tests {
             .unwrap();
         database.execute("CREATE TRIGGER reject_setup_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'setup.complete' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END").await.unwrap();
 
-        assert!(repository
-            .complete_setup_audited(
-                setup_request("operator-secret"),
-                "setup-request",
-                TimestampMillis::from_millis(1_000)
-            )
-            .await
-            .is_err());
+        assert!(
+            repository
+                .complete_setup_audited(
+                    setup_request("operator-secret"),
+                    "setup-request",
+                    TimestampMillis::from_millis(1_000)
+                )
+                .await
+                .is_err()
+        );
         assert_eq!(
             database
                 .scalar::<i64>("SELECT COUNT(*) FROM users")
@@ -1473,14 +1497,16 @@ mod tests {
             .hash("a different secure password")
             .unwrap();
 
-        assert!(repository
-            .complete_recovery(
-                "recovery-secret",
-                &new_hash,
-                TimestampMillis::from_millis(2_000)
-            )
-            .await
-            .is_err());
+        assert!(
+            repository
+                .complete_recovery(
+                    "recovery-secret",
+                    &new_hash,
+                    TimestampMillis::from_millis(2_000)
+                )
+                .await
+                .is_err()
+        );
         assert_eq!(
             database
                 .scalar::<String>("SELECT password_hash FROM users")
@@ -1553,22 +1579,26 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(repository
-            .initialize_setup_token(now)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            repository
+                .initialize_setup_token(now)
+                .await
+                .unwrap()
+                .is_none()
+        );
         let rotated = repository.rotate_setup_token(now).await.unwrap();
         assert_ne!(first.token, rotated.token);
         repository
             .complete_setup(setup_request(&rotated.token), now)
             .await
             .unwrap();
-        assert!(repository
-            .initialize_setup_token(now)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            repository
+                .initialize_setup_token(now)
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert!(repository.rotate_setup_token(now).await.is_err());
     }
 
@@ -1752,17 +1782,21 @@ mod tests {
                 .unwrap(),
             1
         );
-        assert!(!repository
-            .recovery_token_valid("first-recovery-token", TimestampMillis::from_millis(2_000))
-            .await
-            .unwrap());
-        assert!(repository
-            .recovery_token_valid(
-                "replacement-recovery-token",
-                TimestampMillis::from_millis(2_000)
-            )
-            .await
-            .unwrap());
+        assert!(
+            !repository
+                .recovery_token_valid("first-recovery-token", TimestampMillis::from_millis(2_000))
+                .await
+                .unwrap()
+        );
+        assert!(
+            repository
+                .recovery_token_valid(
+                    "replacement-recovery-token",
+                    TimestampMillis::from_millis(2_000)
+                )
+                .await
+                .unwrap()
+        );
     }
 
     fn setup_request(token: &str) -> SetupRequest {

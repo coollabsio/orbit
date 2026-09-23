@@ -1,5 +1,11 @@
 # Lessons
 
+## Migration history
+- Do not squash or edit a migration after a local database has applied it. Orbit checks both version and checksum at startup. If an uncommitted migration must be consolidated, compare the old and new schemas and back up the database before reconciling its migration records; do not reset user data to make the dev server start.
+
+## API retry load
+- A failed `invalidateQueries` call can refetch many active queries. Do not retry it on a short fixed UI timer; use bounded backoff so an API error cannot exhaust the shared rate limit.
+
 ## Design fidelity
 - the chat reference's chat chrome reads clean because of three things: filled (two-tone) icons at 20px in 32px buttons with 8px gaps, a borderless `bg-secondary/40` search field with a 16px right gutter, and neutral member names (white/muted) — role/user colors belong on avatars and message authors only. reicon has `weight="Filled"` for this.
 - Second sidebars (mail folders, docs tree, tasks projects, chat channels) all use a 48px `pane-header` title row and 8px body padding; the app sidebar brand row is also 48px so everything lines up. Never let a list start flush at the top of a pane. Empty states fill the whole pane area (`.empty-state-wrap` + `flex:1`).

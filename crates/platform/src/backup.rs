@@ -18,7 +18,7 @@ use crate::Database;
 
 const DATABASE_FILE: &str = "database.sqlite";
 const MANIFEST_FILE: &str = "manifest.json";
-const SUPPORTED_SCHEMA_VERSION: i64 = 19;
+const SUPPORTED_SCHEMA_VERSION: i64 = 25;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

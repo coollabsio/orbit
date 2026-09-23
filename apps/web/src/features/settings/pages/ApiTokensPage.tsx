@@ -29,8 +29,6 @@ const FIELD_LABEL = 'mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-mut
 const GRID = 'grid grid-cols-1 gap-4 min-[900px]:grid-cols-2'
 // `gap-0` keeps the Field rows at the previous label/control spacing (the label owns its `mb-1.5`).
 const FIELD = 'w-full min-w-0 gap-0'
-/** Keeps the previous Listbox trigger box: taller, full width, `md` radius, solid background. */
-const SELECT_TRIGGER = 'h-9! w-full gap-2 rounded-md bg-background px-3 font-normal shadow-xs hover:bg-muted dark:bg-background dark:hover:bg-muted'
 const REQ = 'inline-block font-semibold text-primary'
 const BADGE = 'h-auto rounded-full border-0 bg-sidebar-accent text-[10px] leading-[14px] text-muted-foreground'
 
@@ -72,7 +70,7 @@ export function ApiTokensPage() {
           <FieldLabel className={FIELD_LABEL} htmlFor="api-token-projects">Projects <span className={REQ}>*</span></FieldLabel>
           {/* Base UI's `multiple` replaces the old Listbox `selectedValues` + `closeOnSelect={false}` pair: the popup stays open while toggling projects. */}
           <Select multiple value={projectIds} disabled={projectsQuery.isPending || projects.length === 0} onValueChange={(value) => setProjectIds(value)}>
-            <SelectTrigger id="api-token-projects" aria-label="Projects" className={SELECT_TRIGGER}>
+            <SelectTrigger id="api-token-projects" aria-label="Projects">
               <SelectValue>
                 {(value: string[]) => value.length === 0
                   ? <span className="text-muted-foreground">{projectsQuery.isPending ? 'Loading projects…' : 'Select projects…'}</span>
@@ -88,7 +86,7 @@ export function ApiTokensPage() {
           <FieldLabel className={FIELD_LABEL} htmlFor="api-token-expiration">Expiration</FieldLabel>
           {/* `items` lets Select.Value render the option label instead of the raw value. */}
           <Select items={EXPIRATION_OPTIONS} value={expiration} onValueChange={(value) => setExpiration(value as ExpirationValue)}>
-            <SelectTrigger id="api-token-expiration" aria-label="Expiration" className={SELECT_TRIGGER}>
+            <SelectTrigger id="api-token-expiration" aria-label="Expiration">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -4,13 +4,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use axum::Json;
+use axum::Router;
 use axum::extract::{Extension, FromRequest, Path, Request, State};
 use axum::http::header::{CONTENT_TYPE, COOKIE, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::Json;
-use axum::Router;
 use orbit_platform::{
     AuthenticatedUser, ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor,
     PasswordService, RequestId, ThrottleDecision, TimestampMillis,
@@ -1033,15 +1033,15 @@ impl IntoResponse for ApiError {
 mod tests {
     use std::sync::Arc;
 
-    use axum::body::{to_bytes, Body};
-    use axum::http::{header, Request, StatusCode};
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode, header};
     use orbit_platform::{
         HttpPlatformLayer, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
     };
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use super::{auth_router, initialize_auth, AuthState, CookieMode, SetupLaunch};
+    use super::{AuthState, CookieMode, SetupLaunch, auth_router, initialize_auth};
     use crate::repositories::identity::{IdentityRepository, SetupRequest};
 
     #[tokio::test]
@@ -1140,10 +1140,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::ACCEPTED);
-        assert!(repository
-            .recovery_token_valid("admin-issued-token", TimestampMillis::now())
-            .await
-            .unwrap());
+        assert!(
+            repository
+                .recovery_token_valid("admin-issued-token", TimestampMillis::now())
+                .await
+                .unwrap()
+        );
         let response: Value = serde_json::from_slice(&body(response).await).unwrap();
         assert_eq!(
             response["detail"],
@@ -1349,13 +1351,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        assert!(response
-            .headers()
-            .get(header::SET_COOKIE)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with("__Host-orbit_session="));
+        assert!(
+            response
+                .headers()
+                .get(header::SET_COOKIE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("__Host-orbit_session=")
+        );
         assert_persistent_max_age(response.headers()[header::SET_COOKIE].to_str().unwrap());
     }
 
@@ -1592,9 +1596,11 @@ mod tests {
         assert!(rows.contains(&("authentication.login".to_owned(), "failure".to_owned())));
         assert!(rows.contains(&("authentication.login".to_owned(), "success".to_owned())));
         assert!(rows.contains(&("session.logout".to_owned(), "success".to_owned())));
-        assert!(!rows
-            .iter()
-            .any(|(action, _)| action == "recovery.requested"));
+        assert!(
+            !rows
+                .iter()
+                .any(|(action, _)| action == "recovery.requested")
+        );
     }
 
     #[tokio::test]
@@ -1634,7 +1640,7 @@ mod tests {
 
     #[tokio::test]
     async fn patch_me_updates_display_name_and_get_me_reflects_it() {
-        let (app, _, _database) = application(CookieMode::secure()).await;
+        let (app, _, database) = application(CookieMode::secure()).await;
         let cookie = login_cookie(&app, "correct horse battery").await;
 
         let patched = app
@@ -1651,6 +1657,11 @@ mod tests {
         let patched: Value = serde_json::from_slice(&body(patched).await).unwrap();
         assert_eq!(patched["display_name"], "Ada Lovelace");
         assert_eq!(patched["email"], "Owner@Example.com");
+        let workspace_event: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_events WHERE action = 'member.profile_updated' AND workspace_id IS NOT NULL",
+        )
+        .fetch_one(database.pool()).await.unwrap();
+        assert_eq!(workspace_event, 1);
 
         let me = app
             .oneshot(cookie_request("GET", "/api/v1/auth/me", &cookie))

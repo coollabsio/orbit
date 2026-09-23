@@ -77,6 +77,8 @@ pub struct Events {
     pub kind: &'static str,
     // Strings avoid losing precision in browser JSON numbers.
     pub sequence: String,
+    pub workspaces_changed: bool,
+    pub profile_changed: bool,
 }
 
 pub async fn replay(
@@ -102,6 +104,24 @@ pub async fn replay(
     let valid = after.is_some_and(|n| {
         n >= 0 && n <= latest && (n == latest || oldest.is_some_and(|first| n >= first - 1))
     });
+    let (workspaces_changed, profile_changed) = if valid && after != Some(latest) {
+        let (workspace, profile): (i64, i64) = sqlx::query_as(
+            "SELECT COALESCE(MAX(a.resource_type IN ('workspace', 'membership')), 0), \
+                    COALESCE(MAX(a.resource_type = 'user'), 0) \
+             FROM outbox_events e JOIN audit_events a ON a.id = e.id \
+             WHERE e.scope = ? AND e.sequence > ? AND e.sequence <= ?",
+        )
+        .bind(workspace.to_string())
+        .bind(after.unwrap_or_default())
+        .bind(latest)
+        .fetch_one(&mut *tx)
+        .await?;
+        (workspace != 0, profile != 0)
+    } else if valid {
+        (false, false)
+    } else {
+        (true, true)
+    };
     tx.commit().await?;
     // All events invalidate the same workspace cache; coalesce the ordered range.
     Ok(Events {
@@ -112,6 +132,8 @@ pub async fn replay(
             "resync_required"
         },
         sequence: latest.to_string(),
+        workspaces_changed,
+        profile_changed,
     })
 }
 

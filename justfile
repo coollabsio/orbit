@@ -10,6 +10,11 @@ setup:
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ -f .env.local ]; then
+        set -a
+        source .env.local
+        set +a
+    fi
     api_port="${ORBIT_DEV_API_PORT:-8080}"
     web_port="${ORBIT_DEV_WEB_PORT:-8888}"
     server_pid=""

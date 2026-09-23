@@ -13,22 +13,41 @@ export function useWorkspaceEvents(workspaceId: string) {
     let delay = 1000
     let cursor: string | undefined
     let pending: string | undefined
+    let pendingWorkspaces = false
+    let pendingProfile = false
     let refreshing = false
+    let nextRefresh = 0
+    let refreshDelay = 1000
     setConnected(false)
 
     const refresh = async () => {
       // Remote edits must not remount a focused draft or race optimistic writes.
-      if (disposed || pending === undefined || refreshing || client.isMutating() > 0) return
+      if (disposed || pending === undefined || refreshing || Date.now() < nextRefresh || client.isMutating() > 0) return
       const active = document.activeElement
       if (active instanceof HTMLElement && active.matches('input, textarea, [contenteditable="true"]')) return
       refreshing = true
       const next = pending
+      const refreshWorkspaces = pendingWorkspaces
+      const refreshProfile = pendingProfile
       pending = undefined
+      pendingWorkspaces = false
+      pendingProfile = false
       try {
         await client.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }, { throwOnError: true })
+        if (refreshWorkspaces) {
+          await client.invalidateQueries({ queryKey: queryKeys.workspaces }, { throwOnError: true })
+        }
+        if (refreshProfile) {
+          await client.invalidateQueries({ queryKey: queryKeys.currentUser }, { throwOnError: true })
+        }
         cursor = next
+        refreshDelay = 1000
       } catch {
         pending ??= next
+        pendingWorkspaces ||= refreshWorkspaces
+        pendingProfile ||= refreshProfile
+        nextRefresh = Date.now() + refreshDelay
+        refreshDelay = Math.min(refreshDelay * 2, 30000)
       } finally { refreshing = false }
     }
     const connect = () => {
@@ -37,19 +56,26 @@ export function useWorkspaceEvents(workspaceId: string) {
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
       if (cursor !== undefined) url.searchParams.set('after', cursor)
       socket = new WebSocket(url)
-      socket.onopen = () => { setConnected(true); delay = 1000 }
+      let opened = false
+      socket.onopen = () => { opened = true; setConnected(true); delay = 1000 }
       socket.onmessage = (message) => {
         const event = parseEvent(message.data)
         if (!event) { socket?.close(); return }
         pending = event.sequence
+        pendingWorkspaces ||= event.kind === 'resync_required' || event.workspaces_changed === true
+        pendingProfile ||= event.kind === 'resync_required' || event.profile_changed === true
         void refresh()
       }
       socket.onclose = () => {
         if (disposed) return
         setConnected(false)
-        // Revalidate revoked sessions and removed memberships through HTTP.
-        void client.invalidateQueries({ queryKey: queryKeys.currentUser })
-        void client.invalidateQueries({ queryKey: queryKeys.workspaces })
+        // A failed handshake gives no evidence of revocation. Do not turn each retry
+        // during an outage or rate limit into two more HTTP requests.
+        if (opened) {
+          // Revalidate revoked sessions and removed memberships through HTTP.
+          void client.invalidateQueries({ queryKey: queryKeys.currentUser })
+          void client.invalidateQueries({ queryKey: queryKeys.workspaces })
+        }
         retry = setTimeout(connect, delay + Math.random() * 500)
         delay = Math.min(delay * 2, 30000)
       }

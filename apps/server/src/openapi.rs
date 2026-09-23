@@ -55,6 +55,13 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::export_global_audit,
         crate::workspace_routes::create_backup,
         crate::integration_routes::create_discord_event,
+        crate::integration_routes::github_webhook,
+        crate::integration_routes::github_manifest_callback,
+        crate::integration_routes::github_workspace_settings,
+        crate::integration_routes::github_project_settings,
+        crate::integration_routes::save_github_project_connection,
+        crate::integration_routes::delete_github_project_connection,
+        crate::integration_routes::start_github_manifest,
         crate::task_routes::list_projects,
         crate::task_routes::create_project,
         crate::task_routes::update_project,
@@ -72,6 +79,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::delete_label,
         crate::task_routes::list_tasks,
         crate::task_routes::get_task,
+        crate::task_routes::list_github_links,
         crate::task_routes::list_task_activity,
         crate::task_routes::create_task,
         crate::task_routes::update_task,
@@ -204,6 +212,8 @@ fn public_operation(operation_id: &str) -> bool {
             | "recovery_request"
             | "recovery_complete"
             | "preview_invitation"
+            | "github_webhook"
+            | "github_manifest_callback"
     )
 }
 
@@ -213,7 +223,9 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
     add_code(&mut responses, "409", "contract_mismatch");
     add_code(&mut responses, "413", "request_too_large");
     add_code(&mut responses, "500", "internal_error");
-    if unsafe_operation(operation_id) && operation_id != "create_discord_event" {
+    if unsafe_operation(operation_id)
+        && !matches!(operation_id, "create_discord_event" | "github_webhook")
+    {
         add_code(&mut responses, "403", "origin_forbidden");
     }
     if !public_operation(operation_id) && operation_id != "create_discord_event" {
@@ -259,6 +271,37 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "integration_event_conflict");
             add_code(&mut responses, "422", "validation_failed");
             add_code(&mut responses, "422", "integration_project_unavailable");
+        }
+        "github_webhook" => {
+            add_code(&mut responses, "401", "invalid_github_signature");
+            add_code(&mut responses, "503", "app_key_missing");
+            add_code(&mut responses, "503", "app_key_invalid");
+            add_code(&mut responses, "409", "github_labels_ambiguous");
+        }
+        "github_workspace_settings" => {
+            add_code(&mut responses, "404", "github_workspace_not_found");
+        }
+        "github_project_settings" => add_code(&mut responses, "404", "github_project_not_found"),
+        "save_github_project_connection" | "delete_github_project_connection" => {
+            add_code(&mut responses, "403", "github_manager_required");
+            add_code(&mut responses, "404", "github_project_not_found");
+            add_code(&mut responses, "422", "github_repository_not_installed");
+            add_code(&mut responses, "422", "invalid_github_connection");
+            add_code(&mut responses, "409", "github_label_conflict");
+        }
+        "start_github_manifest" => {
+            add_code(&mut responses, "403", "github_manager_required");
+            add_code(&mut responses, "404", "github_workspace_not_found");
+            add_code(&mut responses, "409", "github_app_exists");
+            add_code(&mut responses, "422", "github_https_required");
+            add_code(&mut responses, "422", "invalid_github_organization");
+            add_code(&mut responses, "503", "app_key_missing");
+        }
+        "github_manifest_callback" => {
+            add_code(&mut responses, "400", "invalid_github_registration");
+            add_code(&mut responses, "409", "github_app_exists");
+            add_code(&mut responses, "502", "github_registration_failed");
+            add_code(&mut responses, "503", "app_key_missing");
         }
         "create_workspace" => add_code(&mut responses, "422", "invalid_workspace_name"),
         "get_workspace" => add_code(&mut responses, "404", "workspace_resource_not_found"),
@@ -520,6 +563,9 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "409", "task_conflict");
         add_code(responses, "409", "conflict");
         add_code(responses, "409", "restore_conflict");
+    }
+    if matches!(operation_id, "update_task" | "bulk_tasks") {
+        add_code(responses, "409", "github_content_read_only");
     }
 }
 

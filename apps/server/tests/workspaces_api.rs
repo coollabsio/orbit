@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use axum::body::{to_bytes, Body};
-use axum::http::{header, Request, StatusCode};
+use axum::body::{Body, to_bytes};
+use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
     AuthenticatedUser, HttpPlatformLayer, Id, JobStoreError, LocalBlobStore, OriginPolicy,
     PasswordService, TestDatabase, TimestampMillis, WorkerConfig, WorkerError,
@@ -10,8 +10,8 @@ use orbit_server::auth_routes::CookieMode;
 use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::workspaces::{RetentionServiceError, WorkspaceRepository};
-use orbit_server::workspace_routes::{workspace_router, WorkspaceState};
-use serde_json::{json, Value};
+use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -276,10 +276,12 @@ async fn workspace_memberships_invitations_and_audit_are_path_scoped() {
         .await
         .unwrap();
     assert_eq!(wrong_scope.status(), StatusCode::OK);
-    assert!(response_json(wrong_scope).await["items"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        response_json(wrong_scope).await["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let audit = app
         .oneshot(cookie_request(
@@ -291,11 +293,13 @@ async fn workspace_memberships_invitations_and_audit_are_path_scoped() {
         .unwrap();
     assert_eq!(audit.status(), StatusCode::OK);
     let audit = response_json(audit).await;
-    assert!(audit["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|event| event["workspace_id"] == second));
+    assert!(
+        audit["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|event| event["workspace_id"] == second)
+    );
 }
 
 #[tokio::test]
@@ -1022,11 +1026,13 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert!(sqlx::query("DELETE FROM memberships WHERE id = ?")
-        .bind(&owner_membership)
-        .execute(database.pool())
-        .await
-        .is_err());
+    assert!(
+        sqlx::query("DELETE FROM memberships WHERE id = ?")
+            .bind(&owner_membership)
+            .execute(database.pool())
+            .await
+            .is_err()
+    );
     assert!(
         sqlx::query("UPDATE memberships SET role = 'admin' WHERE id = ?")
             .bind(&owner_membership)
@@ -1039,11 +1045,13 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
         .fetch_one(database.pool())
         .await
         .unwrap();
-    assert!(sqlx::query("DELETE FROM users WHERE id = ?")
-        .bind(&owner_user)
-        .execute(database.pool())
-        .await
-        .is_err());
+    assert!(
+        sqlx::query("DELETE FROM users WHERE id = ?")
+            .bind(&owner_user)
+            .execute(database.pool())
+            .await
+            .is_err()
+    );
 
     let deleted = app
         .clone()
@@ -1326,16 +1334,18 @@ async fn invitation_expiry_smtp_provenance_and_concurrent_resend_are_enforced() 
         )
         .await
         .unwrap();
-    assert!(repository
-        .accept_invitation(
-            &expired.token,
-            expired_user.0,
-            "expired@example.com",
-            "expired",
-            expired.invitation.expires_at,
-        )
-        .await
-        .is_err());
+    assert!(
+        repository
+            .accept_invitation(
+                &expired.token,
+                expired_user.0,
+                "expired@example.com",
+                "expired",
+                expired.invitation.expires_at,
+            )
+            .await
+            .is_err()
+    );
 
     let first_repository = repository.clone();
     let second_repository = repository.clone();

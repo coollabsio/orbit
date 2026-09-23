@@ -21,8 +21,6 @@ const FIELD_LABEL = 'mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-mut
 const GRID = 'grid grid-cols-1 gap-4 min-[900px]:grid-cols-2'
 // `gap-0` keeps the Field rows at the previous label/control spacing (the label owns its `mb-1.5`).
 const FIELD = 'w-full min-w-0 gap-0'
-/** Keeps the previous Listbox trigger box: taller, full width, `md` radius, solid background. */
-const SELECT_TRIGGER = 'h-9! w-full gap-2 rounded-md bg-background px-3 font-normal shadow-xs hover:bg-muted dark:bg-background dark:hover:bg-muted'
 
 export function GeneralPage() {
   const { theme, setTheme } = useTheme()
@@ -66,7 +64,7 @@ export function GeneralPage() {
             </FieldLabel>
             {/* `items` lets Select.Value render the option label instead of the raw value. */}
             <Select items={THEME_OPTIONS} value={theme} onValueChange={(value) => setTheme(value as Theme)}>
-              <SelectTrigger id="appearance-theme" className={SELECT_TRIGGER}>
+              <SelectTrigger id="appearance-theme">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

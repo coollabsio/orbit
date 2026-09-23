@@ -76,14 +76,15 @@ async fn replay_resyncs_expired_invalid_and_missing_cursors_and_is_workspace_sco
     tx.commit().await.unwrap();
     use orbit_server::realtime::replay;
     for cursor in [None, Some(-1), Some(2)] {
-        assert_eq!(
-            replay(&db, workspace, cursor).await.unwrap().kind,
-            "resync_required"
-        );
+        let event = replay(&db, workspace, cursor).await.unwrap();
+        assert_eq!(event.kind, "resync_required");
+        assert!(event.workspaces_changed);
     }
     let events = replay(&db, workspace, Some(0)).await.unwrap();
     assert_eq!(events.kind, "workspace.changed");
     assert_eq!(events.sequence, "1");
+    assert!(!events.workspaces_changed);
+    assert!(!events.profile_changed);
     assert_eq!(replay(&db, Id::new_v7(), None).await.unwrap().sequence, "0");
     sqlx::query("DELETE FROM outbox_events")
         .execute(db.pool())
@@ -97,6 +98,64 @@ async fn replay_resyncs_expired_invalid_and_missing_cursors_and_is_workspace_sco
         replay(&db, workspace, Some(1)).await.unwrap().kind,
         "workspace.changed"
     );
+}
+
+#[tokio::test]
+async fn replay_marks_workspace_list_changes_without_marking_task_changes() {
+    let db = TestDatabase::new().await.unwrap();
+    let workspace = Id::new_v7();
+    for (action, resource) in [("task.updated", "task"), ("workspace.updated", "workspace")] {
+        let mut tx = db.pool().begin().await.unwrap();
+        audit::record(
+            &mut tx,
+            workspace,
+            None,
+            action,
+            AuditOutcome::Success,
+            resource,
+            None,
+            "test",
+            serde_json::json!({}),
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+    let first = orbit_server::realtime::replay(&db, workspace, Some(0))
+        .await
+        .unwrap();
+    assert!(first.workspaces_changed);
+    let second = orbit_server::realtime::replay(&db, workspace, Some(1))
+        .await
+        .unwrap();
+    assert!(second.workspaces_changed);
+    let current = orbit_server::realtime::replay(&db, workspace, Some(2))
+        .await
+        .unwrap();
+    assert!(!current.workspaces_changed);
+    assert!(!current.profile_changed);
+    let mut tx = db.pool().begin().await.unwrap();
+    audit::record(
+        &mut tx,
+        workspace,
+        None,
+        "member.profile_updated",
+        AuditOutcome::Success,
+        "user",
+        None,
+        "test",
+        serde_json::json!({}),
+        TimestampMillis::now(),
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    let profile = orbit_server::realtime::replay(&db, workspace, Some(2))
+        .await
+        .unwrap();
+    assert!(profile.profile_changed);
+    assert!(!profile.workspaces_changed);
 }
 
 #[tokio::test]

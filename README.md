@@ -19,4 +19,5 @@ Open <http://127.0.0.1:8888>. Run `just test` for the test suites or `just
 check` for all project checks.
 
 For deployment and operator instructions, see [docs/operations.md](docs/operations.md).
+For GitHub webhook setup and current limits, see [docs/github.md](docs/github.md).
 The project is licensed under the [Apache License 2.0](LICENSE).

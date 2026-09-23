@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { ArrowLeft, Check, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import { useCreateStatus, useDeleteProject, useDeleteStatus, useProjectStatuses,
 import { useTasks } from '@/features/tasks/api/tasks'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
 
 const PROJECT_COLORS = [
   '#8b5cf6', '#6366f1', '#0ea5e9', '#06b6d4', '#10b981', '#22c55e', '#84cc16', '#eab308', '#f59e0b', '#f97316', '#ef4444',
@@ -55,6 +56,8 @@ export function ProjectSettingsPage() {
   const [deleteTarget, setDeleteTarget] = useState<TaskStatusDef | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<{ id: string; position: 'before' | 'after' } | null>(null)
+  const [generalPending, setGeneralPending] = useState<PendingProjectSave | null>(null)
+  const [githubPending, setGithubPending] = useState<PendingProjectSave | null>(null)
 
   const tasks = tasksQuery.data?.pages.flatMap((page) => page.items) ?? []
   const statuses = project ? projectStatuses(statusQuery.data ?? [], project.id) : []
@@ -89,7 +92,7 @@ export function ProjectSettingsPage() {
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-10 pt-7 pb-12 max-[899px]:px-5">
-              <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} />
+              <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} onPendingChange={setGeneralPending} />
 
               <SettingsCard title="Statuses" description="The workflow a task goes through from start to completion." flush>
                 <div className="flex flex-col py-3 pr-3 pl-[18px]">
@@ -231,6 +234,8 @@ export function ProjectSettingsPage() {
                 {createStatus.isPending || updateStatus.isPending || deleteStatus.isPending || reorderStatuses.isPending ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
 
+              <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
+
               <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
                 <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
                   Delete project
@@ -240,6 +245,11 @@ export function ProjectSettingsPage() {
             </div>
           </div>
         )}
+        {generalPending || githubPending ? <UnsavedBar
+          onReset={() => { generalPending?.reset(); githubPending?.reset() }}
+          onSave={() => { generalPending?.save(); githubPending?.save() }}
+          saving={generalPending?.saving || githubPending?.saving}
+        /> : null}
       </section>
 
       {deleteTarget && project ? (
@@ -277,12 +287,22 @@ export function ProjectSettingsPage() {
  * General card with a draft: edits stay local until "Save Changes" (Reset drops them). The parent
  * keys this component by the saved values, so a fresh draft is created after each save.
  */
-function ProjectGeneralCard({ project }: { project: Project }) {
+function ProjectGeneralCard({ project, onPendingChange }: { project: Project; onPendingChange: (pending: PendingProjectSave | null) => void }) {
   const { workspace } = useWorkspace()
   const updateProject = useUpdateProject(workspace.id, project.id)
+  const saveProject = updateProject.mutate
   const [draft, setDraft] = useState({ name: project.name, key: project.key, color: project.color })
   const dirty = draft.name !== project.name || draft.key !== project.key || draft.color !== project.color
   const canSave = draft.name.trim().length > 0 && draft.key.length > 0
+
+  useEffect(() => {
+    onPendingChange(dirty ? {
+      reset: () => setDraft({ name: project.name, key: project.key, color: project.color }),
+      save: () => { if (canSave) saveProject({ name: draft.name.trim(), key: draft.key, color: draft.color, expected_version: project.version }) },
+      saving: !canSave || updateProject.isPending,
+    } : null)
+    return () => onPendingChange(null)
+  }, [dirty, draft, canSave, project, updateProject.isPending, saveProject, onPendingChange])
 
   return (
     <>
@@ -333,13 +353,6 @@ function ProjectGeneralCard({ project }: { project: Project }) {
           </div>
         </div>
       </SettingsCard>
-      {dirty ? (
-        <UnsavedBar
-          onReset={() => setDraft({ name: project.name, key: project.key, color: project.color })}
-          onSave={() => canSave && updateProject.mutate({ name: draft.name.trim(), key: draft.key, color: draft.color, expected_version: project.version })}
-          saving={!canSave || updateProject.isPending}
-        />
-      ) : null}
       {updateProject.isError ? <p role="alert" className="text-destructive">Project update failed. <Button variant="ghost" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</Button></p> : null}
     </>
   )

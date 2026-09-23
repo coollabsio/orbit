@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use base64::Engine;
 use orbit_platform::{
     BackupService, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry, HttpLimits,
     IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, MigrationRunner, OriginPolicy,
@@ -140,6 +141,11 @@ impl App {
                 .map_err(|error| AppError::Integrity(error.to_string()))?;
         }
 
+        TaskRepository::new(database.clone())
+            .reconcile_github_attribution(orbit_platform::TimestampMillis::now())
+            .await
+            .map_err(|error| AppError::Database(error.to_string()))?;
+
         let identity = Arc::new(IdentityRepository::new(database.clone()));
         let (auth, setup) = initialize_auth(
             Arc::clone(&identity),
@@ -199,6 +205,24 @@ impl App {
             origin_policy = origin_policy.trust_proxy(*proxy);
         }
         let metrics = Metrics::default();
+        let app_key = config
+            .secrets
+            .get("app_key")
+            .map(|secret| {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(secret.expose())
+                    .map_err(|_| {
+                        AppError::Config(
+                            "secrets.app_key must be a base64-encoded 32-byte key".to_owned(),
+                        )
+                    })?;
+                <[u8; 32]>::try_from(bytes).map_err(|_| {
+                    AppError::Config(
+                        "secrets.app_key must be a base64-encoded 32-byte key".to_owned(),
+                    )
+                })
+            })
+            .transpose()?;
         let router = metrics.instrument(production_router(
             ApiRoutes {
                 auth,
@@ -214,6 +238,13 @@ impl App {
                 integrations: IntegrationState::new(
                     Arc::new(ApiTokenRepository::new(database.clone())),
                     Arc::new(TaskRepository::new(database.clone())),
+                )
+                .with_github_settings(
+                    Arc::clone(&identity),
+                    cookie_mode,
+                    config.http.public_origin.clone(),
+                    config.environment == orbit_platform::EnvironmentMode::Development,
+                    app_key,
                 ),
             },
             health,

@@ -2,12 +2,12 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use base64::Engine;
 use http_body_util::BodyExt;
 use orbit_platform::{Config, EnvironmentMode};
 use orbit_server::app::App;
-use orbit_server::static_assets::{StaticAssetError, StaticAssets, FRONTEND_REVISION};
+use orbit_server::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -192,7 +192,7 @@ async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
             .scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        19
+        20
     );
 
     let readiness = app

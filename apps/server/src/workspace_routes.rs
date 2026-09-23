@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::ReceiverStream;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::auth_routes::{issued_session_cookie, CookieMode};
+use crate::auth_routes::{CookieMode, issued_session_cookie};
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
 };

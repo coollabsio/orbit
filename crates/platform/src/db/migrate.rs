@@ -183,7 +183,14 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     19,
-                    include_str!("../../../../apps/server/migrations/0019_task_due_date_ranges.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0019_task_due_date_ranges.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    20,
+                    include_str!("../../../../apps/server/migrations/0020_github_integration.sql"),
                     false,
                 ),
             ],

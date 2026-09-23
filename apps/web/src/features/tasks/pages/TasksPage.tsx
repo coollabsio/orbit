@@ -14,7 +14,6 @@ import { useCurrentUser } from '@/features/auth/api'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
-import { projectSettingsLabel, projectSettingsPath } from '@/features/tasks/api/projectDraft'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import type { TaskPriority } from '@/features/tasks/api/models'
@@ -231,13 +230,15 @@ export function TasksPage() {
               />
               <DropdownMenuContent className="flex w-auto min-w-[190px] flex-col gap-px p-1">
                 <DropdownMenuItem className={OPTION} data-active={projectFilter === null || undefined} onClick={() => setProjectFilter(null)}><SquareCheck className="size-3.5" />All projects</DropdownMenuItem>
-                {projects.map((project) => <DropdownMenuItem key={project.id} className={OPTION} data-active={project.id === projectFilter || undefined} onClick={() => setProjectFilter(project.id)}><span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />{project.name}</DropdownMenuItem>)}
+                {projects.map((project) => <div key={project.id} className="relative flex items-center">
+                  <DropdownMenuItem className={`${OPTION} min-w-0 flex-1 pr-8`} data-active={project.id === projectFilter || undefined} onClick={() => setProjectFilter(project.id)}>
+                    <span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
+                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="absolute right-1 flex size-6 items-center justify-center rounded-md px-0 py-0 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground dark:hover:bg-accent" aria-label={`${project.name} settings`} title="Project settings" onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}><Settings className="size-3.5" /></DropdownMenuItem>
+                </div>)}
                 <DropdownMenuSeparator className="my-1 shrink-0" />
                 <DropdownMenuItem className={OPTION} onClick={() => setShowNewProject(true)}><Plus className="size-3.5" />New project</DropdownMenuItem>
-                {activeProject ? <DropdownMenuItem className={OPTION} onClick={() => {
-                  const path = projectSettingsPath(activeProject.id)
-                  if (path) navigate(path)
-                }}><Settings className="size-3.5" />{projectSettingsLabel()}</DropdownMenuItem> : null}
               </DropdownMenuContent>
             </DropdownMenu>
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>

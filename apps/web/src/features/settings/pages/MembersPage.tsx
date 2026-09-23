@@ -38,8 +38,6 @@ const FIELD_LABEL = 'mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-mut
 const GRID = 'grid grid-cols-1 gap-4 min-[900px]:grid-cols-2'
 // `gap-0` keeps the Field rows at the previous label/control spacing (the label owns its `mb-1.5`).
 const FIELD = 'w-full min-w-0 gap-0'
-/** Keeps the previous Listbox trigger box: taller, full width, `md` radius, solid background. */
-const SELECT_TRIGGER = 'h-9! w-full gap-2 rounded-md bg-background px-3 font-normal shadow-xs hover:bg-muted dark:bg-background dark:hover:bg-muted'
 const REQ = 'inline-block font-semibold text-primary'
 const TABLE = 'flex min-w-0 max-w-full flex-col overflow-x-auto [overscroll-behavior-x:contain]'
 const TABLE_GRID = '[grid-template-columns:minmax(0,1.15fr)_minmax(0,1.55fr)_7rem_minmax(10rem,0.9fr)] max-[899px]:[grid-template-columns:minmax(0,1fr)_auto_auto] max-[899px]:[&>:nth-child(2)]:hidden'
@@ -173,7 +171,7 @@ export function MembersPage() {
                 setPage(1)
               }}
             >
-              <SelectTrigger aria-label="Filter by role" className={cn(SELECT_TRIGGER, 'w-36 max-[899px]:w-full')}>
+              <SelectTrigger aria-label="Filter by role" className="w-36 max-[899px]:w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -188,7 +186,7 @@ export function MembersPage() {
                 setPage(1)
               }}
             >
-              <SelectTrigger aria-label="Sort members" className={cn(SELECT_TRIGGER, 'w-40 max-[899px]:w-full')}>
+              <SelectTrigger aria-label="Sort members" className="w-40 max-[899px]:w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -275,7 +273,7 @@ export function MembersPage() {
                     setPage(1)
                   }}
                 >
-                  <SelectTrigger aria-label="Items per page" className={cn(SELECT_TRIGGER, 'h-7! w-16 px-2')}>
+                  <SelectTrigger aria-label="Items per page" size="sm" className="w-16 px-2">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -360,7 +358,7 @@ export function MembersPage() {
                   Role
                 </FieldLabel>
                 <Select items={INVITE_ROLE_OPTIONS} value={inviteRole} onValueChange={(value) => setInviteRole(value as (typeof INVITABLE_ROLES)[number])}>
-                  <SelectTrigger id="invite-role" className={SELECT_TRIGGER}>
+                  <SelectTrigger id="invite-role">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

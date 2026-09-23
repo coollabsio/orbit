@@ -87,3 +87,33 @@ test('This week saves a Monday through Sunday due-date range', async () => {
   expect(end.getDay()).toBe(0)
   expect(Math.round((end.getTime() - start.getTime()) / 86_400_000)).toBe(6)
 })
+
+test('task source appears in properties and saves a separate URL', async () => {
+  let patchBody: Record<string, unknown> | undefined
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method === 'PATCH') {
+      patchBody = await request.json() as Record<string, unknown>
+      return Response.json({ id: 'task-1', source_url: patchBody.source_url })
+    }
+    return Response.json([])
+  }) as unknown as typeof fetch
+  const task: Task = {
+    id: 'task-1', identifier: 'ORB-1', title: 'Linked task', description: 'Issue details', sourceUrl: 'https://github.com/acme/repo/issues/12', statusId: 'todo',
+    position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
+    labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], activity: [], version: 1,
+  }
+  const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [], labels: [], tasks: [task] }
+  const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={() => {}} />, { wrapper: Wrapper })
+
+  const source = view.getByRole('link', { name: 'github.com' }) as HTMLAnchorElement
+  expect(source.href).toBe('https://github.com/acme/repo/issues/12')
+  expect(view.getByText('Issue details')).toBeTruthy()
+  fireEvent.click(view.getByRole('button', { name: 'Edit source' }))
+  const input = await view.findByLabelText('Source URL')
+  fireEvent.change(input, { target: { value: 'https://example.com/issue/12' } })
+  expect((input as HTMLInputElement).value).toBe('https://example.com/issue/12')
+  fireEvent.click(view.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(patchBody).toEqual({ expected_version: 1, source_url: 'https://example.com/issue/12' }))
+})

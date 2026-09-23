@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router'
-import { Key, Setting2 as Settings, ShieldTick as ShieldCheck, Danger as TriangleAlert, Trash as Trash2, People as Users } from 'reicon-react'
+import { Key, Link2, Setting2 as Settings, ShieldTick as ShieldCheck, Danger as TriangleAlert, Trash as Trash2, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
@@ -17,6 +17,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
       { to: '/settings', label: 'General', icon: Settings, end: true },
       { to: '/settings/sessions', label: 'Sessions', icon: ShieldCheck },
       { to: '/settings/api-tokens', label: 'API tokens', icon: Key },
+      { to: '/settings/github', label: 'GitHub', icon: Link2 },
       { to: '/tasks-trash', label: 'Trash', icon: Trash2 },
     ],
   },

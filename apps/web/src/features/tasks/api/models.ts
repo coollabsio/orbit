@@ -52,6 +52,7 @@ export interface Task {
   identifier: string
   title: string
   description: string
+  sourceUrl?: string | null
   statusId: string
   position: number
   priority: TaskPriority
@@ -103,6 +104,7 @@ export function taskFromRecord(
     identifier: `${project?.key ?? 'TASK'}-${record.id.slice(-4).toUpperCase()}`,
     title: record.title,
     description: record.description,
+    sourceUrl: record.source_url ?? null,
     statusId: record.status_id,
     position: record.position,
     priority,

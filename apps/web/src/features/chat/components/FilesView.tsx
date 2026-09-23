@@ -32,10 +32,6 @@ const SORT_ORDERS: { value: SortOrder; label: string }[] = [
   { value: 'latest', label: 'Latest first' },
   { value: 'oldest', label: 'Oldest first' },
 ]
-// keeps the old Listbox trigger's look (h-9, rounded-md, solid background) on top of SelectTrigger
-const pickerTriggerClass =
-  'w-full gap-2 rounded-md bg-background px-3 shadow-xs hover:bg-muted data-[size=default]:h-9 dark:bg-background dark:hover:bg-muted'
-
 const rowIconBtn =
   'rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted data-[danger=true]:hover:bg-destructive/10 data-[danger=true]:hover:text-destructive dark:data-[danger=true]:hover:bg-destructive/10'
 const overlayIconBtn =
@@ -106,10 +102,10 @@ export function FilesView({ state, channel, onBack }: { state: AppState; channel
           </InputGroup>
           <div className="w-40 max-[899px]:w-[calc(50%-4px)]">
             <Select value={filter} items={FILE_FILTERS} onValueChange={(value) => value && setFilter(value)}>
-              <SelectTrigger aria-label="Filter files" className={pickerTriggerClass}>
+              <SelectTrigger aria-label="Filter files">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent align="start" alignItemWithTrigger={false} className="p-1">
+              <SelectContent align="start" alignItemWithTrigger={false}>
                 {FILE_FILTERS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
@@ -120,10 +116,10 @@ export function FilesView({ state, channel, onBack }: { state: AppState; channel
           </div>
           <div className="w-36 max-[899px]:w-[calc(50%-4px)]">
             <Select value={sortOrder} items={SORT_ORDERS} onValueChange={(value) => value && setSortOrder(value)}>
-              <SelectTrigger aria-label="Sort files" className={pickerTriggerClass}>
+              <SelectTrigger aria-label="Sort files">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent align="start" alignItemWithTrigger={false} className="p-1">
+              <SelectContent align="start" alignItemWithTrigger={false}>
                 {SORT_ORDERS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}

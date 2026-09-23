@@ -14,6 +14,7 @@ import {
   deleteTaskAttachment,
   getTask,
   listComments,
+  listGithubLinks,
   listTaskActivity,
   listCommentAttachments,
   listTaskAttachments,
@@ -114,6 +115,17 @@ export function useTask(workspaceId: string, taskId: string | undefined) {
     queryFn: async () => {
       const { data } = await getTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, throwOnError: true })
       return required(data, 'Task response was empty.')
+    },
+  })
+}
+
+export function useTaskGithubLinks(workspaceId: string, taskId: string | undefined) {
+  return useQuery({
+    queryKey: [...queryKeys.tasks.detail(workspaceId, taskId ?? ''), 'github-links'],
+    enabled: Boolean(taskId),
+    queryFn: async () => {
+      const { data } = await listGithubLinks({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, throwOnError: true })
+      return required(data, 'GitHub links response was empty.')
     },
   })
 }

@@ -77,7 +77,7 @@ export function DatePicker({ startValue, value, onClear, onDone }: DatePickerPro
       <div className="flex items-center gap-2">
         <Clock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <Select value={time} onValueChange={(next) => next && setTime(next)}>
-          <SelectTrigger aria-label="Time" className="w-full rounded-md bg-background px-3 font-normal shadow-xs hover:bg-muted data-[size=default]:h-9 dark:bg-background dark:hover:bg-muted">
+          <SelectTrigger aria-label="Time">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

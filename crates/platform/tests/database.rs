@@ -52,6 +52,43 @@ async fn creates_the_platform_schema() {
 }
 
 #[tokio::test]
+async fn github_schema_is_in_one_draft_migration() {
+    let db = TestDatabase::new().await.unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
+            .await
+            .unwrap(),
+        20
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_app_registrations') WHERE name = 'public_origin'")
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_app_registrations') WHERE name = 'project_id'")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<i64>(
+            "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'source_url'"
+        )
+        .await
+        .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn platform_schema_supports_durable_job_and_schedule_semantics() {
     let db = TestDatabase::new().await.unwrap();
     db.execute(
@@ -151,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 19
+            binary_version: 20
         }
     ));
 }

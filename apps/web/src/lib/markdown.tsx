@@ -56,17 +56,23 @@ function linkifyText(text: string): React.ReactNode[] {
   let match: RegExpExecArray | null
   while ((match = urlRegex.exec(text)) !== null) {
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
-    const path = internalPath(match[0])
-    const github = path ? null : githubLink(match[0])
+    const url = match[0].replace(/[.,!?;:)}\]]+$/, '')
+    if (!url) {
+      parts.push(match[0])
+      lastIndex = match.index + match[0].length
+      continue
+    }
+    const path = internalPath(url)
+    const github = path ? null : githubLink(url)
     parts.push(
       github ? (
         <a
           key={`link-${match.index}`}
-          href={safeHref(match[0])}
+          href={safeHref(url)}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
-          title={match[0]}
+          title={url}
         >
           {githubGlyph(github.kind)}
           {github.label}
@@ -81,20 +87,21 @@ function linkifyText(text: string): React.ReactNode[] {
             appNavigate(path)
           }}
         >
-          {match[0]}
+          {url}
         </a>
       ) : (
         <a
           key={`link-${match.index}`}
-          href={safeHref(match[0])}
+          href={safeHref(url)}
           target="_blank"
           rel="noopener noreferrer"
           className="text-primary hover:underline"
         >
-          {match[0]}
+          {url}
         </a>
       ),
     )
+    if (url.length < match[0].length) parts.push(match[0].slice(url.length))
     lastIndex = match.index + match[0].length
   }
   if (lastIndex < text.length) parts.push(text.slice(lastIndex))
@@ -173,7 +180,7 @@ const EMOJI_SHORTCODES: Record<string, string> = {
 
 export function renderMarkdownText(text: string, keyPrefix: string, mentionTokens: MentionToken[] = []): React.ReactNode[] {
   const tokenRegex =
-    /(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\*\*[^*]+?\*\*|__[^_]+?__|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
+    /(<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\*\*[^*]+?\*\*|__[^_]+?__|~~[^~]+?~~|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let tokenIndex = 0
@@ -186,7 +193,16 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
 
     const token = match[0]
     const key = `${keyPrefix}-${match.index}-${tokenIndex}`
-    if (token.startsWith('[')) {
+    if (token.startsWith('<img') || token.startsWith('![')) {
+      const htmlSource = token.match(/\ssrc\s*=\s*(["'])(.*?)\1/i)?.[2]
+      const htmlAlt = token.match(/\salt\s*=\s*(["'])(.*?)\1/i)?.[2]
+      const markdownImage = token.match(/^!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)$/)
+      const src = markdownImage?.[2] || htmlSource
+      const alt = markdownImage?.[1] ?? htmlAlt ?? 'Image'
+      parts.push(src && /^https?:\/\//i.test(src)
+        ? <img key={key} src={src} alt={alt} loading="lazy" className="my-2 block h-auto max-w-full rounded-md" />
+        : token)
+    } else if (token.startsWith('[')) {
       const linkMatch = token.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/)
       if (linkMatch) {
         parts.push(
@@ -213,6 +229,8 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
       }
     } else if (token.startsWith('**') || token.startsWith('__')) {
       parts.push(<strong key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-strong`, mentionTokens)}</strong>)
+    } else if (token.startsWith('~~')) {
+      parts.push(<del key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-del`, mentionTokens)}</del>)
     } else {
       parts.push(<em key={key}>{renderMarkdownText(token.slice(1, -1), `${key}-em`, mentionTokens)}</em>)
     }
@@ -229,6 +247,62 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
 }
 
 /* ---------- blocks (the chat reference renderMarkdownBlocks) ---------- */
+
+function listItem(line: string): { indent: number; ordered: boolean; number: number | null; content: string } | null {
+  const match = line.match(/^([ \t]*)([-*+]|\d+[.)])\s+(.+)$/)
+  if (!match) return null
+  return { indent: match[1].replace(/\t/g, '    ').length, ordered: /^\d/.test(match[2]), number: /^\d/.test(match[2]) ? parseInt(match[2], 10) : null, content: match[3] }
+}
+
+function skipListBlank(lines: string[], index: number, minIndent: number): number {
+  let next = index
+  while (next < lines.length && lines[next].trim() === '') next += 1
+  return next > index && (listItem(lines[next] || '')?.indent ?? -1) >= minIndent ? next : index
+}
+
+function renderList(lines: string[], start: number, keyPrefix: string, mentionTokens: MentionToken[]): { node: React.ReactNode; next: number } {
+  const first = listItem(lines[start])!
+  const items: React.ReactNode[] = []
+  let i = start
+
+  while (i < lines.length) {
+    i = skipListBlank(lines, i, first.indent)
+    const item = listItem(lines[i])
+    if (!item || item.indent !== first.indent || item.ordered !== first.ordered) break
+    const itemIndex = i++
+    const nested: React.ReactNode[] = []
+    while (i < lines.length) {
+      i = skipListBlank(lines, i, first.indent + 1)
+      if ((listItem(lines[i])?.indent ?? -1) <= first.indent) break
+      const child = renderList(lines, i, keyPrefix, mentionTokens)
+      nested.push(child.node)
+      i = child.next
+    }
+    const checklist = !item.ordered ? item.content.match(/^\[([ xX])\](?:\s+|$)(.*)$/) : null
+    items.push(
+      <li key={`${keyPrefix}-item-${itemIndex}`} className={checklist ? 'list-none' : undefined}>
+        {checklist ? (
+          <span className="inline-flex items-start gap-2">
+            <input type="checkbox" checked={checklist[1].toLowerCase() === 'x'} disabled aria-label={checklist[2]} className="pointer-events-none mt-0.5 size-3.5 accent-primary" />
+            <span>{renderMarkdownText(checklist[2], `${keyPrefix}-item-${itemIndex}`, mentionTokens)}</span>
+          </span>
+        ) : renderMarkdownText(item.content, `${keyPrefix}-item-${itemIndex}`, mentionTokens)}
+        {nested}
+      </li>,
+    )
+  }
+
+  const className = first.ordered ? 'ml-4 list-decimal' : 'ml-4 list-disc'
+  const node = first.ordered
+    ? <ol key={`${keyPrefix}-ol-${start}`} className={className} start={first.number ?? 1} data-ordered="true">{items}</ol>
+    : <ul key={`${keyPrefix}-ul-${start}`} className={className} data-ordered="false">{items}</ul>
+  return { node, next: i }
+}
+
+function tableCells(line: string): string[] | null {
+  if (!line.includes('|')) return null
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, '|'))
+}
 
 export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTokens: MentionToken[] = []): React.ReactNode[] {
   const lines = text.replace(/\r\n/g, '\n').split('\n')
@@ -279,6 +353,38 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
       continue
     }
 
+    const headers = tableCells(line)
+    const separator = tableCells(lines[i + 1] || '')
+    if (headers && separator && headers.length === separator.length && separator.every((cell) => /^:?-{3,}:?$/.test(cell))) {
+      const start = i
+      i += 2
+      const rows: string[][] = []
+      while (i < lines.length) {
+        const cells = tableCells(lines[i])
+        if (!cells) break
+        rows.push(cells)
+        i += 1
+      }
+      const align = (index: number) => separator[index].startsWith(':') && separator[index].endsWith(':')
+        ? 'text-center'
+        : separator[index].endsWith(':') ? 'text-right' : 'text-left'
+      blocks.push(
+        <div key={`${keyPrefix}-table-${start}`} className="my-2 max-w-full overflow-x-auto">
+          <table className="min-w-full border-collapse text-[13px]">
+            <thead><tr>{headers.map((cell, index) => <th key={index} className={`border-b border-border px-3 py-1.5 font-semibold ${align(index)}`}>{renderMarkdownText(cell, `${keyPrefix}-th-${start}-${index}`, mentionTokens)}</th>)}</tr></thead>
+            <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{headers.map((_, index) => <td key={index} className={`border-b border-border/50 px-3 py-1.5 align-top ${align(index)}`}>{renderMarkdownText(row[index] || '', `${keyPrefix}-td-${start}-${rowIndex}-${index}`, mentionTokens)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
+
+    if (/^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/.test(line)) {
+      blocks.push(<hr key={`${keyPrefix}-rule-${i}`} className="my-3 border-border" />)
+      i += 1
+      continue
+    }
+
     if (/^>\s?(.*)$/.test(line)) {
       const quoteLines: string[] = []
       while (i < lines.length) {
@@ -299,39 +405,10 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
       continue
     }
 
-    if (/^\s*[-*+]\s+(.+)$/.test(line)) {
-      const items: string[] = []
-      while (i < lines.length) {
-        const itemMatch = lines[i].match(/^\s*[-*+]\s+(.+)$/)
-        if (!itemMatch) break
-        items.push(itemMatch[1])
-        i += 1
-      }
-      blocks.push(
-        <ul key={`${keyPrefix}-ul-${i}`} className="ml-4 list-disc" data-ordered="false">
-          {items.map((item, index) => (
-            <li key={`${keyPrefix}-ul-${i}-${index}`}>{renderMarkdownText(item, `${keyPrefix}-ul-${i}-${index}`, mentionTokens)}</li>
-          ))}
-        </ul>,
-      )
-      continue
-    }
-
-    if (/^\s*\d+[.)]\s+(.+)$/.test(line)) {
-      const items: string[] = []
-      while (i < lines.length) {
-        const itemMatch = lines[i].match(/^\s*\d+[.)]\s+(.+)$/)
-        if (!itemMatch) break
-        items.push(itemMatch[1])
-        i += 1
-      }
-      blocks.push(
-        <ol key={`${keyPrefix}-ol-${i}`} className="ml-4 list-decimal" data-ordered="true">
-          {items.map((item, index) => (
-            <li key={`${keyPrefix}-ol-${i}-${index}`}>{renderMarkdownText(item, `${keyPrefix}-ol-${i}-${index}`, mentionTokens)}</li>
-          ))}
-        </ol>,
-      )
+    if (listItem(line)) {
+      const list = renderList(lines, i, keyPrefix, mentionTokens)
+      blocks.push(list.node)
+      i = list.next
       continue
     }
 
@@ -345,4 +422,3 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
 
   return blocks
 }
-
