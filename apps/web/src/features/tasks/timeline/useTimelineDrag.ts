@@ -1,0 +1,116 @@
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import type { DragMode } from './timelineLib'
+
+export type DragKind = DragMode | 'draw'
+
+export interface DragState {
+  taskId: string
+  kind: DragKind
+  /** Pointer position at press, in (fractional) days from the range start; survives zoom changes. */
+  originDay: number
+  deltaDays: number
+  moved: boolean
+}
+
+const CLICK_SLOP = 4
+const EDGE = 40
+const EDGE_SPEED = 12
+
+/** Pointer drag on the timeline track: day-snapped deltas, edge auto-scroll, Esc to cancel. */
+export function useTimelineDrag({ pxPerDay, trackRef, scrollRef, onCommit }: {
+  pxPerDay: number
+  trackRef: RefObject<HTMLElement | null>
+  scrollRef: RefObject<HTMLElement | null>
+  onCommit: (state: DragState) => void
+}) {
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const suppressClick = useRef(false)
+  const cancelActive = useRef<(() => void) | null>(null)
+  // a drag outlives the render it started in: read zoom and the commit handler fresh
+  const pxRef = useRef(pxPerDay)
+  const commitRef = useRef(onCommit)
+  useLayoutEffect(() => {
+    pxRef.current = pxPerDay
+    commitRef.current = onCommit
+  })
+
+  // a drag must not outlive the timeline (workspace switch, layout change)
+  useEffect(() => () => cancelActive.current?.(), [])
+
+  const begin = (event: ReactPointerEvent, taskId: string, kind: DragKind) => {
+    if (event.button !== 0 || event.pointerType === 'touch') return
+    const track = trackRef.current
+    if (!track) return
+    // a click the browser never delivered (press and release on different elements) must not eat the next one
+    suppressClick.current = false
+    // the track moves with scroll, so its rect turns client x into content x
+    const trackX = (clientX: number) => clientX - track.getBoundingClientRect().left
+    const startClientX = event.clientX
+    let lastClientX = event.clientX
+    let state: DragState = { taskId, kind, originDay: trackX(event.clientX) / pxRef.current, deltaDays: 0, moved: false }
+    let frame = 0
+
+    const update = () => {
+      const day = trackX(lastClientX) / pxRef.current
+      const moved = state.moved || Math.abs(lastClientX - startClientX) > CLICK_SLOP
+      const deltaDays = !moved ? 0 : kind === 'draw'
+        ? Math.floor(day) - Math.floor(state.originDay)
+        : Math.round(day - state.originDay)
+      if (moved !== state.moved || deltaDays !== state.deltaDays) {
+        state = { ...state, moved, deltaDays }
+        setDrag(state)
+      }
+    }
+    const autoScroll = () => {
+      const scroller = scrollRef.current
+      if (scroller && state.moved) {
+        const rect = scroller.getBoundingClientRect()
+        const step = lastClientX < rect.left + EDGE ? -EDGE_SPEED : lastClientX > rect.right - EDGE ? EDGE_SPEED : 0
+        if (step !== 0 && rect.width > 0) {
+          scroller.scrollLeft += step
+          update()
+        }
+      }
+      frame = requestAnimationFrame(autoScroll)
+    }
+    const finish = (commit: boolean) => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('blur', onCancel)
+      window.removeEventListener('keydown', onKey)
+      cancelActive.current = null
+      setDrag(null)
+      if (!commit) return
+      if (state.moved) {
+        suppressClick.current = true
+        // the browser's click (if any) follows pointerup in the same task; after that, stop suppressing
+        setTimeout(() => { suppressClick.current = false }, 0)
+      }
+      if (state.moved || kind === 'draw') commitRef.current(state)
+    }
+    const onMove = (move: PointerEvent) => { lastClientX = move.clientX; update() }
+    const onUp = (up: PointerEvent) => { lastClientX = up.clientX; update(); finish(true) }
+    const onKey = (key: KeyboardEvent) => { if (key.key === 'Escape') finish(false) }
+    const onCancel = () => finish(false)
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('blur', onCancel)
+    window.addEventListener('keydown', onKey)
+    cancelActive.current = onCancel
+    frame = requestAnimationFrame(autoScroll)
+    setDrag(state)
+  }
+
+  /** True once after a real drag; the browser still fires click on release. */
+  const consumeClick = () => {
+    const suppressed = suppressClick.current
+    suppressClick.current = false
+    return suppressed
+  }
+
+  return { drag, begin, consumeClick }
+}
