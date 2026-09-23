@@ -59,7 +59,12 @@ export function TasksPage() {
   const createTask = useCreateTask(workspace.id)
   const [showNewProject, setShowNewProject] = useState(false)
 
-  const layout = resolveLayout(searchParams.get('layout'), localStorage.getItem(LAYOUT_KEY))
+  const urlLayout = searchParams.get('layout')
+  const layout = resolveLayout(urlLayout, localStorage.getItem(LAYOUT_KEY))
+  // a layout arriving by URL (shared link, back from a task) is also the one to remember
+  useEffect(() => {
+    if (urlLayout) localStorage.setItem(LAYOUT_KEY, layout)
+  }, [urlLayout, layout])
   const setLayout = (next: TaskLayout) => {
     localStorage.setItem(LAYOUT_KEY, next)
     const params = new URLSearchParams(searchParams)

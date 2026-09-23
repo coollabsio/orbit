@@ -184,7 +184,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
         sessionStorage.setItem(scrollKey, JSON.stringify({ start: range.start.toISOString(), left: scrollLeft, top: scrollTop, px: pxPerDay }))
       }}
     >
-      <div className="relative min-h-full" style={{ width: `calc(var(--timeline-left) + ${trackWidth}px)` }}>
+      <div className="relative flex min-h-full flex-col" style={{ width: `calc(var(--timeline-left) + ${trackWidth}px)` }}>
         {/* grid layer behind the rows; its left edge is the track origin for pointer maths */}
         <div
           ref={trackRef}
@@ -266,6 +266,10 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
             </div>
           )
         })}
+        {/* keeps the left pane solid below the last row, so the grid never shows through it */}
+        <div className="flex flex-1">
+          <div className="sticky left-0 z-10 w-[280px] shrink-0 border-r border-border bg-background max-[899px]:hidden" />
+        </div>
       </div>
     </div>
   )

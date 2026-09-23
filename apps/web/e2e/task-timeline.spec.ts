@@ -54,4 +54,10 @@ test('drag a timeline bar, then open the task and come back to the same layout',
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL(/\/tasks\?.*layout=timeline/)
   await expect(page.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true')
+
+  // sidebar links carry no layout param; the timeline the user came in with must stay
+  await page.getByRole('link', { name: 'Overdue' }).first().click()
+  await expect(page).toHaveURL(/view=overdue/)
+  await expect(page.locator('[data-timeline-scroller]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Week' })).toBeVisible()
 })

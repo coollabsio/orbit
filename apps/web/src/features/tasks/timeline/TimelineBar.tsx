@@ -93,7 +93,14 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
         onPointerDown={(event) => onPointerDown(event, 'move')}
       >
         <span className={`${HANDLE} left-0`} aria-hidden="true" onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, 'start') }} />
-        {narrow ? null : <>{label}<span className="flex-1" />{assignee ? <UserAvatar user={assignee} size={16} /> : null}</>}
+        {narrow ? null : (
+          <>
+            {/* the label follows the visible edge when the bar starts left of the view */}
+            <span className="sticky left-[calc(var(--timeline-left)+8px)] flex min-w-0 items-center gap-1.5">{label}</span>
+            <span className="flex-1" />
+            {assignee ? <UserAvatar user={assignee} size={16} /> : null}
+          </>
+        )}
         <span className={`${HANDLE} right-0`} aria-hidden="true" onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, 'end') }} />
       </div>
       {narrow ? (
