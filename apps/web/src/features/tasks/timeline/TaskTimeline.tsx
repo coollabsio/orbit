@@ -1,4 +1,4 @@
-import { useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react'
 import { differenceInCalendarDays } from 'date-fns'
 import { TaskSquare as SquareCheck } from 'reicon-react'
 import { toast } from 'sonner'
@@ -13,8 +13,8 @@ import { TimelineHeader } from './TimelineHeader'
 import { TimelineRowLabel } from './TimelineRowLabel'
 import { useTimelineDrag, type DragState } from './useTimelineDrag'
 import {
-  applyDrag, buildTimelineRows, computeRange, dayAt, dayIndex, dayIndexAtX, drawRange, isOverdue, isSameEdit, monthMarks,
-  rowDates, showsDailyTicks, showsWeeklyLines, spanLabel, taskSpan, xOf, type DateEdit,
+  anchoredScrollLeft, applyDrag, buildTimelineRows, computeRange, dayAt, dayIndex, dayIndexAtX, drawRange, isOverdue, isSameEdit, monthMarks,
+  rowDates, showsDailyTicks, showsWeeklyLines, spanLabel, taskSpan, xOf, zoomFromWheel, type DateEdit,
 } from './timelineLib'
 
 export const LEFT_PANE = 280
@@ -39,7 +39,7 @@ export interface TaskTimelineProps {
 }
 
 /** Roadmap timeline: one row per task, bars span due_start_at → due_at. */
-export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerDay, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
+export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
   const [today] = useState(() => todayProp ?? new Date())
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -47,6 +47,10 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   const [ghost, setGhost] = useState<{ taskId: string; day: number } | null>(null)
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
+  const scrollKey = `orbit:timeline_scroll:${workspace.id}`
+  const prevPx = useRef(pxPerDay)
+  const pendingAnchor = useRef<number | null>(null)
+  const empty = tasks.length === 0
 
   const range = computeRange(rowDates(tasks), today)
   const rows = buildTimelineRows({ tasks, projects, statuses, grouped, overrides })
@@ -89,14 +93,57 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
     },
   })
 
-  // open centred on today
+  // restore the last position (coming back from a task), else centre on today
   useLayoutEffect(() => {
-    scrollToToday()
+    const scroller = scrollRef.current
+    const saved = sessionStorage.getItem(scrollKey)
+    if (scroller && saved) {
+      const { left, top } = JSON.parse(saved) as { left: number; top: number }
+      scroller.scrollLeft = left
+      scroller.scrollTop = top
+    } else scrollToToday()
     // mount only; later centring is explicit (Today button, `T`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (tasks.length === 0) {
+  // keep the anchor date fixed when zoom changes (pointer for ctrl+wheel, centre for presets)
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current
+    const track = trackRef.current
+    if (!scroller || !track || prevPx.current === pxPerDay) return
+    const anchor = pendingAnchor.current ?? (scroller.clientWidth - track.offsetLeft) / 2
+    scroller.scrollLeft = anchoredScrollLeft(scroller.scrollLeft, anchor, prevPx.current, pxPerDay)
+    pendingAnchor.current = null
+    prevPx.current = pxPerDay
+  }, [pxPerDay])
+
+  // ctrl+wheel and trackpad pinch; React's onWheel is passive, so preventDefault needs a native listener
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return
+      event.preventDefault()
+      pendingAnchor.current = event.clientX - scroller.getBoundingClientRect().left - (trackRef.current?.offsetLeft ?? 0)
+      onZoomChange(zoomFromWheel(prevPx.current, event.deltaY))
+    }
+    scroller.addEventListener('wheel', onWheel, { passive: false })
+    return () => scroller.removeEventListener('wheel', onWheel)
+  }, [onZoomChange, empty])
+
+  // `T` jumps to today unless the user is typing
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 't' || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      scrollToToday()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  })
+
+  if (empty) {
     return <EmptyState icon={SquareCheck} title="No tasks match these filters" description="Change the filters or add a task." />
   }
 
@@ -113,7 +160,12 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   const backgroundPosition = [weekLines ? `${firstMonday * pxPerDay}px 0` : null, weekends ? `${saturdayOffset}px 0` : null].filter(Boolean).join(', ')
 
   return (
-    <div ref={scrollRef} data-timeline-scroller className="relative h-full overflow-auto overscroll-x-contain [--timeline-left:280px] max-[899px]:[--timeline-left:0px]">
+    <div
+      ref={scrollRef}
+      data-timeline-scroller
+      className="relative h-full overflow-auto overscroll-x-contain [--timeline-left:280px] max-[899px]:[--timeline-left:0px]"
+      onScroll={(event) => sessionStorage.setItem(scrollKey, JSON.stringify({ left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }))}
+    >
       <div className="relative min-h-full" style={{ width: `calc(var(--timeline-left) + ${trackWidth}px)` }}>
         {/* grid layer behind the rows; its left edge is the track origin for pointer maths */}
         <div
@@ -181,7 +233,14 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
                     dragging={preview !== null}
                     onPointerDown={(event, mode) => begin(event, row.task.id, mode)}
                     onClick={() => { if (!consumeClick()) onOpen(row.task.id) }}
-                    onKeyDown={(event) => { if (event.key === 'Enter') onOpen(row.task.id) }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') { onOpen(row.task.id); return }
+                      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                      event.preventDefault()
+                      const step = event.key === 'ArrowRight' ? 1 : -1
+                      const edit = applyDrag(row.task, event.shiftKey ? 'end' : 'move', step)
+                      if (edit) save(row.task, edit)
+                    }}
                   />
                 ) : null}
               </div>

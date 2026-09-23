@@ -197,3 +197,54 @@ test('touch pointers do not start a drag', async () => {
   await flush()
   expect(requests).toHaveLength(0)
 })
+
+test('arrow keys move a focused bar; shift+arrow changes the end date; enter opens', async () => {
+  const requests = captureFetch()
+  const opened: string[] = []
+  const view = renderTimeline([ranged], { onOpen: (id) => opened.push(id) })
+  const bar = view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!
+  fireEvent.keyDown(bar, { key: 'ArrowRight' })
+  await flush()
+  expect(requests[0]!.body.due_start_at).toBe(local(2026, 9, 2).toISOString())
+  expect(requests[0]!.body.due_at).toBe(local(2026, 9, 11, 9).toISOString())
+  fireEvent.keyDown(bar, { key: 'ArrowLeft', shiftKey: true })
+  await flush()
+  expect(requests[1]!.body.due_at).toBe(local(2026, 9, 9, 9).toISOString())
+  fireEvent.keyDown(bar, { key: 'Enter' })
+  expect(opened).toEqual(['a'])
+})
+
+test('ctrl+wheel zooms in and plain wheel does not', () => {
+  const zooms: number[] = []
+  const workspace = { id: 'ws', name: 'Orbit', role: 'owner', version: 1 } as WorkspaceRecord
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
+        <TaskTimeline tasks={[ranged]} projects={projects} statuses={statuses} users={[]} grouped pxPerDay={10} onZoomChange={(px) => zooms.push(px)} onOpen={() => {}} today={today} />
+      </WorkspaceContext.Provider>
+    </QueryClientProvider>,
+  )
+  const scroller = view.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true }))
+  const zoom = new WheelEvent('wheel', { deltaY: -40, ctrlKey: true, bubbles: true, cancelable: true })
+  // happy-dom's WheelEvent drops ctrlKey (browsers inherit it from MouseEvent)
+  Object.defineProperty(zoom, 'ctrlKey', { value: true })
+  scroller.dispatchEvent(zoom)
+  expect(zooms).toHaveLength(1)
+  expect(zooms[0]!).toBeGreaterThan(10)
+  expect(zoom.defaultPrevented).toBe(true)
+})
+
+test('scroll position is saved and restored on the next mount', () => {
+  const first = renderTimeline([ranged])
+  const scroller = first.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  scroller.scrollLeft = 480
+  scroller.scrollTop = 64
+  fireEvent.scroll(scroller)
+  first.unmount()
+  const second = renderTimeline([ranged])
+  const restored = second.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  expect(restored.scrollLeft).toBe(480)
+  expect(restored.scrollTop).toBe(64)
+})
