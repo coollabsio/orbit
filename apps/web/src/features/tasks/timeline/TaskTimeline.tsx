@@ -48,6 +48,8 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
   const [ghost, setGhost] = useState<{ taskId: string; day: number } | null>(null)
+  // a dropped edit stays on screen until its save settles, so the bar never flashes back
+  const [committed, setCommitted] = useState<{ taskId: string; edit: DateEdit } | null>(null)
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const scrollKey = `orbit:timeline_scroll:${workspace.id}`
@@ -58,6 +60,8 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   const pendingSaves = useRef(new Set<string>())
   const pendingAnchor = useRef<number | null>(null)
   const empty = tasks.length === 0
+  // saved once when the timeline goes away, not on every scroll frame
+  const lastScroll = useRef<{ start: string; left: number; top: number; px: number } | null>(null)
 
   const range = computeRange(rowDates(tasks), today)
   const rows = buildTimelineRows({ tasks, projects, statuses, grouped, overrides })
@@ -65,6 +69,8 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   const projectById = new Map(projects.map((project) => [project.id, project]))
   const userById = new Map(users.map((user) => [user.id, user]))
   const trackWidth = range.days * pxPerDay
+  const rangeStart = range.start.getTime()
+  const prevRangeStart = useRef(rangeStart)
   const todayX = xOf(range, today, pxPerDay) + pxPerDay / 2
 
   const scrollToToday = () => {
@@ -95,16 +101,20 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
     // one save per task at a time: the next edit needs the version the server returns
     if (isSameEdit(task, edit) || pendingSaves.current.has(task.id)) return
     pendingSaves.current.add(task.id)
+    setCommitted({ taskId: task.id, edit })
     updateTask
       .mutateAsync({ taskId: task.id, body: { due_start_at: edit.dueStartAt, due_at: edit.dueAt, expected_version: task.version } })
       // useUpdateTask already rolls back and handles 409 with "Refresh task?"
       .catch((error: unknown) => { if (!isTaskVersionConflict(error)) toast.error('Could not save the new dates.') })
-      .finally(() => pendingSaves.current.delete(task.id))
+      .finally(() => {
+        pendingSaves.current.delete(task.id)
+        setCommitted((current) => (current?.taskId === task.id ? null : current))
+      })
   }
 
   const editFor = (state: DragState, task: Task): DateEdit | null => {
     if (state.kind !== 'draw') return applyDrag(task, state.kind, state.deltaDays)
-    const anchor = dayIndexAtX(state.originX, pxPerDay)
+    const anchor = Math.floor(state.originDay)
     return drawRange(dayAt(range, anchor), dayAt(range, anchor + state.deltaDays))
   }
 
@@ -132,6 +142,26 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
     // later centring is explicit (Today button, `T`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [empty])
+
+  // new dates can move the range start (a bar dragged far back, a filter change); shift the
+  // scroll by the same amount so the dates on screen stay put
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current
+    const before = prevRangeStart.current
+    prevRangeStart.current = rangeStart
+    if (!scroller || before === rangeStart) return
+    setScrollLeft(scroller, scrollLeftRef.current + dayIndex(range, new Date(before)) * pxPerDay)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeStart])
+
+  useEffect(() => {
+    const persist = () => { if (lastScroll.current) sessionStorage.setItem(scrollKey, JSON.stringify(lastScroll.current)) }
+    window.addEventListener('pagehide', persist)
+    return () => {
+      window.removeEventListener('pagehide', persist)
+      persist()
+    }
+  }, [scrollKey])
 
   // keep the anchor date fixed when zoom changes (pointer for ctrl+wheel, centre for presets)
   useLayoutEffect(() => {
@@ -194,7 +224,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
       onScroll={(event) => {
         const { scrollLeft, scrollTop } = event.currentTarget
         scrollLeftRef.current = scrollLeft
-        sessionStorage.setItem(scrollKey, JSON.stringify({ start: range.start.toISOString(), left: scrollLeft, top: scrollTop, px: pxPerDay }))
+        lastScroll.current = { start: range.start.toISOString(), left: scrollLeft, top: scrollTop, px: pxPerDay }
       }}
     >
       <div className="relative flex min-h-full flex-col" style={{ width: `calc(var(--timeline-left) + ${trackWidth}px)` }}>
@@ -219,8 +249,10 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
           const status = row.kind === 'task' ? statusById.get(row.task.statusId) : undefined
           const assignee = row.kind === 'task' ? userById.get(row.task.assigneeIds[0] ?? '') : undefined
           const undated = row.kind === 'task' && !row.span
-          // live preview while dragging (also the drawn range on an undated row)
-          const preview = row.kind === 'task' && drag?.taskId === row.task.id && (drag.moved || drag.kind === 'draw') ? editFor(drag, row.task) : null
+          // live preview while dragging (also the drawn range on an undated row), then the saving edit
+          const live = row.kind === 'task' && drag?.taskId === row.task.id && (drag.moved || drag.kind === 'draw') ? editFor(drag, row.task) : null
+          const saving = row.kind === 'task' && committed?.taskId === row.task.id ? committed.edit : null
+          const preview = live ?? saving
           const span = row.kind === 'task' ? (preview ? taskSpan(preview) : row.span) : null
           return (
             <div key={row.key} className={`group/row relative flex h-8 ${row.kind === 'group' ? GROUP_ROW : 'hover:bg-foreground/[0.03]'}`}>
@@ -254,7 +286,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
                 {undated && ghost?.taskId === row.task.id && !drag ? (
                   <div aria-hidden="true" className="pointer-events-none absolute top-1 h-6 rounded-md border border-dashed border-primary/50 bg-primary/10" style={{ left: ghost.day * pxPerDay, width: pxPerDay }} />
                 ) : null}
-                {preview && span ? (
+                {live && span ? (
                   <span className="pointer-events-none absolute -top-5 z-30 rounded bg-popover px-1.5 text-[11px] leading-5 whitespace-nowrap text-popover-foreground shadow-md tabular-nums" style={{ left: xOf(range, span.start, pxPerDay) }}>
                     {spanLabel(span)}
                   </span>
@@ -269,7 +301,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
                     status={status}
                     assignee={assignee}
                     overdueDays={!preview && isOverdue(row.task, status?.category, today) ? dayIndex(range, today) - dayIndex(range, span.end) : 0}
-                    dragging={preview !== null}
+                    dragging={live !== null}
                     onPointerDown={(event, mode) => begin(event, row.task.id, mode)}
                     onClick={() => { if (!consumeClick()) onOpen(row.task.id) }}
                     onKeyDown={(event) => {

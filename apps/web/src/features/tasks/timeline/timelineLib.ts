@@ -193,7 +193,8 @@ export function applyDrag(task: TaskDates, mode: DragMode, deltaDays: number): D
   const due = new Date(task.dueAt)
   const endAt = (day: Date) => atTime(day, due.getHours(), due.getMinutes()).toISOString()
   if (span.point) {
-    if (mode === 'start') return { dueStartAt: min([addDays(span.end, deltaDays), span.end]).toISOString(), dueAt: task.dueAt }
+    // the start grip only means something when pulled earlier; a nudge or a pull right is a no-op
+    if (mode === 'start') return { dueStartAt: deltaDays < 0 ? addDays(span.end, deltaDays).toISOString() : null, dueAt: task.dueAt }
     return { dueStartAt: null, dueAt: endAt(addDays(span.end, deltaDays)) }
   }
   if (mode === 'move') return { dueStartAt: addDays(span.start, deltaDays).toISOString(), dueAt: endAt(addDays(span.end, deltaDays)) }

@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
-import { dayIndexAtX, type DragMode } from './timelineLib'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import type { DragMode } from './timelineLib'
 
 export type DragKind = DragMode | 'draw'
 
 export interface DragState {
   taskId: string
   kind: DragKind
-  /** Pointer x at press, in track (content) pixels. */
-  originX: number
+  /** Pointer position at press, in (fractional) days from the range start; survives zoom changes. */
+  originDay: number
   deltaDays: number
   moved: boolean
 }
@@ -26,6 +26,13 @@ export function useTimelineDrag({ pxPerDay, trackRef, scrollRef, onCommit }: {
   const [drag, setDrag] = useState<DragState | null>(null)
   const suppressClick = useRef(false)
   const cancelActive = useRef<(() => void) | null>(null)
+  // a drag outlives the render it started in: read zoom and the commit handler fresh
+  const pxRef = useRef(pxPerDay)
+  const commitRef = useRef(onCommit)
+  useLayoutEffect(() => {
+    pxRef.current = pxPerDay
+    commitRef.current = onCommit
+  })
 
   // a drag must not outlive the timeline (workspace switch, layout change)
   useEffect(() => () => cancelActive.current?.(), [])
@@ -40,15 +47,15 @@ export function useTimelineDrag({ pxPerDay, trackRef, scrollRef, onCommit }: {
     const trackX = (clientX: number) => clientX - track.getBoundingClientRect().left
     const startClientX = event.clientX
     let lastClientX = event.clientX
-    let state: DragState = { taskId, kind, originX: trackX(event.clientX), deltaDays: 0, moved: false }
+    let state: DragState = { taskId, kind, originDay: trackX(event.clientX) / pxRef.current, deltaDays: 0, moved: false }
     let frame = 0
 
     const update = () => {
-      const x = trackX(lastClientX)
+      const day = trackX(lastClientX) / pxRef.current
       const moved = state.moved || Math.abs(lastClientX - startClientX) > CLICK_SLOP
       const deltaDays = !moved ? 0 : kind === 'draw'
-        ? dayIndexAtX(x, pxPerDay) - dayIndexAtX(state.originX, pxPerDay)
-        : Math.round((x - state.originX) / pxPerDay)
+        ? Math.floor(day) - Math.floor(state.originDay)
+        : Math.round(day - state.originDay)
       if (moved !== state.moved || deltaDays !== state.deltaDays) {
         state = { ...state, moved, deltaDays }
         setDrag(state)
@@ -81,7 +88,7 @@ export function useTimelineDrag({ pxPerDay, trackRef, scrollRef, onCommit }: {
         // the browser's click (if any) follows pointerup in the same task; after that, stop suppressing
         setTimeout(() => { suppressClick.current = false }, 0)
       }
-      if (state.moved || kind === 'draw') onCommit(state)
+      if (state.moved || kind === 'draw') commitRef.current(state)
     }
     const onMove = (move: PointerEvent) => { lastClientX = move.clientX; update() }
     const onUp = (up: PointerEvent) => { lastClientX = up.clientX; update(); finish(true) }

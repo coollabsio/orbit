@@ -61,3 +61,30 @@ test('drag a timeline bar, then open the task and come back to the same layout',
   await expect(page.locator('[data-timeline-scroller]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Week' })).toBeVisible()
 })
+
+test.describe('narrow screens', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test('project and "No dates" toggles stay reachable without the left pane', async ({ page }) => {
+    const base = { workspace_id: 'alpha', project_id: 'project-1', status_id: 'todo', description: '', priority: 'none', assignee_ids: [], label_ids: [], creator_id: 'user-1', version: 1, created_at: '2026-09-01T12:00:00Z', updated_at: '2026-09-01T12:00:00Z' }
+    const tasks = [
+      { ...base, id: 'task-1', title: 'Dated task', position: 1, due_start_at: '2026-09-21T22:00:00Z', due_at: '2026-09-25T07:00:00Z' },
+      { ...base, id: 'task-2', title: 'Undated task', position: 2 },
+    ]
+    await page.route('**/api/v1/**', async (route) => {
+      const path = new URL(route.request().url()).pathname
+      let body: unknown = { items: [], next_cursor: null }
+      if (path.endsWith('/setup/status')) body = { complete: true }
+      if (path.endsWith('/auth/me')) body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
+      if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+      if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#e0457b', version: 1 }], next_cursor: null }
+      if (path.endsWith('/statuses')) body = { items: [{ id: 'todo', project_id: 'project-1', name: 'Todo', category: 'unstarted', color: '#888888', position: 0, version: 1 }], next_cursor: null }
+      if (path.endsWith('/tasks')) body = { items: tasks, next_cursor: null }
+      await route.fulfill({ json: body })
+    })
+    await page.goto('/tasks?workspace=alpha&layout=timeline')
+    await expect(page.getByRole('button', { name: /Launch/ })).toBeVisible()
+    await page.getByRole('button', { name: 'No dates (1)' }).tap()
+    await expect(page.getByRole('button', { name: /Undated task/ })).toBeVisible()
+  })
+})

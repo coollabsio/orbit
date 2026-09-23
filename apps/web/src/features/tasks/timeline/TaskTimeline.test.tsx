@@ -371,3 +371,49 @@ test('a row can jump the timeline to its bar', () => {
   const range = computeRange(rowDates([ranged]), today)
   expect(calls[0]!.left).toBe(dayIndex(range, local(2026, 9, 1)) * 10 - 48)
 })
+
+test('the view stays on the same dates when the range start moves', () => {
+  const view = renderTimeline([ranged])
+  const scroller = view.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  scroller.scrollLeft = 1000
+  fireEvent.scroll(scroller)
+  const early = task('early', { dueAt: local(2026, 4, 20, 9).toISOString() })
+  view.rerender(timelineElement([ranged, early]))
+  const before = computeRange(rowDates([ranged]), today)
+  const after = computeRange(rowDates([ranged, early]), today)
+  expect(dayIndex(after, before.start)).toBeGreaterThan(0)
+  expect(scroller.scrollLeft).toBe(1000 + dayIndex(after, before.start) * 10)
+})
+
+test('a dropped bar keeps its new dates while the save is in flight', async () => {
+  globalThis.fetch = (async () => new Promise<Response>(() => {})) as unknown as typeof fetch
+  const view = renderTimeline([ranged])
+  const bar = () => view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!
+  fireEvent.pointerDown(bar(), { ...pointer, clientX: 100 })
+  fireEvent.pointerMove(window, { ...pointer, clientX: 131 })
+  fireEvent.pointerUp(window, { ...pointer, clientX: 131 })
+  await flush()
+  expect(bar().getAttribute('aria-label')).toBe('WEB-a Task a, Sep 4 → Sep 13 · 10 days')
+})
+
+test('zooming mid-drag uses the new day width', async () => {
+  const requests = captureFetch()
+  const view = renderTimeline([ranged], { pxPerDay: 10 })
+  const bar = view.container.querySelector<HTMLElement>('[data-timeline-bar="a"]')!
+  fireEvent.pointerDown(bar, { ...pointer, clientX: 100 }) // day 10 at 10px/day
+  view.rerender(timelineElement([ranged], { pxPerDay: 20 }))
+  fireEvent.pointerMove(window, { ...pointer, clientX: 260 }) // day 13 at 20px/day
+  fireEvent.pointerUp(window, { ...pointer, clientX: 260 })
+  await flush()
+  expect(requests[0]!.body.due_start_at).toBe(local(2026, 9, 4).toISOString())
+})
+
+test('scrolling does not write to storage until the timeline goes away', () => {
+  const view = renderTimeline([ranged])
+  const scroller = view.container.querySelector<HTMLElement>('[data-timeline-scroller]')!
+  scroller.scrollLeft = 480
+  fireEvent.scroll(scroller)
+  expect(sessionStorage.getItem('orbit:timeline_scroll:ws')).toBeNull()
+  view.unmount()
+  expect(sessionStorage.getItem('orbit:timeline_scroll:ws')).not.toBeNull()
+})

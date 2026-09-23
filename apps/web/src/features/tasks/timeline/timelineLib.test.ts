@@ -261,3 +261,12 @@ describe('buildTimelineRows', () => {
     expect(rowDates([dated, undatedA])).toEqual([local(2026, 3, 2), local(2026, 3, 10)])
   })
 })
+
+describe('diamond start grip', () => {
+  test('adds a start only when dragged earlier; a nudge or a drag right changes nothing', () => {
+    const point = task('a', { dueAt: iso(local(2026, 3, 10, 9)) })
+    expect(applyDrag(point, 'start', 0)).toEqual({ dueStartAt: null, dueAt: point.dueAt! })
+    expect(applyDrag(point, 'start', 3)).toEqual({ dueStartAt: null, dueAt: point.dueAt! })
+    expect(isSameEdit(point, applyDrag(point, 'start', 0)!)).toBe(true)
+  })
+})
