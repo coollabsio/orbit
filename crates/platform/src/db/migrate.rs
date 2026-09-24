@@ -198,6 +198,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0021_task_relations.sql"),
                     true,
                 ),
+                Migration::new(
+                    22,
+                    include_str!("../../../../apps/server/migrations/0022_views.sql"),
+                    false,
+                ),
             ],
         )
     }

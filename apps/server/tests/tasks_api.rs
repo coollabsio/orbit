@@ -3690,3 +3690,77 @@ async fn create_project(fixture: &Fixture, key: &str) -> String {
 fn relations_uri(fixture: &Fixture, task_id: &str) -> String {
     format!("{}/relations", task_uri(fixture, task_id))
 }
+
+#[tokio::test]
+async fn completed_at_is_set_and_cleared_by_status_changes() {
+    let fixture = Fixture::new().await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let cancelled = status_id_by_category(&fixture, &fixture.project_id, "cancelled").await;
+    let task = fixture.create_task("Finish me").await;
+    let id = id_of(&task).to_owned();
+    assert_eq!(task_timestamps(&fixture, &id).await.0, None);
+
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, &id),
+        Some(json!({"expected_version": task["version"], "status_id": done})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (completed_at, updated_at) = task_timestamps(&fixture, &id).await;
+    assert_eq!(completed_at, Some(updated_at));
+
+    // Every PATCH rewrites status_id; an unrelated edit must keep completed_at.
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, &id),
+        Some(json!({"expected_version": task["version"], "title": "Finished"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(task_timestamps(&fixture, &id).await.0, completed_at);
+
+    // Done -> Cancelled stays in a done category, so completed_at is kept.
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, &id),
+        Some(json!({"expected_version": task["version"], "status_id": cancelled})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(task_timestamps(&fixture, &id).await.0, completed_at);
+
+    // Back to an open status clears it.
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, &id),
+        Some(json!({"expected_version": task["version"], "status_id": fixture.status_id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(task_timestamps(&fixture, &id).await.0, None);
+
+    // A task created directly in a done status gets completed_at on insert.
+    let (status, born_done) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({"project_id": fixture.project_id, "status_id": done, "title": "Born done"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (completed_at, updated_at) = task_timestamps(&fixture, id_of(&born_done)).await;
+    assert_eq!(completed_at, Some(updated_at));
+}
+
+async fn task_timestamps(fixture: &Fixture, task_id: &str) -> (Option<i64>, i64) {
+    sqlx::query_as("SELECT completed_at, updated_at FROM tasks WHERE id = ?")
+        .bind(task_id)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap()
+}

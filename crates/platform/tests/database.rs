@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        21
+        22
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 21
+            binary_version: 22
         }
     ));
 }
@@ -614,4 +614,104 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
         chained.contains("duplicate relations cannot chain"),
         "{chained}"
     );
+}
+
+#[tokio::test]
+async fn views_migration_backfills_completed_at_and_creates_view_tables() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 21)
+        .run(&database)
+        .await
+        .unwrap();
+
+    let [user, workspace, membership, project]: [Id; 4] = std::array::from_fn(|_| Id::new_v7());
+    let [todo, done, cancelled, duplicate]: [Id; 4] = std::array::from_fn(|_| Id::new_v7());
+    let [open_task, done_task, cancelled_task, duplicate_task]: [Id; 4] =
+        std::array::from_fn(|_| Id::new_v7());
+    let seed = format!(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'Orbit', 0, '{membership}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{membership}', '{workspace}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at)
+         VALUES ('{project}', '{workspace}', 'Live', 'LIVE', '#000000', 0, NULL, 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at)
+         VALUES ('{todo}', '{workspace}', '{project}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1),
+                ('{done}', '{workspace}', '{project}', 'Done', '', '#ffffff', 'completed', 1, 0, 1, 1),
+                ('{cancelled}', '{workspace}', '{project}', 'Cancelled', '', '#ffffff', 'cancelled', 2, 0, 1, 1),
+                ('{duplicate}', '{workspace}', '{project}', 'Duplicate', '', '#ffffff', 'duplicate', 3, 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at)
+         VALUES ('{open_task}', '{workspace}', '{project}', '{todo}', 'Open', '{user}', 1, 10),
+                ('{done_task}', '{workspace}', '{project}', '{done}', 'Done', '{user}', 1, 20),
+                ('{cancelled_task}', '{workspace}', '{project}', '{cancelled}', 'Cancelled', '{user}', 1, 30),
+                ('{duplicate_task}', '{workspace}', '{project}', '{duplicate}', 'Duplicate', '{user}', 1, 40);"
+    );
+    let mut transaction = database.transaction().await.unwrap();
+    sqlx::raw_sql(&seed)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    let completed: Vec<(String, Option<i64>)> =
+        sqlx::query_as("SELECT title, completed_at FROM tasks ORDER BY updated_at")
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        completed,
+        [
+            ("Open".to_owned(), None),
+            ("Done".to_owned(), Some(20)),
+            ("Cancelled".to_owned(), Some(30)),
+            ("Duplicate".to_owned(), Some(40)),
+        ]
+    );
+    for table in ["saved_views", "saved_view_favorites", "view_preferences"] {
+        assert_eq!(
+            database
+                .scalar::<i64>(&format!(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{table}'"
+                ))
+                .await
+                .unwrap(),
+            1,
+            "missing {table}"
+        );
+    }
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        database
+            .scalar::<String>("PRAGMA integrity_check")
+            .await
+            .unwrap(),
+        "ok"
+    );
+    // The name check trims before measuring.
+    let error = database
+        .execute(&format!(
+            "INSERT INTO saved_views (id, workspace_id, owner_user_id, name, visibility, state_json, created_at, updated_at) \
+             VALUES ('{}', '{workspace}', '{user}', '   ', 'personal', '{{}}', 1, 1)",
+            Id::new_v7()
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("CHECK constraint failed"), "{error}");
 }
