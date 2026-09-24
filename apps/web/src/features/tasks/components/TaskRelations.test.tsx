@@ -140,3 +140,20 @@ test('Add relation → Blocked by… links the picked task and never offers the 
     { method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/task-3f2a/relations', body: { type: 'blocked_by', task_id: 'task-77aa' } },
   ]))
 }, 20000)
+
+test('relations read as one aligned list: a count in the heading and each kind named once beside its first row', async () => {
+  const calls: Call[] = []
+  api(calls, [
+    relation('rel-1', 'blocks', 'outgoing', { id: 'task-5be3', title: 'Review the Orbit foundation' }),
+    relation('rel-2', 'blocks', 'outgoing', { id: 'task-55ee', title: 'Release notes' }),
+    relation('rel-3', 'related', 'outgoing', { id: 'task-12cd', title: 'Safari cookie policy' }),
+  ])
+  const view = renderDetail()
+  const section = await view.findByRole('region', { name: 'Relations' })
+  expect(within(section).getByRole('heading', { level: 3 }).textContent).toBe('Relations3')
+  const blocks = within(section).getByRole('group', { name: 'Blocks' })
+  expect(within(blocks).getAllByRole('listitem')).toHaveLength(2)
+  // the kind is a quiet row label, not a second heading; later rows of the same kind leave it blank
+  expect(within(section).queryAllByRole('heading', { level: 4 })).toHaveLength(0)
+  expect(within(blocks).getAllByText('Blocks')).toHaveLength(1)
+})

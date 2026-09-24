@@ -50,7 +50,10 @@ export function DuplicateBanner({ duplicateOf, projects, status, animate, pendin
   )
 }
 
-/** Main-column section like "GitHub": one group per relation kind, hidden when there is nothing to show. */
+/**
+ * Main-column section like "GitHub": one aligned list. The kind ("Blocks", "Related"…) sits in a quiet left column,
+ * named once beside the first row of its group; the hover fill bleeds past the text edge so rows line up with the heading.
+ */
 export function TaskRelationsSection({ relations, statuses, projects, newRelationId, removingId, onOpen, onRemove }: {
   relations: TaskRelationRecord[]
   statuses: TaskStatusDef[]
@@ -62,35 +65,41 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
 }) {
   const groups = groupRelations(relations)
   if (groups.length === 0) return null
+  const count = groups.reduce((total, group) => total + group.relations.length, 0)
   return (
     <section aria-label="Relations" className="mt-6 border-t border-border pt-4">
-      <h3 className="mb-1 text-xs font-semibold text-muted-foreground">Relations</h3>
-      {groups.map((group) => (
-        <div key={group.key} role="group" aria-label={group.label} className="mt-2">
-          <h4 className="px-2 pb-1 text-[11px] font-medium text-muted-foreground/70">{group.label}</h4>
-          <ul className="m-0 grid list-none gap-px p-0">
-            {group.relations.map((relation) => {
+      <h3 className="mb-2 flex items-baseline gap-1.5 text-xs font-semibold text-muted-foreground">
+        Relations
+        <span className="font-normal text-muted-foreground/60 tabular-nums">{count}</span>
+      </h3>
+      {/* one grid for every row (kind · status · id · title · remove): subgrid rows share its columns, so every title
+          starts at the same x without fixed widths; -mx-2 lets the hover fill bleed past the text edge */}
+      <div className="-mx-2 grid grid-cols-[max-content_max-content_max-content_minmax(0,1fr)_auto] gap-y-px">
+        {groups.map((group) => (
+          <ul key={group.key} role="group" aria-label={group.label} className="col-span-full m-0 grid list-none grid-cols-subgrid gap-y-px p-0">
+            {group.relations.map((relation, index) => {
               const identifier = taskIdentifier(relation.task.id, projectOf(projects, relation.task.project_id))
               return (
                 <li
                   key={relation.id}
-                  className={cn('group/relation flex min-h-8 items-center gap-1 rounded-md pr-1 hover:bg-muted', relation.id === newRelationId && 'animate-relation-enter')}
+                  className={cn('group/relation col-span-full grid min-h-8 grid-cols-subgrid items-center rounded-md hover:bg-muted', relation.id === newRelationId && 'animate-relation-enter')}
                 >
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className="col-span-4 grid grid-cols-subgrid items-center rounded-md py-1.5 pl-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                     onClick={() => onOpen(relation.task.id)}
                   >
+                    <span aria-hidden="true" className="pr-5 whitespace-nowrap text-muted-foreground/70 max-sm:pr-3">{index === 0 ? group.label : null}</span>
                     <TaskStatusIcon status={statuses.find((status) => status.id === relation.task.status_id)} />
-                    <span className="w-[72px] shrink-0 text-muted-foreground tabular-nums">{identifier}</span>
-                    <span className="truncate text-foreground">{relation.task.title || 'Untitled'}</span>
+                    <span className="pr-2.5 pl-2 whitespace-nowrap text-muted-foreground tabular-nums">{identifier}</span>
+                    <span className="truncate pr-2 text-foreground">{relation.task.title || 'Untitled'}</span>
                   </button>
                   <Button
                     variant="ghost"
                     size="icon-xs"
                     aria-label={`Remove relation to ${identifier}`}
                     disabled={removingId === relation.id}
-                    className={cn('shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/relation:opacity-100 focus-visible:opacity-100', PRESS)}
+                    className={cn('mr-1 shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/relation:opacity-100 focus-visible:opacity-100', PRESS)}
                     onClick={() => onRemove(relation.id)}
                   >
                     <X className="size-3" />
@@ -99,8 +108,8 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
               )
             })}
           </ul>
-        </div>
-      ))}
+        ))}
+      </div>
     </section>
   )
 }
