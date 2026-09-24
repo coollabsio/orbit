@@ -1,5 +1,6 @@
 import { addDays, addMonths, differenceInCalendarDays, eachMonthOfInterval, format, max, min, startOfDay, startOfMonth } from 'date-fns'
 import type { Project, StatusCategory, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { isClosedCategory } from '@/features/tasks/taskMeta'
 
 export type ZoomPreset = 'week' | 'month' | 'quarter'
 export const ZOOM_PRESETS: Record<ZoomPreset, number> = { week: 44, month: 16, quarter: 5 }
@@ -112,7 +113,7 @@ export function taskSpan(task: TaskDates): TaskSpan | null {
 }
 
 export function isOverdue(task: Task, category: StatusCategory | undefined, today: Date): boolean {
-  if (!task.dueAt || category === 'completed' || category === 'cancelled') return false
+  if (!task.dueAt || isClosedCategory(category)) return false
   return startOfDay(new Date(task.dueAt)) < startOfDay(today)
 }
 
@@ -159,7 +160,10 @@ export function buildTimelineRows(input: {
     const header: TimelineRow = {
       kind: 'group', key, project, open,
       done: own.filter((task) => categoryOf.get(task.statusId) === 'completed').length,
-      total: own.filter((task) => categoryOf.get(task.statusId) !== 'cancelled').length,
+      total: own.filter((task) => {
+        const category = categoryOf.get(task.statusId)
+        return category !== 'cancelled' && category !== 'duplicate'
+      }).length,
       span: spans.length > 0 ? { start: min(spans.map((s) => s.start)), end: max(spans.map((s) => s.end)) } : null,
     }
     return open ? [header, ...sectionRows(own, `undated:${project.id}`, overrides)] : [header]

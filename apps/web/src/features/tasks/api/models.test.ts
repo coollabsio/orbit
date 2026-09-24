@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { AttachmentRecord, AuditEvent, CommentRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
-import { taskFromRecord } from './models'
+import { taskFromRecord, taskIdentifier } from './models'
 
 const project: ProjectRecord = {
   id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'LCH', color: '#123456',
@@ -11,7 +11,7 @@ const record: TaskRecord = {
   status_id: 'status-1', title: 'Ship it', description: 'Ready', position: 4, priority: 'high',
   assignee_ids: ['user-1'], creator_id: 'user-1', label_ids: ['label-1'],
   due_at: '2030-01-02T12:30:00.000Z',
-  created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', version: 7,
+  created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', duplicate_of: null, blocked: false, version: 7,
 }
 const comment: CommentRecord = {
   id: 'comment-1', workspace_id: 'workspace-1', task_id: record.id, author_id: 'user-1',
@@ -62,4 +62,20 @@ test('service account audit metadata becomes the task activity actor', () => {
     actorName: 'Discord',
     actorServiceAccountId: 'service-1',
   })
+})
+
+test('duplicate target and blocked flag reach the task view model', () => {
+  const duplicate = taskFromRecord({
+    ...record,
+    duplicate_of: { id: 'task-91c0', project_id: project.id, title: 'Login fails on Safari' },
+    blocked: true,
+  }, project)
+  expect(duplicate.duplicateOf).toEqual({ id: 'task-91c0', projectId: project.id, title: 'Login fails on Safari' })
+  expect(duplicate.blocked).toBe(true)
+  expect(taskFromRecord({ ...record, duplicate_of: null, blocked: false }, project)).toMatchObject({ duplicateOf: null, blocked: false })
+})
+
+test('task identifiers are the project key plus the last four id characters', () => {
+  expect(taskIdentifier('01HZYTASK00000000000091c0', project)).toBe('LCH-91C0')
+  expect(taskIdentifier('task-91c0', undefined)).toBe('TASK-91C0')
 })

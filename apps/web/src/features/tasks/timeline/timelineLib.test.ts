@@ -270,3 +270,12 @@ describe('diamond start grip', () => {
     expect(isSameEdit(point, applyDrag(point, 'start', 0)!)).toBe(true)
   })
 })
+
+test('duplicates are closed: never overdue and left out of the project total', () => {
+  const dupStatus: TaskStatusDef = { id: 'dup', projectId: 'p1', name: 'Duplicate', description: '', color: '#8b8f98', category: 'duplicate', position: 3, version: 1 }
+  const open = task('open', { dueAt: iso(local(2026, 3, 1, 9)) })
+  const duplicate = task('dup-task', { statusId: 'dup', dueAt: iso(local(2026, 3, 1, 9)) })
+  expect(isOverdue(duplicate, 'duplicate', local(2026, 3, 20))).toBe(false)
+  const [header] = buildTimelineRows({ tasks: [open, duplicate], projects, statuses: [...statuses, dupStatus], grouped: true, overrides: {} })
+  expect(header).toMatchObject({ kind: 'group', done: 0, total: 1 })
+})

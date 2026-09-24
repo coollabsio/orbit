@@ -1,7 +1,7 @@
 import type { StatusCategory, TaskStatusDef } from '@/features/tasks/api/models'
 
 /**
- * Compact Linear-style status glyph. The shape follows the category (○ ◐ ✓ ⊘), the color the status.
+ * Compact Linear-style status glyph. The shape follows the category (○ ◐ ✓ ⊘ =), the color the status.
  * `status` may be a full definition or just `{ category, color }` (e.g. while editing).
  */
 export function TaskStatusIcon({
@@ -53,6 +53,13 @@ export function TaskStatusIcon({
         <svg {...common} aria-label="Cancelled">
           <circle cx="7" cy="7" r="6" fill={color} />
           <path d="M4.8 4.8 L9.2 9.2 M9.2 4.8 L4.8 9.2" stroke="var(--card)" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )
+    case 'duplicate':
+      return (
+        <svg {...common} aria-label="Duplicate">
+          <circle cx="7" cy="7" r="6" fill={color} />
+          <path d="M4.5 5.6 H9.5 M4.5 8.4 H9.5" stroke="var(--card)" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       )
   }

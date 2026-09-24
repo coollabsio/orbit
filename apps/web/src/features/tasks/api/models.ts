@@ -1,7 +1,7 @@
 import type { User } from '@/features/workspaces/models'
 import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
 
-export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled'
+export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
 
 export type Project = ProjectRecord
@@ -15,6 +15,13 @@ export interface TaskStatusDef {
   category: StatusCategory
   position: number
   version: number
+}
+
+/** Another task as a relation needs it; the identifier is built from its project's key (`taskIdentifier`). */
+export interface TaskRef {
+  id: string
+  projectId: string
+  title: string
 }
 
 
@@ -69,6 +76,10 @@ export interface Task {
   updatedAt: string
   comments: TaskComment[]
   activity: TaskActivity[]
+  /** The canonical task while this task is marked as a duplicate. */
+  duplicateOf?: TaskRef | null
+  /** At least one open task (not completed, cancelled or duplicate) blocks this one. */
+  blocked?: boolean
   version: number
 }
 
@@ -78,6 +89,11 @@ export interface TaskViewState {
   statuses: TaskStatusDef[]
   labels: LabelRecord[]
   tasks: Task[]
+}
+
+/** Human task id: project key + last four id characters, e.g. ORB-91C0. */
+export function taskIdentifier(taskId: string, project: Pick<ProjectRecord, 'key'> | undefined): string {
+  return `${project?.key ?? 'TASK'}-${taskId.slice(-4).toUpperCase()}`
 }
 
 export function taskFromRecord(
@@ -101,7 +117,7 @@ export function taskFromRecord(
     : 'none'
   return {
     id: record.id,
-    identifier: `${project?.key ?? 'TASK'}-${record.id.slice(-4).toUpperCase()}`,
+    identifier: taskIdentifier(record.id, project),
     title: record.title,
     description: record.description,
     sourceUrl: record.source_url ?? null,
@@ -142,6 +158,10 @@ export function taskFromRecord(
         createdAt: event.occurred_at,
       }
     }),
+    duplicateOf: record.duplicate_of
+      ? { id: record.duplicate_of.id, projectId: record.duplicate_of.project_id, title: record.duplicate_of.title }
+      : null,
+    blocked: record.blocked ?? false,
     version: record.version,
   }
 }

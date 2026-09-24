@@ -20,7 +20,7 @@ function withClient(client: QueryClient) {
 const task = (id: string, position: number): TaskRecord => ({
   id, workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title: id,
   description: '', position, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
-  created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 1,
+  created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', duplicate_of: null, blocked: false, version: 1,
 })
 
 const attachment = {
