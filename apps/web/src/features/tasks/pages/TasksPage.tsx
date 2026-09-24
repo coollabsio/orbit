@@ -31,13 +31,14 @@ import { TaskFilters } from '@/features/tasks/components/TaskFilters'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
-import { taskViewCreateDefaults, type TaskView } from '@/features/tasks/taskMeta'
 import { filterTasks, resolveLayout, resolveStatusId, statusGroups, taskApiSort, type TaskLayout } from '@/features/tasks/tasksLib'
 import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
 import { TimelineControls } from '@/features/tasks/timeline/TimelineControls'
 import { useTimelineZoom } from '@/features/tasks/timeline/useTimelineZoom'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
 import { useTaskPreferences } from '@/features/tasks/taskPreferences'
+import { createDefaultsFromFilter } from '@/features/views/grouping'
+import { PRESET_FILTERS, emptyFilter, isTaskPreset } from '@/features/views/viewState'
 
 const LAYOUT_KEY = 'orbit:task_layout'
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
@@ -85,9 +86,8 @@ function WorkspaceTasksPage() {
     setPreferences((current) => ({ ...current, [key]: value }))
   }
   const projectFilter = searchParams.get('project')
-  const viewFilter = ['mine', 'overdue', 'due_soon', 'current_week', 'my_week'].includes(searchParams.get('view') ?? '')
-    ? searchParams.get('view') as TaskView
-    : undefined
+  const viewParam = searchParams.get('view')
+  const viewFilter = isTaskPreset(viewParam) ? viewParam : undefined
 
   const lastView = useRef(viewFilter)
   useEffect(() => {
@@ -176,12 +176,16 @@ function WorkspaceTasksPage() {
     if (!projectId || !statusId || creating.current) return
     creating.current = true
     try {
-      const task = await createTask.mutateAsync({
-        title: 'Untitled',
-        project_id: projectId,
-        status_id: statusId,
-        ...taskViewCreateDefaults(viewFilter, state.currentUserId),
+      const defaults = createDefaultsFromFilter(viewFilter ? PRESET_FILTERS[viewFilter] : emptyFilter(), {
+        statuses: statusesQuery.data,
+        members: users,
+        labels: labelsQuery.data ?? [],
+        projects,
+        currentUserId: state.currentUserId,
+        showEmpty: false,
+        targetProjectId: projectId,
       })
+      const task = await createTask.mutateAsync({ ...defaults, title: 'Untitled', project_id: projectId, status_id: statusId })
       navigate(`/tasks/${task.id}${detailSearchSuffix}`, { replace })
     } catch {
       // The mutation exposes the server problem beside the create action.
