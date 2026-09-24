@@ -15,6 +15,8 @@ import { TaskCommentComposer } from './TaskCommentComposer'
 interface ActivityFeedProps {
   task: Task
   state: TaskViewState
+  /** Opens a task named in an activity entry (relation events). */
+  onOpenTask?: (taskId: string) => void
 }
 
 const TIMELINE_ITEM =
@@ -24,7 +26,7 @@ const TIMELINE_ITEM =
  * Chronological feed: activity events (timeline rows) and comment threads (cards) interleaved by time,
  * so a change made after a comment shows below that comment.
  */
-export function ActivityFeed({ task, state }: ActivityFeedProps) {
+export function ActivityFeed({ task, state, onOpenTask: _onOpenTask }: ActivityFeedProps) {
   const [expanded, setExpanded] = useState(false)
   const { workspace } = useWorkspace()
   const createComment = useCreateTaskComment(workspace.id, task.id)

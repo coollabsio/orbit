@@ -229,7 +229,7 @@ export function TasksPage() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background" data-view={taskId ? 'detail' : 'list'}>
       {taskId ? (
-        <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} />
+        <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} onOpenTask={openTask} />
       ) : (
         <section className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
           <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-foreground max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:border-b-0 max-[899px]:px-2 max-[899px]:py-1.5">
