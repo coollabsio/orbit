@@ -5,12 +5,14 @@
 
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite};
 use utoipa::ToSchema;
 
 use super::task_filter::{ViewState, parse_view_state, validate_view_state};
 use super::tasks::{TaskError, parse_id, record_mutation};
+use crate::audit::{self, AuditOutcome};
 
 const NAME_MAX_CHARS: usize = 80;
 const DESCRIPTION_MAX_CHARS: usize = 500;
@@ -295,6 +297,130 @@ impl ViewRepository {
             "saved_view",
             view_id,
             request_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Idempotent: favoriting a favorite (or unfavoriting a non-favorite) changes nothing and is
+    /// not broadcast. New favorites go to the end of the caller's list in this workspace.
+    pub async fn set_favorite(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        view_id: Id,
+        favorite: bool,
+        request_id: &str,
+    ) -> Result<(), TaskError> {
+        let now = TimestampMillis::now();
+        let mut tx = self.database.immediate_transaction().await?;
+        let caller = load_caller(&mut *tx, workspace_id, actor_id).await?;
+        let current = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
+        if current.is_favorite == favorite {
+            return Ok(());
+        }
+        if favorite {
+            sqlx::query(
+                "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) \
+                 SELECT ?, ?, COALESCE(MAX(saved_view_favorites.position) + 1, 0), ? \
+                 FROM saved_view_favorites \
+                 JOIN saved_views ON saved_views.id = saved_view_favorites.view_id \
+                 WHERE saved_view_favorites.user_id = ? AND saved_views.workspace_id = ?",
+            )
+            .bind(view_id.to_string())
+            .bind(actor_id.to_string())
+            .bind(now.as_millis())
+            .bind(actor_id.to_string())
+            .bind(workspace_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query("DELETE FROM saved_view_favorites WHERE view_id = ? AND user_id = ?")
+                .bind(view_id.to_string())
+                .bind(actor_id.to_string())
+                .execute(&mut *tx)
+                .await?;
+        }
+        record_mutation(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            "saved_view.favorites_changed",
+            "saved_view",
+            view_id,
+            request_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// `view_ids` must be a permutation of the caller's visible favorites in this workspace.
+    /// Skips the writes and the audit/broadcast when the requested order already matches
+    /// (including `[]` for a user with no favorites).
+    pub async fn reorder_favorites(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        view_ids: Vec<Id>,
+        request_id: &str,
+    ) -> Result<(), TaskError> {
+        let invalid = || TaskError::Invalid { field: "view_ids" };
+        let mut requested = view_ids.clone();
+        requested.sort_unstable();
+        if requested.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid());
+        }
+        let now = TimestampMillis::now();
+        let mut tx = self.database.immediate_transaction().await?;
+        load_caller(&mut *tx, workspace_id, actor_id).await?;
+        let ordered = sqlx::query_scalar::<_, String>(
+            "SELECT saved_view_favorites.view_id FROM saved_view_favorites \
+             JOIN saved_views ON saved_views.id = saved_view_favorites.view_id \
+             WHERE saved_view_favorites.user_id = ? AND saved_views.workspace_id = ? \
+             AND (saved_views.visibility = 'workspace' OR saved_views.owner_user_id = ?) \
+             ORDER BY saved_view_favorites.position",
+        )
+        .bind(actor_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect::<Result<Vec<_>, _>>()?;
+        let mut current = ordered.clone();
+        current.sort_unstable();
+        if current != requested {
+            return Err(invalid());
+        }
+        if ordered == view_ids {
+            // Already in the requested order: nothing to write, nothing to broadcast.
+            return Ok(());
+        }
+        for (position, view_id) in view_ids.iter().enumerate() {
+            sqlx::query(
+                "UPDATE saved_view_favorites SET position = ? WHERE view_id = ? AND user_id = ?",
+            )
+            .bind(i64::try_from(position).map_err(|_| invalid())?)
+            .bind(view_id.to_string())
+            .bind(actor_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
+        audit::record(
+            &mut tx,
+            workspace_id,
+            Some(actor_id),
+            "saved_view.favorites_changed",
+            AuditOutcome::Success,
+            "saved_view",
+            None,
+            request_id,
+            json!({}),
             now,
         )
         .await?;

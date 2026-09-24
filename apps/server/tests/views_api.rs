@@ -908,3 +908,345 @@ async fn views_are_listed_by_name_ignoring_case() {
         .collect();
     assert_eq!(names, ["alpha", "beta", "Gamma"]);
 }
+
+async fn set_favorite(
+    fixture: &Fixture,
+    cookie: &str,
+    view_id: &str,
+    favorite: bool,
+) -> StatusCode {
+    let method = if favorite { "PUT" } else { "DELETE" };
+    fixture
+        .call(method, &format!("/views/{view_id}/favorite"), cookie, None)
+        .await
+        .0
+}
+
+async fn reorder(fixture: &Fixture, cookie: &str, view_ids: Value) -> (StatusCode, Value) {
+    fixture
+        .call(
+            "PUT",
+            "/view-favorites/order",
+            cookie,
+            Some(json!({"view_ids": view_ids})),
+        )
+        .await
+}
+
+/// Favorite view names in sidebar order.
+async fn favorite_names(fixture: &Fixture, cookie: &str) -> Vec<String> {
+    let (status, list) = fixture.call("GET", "/views", cookie, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut favorites: Vec<(i64, String)> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|view| view["is_favorite"] == true)
+        .map(|view| {
+            (
+                view["favorite_position"].as_i64().unwrap(),
+                view["name"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    favorites.sort();
+    favorites.into_iter().map(|(_, name)| name).collect()
+}
+
+#[tokio::test]
+async fn favorites_are_idempotent_and_append_at_the_end() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let a = id_of(&fixture.create_view(&cookie, "A", "workspace").await);
+    let b = id_of(&fixture.create_view(&cookie, "B", "personal").await);
+    let c = id_of(&fixture.create_view(&cookie, "C", "workspace").await);
+
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &c, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(favorite_names(&fixture, &cookie).await, ["A", "C"]);
+    let (status, view_b) = fixture
+        .call("GET", &format!("/views/{b}"), &cookie, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view_b["is_favorite"], false);
+    assert_eq!(view_b["favorite_position"], Value::Null);
+
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, false).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, false).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(favorite_names(&fixture, &cookie).await, ["C"]);
+
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &b, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(favorite_names(&fixture, &cookie).await, ["C", "B", "A"]);
+}
+
+#[tokio::test]
+async fn favorites_are_per_user_and_limited_to_visible_views() {
+    let fixture = Fixture::new().await;
+    let (_, member) = fixture
+        .add_user("member@example.com", "Member", Some("member"))
+        .await;
+    let shared = id_of(
+        &fixture
+            .create_view(&fixture.owner_cookie, "Shared", "workspace")
+            .await,
+    );
+    let private = id_of(
+        &fixture
+            .create_view(&fixture.owner_cookie, "Private", "personal")
+            .await,
+    );
+
+    assert_eq!(
+        set_favorite(&fixture, &member, &shared, true).await,
+        StatusCode::NO_CONTENT
+    );
+    let (status, as_member) = fixture
+        .call("GET", &format!("/views/{shared}"), &member, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(as_member["is_favorite"], true);
+    assert_eq!(as_member["favorite_position"], 0);
+    let (status, as_owner) = fixture
+        .call(
+            "GET",
+            &format!("/views/{shared}"),
+            &fixture.owner_cookie,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(as_owner["is_favorite"], false);
+
+    assert_eq!(
+        set_favorite(&fixture, &member, &private, true).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        set_favorite(&fixture, &member, &private, false).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        set_favorite(&fixture, &member, &Id::new_v7().to_string(), true).await,
+        StatusCode::NOT_FOUND
+    );
+    let (_, outsider) = fixture
+        .add_user("outsider@example.com", "Outsider", None)
+        .await;
+    assert_eq!(
+        set_favorite(&fixture, &outsider, &shared, true).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        reorder(&fixture, &outsider, json!([])).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+/// Deferred from Task 5's review: a favorite is scoped to the caller who set it, both on the
+/// single-view fetch and in the list.
+#[tokio::test]
+async fn a_favorite_is_not_visible_to_other_callers() {
+    let fixture = Fixture::new().await;
+    let (_, member) = fixture
+        .add_user("member@example.com", "Member", Some("member"))
+        .await;
+    let shared = id_of(
+        &fixture
+            .create_view(&fixture.owner_cookie, "Shared", "workspace")
+            .await,
+    );
+
+    assert_eq!(
+        set_favorite(&fixture, &fixture.owner_cookie, &shared, true).await,
+        StatusCode::NO_CONTENT
+    );
+
+    let (status, as_member) = fixture
+        .call("GET", &format!("/views/{shared}"), &member, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(as_member["is_favorite"], false);
+    assert_eq!(as_member["favorite_position"], Value::Null);
+
+    let (status, list) = fixture.call("GET", "/views", &member, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(list[0]["id"], shared.as_str());
+    assert_eq!(list[0]["is_favorite"], false);
+    assert_eq!(list[0]["favorite_position"], Value::Null);
+
+    let (status, as_owner) = fixture
+        .call(
+            "GET",
+            &format!("/views/{shared}"),
+            &fixture.owner_cookie,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(as_owner["is_favorite"], true);
+    assert_eq!(as_owner["favorite_position"], 0);
+}
+
+#[tokio::test]
+async fn reordering_requires_exactly_the_callers_favorites() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let a = id_of(&fixture.create_view(&cookie, "A", "workspace").await);
+    let b = id_of(&fixture.create_view(&cookie, "B", "personal").await);
+    let c = id_of(&fixture.create_view(&cookie, "C", "workspace").await);
+    let d = id_of(&fixture.create_view(&cookie, "D", "workspace").await);
+    for id in [&a, &b, &c] {
+        assert_eq!(
+            set_favorite(&fixture, &cookie, id, true).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+
+    let (status, _) = reorder(&fixture, &cookie, json!([c, a, b])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(favorite_names(&fixture, &cookie).await, ["C", "A", "B"]);
+
+    for bad in [
+        json!([c, a]),
+        json!([c, a, b, d]),
+        json!([c, c, a, b]),
+        json!([]),
+        json!([c, a, "not-an-id"]),
+    ] {
+        let (status, problem) = reorder(&fixture, &cookie, bad).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+        assert_eq!(problem["code"], "validation_failed");
+        assert_eq!(problem["detail"], "view_ids");
+    }
+    assert_eq!(favorite_names(&fixture, &cookie).await, ["C", "A", "B"]);
+
+    let (_, member) = fixture
+        .add_user("member@example.com", "Member", Some("member"))
+        .await;
+    assert_eq!(
+        reorder(&fixture, &member, json!([])).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        reorder(&fixture, &member, json!([c])).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+}
+
+#[tokio::test]
+async fn favorites_follow_view_visibility_and_deletion() {
+    let fixture = Fixture::new().await;
+    let (_, author) = fixture
+        .add_user("author@example.com", "Author", Some("member"))
+        .await;
+    let (_, reader) = fixture
+        .add_user("reader@example.com", "Reader", Some("member"))
+        .await;
+    let shared = id_of(&fixture.create_view(&author, "Shared", "workspace").await);
+    let other = id_of(&fixture.create_view(&author, "Other", "workspace").await);
+    assert_eq!(
+        set_favorite(&fixture, &reader, &shared, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_favorite(&fixture, &reader, &other, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_favorite(&fixture, &author, &shared, true).await,
+        StatusCode::NO_CONTENT
+    );
+
+    let (status, _) = fixture
+        .call(
+            "PATCH",
+            &format!("/views/{shared}"),
+            &author,
+            Some(json!({"expected_version": 1, "visibility": "personal"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(favorite_names(&fixture, &reader).await, ["Other"]);
+    assert_eq!(favorite_names(&fixture, &author).await, ["Shared"]);
+    assert_eq!(
+        reorder(&fixture, &reader, json!([other])).await.0,
+        StatusCode::NO_CONTENT
+    );
+
+    assert_eq!(
+        fixture
+            .call(
+                "DELETE",
+                &format!("/views/{other}"),
+                &fixture.owner_cookie,
+                None
+            )
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert!(favorite_names(&fixture, &reader).await.is_empty());
+    assert_eq!(
+        reorder(&fixture, &reader, json!([])).await.0,
+        StatusCode::NO_CONTENT
+    );
+}
+
+#[tokio::test]
+async fn favorite_changes_are_broadcast_only_when_something_changes() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let a = id_of(&fixture.create_view(&cookie, "A", "workspace").await);
+    let start = fixture.sequence().await;
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(fixture.sequence().await, start + 1);
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(fixture.sequence().await, start + 1);
+    assert_eq!(
+        reorder(&fixture, &cookie, json!([a])).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(fixture.sequence().await, start + 1);
+    assert_eq!(
+        set_favorite(&fixture, &cookie, &a, false).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(fixture.sequence().await, start + 2);
+    let changes: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'saved_view.favorites_changed'",
+    )
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(changes, 2);
+}

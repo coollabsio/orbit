@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 68);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 70);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 94);
+    assert_eq!(operation_count, 97);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -728,4 +728,32 @@ fn saved_view_routes_are_documented() {
     let create_required = schemas["ViewCreateBody"]["required"].as_array().unwrap();
     assert!(!create_required.contains(&serde_json::json!("description")));
     assert!(create_required.contains(&serde_json::json!("state")));
+}
+
+#[test]
+fn view_favorite_routes_are_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let favorite = "/api/v1/workspaces/{workspace_id}/views/{view_id}/favorite";
+    let order = "/api/v1/workspaces/{workspace_id}/view-favorites/order";
+    for (path, method, id) in [
+        (favorite, "put", "favorite_view"),
+        (favorite, "delete", "unfavorite_view"),
+        (order, "put", "reorder_view_favorites"),
+    ] {
+        let operation = operation(&document, path, method);
+        assert_eq!(operation["operationId"], id);
+        assert!(operation["responses"].get("204").is_some());
+        assert_eq!(
+            operation["responses"]["default"]["content"]["application/problem+json"]["schema"]["$ref"],
+            "#/components/schemas/TaskProblem"
+        );
+        assert!(codes(operation, "404").contains(&"task_resource_not_found".to_owned()));
+    }
+    let reorder = operation(&document, order, "put");
+    assert!(codes(reorder, "422").contains(&"validation_failed".to_owned()));
+    assert!(codes(reorder, "400").contains(&"invalid_request".to_owned()));
+    assert_eq!(
+        document["components"]["schemas"]["ViewFavoritesOrderBody"]["required"],
+        serde_json::json!(["view_ids"])
+    );
 }

@@ -886,6 +886,13 @@ export type ViewCreateBody = {
     visibility: Visibility;
 };
 
+export type ViewFavoritesOrderBody = {
+    /**
+     * Every view the caller has favorited in this workspace, in the new order.
+     */
+    view_ids: Array<string>;
+};
+
 export type ViewOwner = {
     display_name: string;
     user_id: string;
@@ -6162,6 +6169,68 @@ export type TransferOwnershipResponses = {
 
 export type TransferOwnershipResponse = TransferOwnershipResponses[keyof TransferOwnershipResponses];
 
+export type ReorderViewFavoritesData = {
+    body: ViewFavoritesOrderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/view-favorites/order';
+};
+
+export type ReorderViewFavoritesErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReorderViewFavoritesError = ReorderViewFavoritesErrors[keyof ReorderViewFavoritesErrors];
+
+export type ReorderViewFavoritesResponses = {
+    204: void;
+};
+
+export type ReorderViewFavoritesResponse = ReorderViewFavoritesResponses[keyof ReorderViewFavoritesResponses];
+
 export type ListViewsData = {
     body?: never;
     headers?: {
@@ -6454,3 +6523,121 @@ export type UpdateViewResponses = {
 };
 
 export type UpdateViewResponse = UpdateViewResponses[keyof UpdateViewResponses];
+
+export type UnfavoriteViewData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        view_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/views/{view_id}/favorite';
+};
+
+export type UnfavoriteViewErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UnfavoriteViewError = UnfavoriteViewErrors[keyof UnfavoriteViewErrors];
+
+export type UnfavoriteViewResponses = {
+    204: void;
+};
+
+export type UnfavoriteViewResponse = UnfavoriteViewResponses[keyof UnfavoriteViewResponses];
+
+export type FavoriteViewData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        view_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/views/{view_id}/favorite';
+};
+
+export type FavoriteViewErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type FavoriteViewError = FavoriteViewErrors[keyof FavoriteViewErrors];
+
+export type FavoriteViewResponses = {
+    204: void;
+};
+
+export type FavoriteViewResponse = FavoriteViewResponses[keyof FavoriteViewResponses];
