@@ -1748,6 +1748,12 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
+            // Tasks go before the workspace cascade: tasks.status_id is ON DELETE RESTRICT, and
+            // SQLite may cascade into task_statuses first (it was rebuilt after tasks in 0021).
+            sqlx::query("DELETE FROM tasks WHERE workspace_id = ?")
+                .bind(&workspace_id)
+                .execute(&mut *transaction)
+                .await?;
             workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = ?")
                 .bind(workspace_id)
                 .execute(&mut *transaction)
