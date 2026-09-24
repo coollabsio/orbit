@@ -60,3 +60,15 @@ test('picker candidates dedupe, exclude, skip duplicates on request and match id
   expect(pickerCandidates({ tasks: all, query: 'orb-91', excludeIds: [], excludeDuplicates: false }).map((t) => t.id)).toEqual(['task-91c0'])
   expect(pickerCandidates({ tasks: all, query: '', excludeIds: [], excludeDuplicates: false, limit: 1 })).toHaveLength(1)
 })
+
+test('a task in the Duplicate status is never a duplicate target, even when its canonical task is in the trash', () => {
+  // the canonical is trashed, so the record's duplicate_of is null, but the server still holds the relation
+  const orphan = task('task-5e11', 'Orphaned duplicate', { statusId: 'dup', duplicateOf: null })
+  const open = task('task-91c0', 'Open task', { statusId: 'todo' })
+  const statuses = [
+    { id: 'todo', projectId: 'p1', name: 'Todo', description: '', color: '#888', category: 'unstarted' as const, position: 0, version: 1 },
+    { id: 'dup', projectId: 'p1', name: 'Duplicate', description: '', color: '#8b8f98', category: 'duplicate' as const, position: 1, version: 1 },
+  ]
+  expect(pickerCandidates({ tasks: [orphan, open], query: '', excludeIds: [], excludeDuplicates: true, statuses }).map((t) => t.id)).toEqual(['task-91c0'])
+  expect(pickerCandidates({ tasks: [orphan, open], query: '', excludeIds: [], excludeDuplicates: false, statuses })).toHaveLength(2)
+})

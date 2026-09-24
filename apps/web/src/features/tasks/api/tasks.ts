@@ -344,7 +344,11 @@ export async function bulkSetTaskDuplicateOf(
   tasks: ReadonlyArray<VersionedTask>,
   duplicateOfId: string | null,
 ): Promise<PageTaskRecord> {
-  const updates = markDuplicateUpdates(tasks, duplicateOfId)
+  return bulkTaskDuplicateUpdates(client, workspaceId, markDuplicateUpdates(tasks, duplicateOfId))
+}
+
+/** One atomic bulk call where every item carries its own `duplicate_of_id` (Undo restores per-task targets). */
+export async function bulkTaskDuplicateUpdates(client: ApiClient, workspaceId: string, updates: BulkItem[]): Promise<PageTaskRecord> {
   if (updates.length > MAX_BULK_TASK_UPDATES) throw new BulkTaskLimitError(updates.length)
   const { data } = await bulkTasks({ client, path: { workspace_id: workspaceId }, body: { updates }, throwOnError: true })
   return required(data, 'Bulk task response was empty.')

@@ -4,13 +4,16 @@ import { apiClient } from '@/api/client'
 import type { TaskRecord } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'
-import { bulkSetTaskDuplicateOf, setTaskDuplicateOf, type VersionedTask } from '@/features/tasks/api/tasks'
+import { bulkSetTaskDuplicateOf, bulkTaskDuplicateUpdates, setTaskDuplicateOf, type VersionedTask } from '@/features/tasks/api/tasks'
 import { duplicateErrorMessage, duplicateToastMessage } from '@/features/tasks/relationsLib'
 
 export interface DuplicateTarget {
   id: string
   identifier: string
 }
+
+/** A task about to be marked; `duplicateOf` is its current target, which Undo puts back. */
+export type DuplicateSource = VersionedTask & { duplicateOf?: { id: string } | null }
 
 /**
  * Mark / unmark tasks as duplicates with an Undo toast. Plain SDK calls plus the shared QueryClient instead of
@@ -36,21 +39,26 @@ export function useDuplicateActions(workspaceId: string) {
     }
   }
 
-  const unmarkMany = async (tasks: VersionedTask[]): Promise<void> => {
+  /** Undo: every task goes back to its target before the mark (`null` = it was not a duplicate). */
+  const restore = async (records: TaskRecord[], previous: ReadonlyMap<string, string | null>): Promise<void> => {
     try {
-      settle((await bulkSetTaskDuplicateOf(apiClient, workspaceId, tasks, null)).items)
+      const updates = records.map((record) => ({ id: record.id, expected_version: record.version, duplicate_of_id: previous.get(record.id) ?? null }))
+      settle(updates.length === 1
+        ? [await setTaskDuplicateOf(apiClient, workspaceId, records[0]!, updates[0]!.duplicate_of_id)]
+        : (await bulkTaskDuplicateUpdates(apiClient, workspaceId, updates)).items)
     } catch (error) {
       settle([])
       toast.error(duplicateErrorMessage('unmark', error))
     }
   }
+  const previousTargets = (tasks: DuplicateSource[]) => new Map(tasks.map((task) => [task.id, task.duplicateOf?.id ?? null]))
 
-  const markOne = async (task: VersionedTask, target: DuplicateTarget): Promise<TaskRecord | undefined> => {
+  const markOne = async (task: DuplicateSource, target: DuplicateTarget): Promise<TaskRecord | undefined> => {
     try {
       const record = await setTaskDuplicateOf(apiClient, workspaceId, task, target.id)
       settle([record])
       toast.success(duplicateToastMessage(1, target.identifier), {
-        action: { label: 'Undo', onClick: () => void unmarkOne(record) },
+        action: { label: 'Undo', onClick: () => void restore([record], previousTargets([task])) },
       })
       return record
     } catch (error) {
@@ -60,12 +68,12 @@ export function useDuplicateActions(workspaceId: string) {
     }
   }
 
-  const markMany = async (tasks: VersionedTask[], target: DuplicateTarget): Promise<void> => {
+  const markMany = async (tasks: DuplicateSource[], target: DuplicateTarget): Promise<void> => {
     try {
       const page = await bulkSetTaskDuplicateOf(apiClient, workspaceId, tasks, target.id)
       settle(page.items)
       toast.success(duplicateToastMessage(tasks.length, target.identifier), {
-        action: { label: 'Undo', onClick: () => void unmarkMany(page.items) },
+        action: { label: 'Undo', onClick: () => void restore(page.items, previousTargets(tasks)) },
       })
     } catch (error) {
       settle([])

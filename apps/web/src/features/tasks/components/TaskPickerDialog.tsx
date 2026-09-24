@@ -37,8 +37,8 @@ export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeI
   const candidates = useMemo(() => {
     const records = [...(searched.data?.pages ?? []), ...(recent.data?.pages ?? [])].flatMap((page) => page.items)
     const tasks = records.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))
-    return pickerCandidates({ tasks, query: search, excludeIds, excludeDuplicates })
-  }, [excludeDuplicates, excludeIds, projects.data, recent.data, search, searched.data])
+    return pickerCandidates({ tasks, query: search, excludeIds, excludeDuplicates, statuses })
+  }, [excludeDuplicates, excludeIds, projects.data, recent.data, search, searched.data, statuses])
   const projectName = (projectId: string) => projects.data?.find((project) => project.id === projectId)?.name
   const loading = recent.isPending || searched.isFetching
 

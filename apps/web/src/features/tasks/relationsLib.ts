@@ -1,5 +1,5 @@
 import type { TaskRelationRecord } from '@/api/generated/types.gen'
-import type { Task } from '@/features/tasks/api/models'
+import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 
 /** What the picker chooses a task for. `blocked_by` is stored server-side as "the other task blocks this one". */
 export type RelationKind = 'duplicate' | 'blocks' | 'blocked_by' | 'related'
@@ -66,21 +66,24 @@ export const ADD_RELATION_OPTIONS: Array<{ kind: RelationKind; label: string }> 
 ]
 
 /** Deduped picker rows: identifier, title or description contain the query; excluded ids and (optionally) duplicates dropped. */
-export function pickerCandidates({ tasks, query, excludeIds, excludeDuplicates, limit = 20 }: {
+export function pickerCandidates({ tasks, query, excludeIds, excludeDuplicates, statuses = [], limit = 20 }: {
   tasks: Task[]
   query: string
   excludeIds: readonly string[]
   excludeDuplicates: boolean
+  /** A task in a Duplicate status still holds its relation even when `duplicateOf` is hidden (trashed target). */
+  statuses?: readonly TaskStatusDef[]
   limit?: number
 }): Task[] {
   const needle = query.trim().toLowerCase()
   const skip = new Set(excludeIds)
+  const duplicateStatusIds = new Set(statuses.filter((status) => status.category === 'duplicate').map((status) => status.id))
   const seen = new Set<string>()
   const result: Task[] = []
   for (const task of tasks) {
     if (seen.has(task.id) || skip.has(task.id)) continue
     seen.add(task.id)
-    if (excludeDuplicates && task.duplicateOf) continue
+    if (excludeDuplicates && (task.duplicateOf || duplicateStatusIds.has(task.statusId))) continue
     if (needle && !`${task.identifier} ${task.title} ${task.description}`.toLowerCase().includes(needle)) continue
     result.push(task)
     if (result.length === limit) break

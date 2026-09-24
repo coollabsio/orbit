@@ -98,3 +98,34 @@ test('a rejected mark shows the server reason and no success toast', async () =>
   success.mockRestore()
   error.mockRestore()
 })
+
+test('Undo restores the earlier duplicate link of a task that was re-pointed', async () => {
+  const calls: Call[] = []
+  captureApi(calls)
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  const view = renderActions()
+  await act(async () => { await view.result.current.markOne({ id: 'task-3f2a', version: 2, duplicateOf: { id: 'task-old1' } }, target) })
+
+  ;(success.mock.calls[0]![1] as unknown as ToastOptions).action.onClick()
+  await waitFor(() => expect(calls).toHaveLength(2))
+  expect(calls[1]!.body).toEqual({ expected_version: 3, duplicate_of_id: 'task-old1' })
+  success.mockRestore()
+})
+
+test('bulk Undo gives each task back its own earlier state', async () => {
+  const calls: Call[] = []
+  captureApi(calls)
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  const view = renderActions()
+  await act(async () => {
+    await view.result.current.markMany([{ id: 'task-1', version: 1, duplicateOf: { id: 'task-old1' } }, { id: 'task-2', version: 4, duplicateOf: null }], target)
+  })
+
+  ;(success.mock.calls[0]![1] as unknown as ToastOptions).action.onClick()
+  await waitFor(() => expect(calls).toHaveLength(2))
+  expect(calls[1]!.body).toEqual({ updates: [
+    { id: 'task-1', expected_version: 2, duplicate_of_id: 'task-old1' },
+    { id: 'task-2', expected_version: 5, duplicate_of_id: null },
+  ] })
+  success.mockRestore()
+})
