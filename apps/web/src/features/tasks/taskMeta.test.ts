@@ -24,6 +24,13 @@ test('This week selects the full local Monday-through-Sunday range', () => {
   expect(end.getHours()).toBe(12)
 })
 
+test('My week assigns new tasks to me and gives them this week’s dates', () => {
+  expect(taskViewCreateDefaults('my_week', 'user-1', now)).toEqual({
+    ...taskViewCreateDefaults('current_week', 'user-1', now),
+    assignee_ids: ['user-1'],
+  })
+})
+
 test('the all-tasks view does not add personal defaults', () => {
   expect(taskViewCreateDefaults(undefined, 'user-1', now)).toEqual({})
 })

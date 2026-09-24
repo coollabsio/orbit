@@ -2065,7 +2065,9 @@ async fn saved_task_views_use_the_authenticated_user_and_utc_calendar() {
         ("Mine soon", Some(member_id), Some(soon)),
         ("Theirs overdue", None, Some(past)),
         ("This calendar week", None, Some(this_week)),
+        ("Mine this week", Some(member_id), Some(this_week)),
         ("Next calendar week", None, Some(next_week)),
+        ("Mine next week", Some(member_id), Some(next_week)),
         ("No date", Some(member_id), None),
     ] {
         let mut body = json!({
@@ -2194,7 +2196,35 @@ async fn saved_task_views_use_the_authenticated_user_and_utc_calendar() {
         .map(|task| task["title"].as_str().unwrap().to_owned())
         .collect();
     assert!(current_week_titles.contains(&"This calendar week".to_owned()));
+    assert!(current_week_titles.contains(&"Mine this week".to_owned()));
     assert!(!current_week_titles.contains(&"Next calendar week".to_owned()));
+
+    let my_week = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/tasks?view=my_week",
+                    fixture.workspace_id
+                ),
+                &member_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let my_week_titles: Vec<_> = my_week["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(my_week_titles.contains(&"Mine this week".to_owned()));
+    assert!(!my_week_titles.contains(&"This calendar week".to_owned()));
+    assert!(!my_week_titles.contains(&"Mine next week".to_owned()));
+    assert!(!my_week_titles.contains(&"No date".to_owned()));
 }
 
 async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {

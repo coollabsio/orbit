@@ -16,7 +16,6 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
-import type { TaskPriority } from '@/features/tasks/api/models'
 import {
   useCommentAttachments,
   useCreateTask,
@@ -33,11 +32,12 @@ import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { taskViewCreateDefaults, type TaskView } from '@/features/tasks/taskMeta'
-import { filterTasks, resolveLayout, resolveStatusId, statusGroups, taskApiSort, type SortKey, type TaskLayout } from '@/features/tasks/tasksLib'
+import { filterTasks, resolveLayout, resolveStatusId, statusGroups, taskApiSort, type TaskLayout } from '@/features/tasks/tasksLib'
 import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
 import { TimelineControls } from '@/features/tasks/timeline/TimelineControls'
 import { useTimelineZoom } from '@/features/tasks/timeline/useTimelineZoom'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
+import { useTaskPreferences } from '@/features/tasks/taskPreferences'
 
 const LAYOUT_KEY = 'orbit:task_layout'
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
@@ -46,6 +46,11 @@ const OPTION =
   `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[active]:bg-accent data-[active]:font-medium`
 
 export function TasksPage() {
+  const { workspace } = useWorkspace()
+  return <WorkspaceTasksPage key={workspace.id} />
+}
+
+function WorkspaceTasksPage() {
   const { workspace } = useWorkspace()
   const { taskId } = useParams()
   const navigate = useNavigate()
@@ -74,21 +79,23 @@ export function TasksPage() {
   }
   const [pxPerDay, setPxPerDay] = useTimelineZoom()
   const timelineRef = useRef<TimelineHandle>(null)
-  const [sort, setSort] = useState<SortKey>('manual')
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
-  const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null)
-  const [unassignedFilter, setUnassignedFilter] = useState(false)
-  const [labelFilter, setLabelFilter] = useState<string | null>(null)
-  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | null>(null)
-  const [searchFilter, setSearchFilter] = useState('')
+  const [preferences, setPreferences] = useTaskPreferences(workspace.id)
+  const { sort, statusFilter, assigneeFilter, unassignedFilter, labelFilter, priorityFilter, searchFilter } = preferences
+  const setPreference = <K extends keyof typeof preferences>(key: K, value: typeof preferences[K]) => {
+    setPreferences((current) => ({ ...current, [key]: value }))
+  }
   const projectFilter = searchParams.get('project')
-  const viewFilter = ['mine', 'overdue', 'due_soon', 'current_week'].includes(searchParams.get('view') ?? '')
+  const viewFilter = ['mine', 'overdue', 'due_soon', 'current_week', 'my_week'].includes(searchParams.get('view') ?? '')
     ? searchParams.get('view') as TaskView
     : undefined
 
+  const lastView = useRef(viewFilter)
   useEffect(() => {
-    setSearchFilter('')
-  }, [viewFilter])
+    if (lastView.current !== viewFilter) {
+      setPreferences((current) => ({ ...current, searchFilter: '' }))
+      lastView.current = viewFilter
+    }
+  }, [viewFilter, setPreferences])
 
   const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
   const tasksQuery = useTasks(workspace.id, {
@@ -200,7 +207,9 @@ export function TasksPage() {
         ? 'Due soon'
         : viewFilter === 'current_week'
           ? 'This week'
-          : 'All tasks'
+          : viewFilter === 'my_week'
+            ? 'My week'
+            : 'All tasks'
   const visibleTasks = filterTasks(tasks, {
     currentUserId: state.currentUserId,
     projectId: projectFilter,
@@ -261,7 +270,7 @@ export function TasksPage() {
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
-            <TaskFilters users={users} labels={labelsQuery.data ?? []} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} unassigned={unassignedFilter} labelId={labelFilter} priority={priorityFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={setSearchFilter} onStatusChange={setStatusFilter} onAssigneeChange={setAssigneeFilter} onUnassignedChange={setUnassignedFilter} onLabelChange={setLabelFilter} onPriorityChange={setPriorityFilter} onSortChange={setSort} onLayoutChange={setLayout} />
+            <TaskFilters users={users} labels={labelsQuery.data ?? []} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} unassigned={unassignedFilter} labelId={labelFilter} priority={priorityFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={(value) => setPreference('searchFilter', value)} onStatusChange={(value) => setPreference('statusFilter', value)} onAssigneeChange={(value) => setPreference('assigneeFilter', value)} onUnassignedChange={(value) => setPreference('unassignedFilter', value)} onLabelChange={(value) => setPreference('labelFilter', value)} onPriorityChange={(value) => setPreference('priorityFilter', value)} onSortChange={(value) => setPreference('sort', value)} onLayoutChange={setLayout} />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>

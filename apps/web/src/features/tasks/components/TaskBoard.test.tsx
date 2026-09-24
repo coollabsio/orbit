@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createEvent, fireEvent, render, waitFor, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -57,7 +57,9 @@ test('mounted board rejects an oversized atomic reorder before any server commit
   Object.defineProperty(dropEvent, 'clientY', { value: -1 })
   fireEvent(doing, dropEvent)
 
-  expect((await view.findByRole('alert')).textContent).toContain('at most 100')
+  const error = await view.findByRole('alert')
+  expect(error.textContent).toContain('at most 100')
+  expect(error.classList.contains('absolute')).toBe(true)
   expect(requestBodies).toHaveLength(0)
   expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
 })
@@ -124,4 +126,42 @@ test('reordering inside the Duplicate column is a plain position update, never t
 test('a blocked card shows the blocked icon beside its identifier', () => {
   const view = renderBoard([{ ...task('late', 'todo', 0), blocked: true }], [])
   expect(view.getByRole('img', { name: 'Blocked' })).toBeTruthy()
+})
+
+test('saving a board move does not add a grid item or flash a loading label', async () => {
+  let finishRequest: ((response: Response) => void) | undefined
+  globalThis.fetch = (() => new Promise<Response>((resolve) => { finishRequest = resolve })) as unknown as typeof fetch
+  const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
+        {children}
+      </WorkspaceContext.Provider>
+    </QueryClientProvider>
+  )
+  const status: TaskStatusDef = { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#aaa', category: 'unstarted', position: 0, version: 1 }
+  const group: StatusGroup = { key: 'unstarted:todo', name: 'Todo', category: 'unstarted', status, statusIds: [status.id] }
+  const view = render(
+    <TaskBoard tasks={[task('moving', 'todo', 0), task('other', 'todo', 1)]} users={[]} labels={[]} statuses={[status]} groups={[group]} sort="manual" activeTaskId={null} onOpen={() => {}} />,
+    { wrapper },
+  )
+  const board = view.container.firstElementChild!
+  const moving = view.getByRole('heading', { name: 'Moving' }).closest('article')!
+  const column = view.getByText('Todo').closest('section')!
+
+  fireEvent.dragStart(moving, { dataTransfer })
+  const dropEvent = createEvent.drop(column, { dataTransfer })
+  Object.defineProperty(dropEvent, 'clientY', { value: 10000 })
+  fireEvent(column, dropEvent)
+
+  await waitFor(() => expect(finishRequest).toBeDefined())
+  expect(board.getAttribute('aria-busy')).toBe('true')
+  expect(board.children).toHaveLength(1)
+  expect(view.queryByText('Saving board order…')).toBeNull()
+
+  await act(async () => { finishRequest?.(Response.json({ items: [], next_cursor: null })) })
+  await waitFor(() => expect(board.getAttribute('aria-busy')).toBe('false'))
+  expect(board.children).toHaveLength(1)
+  expect(view.queryByRole('alert')).toBeNull()
 })
