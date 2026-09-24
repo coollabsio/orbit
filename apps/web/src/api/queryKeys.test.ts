@@ -31,4 +31,14 @@ describe('workspace query keys', () => {
     ])
     expect(queryKeys.taskRelations('workspace-a', 'task-one').slice(0, 3)).toEqual([...queryKeys.tasks.all('workspace-a')])
   })
+
+  test('saved views and preferences share the workspace prefix; task queries sit under the tasks prefix', () => {
+    expect(queryKeys.views('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.view('workspace-a', 'view-1').slice(0, 3)).toEqual([...queryKeys.views('workspace-a')])
+    expect(queryKeys.viewPreference('workspace-a', 'preset:mine').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
+    expect(queryKeys.viewPreference('workspace-a', 'all')).not.toEqual(queryKeys.viewPreference('workspace-a', 'project:p1'))
+    const body = { filter: { op: 'and', children: [] }, order_by: 'manual' }
+    expect(queryKeys.taskQuery('workspace-a', body).slice(0, 3)).toEqual([...queryKeys.tasks.all('workspace-a')])
+    expect(queryKeys.taskQuery('workspace-a', body)).not.toEqual(queryKeys.taskQuery('workspace-b', body))
+  })
 })

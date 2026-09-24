@@ -31,6 +31,13 @@ export const queryKeys = {
   audit: (workspaceId: string) => [...workspace(workspaceId), 'audit'] as const,
   notifications: (workspaceId: string, unread?: boolean) =>
     [...workspace(workspaceId), 'notifications', { unread }] as const,
+  /** Saved views list; also the prefix of every `view` key (use `exact: true` to target only the list). */
+  views: (workspaceId: string) => [...workspace(workspaceId), 'views'] as const,
+  view: (workspaceId: string, viewId: string) => [...workspace(workspaceId), 'views', 'detail', viewId] as const,
+  viewPreference: (workspaceId: string, pageKey: string) =>
+    [...workspace(workspaceId), 'view-preferences', pageKey] as const,
+  /** Under `tasks.all`, so every task mutation's existing invalidation and optimistic patch reaches it. */
+  taskQuery: (workspaceId: string, body: object) => [...workspace(workspaceId), 'tasks', 'query', body] as const,
   tasks: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'tasks'] as const,
     list: (workspaceId: string, filters: TaskFilters = {}) =>

@@ -127,3 +127,37 @@ test('a failed workspace refresh backs off instead of retrying every 250 ms', as
     client.clear()
   }
 })
+
+test('any workspace event refreshes saved views, preferences and task queries', async () => {
+  const originalWebSocket = globalThis.WebSocket
+  let socket: { onmessage: ((event: MessageEvent) => void) | null } | undefined
+  class FakeWebSocket {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    constructor() { socket = this }
+    close() {}
+  }
+  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+  const client = new QueryClient()
+  const body = { filter: { op: 'and', children: [] }, order_by: 'manual', order_direction: 'asc', show_completed: 'all' }
+  const keys = [
+    queryKeys.views('workspace-1'),
+    queryKeys.view('workspace-1', 'view-1'),
+    queryKeys.viewPreference('workspace-1', 'all'),
+    queryKeys.taskQuery('workspace-1', body),
+  ]
+  for (const key of keys) client.setQueryData(key, {})
+  try {
+    const view = renderHook(() => useWorkspaceEvents('workspace-1'), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    // saved_view.* audit events reach the socket as a plain workspace.changed (no event name)
+    act(() => socket?.onmessage?.(new MessageEvent('message', {
+      data: '{"version":1,"kind":"workspace.changed","sequence":"1"}',
+    })))
+    await waitFor(() => expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([true, true, true, true]))
+    view.unmount()
+  } finally {
+    globalThis.WebSocket = originalWebSocket
+    client.clear()
+  }
+})
