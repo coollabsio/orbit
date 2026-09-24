@@ -1054,8 +1054,10 @@ impl TaskRepository {
                 .push(" AND tasks.priority = ")
                 .push_bind(priority.clone());
         }
-        if filter.view.as_deref() == Some("mine") || filter.assignee_id.is_some() {
-            let assignee_id = if filter.view.as_deref() == Some("mine") {
+        if matches!(filter.view.as_deref(), Some("mine") | Some("my_week"))
+            || filter.assignee_id.is_some()
+        {
+            let assignee_id = if matches!(filter.view.as_deref(), Some("mine") | Some("my_week")) {
                 actor_id
             } else {
                 filter.assignee_id.unwrap()
@@ -1070,7 +1072,7 @@ impl TaskRepository {
         }
         if matches!(
             filter.view.as_deref(),
-            Some("overdue") | Some("due_soon") | Some("current_week")
+            Some("overdue") | Some("due_soon") | Some("current_week") | Some("my_week")
         ) {
             let day_ms = 86_400_000;
             let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;

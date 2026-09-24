@@ -55,7 +55,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
   }
 
   return (
-    <div className="grid min-h-full min-w-max gap-3 p-3" style={{ gridTemplateColumns: `repeat(${groups.length}, 320px)` }}>
+    <div className="relative grid min-h-full min-w-max gap-3 p-3" aria-busy={bulkTasks.isPending} style={{ gridTemplateColumns: `repeat(${groups.length}, 320px)` }}>
       {groups.map((group) => {
         const columnTasks = sortTasks(
           tasks.filter((task) => group.statusIds.includes(task.statusId)),
@@ -148,8 +148,7 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
           </section>
         )
       })}
-      {bulkTasks.isPending ? <p role="status" className="text-xs text-muted-foreground/70">Saving board order…</p> : null}
-      {bulkTasks.isError ? <p role="alert" className="text-xs text-destructive">{limitError ? `This move would update ${limitError.count} tasks. Move it in smaller steps so each drop affects at most ${MAX_BULK_TASK_UPDATES} tasks.` : <>Board reorder failed. <Button variant="ghost" onClick={bulkTasks.retry}>Retry</Button></>}</p> : null}
+      {bulkTasks.isError ? <p role="alert" className="absolute top-3 right-3 z-10 rounded-md border border-destructive/30 bg-background px-2 py-1 text-xs text-destructive shadow-sm">{limitError ? `This move would update ${limitError.count} tasks. Move it in smaller steps so each drop affects at most ${MAX_BULK_TASK_UPDATES} tasks.` : <>Board reorder failed. <Button variant="ghost" onClick={bulkTasks.retry}>Retry</Button></>}</p> : null}
     </div>
   )
 }

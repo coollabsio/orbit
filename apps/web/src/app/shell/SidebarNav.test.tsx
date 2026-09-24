@@ -19,6 +19,9 @@ test('the task navigation includes a current calendar week view', () => {
   fireEvent.click(view.getByRole('link', { name: 'This week' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?view=current_week')
   expect(view.getByRole('link', { name: 'This week' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  fireEvent.click(view.getByRole('link', { name: 'My week' }))
+  expect(view.getByTestId('location').textContent).toBe('/tasks?view=my_week')
+  expect(view.getByRole('link', { name: 'My week' }).classList.contains('bg-sidebar-accent')).toBe(true)
 })
 
 test('task views and the inbox keep the selected project', () => {
@@ -37,6 +40,9 @@ test('task views and the inbox keep the selected project', () => {
 
   fireEvent.click(view.getByRole('link', { name: 'This week' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r&view=current_week')
+
+  fireEvent.click(view.getByRole('link', { name: 'My week' }))
+  expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r&view=my_week')
 
   fireEvent.click(view.getByRole('link', { name: 'Tasks' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r')

@@ -136,6 +136,16 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <span className={labelClass}>This week</span>
         </NavLink>
         <NavLink
+          to={taskViewPath('my_week')}
+          className={itemClass(taskViewActive('my_week'))}
+          aria-label="My week"
+          title={collapsed ? 'My week' : undefined}
+          onClick={onNavigate}
+        >
+          <Calendar className="size-[18px] shrink-0 opacity-90" />
+          <span className={labelClass}>My week</span>
+        </NavLink>
+        <NavLink
           to={taskViewPath('overdue')}
           className={itemClass(taskViewActive('overdue'))}
           aria-label="Overdue"

@@ -889,7 +889,8 @@ async fn list_tasks(
             .transpose()?,
         view: match query.view.as_deref() {
             None | Some("") => None,
-            Some("mine") | Some("overdue") | Some("due_soon") | Some("current_week") => query.view,
+            Some("mine") | Some("overdue") | Some("due_soon") | Some("current_week")
+            | Some("my_week") => query.view,
             _ => return Err(validation("view", &instance, request_id.as_ref())),
         },
         sort: match query.sort.as_str() {
