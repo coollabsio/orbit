@@ -6,6 +6,7 @@ use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -183,6 +184,8 @@ pub struct TaskChanges {
     pub label_ids: Option<Vec<Id>>,
     pub due_start_at: Option<Option<TimestampMillis>>,
     pub due_at: Option<Option<TimestampMillis>>,
+    /// `Some(Some(id))` marks the task as a duplicate of `id`; `Some(None)` unmarks it.
+    pub duplicate_of_id: Option<Option<Id>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1221,6 +1224,11 @@ impl TaskRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
+        if task_relations::status_category_in_tx(&mut tx, workspace_id, input.status_id).await?
+            == task_relations::DUPLICATE
+        {
+            return Err(TaskError::Invalid { field: "status_id" });
+        }
         validate_assignees(&mut tx, workspace_id, &input.assignee_ids).await?;
         validate_labels(&mut tx, workspace_id, &input.label_ids).await?;
         let position = match input.position {
@@ -1361,11 +1369,38 @@ impl TaskRepository {
                     .fetch_one(&mut *tx)
                     .await?
             };
+            let current_status_id: String =
+                sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
+                    .bind(task_id.to_string())
+                    .fetch_one(&mut *tx)
+                    .await?;
+            let leaves_duplicate = current_status_id != status_id
+                && task_relations::status_category_in_tx(
+                    &mut tx,
+                    workspace_id,
+                    parse_id(current_status_id)?,
+                )
+                .await?
+                    == task_relations::DUPLICATE;
             let changed = sqlx::query(
                     "UPDATE tasks SET title = ?, description = ?, source_url = ?, status_id = ?, deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND (deleted_at IS NOT NULL OR title != ? OR description != ? OR source_url IS NOT ? OR status_id != ?)",
                 ).bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).bind(now.as_millis())
                     .bind(task_id.to_string()).bind(workspace_id.to_string())
                     .bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).execute(&mut *tx).await?;
+            if leaves_duplicate {
+                task_relations::delete_duplicate_relation_in_tx(
+                    &mut tx,
+                    workspace_id,
+                    RelationActor {
+                        user_id: actor_id,
+                        service_account: Some((service_account_id, &service_account_name)),
+                    },
+                    task_id,
+                    request_id,
+                    now,
+                )
+                .await?;
+            }
             if changed.rows_affected() > 0 {
                 record_principal_mutation(
                     &mut tx,
@@ -1597,7 +1632,8 @@ impl TaskRepository {
     ) -> Result<TaskRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let task = update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?;
+        let task =
+            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1645,7 +1681,9 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let mut records = Vec::with_capacity(updates.len());
         for update in updates {
-            records.push(update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?);
+            records.push(
+                update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?,
+            );
         }
         record_mutation(
             &mut tx,
@@ -2095,15 +2133,21 @@ impl TaskRepository {
     }
 }
 
-async fn update_task_in_tx(
+pub(super) async fn update_task_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
     update: &TaskUpdate,
+    request_id: &str,
     now: TimestampMillis,
 ) -> Result<TaskRecord, TaskError> {
     let current = task_in_tx(tx, workspace_id, update.id, false).await?;
     check_version(update.expected_version, current.version, &current)?;
+    if update.changes.duplicate_of_id.is_some() && update.changes.status_id.is_some() {
+        return Err(TaskError::Invalid {
+            field: "duplicate_of_id",
+        });
+    }
     if update.changes.title.is_some() || update.changes.description.is_some() {
         let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_issue_links WHERE workspace_id = ? AND task_id = ?)")
             .bind(workspace_id.to_string())
@@ -2115,7 +2159,34 @@ async fn update_task_in_tx(
         }
     }
     let project_id = update.changes.project_id.unwrap_or(current.project_id);
-    let status_id = update.changes.status_id.unwrap_or(current.status_id);
+    let was_duplicate = task_relations::status_category_in_tx(tx, workspace_id, current.status_id)
+        .await?
+        == task_relations::DUPLICATE;
+    // The Duplicate status is entered only through duplicate_of_id and follows project moves.
+    let status_id = match update.changes.duplicate_of_id {
+        Some(Some(_)) => {
+            task_relations::duplicate_status_id_in_tx(tx, workspace_id, project_id).await?
+        }
+        Some(None) if was_duplicate => {
+            task_relations::restore_status_id_in_tx(tx, workspace_id, update.id, project_id).await?
+        }
+        Some(None) => current.status_id,
+        None => match update.changes.status_id {
+            Some(status_id) if status_id != current.status_id => {
+                if task_relations::status_category_in_tx(tx, workspace_id, status_id).await?
+                    == task_relations::DUPLICATE
+                {
+                    return Err(TaskError::Invalid { field: "status_id" });
+                }
+                status_id
+            }
+            Some(status_id) => status_id,
+            None if was_duplicate && project_id != current.project_id => {
+                task_relations::duplicate_status_id_in_tx(tx, workspace_id, project_id).await?
+            }
+            None => current.status_id,
+        },
+    };
     validate_project_status(tx, workspace_id, project_id, status_id).await?;
     if let Some(assignees) = &update.changes.assignee_ids {
         validate_assignees(tx, workspace_id, assignees).await?;
@@ -2158,6 +2229,51 @@ async fn update_task_in_tx(
     }
     sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
         .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    let actor = RelationActor {
+        user_id: actor_id,
+        service_account: None,
+    };
+    match update.changes.duplicate_of_id {
+        Some(Some(target_id)) => {
+            task_relations::mark_duplicate_in_tx(
+                tx,
+                workspace_id,
+                actor,
+                update.id,
+                current.status_id,
+                target_id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
+        Some(None) => {
+            task_relations::delete_duplicate_relation_in_tx(
+                tx,
+                workspace_id,
+                actor,
+                update.id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
+        None if was_duplicate
+            && status_id != current.status_id
+            && update.changes.status_id.is_some() =>
+        {
+            task_relations::delete_duplicate_relation_in_tx(
+                tx,
+                workspace_id,
+                actor,
+                update.id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
+        None => {}
+    }
     if let Some(assignees) = &update.changes.assignee_ids {
         let added: Vec<Id> = assignees
             .iter()
@@ -3021,7 +3137,7 @@ fn comment_from_row(row: sqlx::sqlite::SqliteRow) -> Result<CommentRecord, TaskE
     })
 }
 
-fn parse_id(value: String) -> Result<Id, TaskError> {
+pub(super) fn parse_id(value: String) -> Result<Id, TaskError> {
     value.parse().map_err(|_| TaskError::Conflict)
 }
 fn parse_version(value: i64) -> Result<u64, TaskError> {

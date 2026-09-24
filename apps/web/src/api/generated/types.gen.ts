@@ -120,6 +120,10 @@ export type BulkItem = {
     description?: string | null;
     due_at?: string | null;
     due_start_at?: string | null;
+    /**
+     * Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
+     */
+    duplicate_of_id?: string | null;
     expected_version: number;
     id: string;
     label_ids?: Array<string> | null;
@@ -671,6 +675,10 @@ export type TaskUpdateBody = {
     description?: string | null;
     due_at?: string | null;
     due_start_at?: string | null;
+    /**
+     * Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
+     */
+    duplicate_of_id?: string | null;
     expected_version: number;
     label_ids?: Array<string> | null;
     position?: number | null;

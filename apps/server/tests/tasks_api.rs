@@ -5,6 +5,7 @@ use axum::http::{Request, StatusCode, header};
 use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, TimestampMillis};
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use orbit_server::repositories::tasks::{GithubWorkItem, TaskRepository};
 use orbit_server::repositories::workspaces::WorkspaceRepository;
 use orbit_server::task_routes::{TaskState, task_router};
 use serde_json::{Value, json};
@@ -2393,6 +2394,629 @@ async fn due_views_skip_tasks_in_the_duplicate_status() {
     assert!(after["items"].as_array().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn marking_a_duplicate_moves_it_to_the_duplicate_status_and_unmarking_restores_it() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Login fails on Safari").await;
+    let canonical = fixture.create_task("Login broken").await;
+    let started = status_id_by_category(&fixture, &fixture.project_id, "started").await;
+    let duplicate_status = status_id_by_category(&fixture, &fixture.project_id, "duplicate").await;
+    let uri = task_uri(&fixture, id_of(&task));
+
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "status_id": started})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, marked) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(marked["status_id"], duplicate_status);
+    assert_eq!(marked["version"], 2);
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&task)).await.as_deref(),
+        Some(id_of(&canonical))
+    );
+
+    let (status, unmarked) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 2, "duplicate_of_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unmarked["status_id"], started);
+    assert_eq!(duplicate_target(&fixture, id_of(&task)).await, None);
+}
+
+#[tokio::test]
+async fn unmarking_falls_back_to_the_first_unstarted_status_when_the_previous_one_is_gone() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Flaky upload").await;
+    let canonical = fixture.create_task("Uploads fail").await;
+    let statuses_uri = format!(
+        "/api/v1/workspaces/{}/projects/{}/statuses",
+        fixture.workspace_id, fixture.project_id
+    );
+    let (status, review) = call(
+        &fixture,
+        "POST",
+        &statuses_uri,
+        Some(json!({"name":"Review", "color":"#445566", "category":"started"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let uri = task_uri(&fixture, id_of(&task));
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "status_id": id_of(&review)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{statuses_uri}/{}?expected_version=0", id_of(&review)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, unmarked) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 2, "duplicate_of_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unmarked["status_id"], fixture.status_id);
+}
+
+#[tokio::test]
+async fn moving_a_duplicate_to_another_status_removes_the_relation() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Crash on save").await;
+    let canonical = fixture.create_task("Saving crashes").await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let uri = task_uri(&fixture, id_of(&task));
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, moved) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "status_id": done})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(moved["status_id"], done);
+    assert_eq!(duplicate_target(&fixture, id_of(&task)).await, None);
+    let unmarked: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = ?",
+    )
+    .bind(id_of(&task))
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(unmarked, 1);
+}
+
+#[tokio::test]
+async fn direct_duplicate_status_writes_and_invalid_targets_are_rejected() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Task").await;
+    let canonical = fixture.create_task("Canonical").await;
+    let trashed = fixture.create_task("Trashed").await;
+    let duplicate_status = status_id_by_category(&fixture, &fixture.project_id, "duplicate").await;
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&trashed))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let uri = task_uri(&fixture, id_of(&task));
+    for (body, field) in [
+        (
+            json!({"expected_version": 0, "status_id": duplicate_status}),
+            "status_id",
+        ),
+        (
+            json!({"expected_version": 0, "status_id": fixture.status_id, "duplicate_of_id": id_of(&canonical)}),
+            "duplicate_of_id",
+        ),
+        (
+            json!({"expected_version": 0, "duplicate_of_id": id_of(&task)}),
+            "duplicate_of_id",
+        ),
+        (
+            json!({"expected_version": 0, "duplicate_of_id": id_of(&trashed)}),
+            "duplicate_of_id",
+        ),
+    ] {
+        let (status, problem) = call(&fixture, "PATCH", &uri, Some(body.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(problem["detail"], field, "{body}");
+    }
+    let (status, problem) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({"project_id": fixture.project_id, "status_id": duplicate_status, "title": "Born duplicate"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "status_id");
+    let (_, current) = call(&fixture, "GET", &uri, None).await;
+    assert_eq!(current["version"], 0);
+    assert_eq!(current["status_id"], fixture.status_id);
+}
+
+#[tokio::test]
+async fn duplicates_never_chain_and_marking_a_canonical_repoints_its_duplicates() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    let third = fixture.create_task("Third").await;
+    let todo: String =
+        sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = ? AND name = 'Todo'")
+            .bind(&fixture.project_id)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    let first_uri = task_uri(&fixture, id_of(&first));
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &first_uri,
+        Some(json!({"expected_version": 0, "status_id": todo})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &first_uri,
+        Some(json!({"expected_version": 1, "duplicate_of_id": id_of(&second)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, problem) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&third)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&first)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "duplicate_of_id");
+
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&second)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&third)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&first)).await.as_deref(),
+        Some(id_of(&third))
+    );
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&second)).await.as_deref(),
+        Some(id_of(&third))
+    );
+    let (_, repointed) = call(&fixture, "GET", &first_uri, None).await;
+    assert_eq!(
+        repointed["version"], 2,
+        "re-pointing must not bump the follower's version"
+    );
+
+    let (status, unmarked) = call(
+        &fixture,
+        "PATCH",
+        &first_uri,
+        Some(json!({"expected_version": 2, "duplicate_of_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        unmarked["status_id"], todo,
+        "the original previous status survives re-pointing"
+    );
+}
+
+#[tokio::test]
+async fn cross_project_duplicates_use_their_own_duplicate_status_and_follow_project_moves() {
+    let fixture = Fixture::new().await;
+    let other_project = create_project(&fixture, "OTH").await;
+    let other_backlog = status_id_by_category(&fixture, &other_project, "unstarted").await;
+    let (status, canonical) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({"project_id": other_project, "status_id": other_backlog, "title": "Other canonical"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let task = fixture.create_task("Local duplicate").await;
+    let uri = task_uri(&fixture, id_of(&task));
+
+    let (status, marked) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        marked["status_id"],
+        status_id_by_category(&fixture, &fixture.project_id, "duplicate").await
+    );
+    let metadata: String = sqlx::query_scalar(
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.marked_duplicate' AND resource_id = ?",
+    )
+    .bind(id_of(&task))
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    let metadata: Value = serde_json::from_str(&metadata).unwrap();
+    assert_eq!(
+        metadata["related_task_project_id"], other_project,
+        "cross-project identifiers need the other task's project"
+    );
+
+    let (status, moved) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "project_id": other_project})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(moved["project_id"], other_project);
+    assert_eq!(
+        moved["status_id"],
+        status_id_by_category(&fixture, &other_project, "duplicate").await
+    );
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&task)).await.as_deref(),
+        Some(id_of(&canonical))
+    );
+}
+
+#[tokio::test]
+async fn bulk_marking_and_undo_are_atomic() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    let canonical = fixture.create_task("Canonical").await;
+    let duplicate_status = status_id_by_category(&fixture, &fixture.project_id, "duplicate").await;
+    let bulk_uri = format!("/api/v1/workspaces/{}/tasks/bulk", fixture.workspace_id);
+
+    let (status, problem) = call(
+        &fixture,
+        "POST",
+        &bulk_uri,
+        Some(json!({"updates": [
+            {"id": id_of(&first), "expected_version": 0, "duplicate_of_id": id_of(&canonical)},
+            {"id": id_of(&second), "expected_version": 0, "duplicate_of_id": id_of(&second)}
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "duplicate_of_id");
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&first)).await,
+        None,
+        "the first item must roll back"
+    );
+
+    let (status, marked) = call(
+        &fixture,
+        "POST",
+        &bulk_uri,
+        Some(json!({"updates": [
+            {"id": id_of(&first), "expected_version": 0, "duplicate_of_id": id_of(&canonical)},
+            {"id": id_of(&second), "expected_version": 0, "duplicate_of_id": id_of(&canonical)}
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        marked["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["status_id"] == duplicate_status)
+    );
+
+    let (status, undone) = call(
+        &fixture,
+        "POST",
+        &bulk_uri,
+        Some(json!({"updates": [
+            {"id": id_of(&first), "expected_version": 1, "duplicate_of_id": null},
+            {"id": id_of(&second), "expected_version": 1, "duplicate_of_id": null}
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        undone["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["status_id"] == fixture.status_id)
+    );
+    assert_eq!(duplicate_target(&fixture, id_of(&first)).await, None);
+    assert_eq!(duplicate_target(&fixture, id_of(&second)).await, None);
+}
+
+#[tokio::test]
+async fn bulk_marking_a_canonical_and_its_duplicate_together_succeeds() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    let canonical = fixture.create_task("Canonical").await;
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&first)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&second)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks/bulk", fixture.workspace_id),
+        Some(json!({"updates": [
+            {"id": id_of(&second), "expected_version": 0, "duplicate_of_id": id_of(&canonical)},
+            {"id": id_of(&first), "expected_version": 1, "duplicate_of_id": id_of(&canonical)}
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&first)).await.as_deref(),
+        Some(id_of(&canonical))
+    );
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&second)).await.as_deref(),
+        Some(id_of(&canonical))
+    );
+}
+
+#[tokio::test]
+async fn duplicate_edge_cases_stay_recoverable() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Duplicate").await;
+    let canonical = fixture.create_task("Canonical").await;
+    let plain = fixture.create_task("Plain").await;
+    let duplicate_status = status_id_by_category(&fixture, &fixture.project_id, "duplicate").await;
+    let uri = task_uri(&fixture, id_of(&task));
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Re-sending the current Duplicate status alongside other fields is not a status change.
+    let (status, saved) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "status_id": duplicate_status, "priority": "high"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["priority"], "high");
+    assert_eq!(
+        duplicate_target(&fixture, id_of(&task)).await.as_deref(),
+        Some(id_of(&canonical))
+    );
+
+    // Unmarking a task that is not a duplicate is a no-op, so a retried bulk undo succeeds.
+    let (status, untouched) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&plain)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(untouched["status_id"], fixture.status_id);
+
+    // A retention purge of the canonical leaves the duplicate recoverable.
+    sqlx::query("DELETE FROM tasks WHERE id = ?")
+        .bind(id_of(&canonical))
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (status, restored) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 2, "duplicate_of_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(restored["status_id"], fixture.status_id);
+}
+
+#[tokio::test]
+async fn duplicate_marking_is_audited_on_both_tasks() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Duplicate task").await;
+    let canonical = fixture.create_task("Canonical task").await;
+    let uri = task_uri(&fixture, id_of(&task));
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT resource_id, metadata_json FROM audit_events WHERE action = 'task.marked_duplicate'",
+    )
+    .fetch_all(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 2);
+    let metadata = |resource: &str| -> Value {
+        serde_json::from_str(&rows.iter().find(|(id, _)| id == resource).unwrap().1).unwrap()
+    };
+    assert_eq!(
+        metadata(id_of(&task)),
+        json!({"type": "duplicate", "direction": "outgoing", "related_task_id": id_of(&canonical), "related_task_project_id": fixture.project_id, "related_task_title": "Canonical task"}),
+        "the duplicate's event is outgoing"
+    );
+    assert_eq!(
+        metadata(id_of(&canonical)),
+        json!({"type": "duplicate", "direction": "incoming", "related_task_id": id_of(&task), "related_task_project_id": fixture.project_id, "related_task_title": "Duplicate task"}),
+        "the canonical's event is incoming"
+    );
+    let (_, activity) = call(
+        &fixture,
+        "GET",
+        &format!("{}/activity", task_uri(&fixture, id_of(&canonical))),
+        None,
+    )
+    .await;
+    assert!(
+        activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["action"] == "task.marked_duplicate")
+    );
+
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "duplicate_of_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let unmarked: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.unmarked_duplicate'",
+    )
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(unmarked, 2);
+}
+
+#[tokio::test]
+async fn github_state_changes_move_duplicates_out_and_drop_the_relation() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Synced issue").await;
+    let canonical = fixture.create_task("Canonical issue").await;
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind) VALUES (?, 'acme/repo', 12, ?, 'issue')")
+        .bind(&fixture.workspace_id)
+        .bind(id_of(&task))
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&task)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    TaskRepository::new((*fixture.database).clone())
+        .sync_github_work_item(
+            fixture.workspace_id.parse().unwrap(),
+            fixture.owner_id,
+            GithubWorkItem {
+                repository: "acme/repo".to_owned(),
+                number: 12,
+                project_id: fixture.project_id.parse().unwrap(),
+                title: "Synced issue".to_owned(),
+                description: String::new(),
+                kind: "issue",
+                state: "closed",
+                state_changed: true,
+            },
+            "github-test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+
+    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = ?")
+        .bind(id_of(&task))
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(category, "completed");
+    assert_eq!(duplicate_target(&fixture, id_of(&task)).await, None);
+    let actor: Option<String> = sqlx::query_scalar(
+        "SELECT actor_id FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = ?",
+    )
+    .bind(id_of(&task))
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(actor, None, "GitHub acts through its service account");
+    let metadata: String = sqlx::query_scalar(
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = ?",
+    )
+    .bind(id_of(&task))
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    let metadata: Value = serde_json::from_str(&metadata).unwrap();
+    assert_eq!(metadata["direction"], "outgoing");
+    assert_eq!(metadata["related_task_id"], id_of(&canonical));
+    assert_eq!(metadata["related_task_project_id"], fixture.project_id);
+    assert_eq!(metadata["related_task_title"], "Canonical issue");
+    assert!(metadata["actor_service_account_id"].is_string());
+}
+
 async fn call(
     fixture: &Fixture,
     method: &str,
@@ -2423,4 +3047,37 @@ async fn status_id_by_category(fixture: &Fixture, project_id: &str, category: &s
     .fetch_one(fixture.database.pool())
     .await
     .unwrap()
+}
+
+fn task_uri(fixture: &Fixture, task_id: &str) -> String {
+    format!(
+        "/api/v1/workspaces/{}/tasks/{task_id}",
+        fixture.workspace_id
+    )
+}
+
+fn id_of(value: &Value) -> &str {
+    value["id"].as_str().unwrap()
+}
+
+async fn duplicate_target(fixture: &Fixture, task_id: &str) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT related_task_id FROM task_relations WHERE task_id = ? AND type = 'duplicate'",
+    )
+    .bind(task_id)
+    .fetch_optional(fixture.database.pool())
+    .await
+    .unwrap()
+}
+
+async fn create_project(fixture: &Fixture, key: &str) -> String {
+    let (status, project) = call(
+        fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/projects", fixture.workspace_id),
+        Some(json!({"name": key, "key": key, "color": "#123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    id_of(&project).to_owned()
 }

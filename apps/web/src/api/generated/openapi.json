@@ -11842,6 +11842,13 @@
             ],
             "format": "date-time"
           },
+          "duplicate_of_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark."
+          },
           "expected_version": {
             "type": "integer",
             "format": "int64",
@@ -14046,6 +14053,13 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "duplicate_of_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark."
           },
           "expected_version": {
             "type": "integer",

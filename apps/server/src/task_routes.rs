@@ -831,6 +831,9 @@ struct TaskUpdateBody {
     #[serde(default, deserialize_with = "deserialize_due_patch")]
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<Option<TimestampMillis>>,
+    /// Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    duplicate_of_id: Option<Option<String>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -860,6 +863,9 @@ struct BulkItem {
     #[serde(default, deserialize_with = "deserialize_due_patch")]
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<Option<TimestampMillis>>,
+    /// Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    duplicate_of_id: Option<Option<String>>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(TaskQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
@@ -1119,6 +1125,7 @@ async fn bulk_tasks(
                     label_ids: item.label_ids,
                     due_start_at: item.due_start_at,
                     due_at: item.due_at,
+                    duplicate_of_id: item.duplicate_of_id,
                 },
                 &instance,
                 request_id.as_ref(),
@@ -1531,6 +1538,10 @@ fn task_update(
                 .transpose()?,
             due_start_at: body.due_start_at,
             due_at: body.due_at,
+            duplicate_of_id: body
+                .duplicate_of_id
+                .map(|value| optional_id(value, instance, request_id))
+                .transpose()?,
         },
     })
 }

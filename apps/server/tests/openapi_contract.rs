@@ -495,3 +495,21 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         }
     }
 }
+
+#[test]
+fn task_updates_document_duplicate_of_id() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    for schema in ["TaskUpdateBody", "BulkItem"] {
+        let body = &document["components"]["schemas"][schema];
+        assert!(
+            body["properties"]["duplicate_of_id"].is_object(),
+            "{schema} lacks duplicate_of_id"
+        );
+        assert!(
+            !body["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("duplicate_of_id"))
+        );
+    }
+}
