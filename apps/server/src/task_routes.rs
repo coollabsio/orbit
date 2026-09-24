@@ -17,7 +17,8 @@ use utoipa::{IntoParams, ToSchema};
 use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::task_filter::{
-    self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, ShowCompleted,
+    self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, OrderBy,
+    OrderDirection, ShowCompleted,
 };
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
@@ -97,6 +98,10 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks",
             get(list_tasks).post(create_task),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/query",
+            post(query_tasks),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/trash",
@@ -803,6 +808,21 @@ struct TaskQuery {
 
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
+struct TaskQueryBody {
+    /// The complete filter tree, including any preset and project scope.
+    #[schema(value_type = crate::repositories::task_filter::FilterGroup)]
+    filter: Value,
+    order_by: OrderBy,
+    /// Ignored when `order_by` is `manual`.
+    order_direction: OrderDirection,
+    show_completed: ShowCompleted,
+    cursor: Option<String>,
+    /// Page size, 1–100 (default 50).
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 struct CreateTaskBody {
     project_id: String,
     status_id: String,
@@ -1011,6 +1031,59 @@ fn legacy_condition(field: FilterField, operator: FilterOperator, value: Value) 
         operator,
         value,
     })
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/query", params(("workspace_id" = String, Path)), request_body = TaskQueryBody, responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
+async fn query_tasks(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TaskQueryBody>,
+) -> Result<Json<Page<TaskRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/query");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let tree = task_filter::parse_filter(&body.filter)
+        .map_err(|error| task_problem(error.into(), instance.clone(), request_id.as_ref()))?;
+    let (sort, order) = task_order(body.order_by, body.order_direction);
+    let filter = TaskFilter {
+        tree,
+        show_completed: body.show_completed,
+        sort,
+        order,
+    };
+    state
+        .tasks
+        .tasks(
+            workspace_id,
+            actor_id,
+            &filter,
+            body.cursor.as_deref(),
+            body.limit.unwrap_or_else(default_limit),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Maps display ordering onto the list sort. Manual order has no direction; priority
+/// ascending means urgent first, like `GET /tasks?sort=priority&order=asc`.
+fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOrder) {
+    let sort = match order_by {
+        OrderBy::Manual => TaskSort::Position,
+        OrderBy::Priority => TaskSort::Priority,
+        OrderBy::Created => TaskSort::CreatedAt,
+        OrderBy::Updated => TaskSort::UpdatedAt,
+        OrderBy::Title => TaskSort::Title,
+        OrderBy::DueDate => TaskSort::DueDate,
+    };
+    let order = match (order_by, direction) {
+        (OrderBy::Manual, _) | (_, OrderDirection::Asc) => SortOrder::Asc,
+        (_, OrderDirection::Desc) => SortOrder::Desc,
+    };
+    (sort, order)
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]

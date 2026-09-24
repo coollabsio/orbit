@@ -8242,6 +8242,150 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/tasks/query": {
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "query_tasks",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskQueryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TaskRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_filter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/tasks/reorder": {
       "post": {
         "tags": [
@@ -12431,6 +12575,25 @@
         },
         "additionalProperties": false
       },
+      "Condition": {
+        "type": "object",
+        "required": [
+          "field",
+          "operator"
+        ],
+        "properties": {
+          "field": {
+            "$ref": "#/components/schemas/FilterField"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/FilterOperator"
+          },
+          "value": {
+            "description": "An array of strings, a date value, a pair of date values, or a string, depending on\n`field` and `operator`. Omitted for `is_empty` and `is_not_empty`."
+          }
+        },
+        "additionalProperties": false
+      },
       "ConflictMetadata": {
         "type": "object",
         "required": [
@@ -12616,6 +12779,69 @@
           }
         }
       },
+      "FilterField": {
+        "type": "string",
+        "enum": [
+          "status",
+          "status_category",
+          "assignee",
+          "creator",
+          "label",
+          "priority",
+          "project",
+          "due_date",
+          "created_at",
+          "updated_at",
+          "text"
+        ]
+      },
+      "FilterGroup": {
+        "type": "object",
+        "description": "An AND/OR group. An empty group matches every task.",
+        "required": [
+          "op",
+          "children"
+        ],
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilterNode"
+            }
+          },
+          "op": {
+            "$ref": "#/components/schemas/GroupOp"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FilterNode": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FilterGroup"
+          },
+          {
+            "$ref": "#/components/schemas/Condition"
+          }
+        ],
+        "description": "A nested group or a condition; groups carry `op` and `children`."
+      },
+      "FilterOperator": {
+        "type": "string",
+        "enum": [
+          "is",
+          "is_not",
+          "is_empty",
+          "is_not_empty",
+          "includes_any",
+          "includes_all",
+          "excludes",
+          "before",
+          "after",
+          "between",
+          "contains"
+        ]
+      },
       "GithubLink": {
         "type": "object",
         "required": [
@@ -12784,6 +13010,13 @@
             }
           }
         }
+      },
+      "GroupOp": {
+        "type": "string",
+        "enum": [
+          "and",
+          "or"
+        ]
       },
       "InvitationBody": {
         "type": "object",
@@ -13089,6 +13322,24 @@
             "type": "string"
           }
         }
+      },
+      "OrderBy": {
+        "type": "string",
+        "enum": [
+          "manual",
+          "priority",
+          "created",
+          "updated",
+          "title",
+          "due_date"
+        ]
+      },
+      "OrderDirection": {
+        "type": "string",
+        "enum": [
+          "asc",
+          "desc"
+        ]
       },
       "Page_AuditEvent": {
         "type": "object",
@@ -14177,6 +14428,16 @@
           }
         }
       },
+      "ShowCompleted": {
+        "type": "string",
+        "description": "Which tasks in a done category (completed, cancelled, duplicate) stay visible.",
+        "enum": [
+          "all",
+          "past_week",
+          "past_month",
+          "none"
+        ]
+      },
       "StatusBody": {
         "type": "object",
         "required": [
@@ -14378,6 +14639,46 @@
             "type": "string"
           }
         }
+      },
+      "TaskQueryBody": {
+        "type": "object",
+        "required": [
+          "filter",
+          "order_by",
+          "order_direction",
+          "show_completed"
+        ],
+        "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filter": {
+            "$ref": "#/components/schemas/FilterGroup",
+            "description": "The complete filter tree, including any preset and project scope."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Page size, 1–100 (default 50).",
+            "minimum": 0
+          },
+          "order_by": {
+            "$ref": "#/components/schemas/OrderBy"
+          },
+          "order_direction": {
+            "$ref": "#/components/schemas/OrderDirection",
+            "description": "Ignored when `order_by` is `manual`."
+          },
+          "show_completed": {
+            "$ref": "#/components/schemas/ShowCompleted"
+          }
+        },
+        "additionalProperties": false
       },
       "TaskRecord": {
         "type": "object",

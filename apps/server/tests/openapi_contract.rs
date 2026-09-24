@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 65);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 66);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 88);
+    assert_eq!(operation_count, 89);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -570,5 +570,81 @@ fn task_relation_routes_are_documented() {
     assert_eq!(
         schemas["RelatedTask"]["required"],
         serde_json::json!(["id", "project_id", "title", "status_id"])
+    );
+}
+
+#[test]
+fn task_query_route_is_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let query = operation(
+        &document,
+        "/api/v1/workspaces/{workspace_id}/tasks/query",
+        "post",
+    );
+    assert_eq!(query["operationId"], "query_tasks");
+    assert_eq!(
+        query["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/TaskQueryBody"
+    );
+    assert_eq!(
+        query["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/Page_TaskRecord"
+    );
+    for (status, code) in [
+        ("400", "invalid_cursor"),
+        ("400", "invalid_request"),
+        ("404", "task_resource_not_found"),
+        ("422", "invalid_filter"),
+    ] {
+        assert!(
+            query["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{status} lacks {code}"
+        );
+    }
+    let schemas = &document["components"]["schemas"];
+    let body = &schemas["TaskQueryBody"];
+    assert_eq!(
+        body["properties"]["filter"]["$ref"],
+        "#/components/schemas/FilterGroup"
+    );
+    assert_eq!(
+        body["required"],
+        serde_json::json!(["filter", "order_by", "order_direction", "show_completed"])
+    );
+    assert_eq!(
+        schemas["FilterGroup"]["properties"]["children"]["items"]["$ref"],
+        "#/components/schemas/FilterNode"
+    );
+    assert_eq!(schemas["FilterNode"]["oneOf"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        schemas["FilterOperator"]["enum"],
+        serde_json::json!([
+            "is",
+            "is_not",
+            "is_empty",
+            "is_not_empty",
+            "includes_any",
+            "includes_all",
+            "excludes",
+            "before",
+            "after",
+            "between",
+            "contains"
+        ])
+    );
+    assert_eq!(
+        schemas["ShowCompleted"]["enum"],
+        serde_json::json!(["all", "past_week", "past_month", "none"])
+    );
+    let problem = &schemas["TaskProblem"];
+    assert!(problem["properties"]["path"].is_object());
+    assert!(
+        !problem["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("path"))
     );
 }

@@ -163,6 +163,16 @@ export type CommentUpdateBody = {
     expected_version: number;
 };
 
+export type Condition = {
+    field: FilterField;
+    operator: FilterOperator;
+    /**
+     * An array of strings, a date value, a pair of date values, or a string, depending on
+     * `field` and `operator`. Omitted for `is_empty` and `is_not_empty`.
+     */
+    value?: unknown;
+};
+
 export type ConflictMetadata = {
     current_version: number;
     refresh?: string | null;
@@ -209,6 +219,23 @@ export type DiscordEventResponse = {
     task: TaskRecord;
 };
 
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text';
+
+/**
+ * An AND/OR group. An empty group matches every task.
+ */
+export type FilterGroup = {
+    children: Array<FilterNode>;
+    op: GroupOp;
+};
+
+/**
+ * A nested group or a condition; groups carry `op` and `children`.
+ */
+export type FilterNode = FilterGroup | Condition;
+
+export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains';
+
 export type GithubLink = {
     kind: string;
     source: boolean;
@@ -254,6 +281,8 @@ export type GithubWorkspaceSettings = {
     key_configured: boolean;
     repositories: Array<GithubRepositoryOption>;
 };
+
+export type GroupOp = 'and' | 'or';
 
 export type InvitationBody = {
     delivery: DeliveryBody;
@@ -341,6 +370,10 @@ export type NotificationRecord = {
     task_id: string;
     workspace_id: string;
 };
+
+export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date';
+
+export type OrderDirection = 'asc' | 'desc';
 
 export type PageAuditEvent = {
     items: Array<{
@@ -616,6 +649,11 @@ export type SetupStatus = {
     complete: boolean;
 };
 
+/**
+ * Which tasks in a done category (completed, cancelled, duplicate) stay visible.
+ */
+export type ShowCompleted = 'all' | 'past_week' | 'past_month' | 'none';
+
 export type StatusBody = {
     category: string;
     color: string;
@@ -670,6 +708,24 @@ export type TaskProblem = {
     status: number;
     title: string;
     type: string;
+};
+
+export type TaskQueryBody = {
+    cursor?: string | null;
+    /**
+     * The complete filter tree, including any preset and project scope.
+     */
+    filter: FilterGroup;
+    /**
+     * Page size, 1–100 (default 50).
+     */
+    limit?: number | null;
+    order_by: OrderBy;
+    /**
+     * Ignored when `order_by` is `manual`.
+     */
+    order_direction: OrderDirection;
+    show_completed: ShowCompleted;
 };
 
 export type TaskRecord = {
@@ -4450,6 +4506,68 @@ export type BulkTasksResponses = {
 };
 
 export type BulkTasksResponse = BulkTasksResponses[keyof BulkTasksResponses];
+
+export type QueryTasksData = {
+    body: TaskQueryBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/query';
+};
+
+export type QueryTasksErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request, invalid_cursor
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * invalid_filter
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type QueryTasksError = QueryTasksErrors[keyof QueryTasksErrors];
+
+export type QueryTasksResponses = {
+    200: PageTaskRecord;
+};
+
+export type QueryTasksResponse = QueryTasksResponses[keyof QueryTasksResponses];
 
 export type ReorderTasksData = {
     body: ReorderBody;

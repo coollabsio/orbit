@@ -4515,3 +4515,257 @@ async fn due_date_order_keeps_empty_dates_last_across_pages() {
         Err(TaskError::InvalidCursor)
     ));
 }
+
+fn query_uri(fixture: &Fixture) -> String {
+    format!("/api/v1/workspaces/{}/tasks/query", fixture.workspace_id)
+}
+
+fn query_body(filter: Value, order_by: &str, direction: &str, show_completed: &str) -> Value {
+    json!({
+        "filter": filter,
+        "order_by": order_by,
+        "order_direction": direction,
+        "show_completed": show_completed
+    })
+}
+
+fn query_titles(page: &Value) -> Vec<String> {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn task_query_filters_orders_and_pages() {
+    let fixture = Fixture::new().await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let now = TimestampMillis::now().as_millis();
+    let tomorrow = TimestampMillis::from_millis(now + 86_400_000);
+    let tomorrow_later = TimestampMillis::from_millis(now + 86_400_000 + 3_600_000);
+    let next_week = TimestampMillis::from_millis(now + 7 * 86_400_000);
+    for body in [
+        json!({"project_id": fixture.project_id, "status_id": fixture.status_id, "title": "Alpha", "priority": "urgent", "due_at": next_week}),
+        json!({"project_id": fixture.project_id, "status_id": fixture.status_id, "title": "Beta", "priority": "urgent"}),
+        json!({"project_id": fixture.project_id, "status_id": done, "title": "Gamma", "priority": "urgent", "due_at": tomorrow}),
+        json!({"project_id": fixture.project_id, "status_id": fixture.status_id, "title": "Delta", "priority": "low", "due_at": tomorrow_later}),
+    ] {
+        let (status, _) = call(
+            &fixture,
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
+    let urgent = json!({"op": "and", "children": [{"field": "priority", "operator": "is", "value": ["urgent"]}]});
+    let mut body = query_body(urgent.clone(), "title", "asc", "all");
+    body["limit"] = json!(2);
+    let (status, first) = call(&fixture, "POST", &query_uri(&fixture), Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(query_titles(&first), ["Alpha", "Beta"]);
+    body["cursor"] = first["next_cursor"].clone();
+    let (status, second) = call(&fixture, "POST", &query_uri(&fixture), Some(body)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(query_titles(&second), ["Gamma"]);
+    assert!(second["next_cursor"].is_null());
+
+    let (_, open) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(query_body(urgent, "title", "asc", "none")),
+    )
+    .await;
+    assert_eq!(query_titles(&open), ["Alpha", "Beta"]);
+
+    let everything = json!({"op": "and", "children": []});
+    let (_, ascending) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(query_body(everything.clone(), "due_date", "asc", "all")),
+    )
+    .await;
+    assert_eq!(
+        query_titles(&ascending),
+        ["Gamma", "Delta", "Alpha", "Beta"]
+    );
+    let (_, descending) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(query_body(everything.clone(), "due_date", "desc", "all")),
+    )
+    .await;
+    assert_eq!(
+        query_titles(&descending),
+        ["Alpha", "Delta", "Gamma", "Beta"]
+    );
+
+    // Manual order has no direction.
+    let (_, manual_asc) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(query_body(everything.clone(), "manual", "asc", "all")),
+    )
+    .await;
+    let (_, manual_desc) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(query_body(everything.clone(), "manual", "desc", "all")),
+    )
+    .await;
+    assert_eq!(query_titles(&manual_asc), query_titles(&manual_desc));
+
+    // A cursor only continues the query that produced it.
+    let mut other = query_body(everything, "title", "asc", "all");
+    other["cursor"] = first["next_cursor"].clone();
+    let (status, problem) = call(&fixture, "POST", &query_uri(&fixture), Some(other)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(problem["code"], "invalid_cursor");
+}
+
+#[tokio::test]
+async fn task_query_rejects_invalid_filters_with_a_json_path() {
+    let fixture = Fixture::new().await;
+    let ok = json!({"field": "priority", "operator": "is", "value": ["high"]});
+    let too_deep = json!({"op": "and", "children": [
+        {"op": "and", "children": [
+            {"op": "and", "children": [
+                {"op": "and", "children": [
+                    {"op": "and", "children": []}
+                ]}
+            ]}
+        ]}
+    ]});
+    for (filter, path) in [
+        (
+            json!({"op": "and", "children": [ok.clone(), ok.clone(), {"field": "priority", "operator": "is", "value": ["critical"]}]}),
+            "filter.children[2].value[0]",
+        ),
+        (
+            json!({"op": "and", "children": [{"field": "priority", "operator": "contains", "value": "x"}]}),
+            "filter.children[0].operator",
+        ),
+        (
+            json!({"op": "and", "children": [{"field": "estimate", "operator": "is", "value": ["1"]}]}),
+            "filter.children[0].field",
+        ),
+        (
+            json!({"op": "and", "children": [], "mode": "all"}),
+            "filter.mode",
+        ),
+        (
+            too_deep,
+            "filter.children[0].children[0].children[0].children[0]",
+        ),
+        (
+            json!({"op": "and", "children": [{"field": "text", "operator": "contains", "value": "x".repeat(201)}]}),
+            "filter.children[0].value",
+        ),
+    ] {
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &query_uri(&fixture),
+                &fixture.owner_cookie,
+                query_body(filter, "manual", "asc", "all"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{path}"
+        );
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "application/problem+json"
+        );
+        let problem = response_json(response).await;
+        assert_eq!(problem["code"], "invalid_filter", "{path}");
+        assert_eq!(problem["path"], path);
+        assert!(
+            problem["detail"]
+                .as_str()
+                .is_some_and(|detail| !detail.is_empty())
+        );
+    }
+
+    let (status, problem) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(json!({"filter": {"op": "and", "children": []}, "order_by": "title", "order_direction": "asc"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(problem["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn task_query_resolves_me_for_the_caller_and_hides_foreign_workspaces() {
+    let fixture = Fixture::new().await;
+    let (member_id, member_cookie) = add_member(&fixture, "query-member@example.com").await;
+    for (title, assignee) in [("Mine", member_id), ("Theirs", fixture.owner_id)] {
+        let (status, _) = call(
+            &fixture,
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            Some(
+                json!({"project_id": fixture.project_id, "status_id": fixture.status_id,
+                        "title": title, "assignee_ids": [assignee.to_string()]}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+    let mine = query_body(
+        json!({"op": "and", "children": [{"field": "assignee", "operator": "is", "value": ["me"]}]}),
+        "title",
+        "asc",
+        "all",
+    );
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &query_uri(&fixture),
+            &member_cookie,
+            mine.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(query_titles(&response_json(response).await), ["Mine"]);
+    let (_, owner_page) = call(&fixture, "POST", &query_uri(&fixture), Some(mine.clone())).await;
+    assert_eq!(query_titles(&owner_page), ["Theirs"]);
+
+    let foreign = create_workspace(&fixture, "Elsewhere").await;
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{foreign}/tasks/query"),
+            &member_cookie,
+            mine,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response_json(response).await["code"],
+        "task_resource_not_found"
+    );
+}

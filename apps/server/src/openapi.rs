@@ -15,7 +15,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         orbit_platform::ConflictMetadata,
         crate::task_routes::ProblemBody,
         crate::workspace_routes::ProblemBody,
-        crate::attachment_routes::AttachmentProblem
+        crate::attachment_routes::AttachmentProblem,
+        crate::repositories::task_filter::FilterGroup
     )),
     modifiers(&ProblemDetails),
     paths(
@@ -78,6 +79,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::update_label,
         crate::task_routes::delete_label,
         crate::task_routes::list_tasks,
+        crate::task_routes::query_tasks,
         crate::task_routes::get_task,
         crate::task_routes::list_task_relations,
         crate::task_routes::create_task_relation,
@@ -429,6 +431,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "update_label"
             | "delete_label"
             | "list_tasks"
+            | "query_tasks"
             | "create_task"
             | "update_task"
             | "create_task_relation"
@@ -490,6 +493,7 @@ fn task_operation(operation_id: &str) -> bool {
             | "update_label"
             | "delete_label"
             | "list_tasks"
+            | "query_tasks"
             | "get_task"
             | "list_task_relations"
             | "create_task_relation"
@@ -517,6 +521,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "list_statuses"
             | "list_labels"
             | "list_tasks"
+            | "query_tasks"
             | "list_task_trash"
             | "list_comments"
     ) {
@@ -543,6 +548,9 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     ) || operation_id == "list_tasks"
     {
         add_code(responses, "422", "validation_failed");
+    }
+    if operation_id == "query_tasks" {
+        add_code(responses, "422", "invalid_filter");
     }
     if matches!(
         operation_id,
