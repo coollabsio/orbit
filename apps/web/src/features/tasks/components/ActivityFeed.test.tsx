@@ -68,3 +68,18 @@ test('shows a service account as the activity actor', () => {
   expect(view.getByText('Discord')).toBeTruthy()
   expect(view.queryByText('Andras')).toBeNull()
 })
+
+test('relation activity links the other task', () => {
+  const opened: string[] = []
+  const relationTask: Task = {
+    ...task,
+    activity: [{
+      id: 'relation-activity', actorId: 'user-1', text: 'Added blocker ORB-77AA',
+      related: { taskId: 'task-77aa', identifier: 'ORB-77AA' }, createdAt: '2026-09-17T10:00:00.000Z',
+    }],
+  }
+  const view = render(<ActivityFeed task={relationTask} state={{ ...state, tasks: [relationTask] }} onOpenTask={(id) => opened.push(id)} />, { wrapper: Wrapper })
+  expect(view.getByRole('listitem').textContent).toContain('Added blocker ORB-77AA')
+  fireEvent.click(view.getByRole('button', { name: 'ORB-77AA' }))
+  expect(opened).toEqual(['task-77aa'])
+})

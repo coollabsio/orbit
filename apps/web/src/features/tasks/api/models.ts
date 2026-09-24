@@ -50,6 +50,8 @@ export interface TaskActivity {
   actorName?: string
   actorServiceAccountId?: string
   text: string
+  /** The other task of a relation event; the feed links `identifier` inside `text`. */
+  related?: { taskId: string; identifier: string }
   createdAt: string
   statusId?: string
 }
@@ -91,6 +93,48 @@ export interface TaskViewState {
   tasks: Task[]
 }
 
+const RELATION_FALLBACK: Record<string, string> = {
+  'task.marked_duplicate': 'Marked as duplicate',
+  'task.unmarked_duplicate': 'Unmarked as duplicate',
+  'task.relation_added': 'Added relation',
+  'task.relation_removed': 'Removed relation',
+}
+
+function genericActivityText(action: string): string {
+  return action.split('.').reverse().join(' ').replace(/^./, (letter) => letter.toUpperCase())
+}
+
+/**
+ * Sentence for a relation audit event. `direction` is relative to the task the event is stored on:
+ * outgoing = this task is the blocker / the duplicate; incoming = the other task is.
+ */
+function relationActivity(
+  action: string,
+  metadata: Record<string, unknown>,
+  identifierOf: (taskId: string, projectId: string | undefined) => string,
+): Pick<TaskActivity, 'text' | 'related'> | null {
+  const fallback = RELATION_FALLBACK[action]
+  if (!fallback) return null
+  const taskId = typeof metadata.related_task_id === 'string' ? metadata.related_task_id : undefined
+  if (!taskId) return { text: fallback }
+  const projectId = typeof metadata.related_task_project_id === 'string' ? metadata.related_task_project_id : undefined
+  const identifier = identifierOf(taskId, projectId)
+  const title = typeof metadata.related_task_title === 'string' ? metadata.related_task_title : ''
+  const incoming = metadata.direction === 'incoming'
+  const blocks = metadata.type === 'blocks'
+  const related = { taskId, identifier }
+  switch (action) {
+    case 'task.marked_duplicate':
+      return { related, text: incoming ? `Marked ${identifier} as duplicate` : `Marked as duplicate of ${identifier}${title ? ` · ${title}` : ''}` }
+    case 'task.unmarked_duplicate':
+      return incoming ? { related, text: `Unmarked ${identifier} as duplicate` } : { text: fallback }
+    case 'task.relation_added':
+      return { related, text: blocks ? (incoming ? `Added blocker ${identifier}` : `Blocks ${identifier}`) : `Added related ${identifier}` }
+    default:
+      return { related, text: blocks ? (incoming ? `Removed blocker ${identifier}` : `No longer blocks ${identifier}`) : `Removed related ${identifier}` }
+  }
+}
+
 /** Human task id: project key + last four id characters, e.g. ORB-91C0. */
 export function taskIdentifier(taskId: string, project: Pick<ProjectRecord, 'key'> | undefined): string {
   return `${project?.key ?? 'TASK'}-${taskId.slice(-4).toUpperCase()}`
@@ -102,7 +146,12 @@ export function taskFromRecord(
   comments: CommentRecord[] = [],
   attachments: AttachmentRecord[] = [],
   activity: AuditEvent[] = [],
+  /** Every workspace project, so relation events can name tasks of other projects. */
+  projects: ProjectRecord[] = [],
 ): Task {
+  const projectFor = (projectId: string | undefined) => projectId
+    ? projects.find((item) => item.id === projectId) ?? (project?.id === projectId ? project : undefined)
+    : project
   const attachmentView = (attachment: AttachmentRecord): Attachment => ({
     id: attachment.id,
     fileName: attachment.display_name,
@@ -148,13 +197,15 @@ export function taskFromRecord(
       version: comment.version,
     })),
     activity: activity.map((event) => {
-      const metadata = event.metadata as Record<string, unknown>
+      const metadata = (event.metadata ?? {}) as Record<string, unknown>
+      const relation = relationActivity(event.action, metadata, (taskId, projectId) => taskIdentifier(taskId, projectFor(projectId)))
       return {
         id: event.id,
         actorId: event.actor_id ?? '',
         actorName: typeof metadata.actor_service_account_name === 'string' ? metadata.actor_service_account_name : undefined,
         actorServiceAccountId: typeof metadata.actor_service_account_id === 'string' ? metadata.actor_service_account_id : undefined,
-        text: event.action.split('.').map((part, index) => index === 0 ? part : part).reverse().join(' ').replace(/^./, (letter) => letter.toUpperCase()),
+        text: relation?.text ?? genericActivityText(event.action),
+        related: relation?.related,
         createdAt: event.occurred_at,
       }
     }),

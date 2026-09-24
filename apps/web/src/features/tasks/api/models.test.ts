@@ -79,3 +79,41 @@ test('task identifiers are the project key plus the last four id characters', ()
   expect(taskIdentifier('01HZYTASK00000000000091c0', project)).toBe('LCH-91C0')
   expect(taskIdentifier('task-91c0', undefined)).toBe('TASK-91C0')
 })
+
+const relationEvent = (action: string, metadata: Record<string, unknown>): AuditEvent => ({ ...activity, id: action, action, metadata })
+const other = { related_task_id: 'task-91c0', related_task_title: 'Login fails on Safari', related_task_project_id: project.id }
+
+test('relation audit events read as sentences and link the other task', () => {
+  const task = taskFromRecord(record, project, [], [], [
+    relationEvent('task.marked_duplicate', { ...other, type: 'duplicate', direction: 'outgoing' }),
+    relationEvent('task.unmarked_duplicate', { ...other, type: 'duplicate', direction: 'outgoing' }),
+    relationEvent('task.relation_added', { ...other, type: 'blocks', direction: 'incoming' }),
+    relationEvent('task.relation_added', { ...other, type: 'blocks', direction: 'outgoing' }),
+    relationEvent('task.relation_added', { ...other, type: 'related', direction: 'outgoing' }),
+    relationEvent('task.relation_removed', { ...other, type: 'related', direction: 'incoming' }),
+    relationEvent('task.relation_removed', { ...other, type: 'blocks', direction: 'incoming' }),
+    relationEvent('task.marked_duplicate', { ...other, type: 'duplicate', direction: 'incoming' }),
+  ])
+  expect(task.activity.map((item) => item.text)).toEqual([
+    'Marked as duplicate of LCH-91C0 · Login fails on Safari',
+    'Unmarked as duplicate',
+    'Added blocker LCH-91C0',
+    'Blocks LCH-91C0',
+    'Added related LCH-91C0',
+    'Removed related LCH-91C0',
+    'Removed blocker LCH-91C0',
+    'Marked LCH-91C0 as duplicate',
+  ])
+  expect(task.activity[0]!.related).toEqual({ taskId: 'task-91c0', identifier: 'LCH-91C0' })
+  expect(task.activity[1]!.related).toBeUndefined()
+})
+
+test('cross-project relation events use the other project key; missing metadata falls back to plain text', () => {
+  const api = { ...project, id: 'project-2', key: 'API' }
+  const task = taskFromRecord(record, project, [], [], [
+    relationEvent('task.relation_added', { ...other, related_task_project_id: 'project-2', type: 'blocks', direction: 'incoming' }),
+    relationEvent('task.relation_added', {}),
+    relationEvent('task.updated', {}),
+  ], [project, api])
+  expect(task.activity.map((item) => item.text)).toEqual(['Added blocker API-91C0', 'Added relation', 'Updated task'])
+})
