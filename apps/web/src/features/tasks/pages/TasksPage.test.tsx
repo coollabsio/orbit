@@ -2,9 +2,10 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { queryKeys } from '@/api/queryKeys'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
+import { PRESET_FILTERS } from '@/features/views/viewState'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { TasksPage } from './TasksPage'
 
@@ -67,7 +68,13 @@ function Location() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
-function renderAt(url: string) {
+/** Moves to another URL in the same router, as a sidebar link would. */
+function GoTo({ to }: { to: string }) {
+  const navigate = useNavigate()
+  return <button type="button" onClick={() => navigate(to)}>Go to {to}</button>
+}
+
+function renderAt(url: string, goTo?: string) {
   // retries stay on (the hooks set them), but run at once
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 }, mutations: { retry: false } } })
   client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', version: 1 }])
@@ -82,6 +89,7 @@ function renderAt(url: string) {
             <Route path="views/:viewId/:taskId" element={<TasksPage />} />
           </Routes>
           <Location />
+          {goTo ? <GoTo to={goTo} /> : null}
         </WorkspaceProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -188,4 +196,37 @@ test('a saved view opens and closes tasks under its own path', async () => {
   await page.findByRole('button', { name: 'Close task' })
   fireEvent.keyDown(document, { key: 'Escape' })
   await waitFor(() => expect(page.getByTestId('location').textContent).toBe('/views/view-1?workspace=workspace-1'))
+})
+
+test('a preset on a project page queries the preset conditions and the project', async () => {
+  const requests = serve()
+  const page = renderAt('/tasks?workspace=workspace-1&view=overdue&project=project-1')
+
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  expect(requests.some(({ method, path }) => method === 'GET' && path.endsWith('/view-preferences/preset:overdue'))).toBeTrue()
+  expect(taskQueries(requests)[0]?.body).toMatchObject({ filter: {
+    op: 'and', children: [...PRESET_FILTERS.overdue.children, { field: 'project', operator: 'is', value: ['project-1'] }],
+  } })
+})
+
+test('switching to a page whose preference is still loading shows loading, not the previous page\'s tasks', async () => {
+  let releaseOverdue: (() => void) | undefined
+  const requests = serve(({ method, path }) => method === 'GET' && path.endsWith('/view-preferences/preset:overdue')
+    ? new Promise<Response>((resolve) => { releaseOverdue = () => resolve(problem(404, 'task_resource_not_found')) })
+    : undefined)
+  const overdue = '/tasks?workspace=workspace-1&view=overdue'
+  const page = renderAt('/tasks?workspace=workspace-1', overdue)
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  const queriesBefore = taskQueries(requests).length
+
+  fireEvent.click(page.getByRole('button', { name: `Go to ${overdue}` }))
+
+  expect(await page.findByText('Loading tasks')).toBeTruthy()
+  expect(page.queryByText('Ship release')).toBeNull()
+  expect(taskQueries(requests)).toHaveLength(queriesBefore)
+
+  releaseOverdue?.()
+  expect(await page.findByText('Overdue')).toBeTruthy()
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  expect(taskQueries(requests)).toHaveLength(queriesBefore + 1)
 })

@@ -242,7 +242,9 @@ function WorkspaceTasksPage() {
   if (preference.isError) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load the settings for this page." />
   }
-  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isLoading || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
+  // `viewState.isLoading` too: after a page or view switch the disabled task query still shows the previous
+  // page's tasks as placeholder data, which must not render under the new page's title and placeholder display
+  if (viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isLoading || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
   if (detailQuery.isError) {
