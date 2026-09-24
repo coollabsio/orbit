@@ -16,6 +16,9 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
+use crate::repositories::task_filter::{
+    self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, ShowCompleted,
+};
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
     CreateTask, NotificationRecord, Page, SortOrder, TaskChanges, TaskError, TaskFilter,
@@ -888,39 +891,104 @@ async fn list_tasks(
     let instance = format!("/api/v1/workspaces/{workspace}/tasks");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    // Validate in the historical order so the same bad request keeps the same error.
+    let project_id = optional_id(query.project_id, &instance, request_id.as_ref())?;
+    let status_id = optional_id(query.status_id, &instance, request_id.as_ref())?;
+    let assignee_id = optional_id(query.assignee_id, &instance, request_id.as_ref())?;
+    let label_id = optional_id(query.label_id, &instance, request_id.as_ref())?;
+    let priority_value = query
+        .priority
+        .map(|value| priority(value, &instance, request_id.as_ref()))
+        .transpose()?;
+    let search = query
+        .search
+        .map(|value| bounded(value, 200, 200, "search", &instance, request_id.as_ref()))
+        .transpose()?;
+    let preset = match query.view.as_deref() {
+        None | Some("") => None,
+        Some(view) => Some(
+            task_filter::preset_filter(view)
+                .ok_or_else(|| validation("view", &instance, request_id.as_ref()))?,
+        ),
+    };
+    let sort = match query.sort.as_str() {
+        "position" => TaskSort::Position,
+        "priority" => TaskSort::Priority,
+        "title" => TaskSort::Title,
+        "created_at" => TaskSort::CreatedAt,
+        "updated_at" => TaskSort::UpdatedAt,
+        "due_date" => TaskSort::DueDate,
+        _ => return Err(validation("sort", &instance, request_id.as_ref())),
+    };
+    let order = match query.order.as_str() {
+        "asc" => SortOrder::Asc,
+        "desc" => SortOrder::Desc,
+        _ => return Err(validation("order", &instance, request_id.as_ref())),
+    };
+    // view=mine|my_week always meant the caller; an explicit assignee_id was ignored with them.
+    let personal_view = matches!(query.view.as_deref(), Some("mine" | "my_week"));
+    let mut children = Vec::new();
+    if let Some(id) = project_id {
+        children.push(legacy_condition(
+            FilterField::Project,
+            FilterOperator::Is,
+            serde_json::json!([id.to_string()]),
+        ));
+    }
+    if let Some(id) = status_id {
+        // A bare id keeps the exact-status meaning (see task_filter::push_status).
+        children.push(legacy_condition(
+            FilterField::Status,
+            FilterOperator::Is,
+            serde_json::json!([id.to_string()]),
+        ));
+    }
+    if let Some(value) = priority_value {
+        children.push(legacy_condition(
+            FilterField::Priority,
+            FilterOperator::Is,
+            serde_json::json!([value]),
+        ));
+    }
+    if let Some(id) = assignee_id.filter(|_| !personal_view) {
+        children.push(legacy_condition(
+            FilterField::Assignee,
+            FilterOperator::Is,
+            serde_json::json!([id.to_string()]),
+        ));
+    }
+    if query.unassigned {
+        children.push(legacy_condition(
+            FilterField::Assignee,
+            FilterOperator::IsEmpty,
+            Value::Null,
+        ));
+    }
+    if let Some(id) = label_id {
+        children.push(legacy_condition(
+            FilterField::Label,
+            FilterOperator::IncludesAny,
+            serde_json::json!([id.to_string()]),
+        ));
+    }
+    // An empty search matched everything, so it adds no condition.
+    if let Some(text) = search.filter(|text| !text.is_empty()) {
+        children.push(legacy_condition(
+            FilterField::Text,
+            FilterOperator::Contains,
+            Value::String(text),
+        ));
+    }
+    let mut groups: Vec<FilterGroup> = preset.into_iter().collect();
+    groups.push(FilterGroup {
+        op: GroupOp::And,
+        children,
+    });
     let filter = TaskFilter {
-        project_id: optional_id(query.project_id, &instance, request_id.as_ref())?,
-        status_id: optional_id(query.status_id, &instance, request_id.as_ref())?,
-        assignee_id: optional_id(query.assignee_id, &instance, request_id.as_ref())?,
-        unassigned: query.unassigned,
-        label_id: optional_id(query.label_id, &instance, request_id.as_ref())?,
-        priority: query
-            .priority
-            .map(|value| priority(value, &instance, request_id.as_ref()))
-            .transpose()?,
-        search: query
-            .search
-            .map(|value| bounded(value, 200, 200, "search", &instance, request_id.as_ref()))
-            .transpose()?,
-        view: match query.view.as_deref() {
-            None | Some("") => None,
-            Some("mine") | Some("overdue") | Some("due_soon") | Some("current_week")
-            | Some("my_week") => query.view,
-            _ => return Err(validation("view", &instance, request_id.as_ref())),
-        },
-        sort: match query.sort.as_str() {
-            "position" => TaskSort::Position,
-            "priority" => TaskSort::Priority,
-            "title" => TaskSort::Title,
-            "created_at" => TaskSort::CreatedAt,
-            "updated_at" => TaskSort::UpdatedAt,
-            _ => return Err(validation("sort", &instance, request_id.as_ref())),
-        },
-        order: match query.order.as_str() {
-            "asc" => SortOrder::Asc,
-            "desc" => SortOrder::Desc,
-            _ => return Err(validation("order", &instance, request_id.as_ref())),
-        },
+        tree: task_filter::and_groups(groups),
+        show_completed: ShowCompleted::All,
+        sort,
+        order,
     };
     state
         .tasks
@@ -930,10 +998,19 @@ async fn list_tasks(
             &filter,
             query.cursor.as_deref(),
             query.limit,
+            TimestampMillis::now(),
         )
         .await
         .map(Json)
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+fn legacy_condition(field: FilterField, operator: FilterOperator, value: Value) -> FilterNode {
+    FilterNode::Condition(Condition {
+        field,
+        operator,
+        value,
+    })
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
@@ -1978,6 +2055,17 @@ fn task_problem(
         TaskError::VersionConflict { current } => {
             ApiError::version_conflict(*current, instance, request_id)
         }
+        TaskError::InvalidFilter { path, message } => {
+            ApiError::invalid_filter(path, message, instance, request_id)
+        }
+        TaskError::Forbidden => ApiError::new(
+            StatusCode::FORBIDDEN,
+            "task_action_forbidden",
+            "Action forbidden",
+            "You do not have permission to change this resource.",
+            instance,
+            request_id,
+        ),
         TaskError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -2018,6 +2106,10 @@ pub(crate) struct ProblemBody {
     request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     conflict: Option<ConflictBody>,
+    /// JSON path of the first invalid filter node, e.g. `filter.children[2].value`. Only set
+    /// for `invalid_filter`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -2060,6 +2152,7 @@ impl ApiError {
                     .map(|Extension(value)| value.as_str().to_owned())
                     .unwrap_or_else(|| "unknown".to_owned()),
                 conflict: None,
+                path: None,
             }),
         }
     }
@@ -2107,6 +2200,24 @@ impl ApiError {
             refresh: None,
             field: Some(field),
         });
+        error
+    }
+
+    fn invalid_filter(
+        path: String,
+        detail: &'static str,
+        instance: String,
+        request_id: Option<&Extension<RequestId>>,
+    ) -> Self {
+        let mut error = Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_filter",
+            "Invalid filter",
+            detail,
+            instance,
+            request_id,
+        );
+        error.body.path = Some(path);
         error
     }
 }

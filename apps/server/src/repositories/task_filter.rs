@@ -1,12 +1,14 @@
 //! The task view contract (`ViewState`): filter trees, display options, validation that reports
 //! the JSON path of the first bad node, and the built-in preset trees.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use orbit_platform::{Id, TimestampMillis};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use sqlx::{QueryBuilder, Sqlite};
 use utoipa::ToSchema;
 
 /// Groups may nest this many levels below the root group (the root is level 0).
@@ -771,6 +773,363 @@ fn condition(field: FilterField, operator: FilterOperator, value: Value) -> Filt
     })
 }
 
+/// Request context for compiling a filter: `me` is `actor_id`, and relative dates and the
+/// `show_completed` window resolve against `now` (UTC).
+#[derive(Clone, Copy, Debug)]
+pub struct FilterContext {
+    pub actor_id: Id,
+    pub now: TimestampMillis,
+}
+
+/// An assignee that is still an active (member, not suspended) user, as in `unassigned`.
+const ACTIVE_ASSIGNEE: &str = "SELECT 1 FROM task_assignees \
+     JOIN memberships ON memberships.id = task_assignees.membership_id \
+     JOIN users ON users.id = task_assignees.user_id \
+     WHERE task_assignees.task_id = tasks.id AND memberships.workspace_id = tasks.workspace_id \
+     AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL";
+const TASK_LABEL: &str = "SELECT 1 FROM task_labels WHERE task_labels.task_id = tasks.id";
+const TASK_STATUS: &str = "SELECT 1 FROM task_statuses WHERE task_statuses.id = tasks.status_id";
+const DONE_STATUS: &str = "EXISTS (SELECT 1 FROM task_statuses \
+     WHERE task_statuses.id = tasks.status_id \
+     AND task_statuses.category IN ('completed', 'cancelled', 'duplicate'))";
+
+/// Appends ` AND (<compiled tree>)` to `query`. Every value is bound. The tree must already be
+/// validated; an unexpected node fails closed (`0 = 1`).
+pub fn push_filter(query: &mut QueryBuilder<'_, Sqlite>, group: &FilterGroup, ctx: &FilterContext) {
+    query.push(" AND (");
+    push_group(query, group, ctx);
+    query.push(")");
+}
+
+/// Appends the `show_completed` restriction; `All` adds nothing.
+pub fn push_show_completed(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    show: ShowCompleted,
+    now: TimestampMillis,
+) {
+    let window = match show {
+        ShowCompleted::All => return,
+        ShowCompleted::None => {
+            query.push(" AND NOT ").push(DONE_STATUS);
+            return;
+        }
+        ShowCompleted::PastWeek => 7 * DAY_MS,
+        ShowCompleted::PastMonth => 30 * DAY_MS,
+    };
+    query
+        .push(" AND (NOT ")
+        .push(DONE_STATUS)
+        .push(" OR tasks.completed_at >= ")
+        .push_bind(now.as_millis() - window)
+        .push(")");
+}
+
+fn push_group(query: &mut QueryBuilder<'_, Sqlite>, group: &FilterGroup, ctx: &FilterContext) {
+    if group.children.is_empty() {
+        query.push("1 = 1");
+        return;
+    }
+    let joiner = match group.op {
+        GroupOp::And => " AND ",
+        GroupOp::Or => " OR ",
+    };
+    for (index, child) in group.children.iter().enumerate() {
+        if index > 0 {
+            query.push(joiner);
+        }
+        query.push("(");
+        match child {
+            FilterNode::Group(inner) => push_group(query, inner, ctx),
+            FilterNode::Condition(condition) => push_condition(query, condition, ctx),
+        }
+        query.push(")");
+    }
+}
+
+fn push_condition(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    condition: &Condition,
+    ctx: &FilterContext,
+) {
+    use FilterField as F;
+    use FilterOperator as O;
+    let negated = matches!(condition.operator, O::IsNot | O::Excludes);
+    let value = &condition.value;
+    match (condition.field, condition.operator) {
+        (F::Status, O::Is | O::IsNot) => push_status(query, value, negated),
+        (F::StatusCategory, O::Is | O::IsNot) => push_exists(
+            query,
+            negated,
+            TASK_STATUS,
+            " AND task_statuses.category IN ",
+            values(value, ctx, false),
+        ),
+        (F::Assignee, O::Is | O::IsNot) => push_exists(
+            query,
+            negated,
+            ACTIVE_ASSIGNEE,
+            " AND task_assignees.user_id IN ",
+            values(value, ctx, true),
+        ),
+        (F::Assignee, O::IsEmpty) => {
+            query.push("NOT EXISTS (").push(ACTIVE_ASSIGNEE).push(")");
+        }
+        (F::Assignee, O::IsNotEmpty) => {
+            query.push("EXISTS (").push(ACTIVE_ASSIGNEE).push(")");
+        }
+        (F::Creator, O::Is | O::IsNot) => {
+            push_column_in(query, "tasks.creator_id", negated, values(value, ctx, true));
+        }
+        (F::Label, O::IncludesAny | O::Excludes) => push_exists(
+            query,
+            negated,
+            TASK_LABEL,
+            " AND task_labels.label_id IN ",
+            values(value, ctx, false),
+        ),
+        (F::Label, O::IncludesAll) => push_all_labels(query, values(value, ctx, false)),
+        (F::Label, O::IsEmpty) => {
+            query.push("NOT EXISTS (").push(TASK_LABEL).push(")");
+        }
+        (F::Label, O::IsNotEmpty) => {
+            query.push("EXISTS (").push(TASK_LABEL).push(")");
+        }
+        (F::Priority, O::Is | O::IsNot) => {
+            push_column_in(query, "tasks.priority", negated, values(value, ctx, false));
+        }
+        (F::Project, O::Is | O::IsNot) => {
+            push_column_in(
+                query,
+                "tasks.project_id",
+                negated,
+                values(value, ctx, false),
+            );
+        }
+        (F::DueDate, O::IsEmpty) => {
+            query.push("tasks.due_at IS NULL");
+        }
+        (F::DueDate, O::IsNotEmpty) => {
+            query.push("tasks.due_at IS NOT NULL");
+        }
+        (F::DueDate, O::Before | O::After | O::Between) => {
+            push_date(query, "tasks.due_at", condition, ctx.now);
+        }
+        (F::CreatedAt, O::Before | O::After) => {
+            push_date(query, "tasks.created_at", condition, ctx.now);
+        }
+        (F::UpdatedAt, O::Before | O::After) => {
+            push_date(query, "tasks.updated_at", condition, ctx.now);
+        }
+        (F::Text, O::Contains) => push_text(query, value),
+        _ => {
+            query.push("0 = 1");
+        }
+    }
+}
+
+/// The condition's string values, deduplicated; `me` becomes the caller when `resolve_me`.
+fn values(value: &Value, ctx: &FilterContext, resolve_me: bool) -> Vec<String> {
+    let unique: BTreeSet<String> = value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|item| {
+            if resolve_me && item == "me" {
+                ctx.actor_id.to_string()
+            } else {
+                item.to_owned()
+            }
+        })
+        .collect();
+    unique.into_iter().collect()
+}
+
+/// Pushes `(?, ?, …)`.
+fn push_list(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
+    let mut list = query.separated(", ");
+    list.push_unseparated("(");
+    for value in values {
+        list.push_bind(value);
+    }
+    list.push_unseparated(")");
+}
+
+fn push_exists(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    negated: bool,
+    subquery: &'static str,
+    column_in: &'static str,
+    values: Vec<String>,
+) {
+    if values.is_empty() {
+        query.push(if negated { "1 = 1" } else { "0 = 1" });
+        return;
+    }
+    query
+        .push(if negated { "NOT EXISTS (" } else { "EXISTS (" })
+        .push(subquery)
+        .push(column_in);
+    push_list(query, values);
+    query.push(")");
+}
+
+fn push_column_in(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    column: &'static str,
+    negated: bool,
+    values: Vec<String>,
+) {
+    if values.is_empty() {
+        query.push(if negated { "1 = 1" } else { "0 = 1" });
+        return;
+    }
+    if negated {
+        query
+            .push("(")
+            .push(column)
+            .push(" IS NULL OR ")
+            .push(column)
+            .push(" NOT IN ");
+        push_list(query, values);
+        query.push(")");
+    } else {
+        query.push(column).push(" IN ");
+        push_list(query, values);
+    }
+}
+
+fn push_all_labels(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
+    if values.is_empty() {
+        query.push("0 = 1");
+        return;
+    }
+    let count = i64::try_from(values.len()).unwrap_or(i64::MAX);
+    query.push(
+        "(SELECT COUNT(DISTINCT task_labels.label_id) FROM task_labels \
+         WHERE task_labels.task_id = tasks.id AND task_labels.label_id IN ",
+    );
+    push_list(query, values);
+    query.push(") = ").push_bind(count);
+}
+
+/// Status values are `category:name` keys (names compared lower-cased and trimmed, like the
+/// web's `statusKeyOf`; SQLite `lower()` folds ASCII only) or bare status ids.
+fn push_status(query: &mut QueryBuilder<'_, Sqlite>, value: &Value, negated: bool) {
+    let mut keys = BTreeSet::new();
+    let mut ids = BTreeSet::new();
+    for item in value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        match item.split_once(':') {
+            Some((category, name)) => {
+                keys.insert(format!("{category}:{}", name.trim().to_ascii_lowercase()));
+            }
+            None => {
+                ids.insert(item.to_owned());
+            }
+        }
+    }
+    if keys.is_empty() && ids.is_empty() {
+        query.push(if negated { "1 = 1" } else { "0 = 1" });
+        return;
+    }
+    // Bare ids compare `tasks.status_id` directly so the legacy `status_id=` filter keeps
+    // using the index.
+    query.push(if negated { "NOT (" } else { "(" });
+    let has_ids = !ids.is_empty();
+    if !keys.is_empty() {
+        query
+            .push("EXISTS (")
+            .push(TASK_STATUS)
+            .push(" AND (task_statuses.category || ':' || lower(trim(task_statuses.name))) IN ");
+        push_list(query, keys.into_iter().collect());
+        query.push(")");
+        if has_ids {
+            query.push(" OR ");
+        }
+    }
+    if has_ids {
+        query.push("tasks.status_id IN ");
+        push_list(query, ids.into_iter().collect());
+    }
+    query.push(")");
+}
+
+/// `before D`: `< D`; `after D`: `>= D + 1 day`; `between [a, b]`: `>= a AND < b + 1 day`.
+fn push_date(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    column: &'static str,
+    condition: &Condition,
+    now: TimestampMillis,
+) {
+    let start_of = |day: i64| day.saturating_mul(DAY_MS);
+    let bounds = match condition.operator {
+        FilterOperator::Before => parse_date_value(&condition.value, "value")
+            .ok()
+            .map(|date| (None, Some(start_of(resolve_day(date, now))))),
+        FilterOperator::After => parse_date_value(&condition.value, "value")
+            .ok()
+            .map(|date| (Some(start_of(resolve_day(date, now) + 1)), None)),
+        FilterOperator::Between => {
+            parse_date_range(&condition.value, "value")
+                .ok()
+                .map(|(start, end)| {
+                    (
+                        Some(start_of(resolve_day(start, now))),
+                        Some(start_of(resolve_day(end, now) + 1)),
+                    )
+                })
+        }
+        _ => None,
+    };
+    match bounds {
+        Some((Some(from), Some(until))) => {
+            query
+                .push(column)
+                .push(" >= ")
+                .push_bind(from)
+                .push(" AND ")
+                .push(column)
+                .push(" < ")
+                .push_bind(until);
+        }
+        Some((Some(from), None)) => {
+            query.push(column).push(" >= ").push_bind(from);
+        }
+        Some((None, Some(until))) => {
+            query.push(column).push(" < ").push_bind(until);
+        }
+        Some((None, None)) | None => {
+            query.push("0 = 1");
+        }
+    }
+}
+
+fn push_text(query: &mut QueryBuilder<'_, Sqlite>, value: &Value) {
+    let Some(text) = value.as_str().filter(|text| !text.is_empty()) else {
+        query.push("0 = 1");
+        return;
+    };
+    let pattern = format!("%{}%", escape_like(&text.to_lowercase()));
+    query
+        .push("LOWER(tasks.title) LIKE ")
+        .push_bind(pattern.clone())
+        .push(" ESCAPE '\\' OR LOWER(tasks.description) LIKE ")
+        .push_bind(pattern)
+        .push(" ESCAPE '\\'");
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -1331,5 +1690,74 @@ mod tests {
                 day
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod sql_tests {
+    use serde_json::json;
+    use sqlx::{QueryBuilder, Sqlite};
+
+    use super::*;
+
+    fn compile(tree: Value) -> String {
+        let group = parse_filter(&tree).unwrap();
+        let mut query = QueryBuilder::<Sqlite>::new("SELECT tasks.id FROM tasks WHERE 1 = 1");
+        push_filter(
+            &mut query,
+            &group,
+            &FilterContext {
+                actor_id: Id::new_v7(),
+                now: TimestampMillis::from_millis(0),
+            },
+        );
+        query.sql().to_owned()
+    }
+
+    #[test]
+    fn values_are_bound_never_interpolated() {
+        let sql = compile(json!({ "op": "and", "children": [
+            { "field": "text", "operator": "contains", "value": "x' OR 1=1 --" },
+            { "field": "status", "operator": "is", "value": ["started:it's"] }
+        ] }));
+        assert!(!sql.contains("1=1"), "{sql}");
+        assert!(!sql.contains("it's"), "{sql}");
+        assert_eq!(sql.matches('?').count(), 3, "{sql}");
+    }
+
+    #[test]
+    fn empty_groups_match_everything_and_children_are_parenthesised() {
+        assert_eq!(
+            compile(json!({ "op": "and", "children": [] })),
+            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND (1 = 1)"
+        );
+        assert_eq!(
+            compile(json!({ "op": "or", "children": [
+                { "field": "priority", "operator": "is", "value": ["high"] },
+                { "op": "and", "children": [] }
+            ] })),
+            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND ((tasks.priority IN (?)) OR (1 = 1))"
+        );
+    }
+
+    #[test]
+    fn show_completed_all_adds_nothing() {
+        let mut query = QueryBuilder::<Sqlite>::new("SELECT 1");
+        push_show_completed(
+            &mut query,
+            ShowCompleted::All,
+            TimestampMillis::from_millis(0),
+        );
+        assert_eq!(query.sql(), "SELECT 1");
+        push_show_completed(
+            &mut query,
+            ShowCompleted::PastWeek,
+            TimestampMillis::from_millis(0),
+        );
+        assert!(
+            query.sql().contains("tasks.completed_at >= ?"),
+            "{}",
+            query.sql()
+        );
     }
 }

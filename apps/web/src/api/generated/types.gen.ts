@@ -661,6 +661,11 @@ export type TaskProblem = {
     conflict?: null | TaskConflict;
     detail: string;
     instance: string;
+    /**
+     * JSON path of the first invalid filter node, e.g. `filter.children[2].value`. Only set
+     * for `invalid_filter`.
+     */
+    path?: string | null;
     request_id: string;
     status: number;
     title: string;

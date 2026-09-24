@@ -2,10 +2,12 @@ use orbit_domain::{DEFAULT_STATUSES, StatusCategory};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
 
@@ -217,6 +219,8 @@ pub enum TaskSort {
     Title,
     CreatedAt,
     UpdatedAt,
+    /// Undated tasks sort last in both directions.
+    DueDate,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -227,14 +231,10 @@ pub enum SortOrder {
 
 #[derive(Clone, Debug)]
 pub struct TaskFilter {
-    pub project_id: Option<Id>,
-    pub status_id: Option<Id>,
-    pub assignee_id: Option<Id>,
-    pub unassigned: bool,
-    pub label_id: Option<Id>,
-    pub priority: Option<String>,
-    pub search: Option<String>,
-    pub view: Option<String>,
+    /// The complete filter: project scope, preset and user conditions (or converted legacy
+    /// query parameters). `tasks()` validates it.
+    pub tree: FilterGroup,
+    pub show_completed: ShowCompleted,
     pub sort: TaskSort,
     pub order: SortOrder,
 }
@@ -263,8 +263,21 @@ pub enum TaskError {
     InvalidCursor,
     #[error("stale version")]
     VersionConflict { current: Box<Value> },
+    #[error("filter is invalid at {path}: {message}")]
+    InvalidFilter { path: String, message: &'static str },
+    #[error("the caller may not change this resource")]
+    Forbidden,
     #[error("task repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
+}
+
+impl From<FilterError> for TaskError {
+    fn from(error: FilterError) -> Self {
+        Self::InvalidFilter {
+            path: error.path,
+            message: error.message,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1047,6 +1060,8 @@ impl TaskRepository {
 }
 
 impl TaskRepository {
+    /// Lists live tasks that match `filter`. `now` resolves relative dates and the
+    /// `show_completed` window; handlers pass `TimestampMillis::now()`.
     pub async fn tasks(
         &self,
         workspace_id: Id,
@@ -1054,8 +1069,10 @@ impl TaskRepository {
         filter: &TaskFilter,
         cursor: Option<&str>,
         limit: usize,
+        now: TimestampMillis,
     ) -> Result<Page<TaskRecord>, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
+        task_filter::validate_filter(&filter.tree)?;
         let fingerprint = task_fingerprint(workspace_id, filter);
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(format!(
@@ -1064,88 +1081,19 @@ impl TaskRepository {
         ));
         query.push_bind(workspace_id.to_string());
         query.push(" AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL");
-        if let Some(project_id) = filter.project_id {
-            query
-                .push(" AND tasks.project_id = ")
-                .push_bind(project_id.to_string());
-        }
-        if let Some(status_id) = filter.status_id {
-            query
-                .push(" AND tasks.status_id = ")
-                .push_bind(status_id.to_string());
-        }
-        if let Some(priority) = &filter.priority {
-            query
-                .push(" AND tasks.priority = ")
-                .push_bind(priority.clone());
-        }
-        if matches!(filter.view.as_deref(), Some("mine") | Some("my_week"))
-            || filter.assignee_id.is_some()
-        {
-            let assignee_id = if matches!(filter.view.as_deref(), Some("mine") | Some("my_week")) {
-                actor_id
-            } else {
-                filter.assignee_id.unwrap()
-            };
-            query
-                .push(" AND EXISTS (SELECT 1 FROM task_assignees JOIN memberships ON memberships.id = task_assignees.membership_id JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id AND memberships.workspace_id = tasks.workspace_id AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL AND task_assignees.user_id = ")
-                .push_bind(assignee_id.to_string())
-                .push(")");
-        }
-        if filter.unassigned {
-            query.push(" AND NOT EXISTS (SELECT 1 FROM task_assignees JOIN memberships ON memberships.id = task_assignees.membership_id JOIN users ON users.id = task_assignees.user_id WHERE task_assignees.task_id = tasks.id AND memberships.workspace_id = tasks.workspace_id AND memberships.user_id = task_assignees.user_id AND users.suspended_at IS NULL)");
-        }
-        if matches!(
-            filter.view.as_deref(),
-            Some("overdue") | Some("due_soon") | Some("current_week") | Some("my_week")
-        ) {
-            let day_ms = 86_400_000;
-            let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;
-            query.push(
-                " AND tasks.due_at IS NOT NULL AND EXISTS (SELECT 1 FROM task_statuses WHERE task_statuses.id = tasks.status_id AND task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate'))",
-            );
-            if filter.view.as_deref() == Some("overdue") {
-                query
-                    .push(" AND tasks.due_at < ")
-                    .push_bind(start_of_utc_day);
-            } else if filter.view.as_deref() == Some("due_soon") {
-                query
-                    .push(" AND tasks.due_at >= ")
-                    .push_bind(start_of_utc_day)
-                    .push(" AND tasks.due_at < ")
-                    .push_bind(start_of_utc_day + 7 * day_ms);
-            } else {
-                let days_since_epoch = start_of_utc_day / day_ms;
-                let monday = start_of_utc_day - (days_since_epoch + 3).rem_euclid(7) * day_ms;
-                query
-                    .push(" AND tasks.due_at >= ")
-                    .push_bind(monday)
-                    .push(" AND tasks.due_at < ")
-                    .push_bind(monday + 7 * day_ms);
-            }
-        }
-        if let Some(label_id) = filter.label_id {
-            query
-                .push(" AND EXISTS (SELECT 1 FROM task_labels WHERE task_labels.task_id = tasks.id AND task_labels.label_id = ")
-                .push_bind(label_id.to_string())
-                .push(")");
-        }
-        if let Some(search) = &filter.search {
-            let pattern = format!("%{}%", escape_like(&search.to_lowercase()));
-            query
-                .push(" AND (LOWER(tasks.title) LIKE ")
-                .push_bind(pattern.clone())
-                .push(" ESCAPE '\\' OR LOWER(tasks.description) LIKE ")
-                .push_bind(pattern)
-                .push(" ESCAPE '\\')");
-        }
+        task_filter::push_filter(
+            &mut query,
+            &filter.tree,
+            &task_filter::FilterContext { actor_id, now },
+        );
+        task_filter::push_show_completed(&mut query, filter.show_completed, now);
+        let column = task_sort_column(&filter.sort, &filter.order);
+        let (operator, direction) = if filter.order == SortOrder::Asc {
+            (">", " ASC")
+        } else {
+            ("<", " DESC")
+        };
         if let Some((raw_value, id)) = after {
-            let operator = if filter.order == SortOrder::Asc {
-                ">"
-            } else {
-                "<"
-            };
-            let column = task_sort_column(&filter.sort);
             query
                 .push(" AND (")
                 .push(column)
@@ -1162,14 +1110,9 @@ impl TaskRepository {
                 .push_bind(id.to_string())
                 .push("))");
         }
-        let direction = if filter.order == SortOrder::Asc {
-            " ASC"
-        } else {
-            " DESC"
-        };
         query
             .push(" ORDER BY ")
-            .push(task_sort_column(&filter.sort))
+            .push(column)
             .push(direction)
             .push(", tasks.id")
             .push(direction);
@@ -1180,19 +1123,8 @@ impl TaskRepository {
         for row in rows {
             tasks.push(task_from_row(self.database.pool(), row).await?);
         }
-        let has_more = tasks.len() > limit;
-        tasks.truncate(limit);
-        let next_cursor = if has_more {
-            tasks
-                .last()
-                .map(|task| encode_cursor(&fingerprint, task_cursor_key(task, filter)))
-                .transpose()?
-        } else {
-            None
-        };
-        Ok(Page {
-            items: tasks,
-            next_cursor,
+        finish_page(tasks, limit, &fingerprint, |task| {
+            task_cursor_key(task, filter)
         })
     }
 
@@ -2425,27 +2357,24 @@ fn cursor_i64_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(i64
 }
 
 fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
+    // Hash the tree: a 50-condition filter would not fit the 8 KiB cursor limit.
+    let tree = serde_json::to_vec(&filter.tree).unwrap_or_default();
+    let digest: String = Sha256::digest(&tree)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     format!(
-        "tasks:w={workspace_id}:p={}:s={}:a={}:u={}:l={}:r={}:q={}:v={}:sort={:?}:order={:?}",
-        filter
-            .project_id
-            .map_or_else(String::new, |id| id.to_string()),
-        filter
-            .status_id
-            .map_or_else(String::new, |id| id.to_string()),
-        filter
-            .assignee_id
-            .map_or_else(String::new, |id| id.to_string()),
-        filter.unassigned,
-        filter
-            .label_id
-            .map_or_else(String::new, |id| id.to_string()),
-        filter.priority.as_deref().unwrap_or(""),
-        filter.search.as_deref().unwrap_or(""),
-        filter.view.as_deref().unwrap_or(""),
-        filter.sort,
-        filter.order,
+        "tasks:w={workspace_id}:f={digest}:c={:?}:sort={:?}:order={:?}",
+        filter.show_completed, filter.sort, filter.order,
     )
+}
+
+/// The COALESCE value that keeps undated tasks after dated ones in either direction.
+fn due_date_sentinel(order: &SortOrder) -> i64 {
+    match order {
+        SortOrder::Asc => i64::MAX,
+        SortOrder::Desc => -i64::MAX,
+    }
 }
 
 fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
@@ -2455,19 +2384,26 @@ fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
         TaskSort::Title => task.title.clone(),
         TaskSort::CreatedAt => task.created_at.as_millis().to_string(),
         TaskSort::UpdatedAt => task.updated_at.as_millis().to_string(),
+        TaskSort::DueDate => task
+            .due_at
+            .map_or(due_date_sentinel(&filter.order), TimestampMillis::as_millis)
+            .to_string(),
     };
     vec![primary, task.id.to_string()]
 }
 
-fn task_sort_column(sort: &TaskSort) -> &'static str {
-    match sort {
-        TaskSort::Position => "tasks.position",
-        TaskSort::Priority => {
+fn task_sort_column(sort: &TaskSort, order: &SortOrder) -> &'static str {
+    match (sort, order) {
+        (TaskSort::Position, _) => "tasks.position",
+        (TaskSort::Priority, _) => {
             "CASE tasks.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
         }
-        TaskSort::Title => "tasks.title",
-        TaskSort::CreatedAt => "tasks.created_at",
-        TaskSort::UpdatedAt => "tasks.updated_at",
+        (TaskSort::Title, _) => "tasks.title",
+        (TaskSort::CreatedAt, _) => "tasks.created_at",
+        (TaskSort::UpdatedAt, _) => "tasks.updated_at",
+        // The literals are due_date_sentinel's values.
+        (TaskSort::DueDate, SortOrder::Asc) => "COALESCE(tasks.due_at, 9223372036854775807)",
+        (TaskSort::DueDate, SortOrder::Desc) => "COALESCE(tasks.due_at, -9223372036854775807)",
     }
 }
 
@@ -2480,7 +2416,11 @@ fn push_cursor_value<'a>(
         TaskSort::Title => {
             query.push_bind(value.to_owned());
         }
-        TaskSort::Position | TaskSort::Priority | TaskSort::CreatedAt | TaskSort::UpdatedAt => {
+        TaskSort::Position
+        | TaskSort::Priority
+        | TaskSort::CreatedAt
+        | TaskSort::UpdatedAt
+        | TaskSort::DueDate => {
             query.push_bind(value.parse::<i64>().map_err(|_| TaskError::InvalidCursor)?);
         }
     }
@@ -2495,13 +2435,6 @@ fn priority_rank(priority: &str) -> i64 {
         "low" => 3,
         _ => 4,
     }
-}
-
-fn escape_like(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
 }
 
 async fn require_access(

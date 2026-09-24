@@ -14356,6 +14356,13 @@
           "instance": {
             "type": "string"
           },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "JSON path of the first invalid filter node, e.g. `filter.children[2].value`. Only set\nfor `invalid_filter`."
+          },
           "request_id": {
             "type": "string"
           },
