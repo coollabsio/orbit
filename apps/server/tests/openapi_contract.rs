@@ -513,3 +513,17 @@ fn task_updates_document_duplicate_of_id() {
         );
     }
 }
+
+#[test]
+fn task_records_document_duplicate_and_blocked_fields() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let record = &document["components"]["schemas"]["TaskRecord"];
+    let required = record["required"].as_array().unwrap();
+    assert!(required.contains(&serde_json::json!("duplicate_of")));
+    assert!(required.contains(&serde_json::json!("blocked")));
+    assert_eq!(record["properties"]["blocked"]["type"], "boolean");
+    assert_eq!(
+        document["components"]["schemas"]["TaskRef"]["required"],
+        serde_json::json!(["id", "project_id", "title"])
+    );
+}

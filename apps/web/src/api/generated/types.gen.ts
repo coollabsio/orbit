@@ -454,6 +454,10 @@ export type PageStatusRecord = {
 export type PageTaskRecord = {
     items: Array<{
         assignee_ids: Array<string>;
+        /**
+         * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
+         */
+        blocked: boolean;
         created_at: string;
         creator_id?: string | null;
         creator_service_account_id?: string | null;
@@ -462,6 +466,7 @@ export type PageTaskRecord = {
         description: string;
         due_at?: string | null;
         due_start_at?: string | null;
+        duplicate_of: null | TaskRef;
         id: string;
         label_ids: Array<string>;
         position: number;
@@ -649,6 +654,10 @@ export type TaskProblem = {
 
 export type TaskRecord = {
     assignee_ids: Array<string>;
+    /**
+     * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
+     */
+    blocked: boolean;
     created_at: string;
     creator_id?: string | null;
     creator_service_account_id?: string | null;
@@ -657,6 +666,7 @@ export type TaskRecord = {
     description: string;
     due_at?: string | null;
     due_start_at?: string | null;
+    duplicate_of: null | TaskRef;
     id: string;
     label_ids: Array<string>;
     position: number;
@@ -668,6 +678,15 @@ export type TaskRecord = {
     updated_at: string;
     version: number;
     workspace_id: string;
+};
+
+/**
+ * A task reference small enough to embed; clients build the display identifier themselves.
+ */
+export type TaskRef = {
+    id: string;
+    project_id: string;
+    title: string;
 };
 
 export type TaskUpdateBody = {

@@ -3017,6 +3017,162 @@ async fn github_state_changes_move_duplicates_out_and_drop_the_relation() {
     assert!(metadata["actor_service_account_id"].is_string());
 }
 
+#[tokio::test]
+async fn task_records_expose_the_visible_duplicate_target() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Duplicate").await;
+    let canonical = fixture.create_task("Canonical").await;
+    assert!(task["duplicate_of"].is_null());
+    assert_eq!(task["blocked"], false);
+    let uri = task_uri(&fixture, id_of(&task));
+    let expected =
+        json!({"id": id_of(&canonical), "project_id": fixture.project_id, "title": "Canonical"});
+
+    let (status, marked) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(marked["duplicate_of"], expected);
+    let (_, fetched) = call(&fixture, "GET", &uri, None).await;
+    assert_eq!(fetched["duplicate_of"], expected);
+    let (_, listed) = call(
+        &fixture,
+        "GET",
+        &format!(
+            "/api/v1/workspaces/{}/tasks?project_id={}",
+            fixture.workspace_id, fixture.project_id
+        ),
+        None,
+    )
+    .await;
+    let items = listed["items"].as_array().unwrap();
+    let listed_task = items.iter().find(|item| item["id"] == task["id"]).unwrap();
+    assert_eq!(listed_task["duplicate_of"], expected);
+    let listed_canonical = items
+        .iter()
+        .find(|item| item["id"] == canonical["id"])
+        .unwrap();
+    assert!(listed_canonical["duplicate_of"].is_null());
+
+    let canonical_uri = task_uri(&fixture, id_of(&canonical));
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{canonical_uri}?expected_version=0"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, hidden) = call(&fixture, "GET", &uri, None).await;
+    assert!(
+        hidden["duplicate_of"].is_null(),
+        "a trashed target is hidden"
+    );
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("{canonical_uri}/restore"),
+        Some(json!({"expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, back) = call(&fixture, "GET", &uri, None).await;
+    assert_eq!(back["duplicate_of"], expected);
+
+    let (status, unmarked) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "duplicate_of_id": null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(unmarked["duplicate_of"].is_null());
+}
+
+#[tokio::test]
+async fn blocked_flag_follows_open_blockers() {
+    let fixture = Fixture::new().await;
+    let blocker = fixture.create_task("Blocker").await;
+    let blocked = fixture.create_task("Blocked").await;
+    sqlx::query("INSERT INTO task_relations (id, workspace_id, task_id, related_task_id, type, created_at) VALUES (?, ?, ?, ?, 'blocks', 0)")
+        .bind(Id::new_v7().to_string())
+        .bind(&fixture.workspace_id)
+        .bind(id_of(&blocker))
+        .bind(id_of(&blocked))
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let blocked_uri = task_uri(&fixture, id_of(&blocked));
+    let blocker_uri = task_uri(&fixture, id_of(&blocker));
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+
+    assert_eq!(
+        call(&fixture, "GET", &blocked_uri, None).await.1["blocked"],
+        true
+    );
+    assert_eq!(
+        call(&fixture, "GET", &blocker_uri, None).await.1["blocked"],
+        false
+    );
+    let (_, listed) = call(
+        &fixture,
+        "GET",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        None,
+    )
+    .await;
+    let listed_blocked = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == blocked["id"])
+        .unwrap()
+        .clone();
+    assert_eq!(listed_blocked["blocked"], true);
+
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &blocker_uri,
+        Some(json!({"expected_version": 0, "status_id": done})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        call(&fixture, "GET", &blocked_uri, None).await.1["blocked"],
+        false
+    );
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &blocker_uri,
+        Some(json!({"expected_version": 1, "status_id": fixture.status_id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        call(&fixture, "GET", &blocked_uri, None).await.1["blocked"],
+        true
+    );
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{blocker_uri}?expected_version=2"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        call(&fixture, "GET", &blocked_uri, None).await.1["blocked"],
+        false
+    );
+}
+
 async fn call(
     fixture: &Fixture,
     method: &str,

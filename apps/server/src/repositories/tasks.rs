@@ -91,6 +91,21 @@ pub struct TaskRecord {
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
+    /// The task this one duplicates; null when it is not a duplicate or its target is in the trash.
+    #[schema(required = true)]
+    pub duplicate_of: Option<TaskRef>,
+    /// True while at least one live task that is not completed, cancelled or a duplicate blocks it.
+    pub blocked: bool,
+}
+
+/// A task reference small enough to embed; clients build the display identifier themselves.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct TaskRef {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = String)]
+    pub project_id: Id,
+    pub title: String,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1043,13 +1058,10 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let fingerprint = task_fingerprint(workspace_id, filter);
         let after = cursor_pair(cursor, &fingerprint)?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
-             tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, \
-             tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
-             JOIN projects ON projects.id = tasks.project_id \
-             WHERE tasks.workspace_id = ",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
+            task_columns()
+        ));
         query.push_bind(workspace_id.to_string());
         query.push(" AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL");
         if let Some(project_id) = filter.project_id {
@@ -1189,18 +1201,17 @@ impl TaskRepository {
         actor_id: Id,
     ) -> Result<TaskRecord, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let row = sqlx::query(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
-             tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, \
-             tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
-             JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
+        let sql = format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
-        )
-        .bind(task_id.to_string())
-        .bind(workspace_id.to_string())
-        .fetch_optional(self.database.pool())
-        .await?
-        .ok_or(TaskError::NotFound)?;
+            task_columns()
+        );
+        let row = sqlx::query(&sql)
+            .bind(task_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_optional(self.database.pool())
+            .await?
+            .ok_or(TaskError::NotFound)?;
         task_from_row(self.database.pool(), row).await
     }
 
@@ -1310,6 +1321,8 @@ impl TaskRepository {
             deleted_at: None,
             created_at: now,
             updated_at: now,
+            duplicate_of: None,
+            blocked: false,
         })
     }
 
@@ -1813,10 +1826,10 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
-             FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
+            task_columns()
+        ));
         query
             .push_bind(workspace_id.to_string())
             .push(" AND tasks.deleted_at > ")
@@ -2298,6 +2311,7 @@ pub(super) async fn update_task_in_tx(
     if let Some(labels) = &update.changes.label_ids {
         replace_labels(tx, update.id, labels).await?;
     }
+    let duplicate_of = duplicate_of_in_tx(tx, update.id).await?;
     Ok(TaskRecord {
         project_id,
         status_id,
@@ -2320,6 +2334,7 @@ pub(super) async fn update_task_in_tx(
             .unwrap_or(current.label_ids.clone()),
         version: current.version + 1,
         updated_at: now,
+        duplicate_of,
         ..current
     })
 }
@@ -2932,13 +2947,20 @@ async fn task_in_tx(
     task_id: Id,
     deleted: bool,
 ) -> Result<TaskRecord, TaskError> {
-    let row = sqlx::query(
-        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
-         FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
+    let sql = format!(
+        "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
          AND ((? = 1 AND tasks.deleted_at IS NOT NULL) OR (? = 0 AND tasks.deleted_at IS NULL)) AND (? = 1 OR projects.deleted_at IS NULL)",
-    )
-    .bind(task_id.to_string()).bind(workspace_id.to_string()).bind(i64::from(deleted)).bind(i64::from(deleted)).bind(i64::from(deleted))
-    .fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
+        task_columns()
+    );
+    let row = sqlx::query(&sql)
+        .bind(task_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(i64::from(deleted))
+        .bind(i64::from(deleted))
+        .bind(i64::from(deleted))
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(TaskError::NotFound)?;
     task_from_row_tx(tx, row).await
 }
 
@@ -3057,6 +3079,57 @@ async fn task_from_row_tx(
     task_record_from_row(row, id, assignee_ids, label_ids)
 }
 
+/// Correlated subquery rendering the live duplicate target of `task_id_sql` as a JSON object,
+/// or NULL when the task is not a duplicate or its target (or target's project) is in the trash.
+fn duplicate_of_subquery(task_id_sql: &str) -> String {
+    format!(
+        "(SELECT json_object('id', canonical.id, 'project_id', canonical.project_id, 'title', canonical.title) \
+         FROM task_relations AS duplicate_relation \
+         JOIN tasks AS canonical ON canonical.id = duplicate_relation.related_task_id \
+         JOIN projects AS canonical_project ON canonical_project.id = canonical.project_id \
+         WHERE duplicate_relation.task_id = {task_id_sql} AND duplicate_relation.type = 'duplicate' \
+         AND canonical.deleted_at IS NULL AND canonical_project.deleted_at IS NULL)"
+    )
+}
+
+/// The column list every `TaskRecord` query selects (decoded by `task_record_from_row`).
+fn task_columns() -> String {
+    format!(
+        "tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
+         tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
+         tasks.creator_service_account_id, \
+         (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, \
+         tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
+         {} AS duplicate_of_json, \
+         EXISTS (SELECT 1 FROM task_relations AS blocker_relation \
+                 JOIN tasks AS blocker ON blocker.id = blocker_relation.task_id \
+                 JOIN projects AS blocker_project ON blocker_project.id = blocker.project_id \
+                 JOIN task_statuses AS blocker_status ON blocker_status.id = blocker.status_id \
+                 WHERE blocker_relation.related_task_id = tasks.id AND blocker_relation.type = 'blocks' \
+                 AND blocker.deleted_at IS NULL AND blocker_project.deleted_at IS NULL \
+                 AND blocker_status.category NOT IN ('completed', 'cancelled', 'duplicate')) AS blocked",
+        duplicate_of_subquery("tasks.id")
+    )
+}
+
+fn parse_task_ref(value: Option<String>) -> Result<Option<TaskRef>, TaskError> {
+    value
+        .map(|json| serde_json::from_str(&json).map_err(|_| TaskError::Conflict))
+        .transpose()
+}
+
+async fn duplicate_of_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    task_id: Id,
+) -> Result<Option<TaskRef>, TaskError> {
+    let sql = format!("SELECT {}", duplicate_of_subquery("?"));
+    let value: Option<String> = sqlx::query_scalar(&sql)
+        .bind(task_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+    parse_task_ref(value)
+}
+
 fn task_record_from_row(
     row: sqlx::sqlite::SqliteRow,
     id: Id,
@@ -3098,6 +3171,8 @@ fn task_record_from_row(
             .map(TimestampMillis::from_millis),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
+        duplicate_of: parse_task_ref(row.get("duplicate_of_json"))?,
+        blocked: row.get::<bool, _>("blocked"),
     })
 }
 

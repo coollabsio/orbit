@@ -13176,7 +13176,9 @@
                 "label_ids",
                 "version",
                 "created_at",
-                "updated_at"
+                "updated_at",
+                "duplicate_of",
+                "blocked"
               ],
               "properties": {
                 "assignee_ids": {
@@ -13184,6 +13186,10 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "blocked": {
+                  "type": "boolean",
+                  "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
                 },
                 "created_at": {
                   "type": "string",
@@ -13230,6 +13236,17 @@
                     "null"
                   ],
                   "format": "date-time"
+                },
+                "duplicate_of": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TaskRef",
+                      "description": "The task this one duplicates; null when it is not a duplicate or its target is in the trash."
+                    }
+                  ]
                 },
                 "id": {
                   "type": "string"
@@ -13919,7 +13936,9 @@
           "label_ids",
           "version",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "duplicate_of",
+          "blocked"
         ],
         "properties": {
           "assignee_ids": {
@@ -13927,6 +13946,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
           },
           "created_at": {
             "type": "string",
@@ -13974,6 +13997,17 @@
             ],
             "format": "date-time"
           },
+          "duplicate_of": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRef",
+                "description": "The task this one duplicates; null when it is not a duplicate or its target is in the trash."
+              }
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -14015,6 +14049,26 @@
             "minimum": 0
           },
           "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskRef": {
+        "type": "object",
+        "description": "A task reference small enough to embed; clients build the display identifier themselves.",
+        "required": [
+          "id",
+          "project_id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "title": {
             "type": "string"
           }
         }
