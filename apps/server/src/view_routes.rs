@@ -12,7 +12,9 @@ use utoipa::ToSchema;
 
 use crate::repositories::task_filter::ViewState;
 use crate::repositories::tasks::TaskError;
-use crate::repositories::views::{SavedViewRecord, ViewCreate, ViewUpdate, Visibility};
+use crate::repositories::views::{
+    SavedViewRecord, ViewCreate, ViewPreferenceRecord, ViewUpdate, Visibility,
+};
 use crate::task_routes::{
     ApiError, ApiJson, TaskState, deserialize_source_patch, parse_id, request_id_value, scope,
     task_problem,
@@ -38,6 +40,10 @@ pub fn view_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/view-favorites/order",
             put(reorder_view_favorites),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}",
+            get(get_view_preference).put(put_view_preference),
         )
         .with_state(state)
 }
@@ -295,4 +301,47 @@ fn parse_view_ids(values: &[String]) -> Result<Vec<Id>, TaskError> {
                 .map_err(|_| TaskError::Invalid { field: "view_ids" })
         })
         .collect()
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ViewPreferenceBody {
+    state: ViewState,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}", params(("workspace_id" = String, Path), ("page_key" = String, Path, description = "`all`, `project:<project_id>` or `preset:<mine|overdue|due_soon|current_week|my_week>`")), responses((status = 200, body = ViewPreferenceRecord)))]
+async fn get_view_preference(
+    State(state): State<TaskState>,
+    Path((workspace, page_key)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<ViewPreferenceRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/view-preferences/{page_key}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .views
+        .get_preference(workspace_id, actor_id, &page_key)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}", params(("workspace_id" = String, Path), ("page_key" = String, Path, description = "`all`, `project:<project_id>` or `preset:<mine|overdue|due_soon|current_week|my_week>`")), request_body = ViewPreferenceBody, responses((status = 200, body = ViewPreferenceRecord)))]
+async fn put_view_preference(
+    State(state): State<TaskState>,
+    Path((workspace, page_key)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ViewPreferenceBody>,
+) -> Result<Json<ViewPreferenceRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/view-preferences/{page_key}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .views
+        .put_preference(workspace_id, actor_id, &page_key, body.state)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }

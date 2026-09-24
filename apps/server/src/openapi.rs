@@ -108,6 +108,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::view_routes::favorite_view,
         crate::view_routes::unfavorite_view,
         crate::view_routes::reorder_view_favorites,
+        crate::view_routes::get_view_preference,
+        crate::view_routes::put_view_preference,
         crate::attachment_routes::list_task_attachments,
         crate::attachment_routes::list_comment_attachments,
         crate::attachment_routes::upload_task_attachments,
@@ -463,6 +465,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_view"
             | "update_view"
             | "reorder_view_favorites"
+            | "put_view_preference"
     )
 }
 
@@ -620,6 +623,8 @@ fn view_operation(operation_id: &str) -> bool {
             | "favorite_view"
             | "unfavorite_view"
             | "reorder_view_favorites"
+            | "get_view_preference"
+            | "put_view_preference"
     )
 }
 
@@ -627,11 +632,18 @@ fn view_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     add_code(responses, "404", "task_resource_not_found");
     if matches!(
         operation_id,
-        "create_view" | "update_view" | "reorder_view_favorites"
+        "create_view"
+            | "update_view"
+            | "reorder_view_favorites"
+            | "get_view_preference"
+            | "put_view_preference"
     ) {
         add_code(responses, "422", "validation_failed");
     }
-    if matches!(operation_id, "create_view" | "update_view") {
+    if matches!(
+        operation_id,
+        "create_view" | "update_view" | "put_view_preference"
+    ) {
         add_code(responses, "422", "invalid_filter");
     }
     if matches!(operation_id, "update_view" | "delete_view") {

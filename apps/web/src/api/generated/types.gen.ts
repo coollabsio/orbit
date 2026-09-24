@@ -898,6 +898,20 @@ export type ViewOwner = {
     user_id: string;
 };
 
+export type ViewPreferenceBody = {
+    state: ViewState;
+};
+
+export type ViewPreferenceRecord = {
+    /**
+     * `all`, `project:<id>` or `preset:<name>`.
+     */
+    page_key: string;
+    state: null | ViewState;
+    state_error: string | null;
+    updated_at: string;
+};
+
 /**
  * Filter and display options shared by saved views and per-page preferences.
  */
@@ -6230,6 +6244,134 @@ export type ReorderViewFavoritesResponses = {
 };
 
 export type ReorderViewFavoritesResponse = ReorderViewFavoritesResponses[keyof ReorderViewFavoritesResponses];
+
+export type GetViewPreferenceData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        /**
+         * `all`, `project:<project_id>` or `preset:<mine|overdue|due_soon|current_week|my_week>`
+         */
+        page_key: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}';
+};
+
+export type GetViewPreferenceErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetViewPreferenceError = GetViewPreferenceErrors[keyof GetViewPreferenceErrors];
+
+export type GetViewPreferenceResponses = {
+    200: ViewPreferenceRecord;
+};
+
+export type GetViewPreferenceResponse = GetViewPreferenceResponses[keyof GetViewPreferenceResponses];
+
+export type PutViewPreferenceData = {
+    body: ViewPreferenceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        /**
+         * `all`, `project:<project_id>` or `preset:<mine|overdue|due_soon|current_week|my_week>`
+         */
+        page_key: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}';
+};
+
+export type PutViewPreferenceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, invalid_filter
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PutViewPreferenceError = PutViewPreferenceErrors[keyof PutViewPreferenceErrors];
+
+export type PutViewPreferenceResponses = {
+    200: ViewPreferenceRecord;
+};
+
+export type PutViewPreferenceResponse = PutViewPreferenceResponses[keyof PutViewPreferenceResponses];
 
 export type ListViewsData = {
     body?: never;

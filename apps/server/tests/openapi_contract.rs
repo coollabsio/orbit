@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 70);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 71);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 97);
+    assert_eq!(operation_count, 99);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -756,4 +756,36 @@ fn view_favorite_routes_are_documented() {
         document["components"]["schemas"]["ViewFavoritesOrderBody"]["required"],
         serde_json::json!(["view_ids"])
     );
+}
+
+#[test]
+fn view_preference_routes_are_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let path = "/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}";
+    let get = operation(&document, path, "get");
+    assert_eq!(get["operationId"], "get_view_preference");
+    assert_eq!(
+        get["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ViewPreferenceRecord"
+    );
+    assert!(codes(get, "404").contains(&"task_resource_not_found".to_owned()));
+    assert!(codes(get, "422").contains(&"validation_failed".to_owned()));
+    let put = operation(&document, path, "put");
+    assert_eq!(put["operationId"], "put_view_preference");
+    assert_eq!(
+        put["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ViewPreferenceBody"
+    );
+    assert!(codes(put, "422").contains(&"invalid_filter".to_owned()));
+    assert!(codes(put, "400").contains(&"invalid_request".to_owned()));
+    assert_eq!(
+        put["responses"]["default"]["content"]["application/problem+json"]["schema"]["$ref"],
+        "#/components/schemas/TaskProblem"
+    );
+    let required = document["components"]["schemas"]["ViewPreferenceRecord"]["required"]
+        .as_array()
+        .unwrap();
+    for field in ["page_key", "state", "state_error", "updated_at"] {
+        assert!(required.contains(&serde_json::json!(field)), "{field}");
+    }
 }

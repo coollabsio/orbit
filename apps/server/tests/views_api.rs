@@ -1250,3 +1250,231 @@ async fn favorite_changes_are_broadcast_only_when_something_changes() {
     .unwrap();
     assert_eq!(changes, 2);
 }
+
+async fn preference(
+    fixture: &Fixture,
+    method: &str,
+    cookie: &str,
+    page_key: &str,
+    state: Option<Value>,
+) -> (StatusCode, Value) {
+    fixture
+        .call(
+            method,
+            &format!("/view-preferences/{page_key}"),
+            cookie,
+            state.map(|state| json!({"state": state})),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn view_preferences_round_trip_and_upsert() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let (status, problem) = preference(&fixture, "GET", &cookie, "all", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(problem["code"], "task_resource_not_found");
+
+    let (status, saved) = preference(&fixture, "PUT", &cookie, "all", Some(view_state())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["page_key"], "all");
+    assert_eq!(saved["state"], view_state());
+    assert_eq!(saved["state_error"], Value::Null);
+    let (status, fetched) = preference(&fixture, "GET", &cookie, "all", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fetched, saved);
+
+    let (status, _) = preference(&fixture, "PUT", &cookie, "all", Some(other_state())).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, fetched) = preference(&fixture, "GET", &cookie, "all", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fetched["state"], other_state());
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM view_preferences WHERE workspace_id = ? AND user_id = ?",
+    )
+    .bind(&fixture.workspace_id)
+    .bind(fixture.owner_id.to_string())
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows, 1);
+}
+
+#[tokio::test]
+async fn view_preference_page_keys_are_validated() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let project_id: String =
+        sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = ? LIMIT 1")
+            .bind(&fixture.workspace_id)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    let invalid = [
+        "everything".to_owned(),
+        "all:extra".to_owned(),
+        "project:".to_owned(),
+        "project:nope".to_owned(),
+        format!("project:{}", project_id.to_uppercase()),
+        "preset:".to_owned(),
+        "preset:bogus".to_owned(),
+    ];
+    for key in &invalid {
+        for (method, state) in [("GET", None), ("PUT", Some(view_state()))] {
+            let (status, problem) = preference(&fixture, method, &cookie, key, state).await;
+            assert_eq!(
+                status,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{method} {key}: {problem}"
+            );
+            assert_eq!(problem["detail"], "page_key");
+        }
+    }
+
+    let valid = [
+        format!("project:{project_id}"),
+        "preset:mine".to_owned(),
+        "preset:overdue".to_owned(),
+        "preset:due_soon".to_owned(),
+        "preset:current_week".to_owned(),
+        "preset:my_week".to_owned(),
+    ];
+    for key in &valid {
+        let (status, saved) = preference(&fixture, "PUT", &cookie, key, Some(view_state())).await;
+        assert_eq!(status, StatusCode::OK, "{key}: {saved}");
+        assert_eq!(saved["page_key"], key.as_str());
+    }
+    let (status, encoded) = preference(
+        &fixture,
+        "GET",
+        &cookie,
+        &format!("project%3A{project_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{encoded}");
+    assert_eq!(encoded["page_key"], format!("project:{project_id}"));
+}
+
+#[tokio::test]
+async fn view_preferences_are_per_caller() {
+    let fixture = Fixture::new().await;
+    let owner = fixture.owner_cookie.clone();
+    let (_, member) = fixture
+        .add_user("member@example.com", "Member", Some("member"))
+        .await;
+    let (_, outsider) = fixture
+        .add_user("outsider@example.com", "Outsider", None)
+        .await;
+
+    assert_eq!(
+        preference(&fixture, "PUT", &owner, "all", Some(view_state()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        preference(&fixture, "GET", &member, "all", None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        preference(&fixture, "PUT", &member, "all", Some(other_state()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        preference(&fixture, "GET", &owner, "all", None).await.1["state"],
+        view_state()
+    );
+    assert_eq!(
+        preference(&fixture, "GET", &member, "all", None).await.1["state"],
+        other_state()
+    );
+    assert_eq!(
+        preference(&fixture, "GET", &outsider, "all", None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        preference(&fixture, "PUT", &outsider, "all", Some(view_state()))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+
+    let other = WorkspaceRepository::new((*fixture.database).clone())
+        .create(
+            fixture.owner_id,
+            "Elsewhere".to_owned(),
+            "views-test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap()
+        .id
+        .to_string();
+    let (status, _) = fixture
+        .call_in(&other, "GET", "/view-preferences/all", &owner, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn view_preference_state_is_validated_and_never_broadcast() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let start = fixture.sequence().await;
+    let (status, problem) =
+        preference(&fixture, "PUT", &cookie, "all", Some(state_with_text(201))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert!(
+        problem["path"]
+            .as_str()
+            .unwrap()
+            .starts_with("filter.children[0]"),
+        "{problem}"
+    );
+    assert_eq!(
+        preference(&fixture, "PUT", &cookie, "all", Some(view_state()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(fixture.sequence().await, start);
+    let (status, _) = fixture
+        .call(
+            "PUT",
+            "/view-preferences/all",
+            &cookie,
+            Some(json!({"state": view_state(), "extra": 1})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unreadable_stored_preference_is_returned_with_a_state_error() {
+    let fixture = Fixture::new().await;
+    sqlx::query(
+        "INSERT INTO view_preferences (workspace_id, user_id, page_key, state_json, updated_at) \
+         VALUES (?, ?, 'preset:overdue', '{\"filter\":', 0)",
+    )
+    .bind(&fixture.workspace_id)
+    .bind(fixture.owner_id.to_string())
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let (status, stored) = preference(
+        &fixture,
+        "GET",
+        &fixture.owner_cookie,
+        "preset:overdue",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stored}");
+    assert_eq!(stored["page_key"], "preset:overdue");
+    assert_eq!(stored["state"], Value::Null);
+    assert!(!stored["state_error"].as_str().unwrap().is_empty());
+}

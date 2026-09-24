@@ -1,4 +1,4 @@
-//! Saved task views and per-user view favorites.
+//! Saved task views, per-user view favorites, and per-page view preferences.
 //!
 //! Personal views exist only for their owner; everyone else gets `NotFound`. Workspace views are
 //! readable by every member and editable by their owner or a workspace owner/admin.
@@ -10,7 +10,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite};
 use utoipa::ToSchema;
 
-use super::task_filter::{ViewState, parse_view_state, validate_view_state};
+use super::task_filter::{ViewState, parse_view_state, preset_filter, validate_view_state};
 use super::tasks::{TaskError, parse_id, record_mutation};
 use crate::audit::{self, AuditOutcome};
 
@@ -105,6 +105,19 @@ pub struct ViewUpdate {
     pub color: Option<Option<String>>,
     pub visibility: Option<Visibility>,
     pub state: Option<ViewState>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ViewPreferenceRecord {
+    /// `all`, `project:<id>` or `preset:<name>`.
+    pub page_key: String,
+    /// Null when the stored state no longer parses; `state_error` then says why.
+    #[schema(required = true)]
+    pub state: Option<ViewState>,
+    #[schema(required = true)]
+    pub state_error: Option<String>,
+    #[schema(value_type = String, format = DateTime)]
+    pub updated_at: TimestampMillis,
 }
 
 #[derive(Clone)]
@@ -427,6 +440,69 @@ impl ViewRepository {
         tx.commit().await?;
         Ok(())
     }
+
+    /// The caller's saved state for one task page; `NotFound` when none was saved yet.
+    pub async fn get_preference(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        page_key: &str,
+    ) -> Result<ViewPreferenceRecord, TaskError> {
+        check_page_key(page_key)?;
+        load_caller(self.database.pool(), workspace_id, actor_id).await?;
+        let row = sqlx::query(
+            "SELECT state_json, updated_at FROM view_preferences \
+             WHERE workspace_id = ? AND user_id = ? AND page_key = ?",
+        )
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(page_key)
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(TaskError::NotFound)?;
+        let (state, state_error) = decode_state(row.get::<String, _>("state_json").as_str());
+        Ok(ViewPreferenceRecord {
+            page_key: page_key.to_owned(),
+            state,
+            state_error,
+            updated_at: TimestampMillis::from_millis(row.get("updated_at")),
+        })
+    }
+
+    /// Upserts the caller's state for one task page. Not audited and not broadcast.
+    pub async fn put_preference(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        page_key: &str,
+        state: ViewState,
+    ) -> Result<ViewPreferenceRecord, TaskError> {
+        check_page_key(page_key)?;
+        let state_json = encode_state(&state)?;
+        let now = TimestampMillis::now();
+        let mut tx = self.database.immediate_transaction().await?;
+        load_caller(&mut *tx, workspace_id, actor_id).await?;
+        sqlx::query(
+            "INSERT INTO view_preferences (workspace_id, user_id, page_key, state_json, updated_at) \
+             VALUES (?, ?, ?, ?, ?) \
+             ON CONFLICT (workspace_id, user_id, page_key) \
+             DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
+        )
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(page_key)
+        .bind(state_json)
+        .bind(now.as_millis())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(ViewPreferenceRecord {
+            page_key: page_key.to_owned(),
+            state: Some(state),
+            state_error: None,
+            updated_at: now,
+        })
+    }
 }
 
 /// The acting member. `manager` is a workspace owner or admin.
@@ -536,6 +612,21 @@ fn decode_state(json: &str) -> (Option<ViewState>, Option<String>) {
 fn encode_state(state: &ViewState) -> Result<String, TaskError> {
     validate_view_state(state)?;
     serde_json::to_string(state).map_err(|_| TaskError::Invalid { field: "state" })
+}
+
+/// `all` | `project:<uuidv7>` | `preset:(mine|overdue|due_soon|current_week|my_week)`.
+fn check_page_key(page_key: &str) -> Result<(), TaskError> {
+    let valid = match page_key.split_once(':') {
+        None => page_key == "all",
+        Some(("project", id)) => id.parse::<Id>().is_ok(),
+        Some(("preset", preset)) => preset_filter(preset).is_some(),
+        Some(_) => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(TaskError::Invalid { field: "page_key" })
+    }
 }
 
 fn clean_name(name: &str) -> Result<String, TaskError> {
