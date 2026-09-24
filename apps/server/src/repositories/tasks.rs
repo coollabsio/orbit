@@ -1,4 +1,4 @@
-use orbit_domain::StatusCategory;
+use orbit_domain::{DEFAULT_STATUSES, StatusCategory};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -6,6 +6,7 @@ use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -90,6 +91,21 @@ pub struct TaskRecord {
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
+    /// The task this one duplicates; null when it is not a duplicate or its target is in the trash.
+    #[schema(required = true)]
+    pub duplicate_of: Option<TaskRef>,
+    /// True while at least one live task that is not completed, cancelled or a duplicate blocks it.
+    pub blocked: bool,
+}
+
+/// A task reference small enough to embed; clients build the display identifier themselves.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct TaskRef {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = String)]
+    pub project_id: Id,
+    pub title: String,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -183,6 +199,8 @@ pub struct TaskChanges {
     pub label_ids: Option<Vec<Id>>,
     pub due_start_at: Option<Option<TimestampMillis>>,
     pub due_at: Option<Option<TimestampMillis>>,
+    /// `Some(Some(id))` marks the task as a duplicate of `id`; `Some(None)` unmarks it.
+    pub duplicate_of_id: Option<Option<Id>>,
 }
 
 #[derive(Clone, Debug)]
@@ -704,6 +722,9 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<StatusRecord, TaskError> {
+        if category == StatusCategory::Duplicate.as_str() {
+            return Err(TaskError::Invalid { field: "category" });
+        }
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
@@ -755,6 +776,10 @@ impl TaskRepository {
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
+        let duplicate = StatusCategory::Duplicate.as_str();
+        if (current.category == duplicate) != (category == duplicate) {
+            return Err(TaskError::Invalid { field: "category" });
+        }
         let description = description.unwrap_or_else(|| current.description.clone());
         sqlx::query("UPDATE task_statuses SET name = ?, description = ?, color = ?, category = ?, position = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND project_id = ? AND version = ?")
             .bind(&name).bind(&description).bind(&color).bind(&category).bind(position).bind(now.as_millis()).bind(status_id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
@@ -796,6 +821,9 @@ impl TaskRepository {
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
+        if current.category == StatusCategory::Duplicate.as_str() {
+            return Err(TaskError::Invalid { field: "status_id" });
+        }
         let tasks: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND status_id = ?",
         )
@@ -1030,13 +1058,10 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let fingerprint = task_fingerprint(workspace_id, filter);
         let after = cursor_pair(cursor, &fingerprint)?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
-             tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, \
-             tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
-             JOIN projects ON projects.id = tasks.project_id \
-             WHERE tasks.workspace_id = ",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
+            task_columns()
+        ));
         query.push_bind(workspace_id.to_string());
         query.push(" AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL");
         if let Some(project_id) = filter.project_id {
@@ -1077,7 +1102,7 @@ impl TaskRepository {
             let day_ms = 86_400_000;
             let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;
             query.push(
-                " AND tasks.due_at IS NOT NULL AND EXISTS (SELECT 1 FROM task_statuses WHERE task_statuses.id = tasks.status_id AND task_statuses.category NOT IN ('completed', 'cancelled'))",
+                " AND tasks.due_at IS NOT NULL AND EXISTS (SELECT 1 FROM task_statuses WHERE task_statuses.id = tasks.status_id AND task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate'))",
             );
             if filter.view.as_deref() == Some("overdue") {
                 query
@@ -1178,18 +1203,17 @@ impl TaskRepository {
         actor_id: Id,
     ) -> Result<TaskRecord, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let row = sqlx::query(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
-             tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, \
-             tasks.deleted_at, tasks.created_at, tasks.updated_at FROM tasks \
-             JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
+        let sql = format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
-        )
-        .bind(task_id.to_string())
-        .bind(workspace_id.to_string())
-        .fetch_optional(self.database.pool())
-        .await?
-        .ok_or(TaskError::NotFound)?;
+            task_columns()
+        );
+        let row = sqlx::query(&sql)
+            .bind(task_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_optional(self.database.pool())
+            .await?
+            .ok_or(TaskError::NotFound)?;
         task_from_row(self.database.pool(), row).await
     }
 
@@ -1213,6 +1237,11 @@ impl TaskRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
+        if task_relations::status_category_in_tx(&mut tx, workspace_id, input.status_id).await?
+            == task_relations::DUPLICATE
+        {
+            return Err(TaskError::Invalid { field: "status_id" });
+        }
         validate_assignees(&mut tx, workspace_id, &input.assignee_ids).await?;
         validate_labels(&mut tx, workspace_id, &input.label_ids).await?;
         let position = match input.position {
@@ -1294,6 +1323,8 @@ impl TaskRepository {
             deleted_at: None,
             created_at: now,
             updated_at: now,
+            duplicate_of: None,
+            blocked: false,
         })
     }
 
@@ -1330,7 +1361,7 @@ impl TaskRepository {
             _ => "unstarted",
         };
         let existing = sqlx::query(
-            "SELECT github_issue_links.task_id, github_issue_links.kind, tasks.project_id, tasks.deleted_at FROM github_issue_links JOIN tasks ON tasks.id = github_issue_links.task_id WHERE github_issue_links.workspace_id = ? AND repository = ? AND issue_number = ?",
+            "SELECT github_issue_links.task_id, github_issue_links.kind, tasks.project_id, tasks.status_id, tasks.deleted_at FROM github_issue_links JOIN tasks ON tasks.id = github_issue_links.task_id WHERE github_issue_links.workspace_id = ? AND repository = ? AND issue_number = ?",
         ).bind(workspace_id.to_string()).bind(&issue.repository).bind(issue.number).fetch_optional(&mut *tx).await?;
         if let Some(row) = &existing {
             let was_deleted = row.get::<Option<i64>, _>("deleted_at").is_some();
@@ -1340,24 +1371,43 @@ impl TaskRepository {
             {
                 return Err(TaskError::IntegrationConflict);
             }
+            let current_status_id: String = row.get("status_id");
             let status_id: String = if issue.state_changed || was_deleted {
                 sqlx::query_scalar(
                         "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category = ? ORDER BY position, id LIMIT 1",
                     ).bind(workspace_id.to_string()).bind(row.get::<String, _>("project_id"))
                         .bind(status_category).fetch_optional(&mut *tx).await?
-                        .unwrap_or(sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
-                            .bind(task_id.to_string()).fetch_one(&mut *tx).await?)
+                        .unwrap_or_else(|| current_status_id.clone())
             } else {
-                sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
-                    .bind(task_id.to_string())
-                    .fetch_one(&mut *tx)
-                    .await?
+                current_status_id.clone()
             };
+            let leaves_duplicate = current_status_id != status_id
+                && task_relations::status_category_in_tx(
+                    &mut tx,
+                    workspace_id,
+                    parse_id(current_status_id)?,
+                )
+                .await?
+                    == task_relations::DUPLICATE;
             let changed = sqlx::query(
                     "UPDATE tasks SET title = ?, description = ?, source_url = ?, status_id = ?, deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND (deleted_at IS NOT NULL OR title != ? OR description != ? OR source_url IS NOT ? OR status_id != ?)",
                 ).bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).bind(now.as_millis())
                     .bind(task_id.to_string()).bind(workspace_id.to_string())
                     .bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).execute(&mut *tx).await?;
+            if leaves_duplicate {
+                task_relations::delete_duplicate_relation_in_tx(
+                    &mut tx,
+                    workspace_id,
+                    RelationActor {
+                        user_id: actor_id,
+                        service_account: Some((service_account_id, &service_account_name)),
+                    },
+                    task_id,
+                    request_id,
+                    now,
+                )
+                .await?;
+            }
             if changed.rows_affected() > 0 {
                 record_principal_mutation(
                     &mut tx,
@@ -1400,7 +1450,7 @@ impl TaskRepository {
             return Ok(task_id);
         }
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? ORDER BY CASE WHEN category = ? THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
+            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category <> 'duplicate' ORDER BY CASE WHEN category = ? THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
         ).bind(workspace_id.to_string()).bind(issue.project_id.to_string())
             .bind(status_category)
             .fetch_optional(&mut *tx).await?.ok_or(TaskError::NotFound)?;
@@ -1505,15 +1555,10 @@ impl TaskRepository {
         }
 
         project_in_tx(&mut tx, workspace_id, input.project_id, false).await?;
-        let status_id = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
-        )
-        .bind(workspace_id.to_string())
-        .bind(input.project_id.to_string())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(TaskError::NotFound)
-        .and_then(parse_id)?;
+        let status_id =
+            task_relations::default_status_id_in_tx(&mut tx, workspace_id, input.project_id)
+                .await?
+                .ok_or(TaskError::NotFound)?;
 
         let existing_label = sqlx::query_scalar::<_, String>(
             "SELECT id FROM labels WHERE workspace_id = ? AND lower(name) = 'discord' ORDER BY id LIMIT 1",
@@ -1589,7 +1634,8 @@ impl TaskRepository {
     ) -> Result<TaskRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let task = update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?;
+        let task =
+            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1637,7 +1683,9 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let mut records = Vec::with_capacity(updates.len());
         for update in updates {
-            records.push(update_task_in_tx(&mut tx, workspace_id, actor_id, update, now).await?);
+            records.push(
+                update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?,
+            );
         }
         record_mutation(
             &mut tx,
@@ -1767,10 +1815,10 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
-             FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
+            task_columns()
+        ));
         query
             .push_bind(workspace_id.to_string())
             .push(" AND tasks.deleted_at > ")
@@ -2087,15 +2135,21 @@ impl TaskRepository {
     }
 }
 
-async fn update_task_in_tx(
+pub(super) async fn update_task_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
     update: &TaskUpdate,
+    request_id: &str,
     now: TimestampMillis,
 ) -> Result<TaskRecord, TaskError> {
     let current = task_in_tx(tx, workspace_id, update.id, false).await?;
     check_version(update.expected_version, current.version, &current)?;
+    if update.changes.duplicate_of_id.is_some() && update.changes.status_id.is_some() {
+        return Err(TaskError::Invalid {
+            field: "duplicate_of_id",
+        });
+    }
     if update.changes.title.is_some() || update.changes.description.is_some() {
         let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_issue_links WHERE workspace_id = ? AND task_id = ?)")
             .bind(workspace_id.to_string())
@@ -2107,7 +2161,38 @@ async fn update_task_in_tx(
         }
     }
     let project_id = update.changes.project_id.unwrap_or(current.project_id);
-    let status_id = update.changes.status_id.unwrap_or(current.status_id);
+    // Only these changes can move the task into or out of the Duplicate status.
+    let duplicate_may_change = update.changes.duplicate_of_id.is_some()
+        || update.changes.status_id.is_some()
+        || project_id != current.project_id;
+    let was_duplicate = duplicate_may_change
+        && task_relations::status_category_in_tx(tx, workspace_id, current.status_id).await?
+            == task_relations::DUPLICATE;
+    // The Duplicate status is entered only through duplicate_of_id and follows project moves.
+    let status_id = match update.changes.duplicate_of_id {
+        Some(Some(_)) => {
+            task_relations::duplicate_status_id_in_tx(tx, workspace_id, project_id).await?
+        }
+        Some(None) if was_duplicate => {
+            task_relations::restore_status_id_in_tx(tx, workspace_id, update.id, project_id).await?
+        }
+        Some(None) => current.status_id,
+        None => match update.changes.status_id {
+            Some(status_id) if status_id != current.status_id => {
+                if task_relations::status_category_in_tx(tx, workspace_id, status_id).await?
+                    == task_relations::DUPLICATE
+                {
+                    return Err(TaskError::Invalid { field: "status_id" });
+                }
+                status_id
+            }
+            Some(status_id) => status_id,
+            None if was_duplicate && project_id != current.project_id => {
+                task_relations::duplicate_status_id_in_tx(tx, workspace_id, project_id).await?
+            }
+            None => current.status_id,
+        },
+    };
     validate_project_status(tx, workspace_id, project_id, status_id).await?;
     if let Some(assignees) = &update.changes.assignee_ids {
         validate_assignees(tx, workspace_id, assignees).await?;
@@ -2150,6 +2235,51 @@ async fn update_task_in_tx(
     }
     sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
         .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    let actor = RelationActor {
+        user_id: actor_id,
+        service_account: None,
+    };
+    match update.changes.duplicate_of_id {
+        Some(Some(target_id)) => {
+            task_relations::mark_duplicate_in_tx(
+                tx,
+                workspace_id,
+                actor,
+                update.id,
+                current.status_id,
+                target_id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
+        Some(None) => {
+            task_relations::delete_duplicate_relation_in_tx(
+                tx,
+                workspace_id,
+                actor,
+                update.id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
+        None if was_duplicate
+            && status_id != current.status_id
+            && update.changes.status_id.is_some() =>
+        {
+            task_relations::delete_duplicate_relation_in_tx(
+                tx,
+                workspace_id,
+                actor,
+                update.id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
+        None => {}
+    }
     if let Some(assignees) = &update.changes.assignee_ids {
         let added: Vec<Id> = assignees
             .iter()
@@ -2174,6 +2304,11 @@ async fn update_task_in_tx(
     if let Some(labels) = &update.changes.label_ids {
         replace_labels(tx, update.id, labels).await?;
     }
+    let duplicate_of = if duplicate_may_change {
+        duplicate_of_in_tx(tx, update.id).await?
+    } else {
+        current.duplicate_of.clone()
+    };
     Ok(TaskRecord {
         project_id,
         status_id,
@@ -2196,6 +2331,7 @@ async fn update_task_in_tx(
             .unwrap_or(current.label_ids.clone()),
         version: current.version + 1,
         updated_at: now,
+        duplicate_of,
         ..current
     })
 }
@@ -2388,7 +2524,7 @@ async fn require_access(
     }
 }
 
-async fn require_access_tx(
+pub(super) async fn require_access_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
@@ -2655,28 +2791,15 @@ async fn insert_default_statuses(
     project_id: Id,
     now: TimestampMillis,
 ) -> Result<(), TaskError> {
-    let statuses = [
-        ("Backlog", "#8b8f98", StatusCategory::Unstarted),
-        ("Todo", "#8b8f98", StatusCategory::Unstarted),
-        ("In Progress", "#f2c94c", StatusCategory::Started),
-        ("Done", "#4cb782", StatusCategory::Completed),
-        ("Cancelled", "#8b8f98", StatusCategory::Cancelled),
-    ];
-    for (position, (name, color, category)) in statuses.into_iter().enumerate() {
-        let category = match category {
-            StatusCategory::Unstarted => "unstarted",
-            StatusCategory::Started => "started",
-            StatusCategory::Completed => "completed",
-            StatusCategory::Cancelled => "cancelled",
-        };
+    for (position, (name, color, category)) in DEFAULT_STATUSES.into_iter().enumerate() {
         sqlx::query("INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?, ?)")
-            .bind(Id::new_v7().to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(name).bind(color).bind(category).bind(position as i64).bind(now.as_millis()).bind(now.as_millis()).execute(&mut **tx).await?;
+            .bind(Id::new_v7().to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(name).bind(color).bind(category.as_str()).bind(position as i64).bind(now.as_millis()).bind(now.as_millis()).execute(&mut **tx).await?;
     }
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn record_mutation(
+pub(super) async fn record_mutation(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
@@ -2815,19 +2938,26 @@ async fn label_in_tx(
     label_from_row(row)
 }
 
-async fn task_in_tx(
+pub(super) async fn task_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     task_id: Id,
     deleted: bool,
 ) -> Result<TaskRecord, TaskError> {
-    let row = sqlx::query(
-        "SELECT tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, tasks.creator_service_account_id, (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at \
-         FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
+    let sql = format!(
+        "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? \
          AND ((? = 1 AND tasks.deleted_at IS NOT NULL) OR (? = 0 AND tasks.deleted_at IS NULL)) AND (? = 1 OR projects.deleted_at IS NULL)",
-    )
-    .bind(task_id.to_string()).bind(workspace_id.to_string()).bind(i64::from(deleted)).bind(i64::from(deleted)).bind(i64::from(deleted))
-    .fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
+        task_columns()
+    );
+    let row = sqlx::query(&sql)
+        .bind(task_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(i64::from(deleted))
+        .bind(i64::from(deleted))
+        .bind(i64::from(deleted))
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(TaskError::NotFound)?;
     task_from_row_tx(tx, row).await
 }
 
@@ -2946,6 +3076,57 @@ async fn task_from_row_tx(
     task_record_from_row(row, id, assignee_ids, label_ids)
 }
 
+/// Correlated subquery rendering the live duplicate target of `task_id_sql` as a JSON object,
+/// or NULL when the task is not a duplicate or its target (or target's project) is in the trash.
+fn duplicate_of_subquery(task_id_sql: &str) -> String {
+    format!(
+        "(SELECT json_object('id', canonical.id, 'project_id', canonical.project_id, 'title', canonical.title) \
+         FROM task_relations AS duplicate_relation \
+         JOIN tasks AS canonical ON canonical.id = duplicate_relation.related_task_id \
+         JOIN projects AS canonical_project ON canonical_project.id = canonical.project_id \
+         WHERE duplicate_relation.task_id = {task_id_sql} AND duplicate_relation.type = 'duplicate' \
+         AND canonical.deleted_at IS NULL AND canonical_project.deleted_at IS NULL)"
+    )
+}
+
+/// The column list every `TaskRecord` query selects (decoded by `task_record_from_row`).
+fn task_columns() -> String {
+    format!(
+        "tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
+         tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
+         tasks.creator_service_account_id, \
+         (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, \
+         tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
+         {} AS duplicate_of_json, \
+         EXISTS (SELECT 1 FROM task_relations AS blocker_relation \
+                 JOIN tasks AS blocker ON blocker.id = blocker_relation.task_id \
+                 JOIN projects AS blocker_project ON blocker_project.id = blocker.project_id \
+                 JOIN task_statuses AS blocker_status ON blocker_status.id = blocker.status_id \
+                 WHERE blocker_relation.related_task_id = tasks.id AND blocker_relation.type = 'blocks' \
+                 AND blocker.deleted_at IS NULL AND blocker_project.deleted_at IS NULL \
+                 AND blocker_status.category NOT IN ('completed', 'cancelled', 'duplicate')) AS blocked",
+        duplicate_of_subquery("tasks.id")
+    )
+}
+
+fn parse_task_ref(value: Option<String>) -> Result<Option<TaskRef>, TaskError> {
+    value
+        .map(|json| serde_json::from_str(&json).map_err(|_| TaskError::Conflict))
+        .transpose()
+}
+
+async fn duplicate_of_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    task_id: Id,
+) -> Result<Option<TaskRef>, TaskError> {
+    let sql = format!("SELECT {}", duplicate_of_subquery("?"));
+    let value: Option<String> = sqlx::query_scalar(&sql)
+        .bind(task_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+    parse_task_ref(value)
+}
+
 fn task_record_from_row(
     row: sqlx::sqlite::SqliteRow,
     id: Id,
@@ -2987,6 +3168,8 @@ fn task_record_from_row(
             .map(TimestampMillis::from_millis),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
+        duplicate_of: parse_task_ref(row.get("duplicate_of_json"))?,
+        blocked: row.get::<bool, _>("blocked"),
     })
 }
 
@@ -3026,7 +3209,7 @@ fn comment_from_row(row: sqlx::sqlite::SqliteRow) -> Result<CommentRecord, TaskE
     })
 }
 
-fn parse_id(value: String) -> Result<Id, TaskError> {
+pub(super) fn parse_id(value: String) -> Result<Id, TaskError> {
     value.parse().map_err(|_| TaskError::Conflict)
 }
 fn parse_version(value: i64) -> Result<u64, TaskError> {

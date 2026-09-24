@@ -879,7 +879,14 @@ async fn ordinary_workspace_creation_installs_the_default_project_and_workflow()
     assert_eq!(projects, 1);
     assert_eq!(
         statuses,
-        ["Backlog", "Todo", "In Progress", "Done", "Cancelled"]
+        [
+            "Backlog",
+            "Todo",
+            "In Progress",
+            "Done",
+            "Cancelled",
+            "Duplicate"
+        ]
     );
 }
 

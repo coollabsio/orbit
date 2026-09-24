@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use orbit_platform::{
-    Database, DatabaseConfig, DatabaseError, Migration, MigrationError, MigrationRunner,
+    Database, DatabaseConfig, DatabaseError, Id, Migration, MigrationError, MigrationRunner,
     TestDatabase,
 };
 
@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        20
+        21
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 20
+            binary_version: 21
         }
     ));
 }
@@ -421,4 +421,197 @@ async fn exposes_pending_destructive_migrations_without_running_backups() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].version, 1);
     assert!(pending[0].destructive);
+}
+
+#[tokio::test]
+async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 20)
+        .run(&database)
+        .await
+        .unwrap();
+
+    let [user, workspace, membership, live_project, trashed_project]: [Id; 5] =
+        std::array::from_fn(|_| Id::new_v7());
+    let [
+        todo,
+        done,
+        trashed_todo,
+        first_task,
+        second_task,
+        third_task,
+    ]: [Id; 6] = std::array::from_fn(|_| Id::new_v7());
+    let seed = format!(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'Orbit', 0, '{membership}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{membership}', '{workspace}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at)
+         VALUES ('{live_project}', '{workspace}', 'Live', 'LIVE', '#000000', 0, NULL, 1, 1),
+                ('{trashed_project}', '{workspace}', 'Trashed', 'TRASH', '#000000', 0, 5, 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at)
+         VALUES ('{todo}', '{workspace}', '{live_project}', 'Todo', '', '#ffffff', 'unstarted', 0, 3, 1, 2),
+                ('{done}', '{workspace}', '{live_project}', 'Done', '', '#ffffff', 'completed', 7, 0, 1, 1),
+                ('{trashed_todo}', '{workspace}', '{trashed_project}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at)
+         VALUES ('{first_task}', '{workspace}', '{live_project}', '{todo}', 'First', '{user}', 1, 1),
+                ('{second_task}', '{workspace}', '{live_project}', '{done}', 'Second', '{user}', 1, 1),
+                ('{third_task}', '{workspace}', '{live_project}', '{todo}', 'Third', '{user}', 1, 1);"
+    );
+    let mut transaction = database.transaction().await.unwrap();
+    sqlx::raw_sql(&seed)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        database
+            .scalar::<String>("PRAGMA integrity_check")
+            .await
+            .unwrap(),
+        "ok"
+    );
+    let statuses: Vec<(String, String, i64, i64)> = sqlx::query_as(
+        "SELECT id, category, position, version FROM task_statuses WHERE project_id = ? ORDER BY position",
+    )
+    .bind(live_project.to_string())
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(statuses.len(), 3);
+    assert_eq!(
+        statuses[..2],
+        [
+            (todo.to_string(), "unstarted".to_owned(), 0, 3),
+            (done.to_string(), "completed".to_owned(), 7, 0),
+        ]
+    );
+    assert_eq!((statuses[2].1.as_str(), statuses[2].2), ("duplicate", 8));
+    assert!(
+        statuses[2].0.parse::<Id>().is_ok(),
+        "seeded id {} must be a canonical UUIDv7",
+        statuses[2].0
+    );
+    let (name, color, description): (String, String, String) =
+        sqlx::query_as("SELECT name, color, description FROM task_statuses WHERE id = ?")
+            .bind(&statuses[2].0)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        (name.as_str(), color.as_str(), description.as_str()),
+        ("Duplicate", "#8b8f98", "")
+    );
+    let trashed_position: i64 = sqlx::query_scalar(
+        "SELECT position FROM task_statuses WHERE project_id = ? AND category = 'duplicate'",
+    )
+    .bind(trashed_project.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        trashed_position, 1,
+        "trashed projects get one too, so restore works"
+    );
+
+    // The rebuilt table keeps its triggers, FK enforcement and the new invariants.
+    for (sql, message) in [
+        (
+            format!(
+                "UPDATE task_statuses SET project_id = '{trashed_project}' WHERE id = '{todo}'"
+            ),
+            "task status scope is immutable",
+        ),
+        (
+            format!("UPDATE task_statuses SET category = 'duplicate' WHERE id = '{todo}'"),
+            "the duplicate status category is immutable",
+        ),
+        (
+            format!(
+                "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) \
+                 VALUES ('{}', '{workspace}', '{live_project}', 'Again', '', '#ffffff', 'duplicate', 9, 0, 1, 1)",
+                Id::new_v7()
+            ),
+            "UNIQUE constraint failed",
+        ),
+        (
+            format!("DELETE FROM task_statuses WHERE id = '{todo}'"),
+            "FOREIGN KEY constraint failed",
+        ),
+    ] {
+        let error = database.execute(&sql).await.unwrap_err().to_string();
+        assert!(error.contains(message), "{sql}: {error}");
+    }
+
+    let relation = |id: Id, source: Id, target: Id, kind: &str, previous: &str| {
+        format!(
+            "INSERT INTO task_relations (id, workspace_id, task_id, related_task_id, type, previous_status_id, created_by, created_at) \
+             VALUES ('{id}', '{workspace}', '{source}', '{target}', '{kind}', {previous}, '{user}', 1)"
+        )
+    };
+    database
+        .execute(&relation(
+            Id::new_v7(),
+            first_task,
+            second_task,
+            "blocks",
+            "NULL",
+        ))
+        .await
+        .unwrap();
+    let reverse = database
+        .execute(&relation(
+            Id::new_v7(),
+            second_task,
+            first_task,
+            "blocks",
+            "NULL",
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(reverse.contains("task_relations_pair"), "{reverse}");
+    database
+        .execute(&relation(
+            Id::new_v7(),
+            third_task,
+            first_task,
+            "duplicate",
+            &format!("'{todo}'"),
+        ))
+        .await
+        .unwrap();
+    let chained = database
+        .execute(&relation(
+            Id::new_v7(),
+            second_task,
+            third_task,
+            "duplicate",
+            &format!("'{done}'"),
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        chained.contains("duplicate relations cannot chain"),
+        "{chained}"
+    );
 }

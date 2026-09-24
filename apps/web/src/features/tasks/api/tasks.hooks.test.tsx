@@ -3,8 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
-import type { PageTaskRecord, TaskRecord } from '@/api/generated/types.gen'
-import { useBulkTasks, useCreateTaskComment, useTasks, useUploadTaskAttachments } from './tasks'
+import type { PageTaskRecord, TaskRecord, TaskRelationRecord } from '@/api/generated/types.gen'
+import { useAddTaskRelation, useBulkTasks, useCreateTaskComment, useRemoveTaskRelation, useTaskRelations, useTasks, useUploadTaskAttachments } from './tasks'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -20,7 +20,7 @@ function withClient(client: QueryClient) {
 const task = (id: string, position: number): TaskRecord => ({
   id, workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title: id,
   description: '', position, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
-  created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 1,
+  created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', duplicate_of: null, blocked: false, version: 1,
 })
 
 const attachment = {
@@ -173,4 +173,37 @@ test('rejected bulk hook request rolls back list and detail caches', async () =>
 
   expect(client.getQueryData<PageTaskRecord>(listKey)?.items[0]).toEqual(original)
   expect(client.getQueryData<TaskRecord>(detailKey)).toEqual(original)
+})
+
+test('task relations load, add and remove through the relation endpoints and invalidate task queries', async () => {
+  const calls: Array<{ method: string; path: string; body?: unknown }> = []
+  const relation: TaskRelationRecord = {
+    id: 'rel-1', type: 'blocks', direction: 'incoming', created_at: '2026-09-23T10:00:00Z',
+    task: { id: 'task-2', project_id: 'project-1', title: 'Auth token refresh', status_id: 'todo' },
+  }
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    calls.push({ method: request.method, path: new URL(request.url).pathname, body: request.method === 'POST' ? await request.json() : undefined })
+    if (request.method === 'DELETE') return new Response(null, { status: 204 })
+    return request.method === 'POST' ? Response.json(relation, { status: 201 }) : Response.json([relation])
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const listKey = queryKeys.tasks.list('workspace-1')
+  client.setQueryData(listKey, { pages: [], pageParams: [] })
+  const view = renderHook(() => ({
+    relations: useTaskRelations('workspace-1', 'task-1'),
+    add: useAddTaskRelation('workspace-1', 'task-1'),
+    remove: useRemoveTaskRelation('workspace-1', 'task-1'),
+  }), { wrapper: withClient(client) })
+
+  await waitFor(() => expect(view.result.current.relations.data).toEqual([relation]))
+  expect(calls[0]).toEqual({ method: 'GET', path: '/api/v1/workspaces/workspace-1/tasks/task-1/relations', body: undefined })
+  await act(async () => { await view.result.current.add.mutateAsync({ type: 'blocked_by', task_id: 'task-2' }) })
+  expect(client.getQueryState(listKey)?.isInvalidated).toBeTrue()
+  await act(async () => { await view.result.current.remove.mutateAsync('rel-1') })
+
+  expect(calls.filter((call) => call.method !== 'GET')).toEqual([
+    { method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/task-1/relations', body: { type: 'blocked_by', task_id: 'task-2' } },
+    { method: 'DELETE', path: '/api/v1/workspaces/workspace-1/tasks/task-1/relations/rel-1', body: undefined },
+  ])
 })

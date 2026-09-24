@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { ArrowLeft, Check, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
+import { ArrowLeft, Check, Lock, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { EmptyState } from '@/components/common/EmptyState'
 import { InfoTip } from '@/components/common/InfoTip'
@@ -63,6 +64,8 @@ export function ProjectSettingsPage() {
   const statuses = project ? projectStatuses(statusQuery.data ?? [], project.id) : []
   const defaultStatus = project ? defaultStatusOf(statusQuery.data ?? [], project.id) : undefined
   const countFor = (statusId: string) => tasks.filter((t) => t.status_id === statusId).length
+  // the Duplicate status is system-managed: one per project, renamable/recolorable, never deleted or added
+  const regularCount = statuses.filter((s) => s.category !== 'duplicate').length
 
   const endDrag = () => {
     setDragId(null)
@@ -102,16 +105,18 @@ export function ProjectSettingsPage() {
                       <div key={category}>
                         <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
                           <span>{CATEGORY_LABEL[category]}</span>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="size-6 text-muted-foreground/70"
-                            aria-label={`Add ${CATEGORY_LABEL[category].toLowerCase()} status`}
-                            title="Add status"
-                            onClick={() => setEditor({ mode: 'new', category })}
-                          >
-                            <Plus className="size-3.5" />
-                          </Button>
+                          {category === 'duplicate' ? null : (
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="size-6 text-muted-foreground/70"
+                              aria-label={`Add ${CATEGORY_LABEL[category].toLowerCase()} status`}
+                              title="Add status"
+                              onClick={() => setEditor({ mode: 'new', category })}
+                            >
+                              <Plus className="size-3.5" />
+                            </Button>
+                          )}
                         </div>
                         {own.map((status) =>
                           editor?.mode === 'edit' && editor.statusId === status.id ? (
@@ -176,6 +181,14 @@ export function ProjectSettingsPage() {
                                 <span className="text-sm font-medium text-foreground">
                                   {status.name}
                                   {status.id === defaultStatus?.id ? <span className="font-normal text-muted-foreground"> · Default</span> : null}
+                                  {status.category === 'duplicate' ? (
+                                    <Tooltip>
+                                      <TooltipTrigger render={<span role="img" aria-label="System status" tabIndex={0} className="ml-1.5 inline-flex align-[-1px] text-muted-foreground/70" />}>
+                                        <Lock size={12} aria-hidden="true" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>System status</TooltipContent>
+                                    </Tooltip>
+                                  ) : null}
                                 </span>
                                 {status.description ? (
                                   <span className="text-xs text-muted-foreground/70">{status.description}</span>
@@ -202,7 +215,8 @@ export function ProjectSettingsPage() {
                                   <DropdownMenuItem
                                     className={OPTION}
                                     data-danger="true"
-                                    disabled={statuses.length === 1}
+                                    disabled={status.category === 'duplicate' || regularCount === 1}
+                                    title={status.category === 'duplicate' ? 'System status' : undefined}
                                     onClick={() => setDeleteTarget(status)}
                                   >
                                     <Trash2 className="size-3.5" />

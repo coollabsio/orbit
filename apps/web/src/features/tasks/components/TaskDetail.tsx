@@ -21,7 +21,15 @@ import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
 import type { Project, Task, TaskViewState } from '@/features/tasks/api/models'
-import { useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useTaskGithubLinks, useUpdateTask, useUploadTaskAttachments } from '@/features/tasks/api/tasks'
+import { useProjects } from '@/features/tasks/api/projects'
+import {
+  useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
+  useTaskGithubLinks, useTaskRelations, useUpdateTask, useUploadTaskAttachments,
+} from '@/features/tasks/api/tasks'
+import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks/relationsLib'
+import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
+import { TaskPickerDialog } from './TaskPickerDialog'
+import { AddRelationMenu, DuplicateBanner, TaskRelationsSection } from './TaskRelations'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
@@ -61,10 +69,12 @@ interface TaskDetailProps {
   project: Project | undefined
   state: TaskViewState
   onBack: () => void
+  /** Opens another task (banner, relation rows, activity links). */
+  onOpenTask?: (taskId: string) => void
 }
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
-export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
+export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDetailProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const uploadAttachments = useUploadTaskAttachments(workspace.id, task?.id ?? '')
@@ -80,6 +90,30 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
   // the date panel needs to close itself from Clear/Done, so the popover stays controlled
   const [dueDateOpen, setDueDateOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
+  const projects = useProjects(workspace.id).data ?? []
+  const relations = useTaskRelations(workspace.id, task?.id).data ?? []
+  const addRelation = useAddTaskRelation(workspace.id, task?.id ?? '')
+  const removeRelation = useRemoveTaskRelation(workspace.id, task?.id ?? '')
+  const duplicates = useDuplicateActions(workspace.id)
+  const [picker, setPicker] = useState<RelationKind | null>(null)
+  const [newRelationId, setNewRelationId] = useState<string | null>(null)
+  const [unmarking, setUnmarking] = useState(false)
+  // the banner animates only when the task becomes a duplicate while open, never on page load;
+  // captured once the task has loaded, so a cold load does not count as a change
+  const [initialDuplicate, setInitialDuplicate] = useState<{ taskId: string; duplicateOfId: string | null } | null>(null)
+  if (task && initialDuplicate?.taskId !== task.id) setInitialDuplicate({ taskId: task.id, duplicateOfId: task.duplicateOf?.id ?? null })
+  const openTask = (taskId: string) => onOpenTask?.(taskId)
+  const choose = (target: Task) => {
+    if (!task || !picker) return
+    if (picker === 'duplicate') void duplicates.markOne(task, target)
+    else addRelation.mutate({ type: picker, task_id: target.id }, { onSuccess: (record) => setNewRelationId(record.id) })
+  }
+  const unmark = async () => {
+    if (!task) return
+    setUnmarking(true)
+    await duplicates.unmarkOne(task)
+    setUnmarking(false)
+  }
   const attach = (files: FileList | File[] | null) => {
     if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
@@ -123,6 +157,17 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,760px)_240px] content-start items-start gap-x-12 overflow-y-auto px-10 pt-8 pb-12 max-[899px]:grid-cols-1 max-[899px]:gap-[14px] max-[899px]:px-3.5 max-[899px]:pt-4 max-[899px]:pb-7">
           <div className="min-w-0 max-w-[760px]">
+            {task.duplicateOf ? (
+              <DuplicateBanner
+                duplicateOf={task.duplicateOf}
+                projects={projects}
+                status={status}
+                animate={initialDuplicate?.taskId === task.id && task.duplicateOf.id !== initialDuplicate.duplicateOfId}
+                pending={unmarking}
+                onOpen={openTask}
+                onUnmark={() => void unmark()}
+              />
+            ) : null}
             <TaskTextFields
               task={task}
               readOnly={githubContentReadOnly}
@@ -140,6 +185,7 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                   <Paperclip className="size-3.5" />
                   Attach
                 </Button>
+                <AddRelationMenu onChoose={setPicker} />
                 {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70">Uploading {uploadAttachments.progress}%</span> : null}
                 {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{uploadAttachments.remainingCount} file(s) remain. <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
               </div>
@@ -149,6 +195,8 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
             {updateTask.isError ? <p role="alert" className="text-xs text-destructive">Task update failed. <Button variant="ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</Button></p> : null}
             {deleteAttachment.isError ? <p role="alert" className="text-xs text-destructive">Attachment removal failed. <Button variant="ghost" onClick={() => deleteAttachment.variables && deleteAttachment.mutate(deleteAttachment.variables)}>Retry</Button></p> : null}
             {deleteTask.isError ? <p role="alert" className="text-xs text-destructive">Task deletion failed. <Button variant="ghost" onClick={() => deleteTask.variables && void deleteAndClose(deleteTask.variables)}>Retry</Button></p> : null}
+            {addRelation.isError ? <p role="alert" className="text-xs text-destructive">Couldn't add the relation. {addRelation.error.message}</p> : null}
+            {removeRelation.isError ? <p role="alert" className="text-xs text-destructive">Couldn't remove the relation. {removeRelation.error.message}</p> : null}
 
             {githubPullRequests.length > 0 ? <section aria-label="GitHub links" className="mt-6 border-t border-border pt-4">
               <h3 className="mb-2 text-xs font-semibold text-muted-foreground">GitHub</h3>
@@ -160,6 +208,15 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                 </a>)}
               </div>
             </section> : null}
+            <TaskRelationsSection
+              relations={relations}
+              statuses={state.statuses}
+              projects={projects}
+              newRelationId={newRelationId}
+              removingId={removeRelation.isPending ? removeRelation.variables : undefined}
+              onOpen={openTask}
+              onRemove={(relationId) => removeRelation.mutate(relationId)}
+            />
 
           </div>
 
@@ -181,7 +238,9 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
                       key={option.id}
                       className={OPTION}
                       data-selected={option.id === task.statusId || undefined}
-                      onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
+                      onClick={() => option.category === 'duplicate'
+                        ? setPicker('duplicate')
+                        : updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
                     >
                       <TaskStatusIcon status={option} />
                       {option.name}
@@ -337,13 +396,24 @@ export function TaskDetail({ task, project, state, onBack }: TaskDetailProps) {
           </aside>
 
           <div className="col-start-1 min-w-0 max-w-[760px] max-[899px]:w-full max-[899px]:max-w-none">
-            <ActivityFeed task={task} state={state} />
+            <ActivityFeed task={task} state={state} onOpenTask={onOpenTask} />
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
             <div className="mt-4 max-[899px]:mt-3">
               <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentionedUserIds) => createComment.mutateAsync({ body, files, mentionedUserIds })} />
             </div>
           </div>
+          {picker ? (
+            <TaskPickerDialog
+              open
+              onOpenChange={(open) => { if (!open) setPicker(null) }}
+              title={pickerTitle(picker, task.identifier)}
+              statuses={state.statuses}
+              excludeIds={picker === 'duplicate' ? [task.id] : [task.id, ...relatedTaskIds(relations)]}
+              excludeDuplicates={picker === 'duplicate'}
+              onSelect={choose}
+            />
+          ) : null}
         </div>
       )}
     </section>

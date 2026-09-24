@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -7,7 +7,8 @@ import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
-import type { StatusGroup } from '@/features/tasks/tasksLib'
+import { statusGroups, type StatusGroup } from '@/features/tasks/tasksLib'
+import { toast } from 'sonner'
 import { TaskList } from './TaskList'
 
 const originalFetch = globalThis.fetch
@@ -170,4 +171,107 @@ test('bulk toolbar Escape closes an open menu first, then clears the selection',
   await waitFor(() => expect(within(toolbar).getByRole('button', { name: 'Status' }).getAttribute('aria-expanded')).toBe('false'))
   fireEvent.keyDown(document.body, { key: 'Escape' })
   expect(view.queryByRole('toolbar', { name: 'Selected tasks' })).toBeNull()
+}, 20000)
+
+const duplicateStatus: TaskStatusDef = {
+  id: 'dup', projectId: 'project-1', name: 'Duplicate', description: '', color: '#8b8f98',
+  category: 'duplicate', position: 1, version: 1,
+}
+const listProject = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1 }
+const canonical = {
+  id: 'task-91c0', workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title: 'Login fails on Safari',
+  description: '', position: 9, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
+  created_at: '', updated_at: '', version: 1, duplicate_of: null, blocked: false,
+}
+type Call = { method: string; path: string; body?: Record<string, unknown> }
+function relationsApi(calls: Call[]) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    const path = new URL(request.url).pathname
+    const body = request.method === 'GET' ? undefined : await request.json() as Record<string, unknown>
+    calls.push({ method: request.method, path, body })
+    if (path.endsWith('/projects')) return Response.json({ items: [listProject], next_cursor: null })
+    if (path.endsWith('/tasks/bulk')) {
+      const updates = body!.updates as Array<{ id: string; expected_version: number }>
+      return Response.json({ items: updates.map((update) => ({ ...canonical, id: update.id, version: update.expected_version + 1 })), next_cursor: null })
+    }
+    if (path.endsWith('/tasks')) return Response.json({ items: [canonical], next_cursor: null })
+    return Response.json({ ...canonical, id: path.split('/').at(-1), version: 2 })
+  }) as unknown as typeof fetch
+}
+const writes = (calls: Call[]) => calls.filter((call) => call.method !== 'GET')
+const asDuplicate = (value: Task): Task => ({ ...value, statusId: 'dup', duplicateOf: { id: 'task-91c0', projectId: 'project-1', title: 'Login fails on Safari' } })
+
+function viewWithDuplicate(tasks: Task[]) {
+  const statuses = [status, duplicateStatus]
+  return render(<TaskList tasks={tasks} users={[]} labels={[]} statuses={statuses} groups={statusGroups(statuses, 'project-1')} sort="manual" onOpen={() => {}} onAdd={() => {}} />, { wrapper })
+}
+
+test('a blocked task shows the blocked icon beside its identifier', () => {
+  const view = viewFor([{ ...task(1), blocked: true }, task(2)])
+  expect(view.getAllByRole('img', { name: 'Blocked' })).toHaveLength(1)
+})
+
+test('choosing Duplicate in a row status menu opens the picker instead of saving', async () => {
+  const calls: Call[] = []
+  relationsApi(calls)
+  const view = viewWithDuplicate([task(1)])
+  fireEvent.click(view.getByRole('button', { name: 'Status: Todo' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: /Duplicate$/ }, { timeout: 5000 }))
+  expect(await view.findByRole('dialog', { name: 'Mark ORB-1 as duplicate of…' })).toBeTruthy()
+  expect(writes(calls)).toEqual([])
+}, 20000)
+
+test('moving a duplicate to another status is a plain status change, not the picker', async () => {
+  const calls: Call[] = []
+  relationsApi(calls)
+  const view = viewWithDuplicate([asDuplicate(task(2))])
+  fireEvent.click(view.getByRole('button', { name: 'Status: Duplicate' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: /Todo$/ }, { timeout: 5000 }))
+  await waitFor(() => expect(writes(calls)[0]?.body).toEqual({ expected_version: 1, status_id: 'todo' }))
+  expect(view.queryByRole('dialog')).toBeNull()
+}, 20000)
+
+test('dropping a row on the Duplicate group asks for the canonical task and writes nothing yet', async () => {
+  const calls: Call[] = []
+  relationsApi(calls)
+  const view = viewWithDuplicate([task(1), asDuplicate(task(2))])
+  expect(view.queryByRole('button', { name: 'New task in Duplicate' })).toBeNull()
+  const row = view.getByText('Task 1').closest('[draggable="true"]')!
+  const duplicateGroup = view.getByRole('button', { name: 'Collapse Duplicate' }).closest('section')!
+  const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => {}, getData: () => 'task-1' }
+  fireEvent.dragStart(row, { dataTransfer })
+  fireEvent.drop(duplicateGroup, { dataTransfer })
+  expect(await view.findByRole('dialog', { name: 'Mark ORB-1 as duplicate of…' })).toBeTruthy()
+  expect(writes(calls)).toEqual([])
+})
+
+test('the bulk bar hides the Duplicate status and marks the selection in one call with an Undo toast', async () => {
+  const calls: Call[] = []
+  relationsApi(calls)
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  const view = viewWithDuplicate([task(1), task(2)])
+  for (const checkbox of view.getAllByRole('checkbox')) fireEvent.click(checkbox)
+  const toolbar = view.getByRole('toolbar', { name: 'Selected tasks' })
+
+  fireEvent.click(within(toolbar).getByRole('button', { name: 'Status' }))
+  await view.findByRole('menuitem', { name: /Todo$/ }, { timeout: 5000 })
+  expect(view.queryByRole('menuitem', { name: /Duplicate$/ })).toBeNull()
+  fireEvent.keyDown(document.body, { key: 'Escape' })
+  await waitFor(() => expect(within(toolbar).getByRole('button', { name: 'Status' }).getAttribute('aria-expanded')).toBe('false'))
+
+  const markDuplicate = within(toolbar).getByRole('button', { name: 'Mark as duplicate…' })
+  // one word like the other bulk actions, so the bar keeps its width; the full action stays the accessible name
+  expect(markDuplicate.textContent).toBe('Duplicate')
+  fireEvent.click(markDuplicate)
+  const picker = await view.findByRole('dialog', { name: 'Mark 2 tasks as duplicate of…' })
+  fireEvent.click(await within(picker).findByRole('option', { name: /Login fails on Safari/ }))
+  await waitFor(() => expect(writes(calls)).toHaveLength(1))
+  expect(writes(calls)[0]).toEqual({ method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/bulk', body: { updates: [
+    { id: 'task-1', expected_version: 1, duplicate_of_id: 'task-91c0' },
+    { id: 'task-2', expected_version: 1, duplicate_of_id: 'task-91c0' },
+  ] } })
+  await waitFor(() => expect(success).toHaveBeenCalledTimes(1))
+  expect(success.mock.calls[0]![0]).toBe('Marked 2 tasks as duplicate of ORB-91C0')
+  success.mockRestore()
 }, 20000)

@@ -10,6 +10,10 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { boardDropUpdates, resolveStatusId, sortTasks, type SortKey, type StatusGroup } from '@/features/tasks/tasksLib'
 import { PriorityPicker } from './PriorityPicker'
 import { LabelPill } from './TaskLabels'
+import { pickerTitle } from '@/features/tasks/relationsLib'
+import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
+import { BlockedIndicator } from './BlockedIndicator'
+import { TaskPickerDialog } from './TaskPickerDialog'
 
 interface TaskBoardProps {
   tasks: Task[]
@@ -29,6 +33,8 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
   const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
   const [dragging, setDragging] = useState<{ id: string; height: number } | null>(null)
   const [drop, setDrop] = useState<{ key: string; index: number } | null>(null)
+  const duplicates = useDuplicateActions(workspace.id)
+  const [duplicateTask, setDuplicateTask] = useState<Task | null>(null)
 
   const endDrag = () => {
     setDragging(null)
@@ -50,6 +56,11 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
     if (!task) return
     const statusId = resolveStatusId(statuses, task.projectId, group.key)
     if (!statusId) return
+    // entering Duplicate needs a canonical task: ask first; nothing is written until one is picked
+    if (statusId !== task.statusId && statuses.find((status) => status.id === statusId)?.category === 'duplicate') {
+      setDuplicateTask(task)
+      return
+    }
     const updates = boardDropUpdates(task, columnTasks, statusId, index)
     if (updates.length > 0) bulkTasks.mutate(updates)
   }
@@ -121,7 +132,10 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
                     >
                       {/* id … assignees · priority (priority changes in place) */}
                       <div className="flex min-h-5 items-center justify-between text-[11px] text-muted-foreground/70">
-                        <span>{task.identifier}</span>
+                        <span className="flex items-center gap-1">
+                          {task.identifier}
+                          {task.blocked ? <BlockedIndicator /> : null}
+                        </span>
                         <span className="flex items-center gap-1">
                           {assignees.length > 0 ? <UserAvatarStack users={assignees} size={18} /> : null}
                           <PriorityPicker task={task} align="right" />
@@ -149,6 +163,17 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
         )
       })}
       {bulkTasks.isError ? <p role="alert" className="absolute top-3 right-3 z-10 rounded-md border border-destructive/30 bg-background px-2 py-1 text-xs text-destructive shadow-sm">{limitError ? `This move would update ${limitError.count} tasks. Move it in smaller steps so each drop affects at most ${MAX_BULK_TASK_UPDATES} tasks.` : <>Board reorder failed. <Button variant="ghost" onClick={bulkTasks.retry}>Retry</Button></>}</p> : null}
+      {duplicateTask ? (
+        <TaskPickerDialog
+          open
+          onOpenChange={(open) => { if (!open) setDuplicateTask(null) }}
+          title={pickerTitle('duplicate', duplicateTask.identifier)}
+          statuses={statuses}
+          excludeIds={[duplicateTask.id]}
+          excludeDuplicates
+          onSelect={(target) => void duplicates.markOne(duplicateTask, target)}
+        />
+      ) : null}
     </div>
   )
 }

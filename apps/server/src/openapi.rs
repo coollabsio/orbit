@@ -79,6 +79,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::delete_label,
         crate::task_routes::list_tasks,
         crate::task_routes::get_task,
+        crate::task_routes::list_task_relations,
+        crate::task_routes::create_task_relation,
+        crate::task_routes::delete_task_relation,
         crate::task_routes::list_github_links,
         crate::task_routes::list_task_activity,
         crate::task_routes::create_task,
@@ -428,6 +431,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "list_tasks"
             | "create_task"
             | "update_task"
+            | "create_task_relation"
             | "bulk_tasks"
             | "reorder_tasks"
             | "delete_task"
@@ -487,6 +491,9 @@ fn task_operation(operation_id: &str) -> bool {
             | "delete_label"
             | "list_tasks"
             | "get_task"
+            | "list_task_relations"
+            | "create_task_relation"
+            | "delete_task_relation"
             | "create_task"
             | "update_task"
             | "bulk_tasks"
@@ -521,6 +528,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "update_project"
             | "create_status"
             | "update_status"
+            | "delete_status"
             | "reorder_statuses"
             | "create_label"
             | "update_label"
@@ -530,13 +538,20 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "reorder_tasks"
             | "create_comment"
             | "update_comment"
+            | "create_task_relation"
+            | "delete_task_relation"
     ) || operation_id == "list_tasks"
     {
         add_code(responses, "422", "validation_failed");
     }
     if matches!(
         operation_id,
-        "create_project" | "create_status" | "create_label" | "create_task" | "create_comment"
+        "create_project"
+            | "create_status"
+            | "create_label"
+            | "create_task"
+            | "create_comment"
+            | "create_task_relation"
     ) {
         add_code(responses, "409", "task_conflict");
     }

@@ -1,8 +1,10 @@
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { isClosedCategory } from '@/features/tasks/taskMeta'
 import type { User } from '@/features/workspaces/models'
 import { TaskStatusIcon } from '../components/TaskStatusIcon'
+import { BlockedIndicator } from '../components/BlockedIndicator'
 import { dayIndex, spanLabel, xOf, type DragMode, type TaskSpan, type TimeRange } from './timelineLib'
 
 /** Below this width the label moves outside, to the right of the bar. */
@@ -40,7 +42,7 @@ export interface TimelineBarProps {
 
 /** A task on the timeline: a bar for a date range, a diamond for a due date only, plus an overdue tail. */
 export function TimelineBar({ task, span, range, pxPerDay, color, status, assignee, overdueDays, dragging, onPointerDown, onClick, onKeyDown }: TimelineBarProps) {
-  const closed = status?.category === 'completed' || status?.category === 'cancelled'
+  const closed = isClosedCategory(status?.category)
   const left = xOf(range, span.start, pxPerDay)
   const width = (dayIndex(range, span.end) - dayIndex(range, span.start) + 1) * pxPerDay
   const tailStart = xOf(range, span.end, pxPerDay) + pxPerDay
@@ -48,6 +50,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
   const label = (
     <>
       <TaskStatusIcon status={status} size={13} />
+      {task.blocked ? <BlockedIndicator /> : null}
       <span className="truncate">{task.title || 'Untitled'}</span>
     </>
   )

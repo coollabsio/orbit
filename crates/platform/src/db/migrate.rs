@@ -193,8 +193,24 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0020_github_integration.sql"),
                     false,
                 ),
+                Migration::new(
+                    21,
+                    include_str!("../../../../apps/server/migrations/0021_task_relations.sql"),
+                    true,
+                ),
             ],
         )
+    }
+
+    /// The embedded catalog up to and including `last_version`, for testing a migration
+    /// against data written under the schema that precedes it.
+    #[must_use]
+    pub fn embedded_through(app_version: impl Into<String>, last_version: i64) -> Self {
+        let mut runner = Self::embedded(app_version);
+        runner
+            .migrations
+            .retain(|migration| migration.version <= last_version);
+        runner
     }
 
     pub async fn pending(

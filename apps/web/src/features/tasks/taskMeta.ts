@@ -29,13 +29,19 @@ export function taskViewCreateDefaults(view: TaskView | undefined, currentUserId
 }
 
 /** Status categories (workflow stages). Every status belongs to one; the glyph shape comes from it. */
-export const CATEGORY_ORDER: StatusCategory[] = ['unstarted', 'started', 'completed', 'cancelled']
+export const CATEGORY_ORDER: StatusCategory[] = ['unstarted', 'started', 'completed', 'cancelled', 'duplicate']
 
 export const CATEGORY_LABEL: Record<StatusCategory, string> = {
   unstarted: 'Unstarted',
   started: 'Started',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  duplicate: 'Duplicate',
+}
+
+/** Closed work: never overdue, dimmed on the timeline, left out of open totals. */
+export function isClosedCategory(category: StatusCategory | undefined): boolean {
+  return category === 'completed' || category === 'cancelled' || category === 'duplicate'
 }
 
 /** Default statuses every new project starts with. */

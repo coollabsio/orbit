@@ -15,6 +15,8 @@ import { TaskCommentComposer } from './TaskCommentComposer'
 interface ActivityFeedProps {
   task: Task
   state: TaskViewState
+  /** Opens a task named in an activity entry (relation events). */
+  onOpenTask?: (taskId: string) => void
 }
 
 const TIMELINE_ITEM =
@@ -24,7 +26,27 @@ const TIMELINE_ITEM =
  * Chronological feed: activity events (timeline rows) and comment threads (cards) interleaved by time,
  * so a change made after a comment shows below that comment.
  */
-export function ActivityFeed({ task, state }: ActivityFeedProps) {
+/** Activity sentence; the related task's identifier becomes a link when the feed can open tasks. */
+function ActivityText({ item, onOpenTask }: { item: TaskActivity; onOpenTask?: (taskId: string) => void }) {
+  const related = item.related
+  const at = related ? item.text.indexOf(related.identifier) : -1
+  if (!related || at === -1 || !onOpenTask) return <>{item.text}</>
+  return (
+    <>
+      {item.text.slice(0, at)}
+      <button
+        type="button"
+        className="rounded-sm font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={() => onOpenTask(related.taskId)}
+      >
+        {related.identifier}
+      </button>
+      {item.text.slice(at + related.identifier.length)}
+    </>
+  )
+}
+
+export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   const [expanded, setExpanded] = useState(false)
   const { workspace } = useWorkspace()
   const createComment = useCreateTaskComment(workspace.id, task.id)
@@ -49,7 +71,7 @@ export function ActivityFeed({ task, state }: ActivityFeedProps) {
               {status ? <TaskStatusIcon status={status} size={14} /> : <UserAvatar user={actor} size={14} />}
             </span>
             <span className="truncate">
-              <span className="font-medium text-foreground">{item.actorName ?? actor?.name ?? 'Someone'}</span> {item.text} · {agoLabel(item.createdAt)}
+              <span className="font-medium text-foreground">{item.actorName ?? actor?.name ?? 'Someone'}</span> <ActivityText item={item} onOpenTask={onOpenTask} /> · {agoLabel(item.createdAt)}
             </span>
           </li>
         )

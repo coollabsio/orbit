@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -12,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { TaskStatusIcon } from './TaskStatusIcon'
+import { BlockedIndicator } from './BlockedIndicator'
 import { projectStatuses } from '@/features/tasks/taskMeta'
 import { shortDate } from '@/lib/format'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
@@ -43,10 +45,12 @@ interface TaskRowProps {
   onToggleSelect: (taskId: string) => void
   onDragStart: (taskId: string) => void
   onDragEnd: () => void
+  /** Duplicate needs a canonical task: the list opens its picker. */
+  onRequestDuplicate: (task: Task) => void
 }
 
 /** List row: [checkbox] priority · id · status · title … labels · assignee · created. */
-export function TaskRow({ task, statuses, labels, users, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd }: TaskRowProps) {
+export function TaskRow({ task, statuses, labels, users, assignees, selected, dragging, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
@@ -80,7 +84,11 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
         />
       </div>
       <PriorityPicker task={task} />
-      <span className="w-[72px] shrink-0 text-xs whitespace-nowrap text-muted-foreground/70 tabular-nums max-[480px]:hidden">{task.identifier}</span>
+      {/* the blocked mark lives inside the fixed id column so titles stay aligned; on phones only the mark shows */}
+      <span className={cn('inline-flex w-[72px] shrink-0 items-center gap-1 text-xs whitespace-nowrap text-muted-foreground/70 tabular-nums max-[480px]:w-auto', !task.blocked && 'max-[480px]:hidden')}>
+        <span className="whitespace-nowrap max-[480px]:hidden">{task.identifier}</span>
+        {task.blocked ? <BlockedIndicator /> : null}
+      </span>
       <div onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -96,7 +104,9 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
                 key={option.id}
                 className={OPTION}
                 data-selected={option.id === task.statusId || undefined}
-                onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
+                onClick={() => option.category === 'duplicate'
+                  ? onRequestDuplicate(task)
+                  : updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
               >
                 <TaskStatusIcon status={option} />
                 {option.name}

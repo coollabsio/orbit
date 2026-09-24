@@ -95,7 +95,9 @@ test('project creation retry selects the created project', async () => {
 test('task deletion retry returns to the task list after success', async () => {
   let calls = 0
   globalThis.fetch = (async (request: Request) => {
-    if (new URL(request.url).pathname.endsWith('/github-links')) return Response.json([])
+    const path = new URL(request.url).pathname
+    if (path.endsWith('/github-links') || path.endsWith('/relations')) return Response.json([])
+    if (path.endsWith('/projects')) return Response.json({ items: [], next_cursor: null })
     calls += 1
     return calls === 1 ? failure() : new Response(null, { status: 204 })
   }) as unknown as typeof fetch

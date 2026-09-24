@@ -20,6 +20,8 @@ export const queryKeys = {
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'activity'] as const,
   attachments: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'attachments'] as const,
+  taskRelations: (workspaceId: string, taskId: string) =>
+    [...workspace(workspaceId), 'tasks', 'detail', taskId, 'relations'] as const,
   labels: (workspaceId: string) => [...workspace(workspaceId), 'labels'] as const,
   commentAttachments: (workspaceId: string, taskId: string, commentId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments', commentId, 'attachments'] as const,

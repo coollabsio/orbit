@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createApiClient } from '@/api/client'
-import { nextTaskCursor, taskListAllPages, taskListPage } from './tasks'
+import { bulkSetTaskDuplicateOf, markDuplicateUpdates, nextTaskCursor, optimisticTaskPatch, setTaskDuplicateOf, taskListAllPages, taskListPage } from './tasks'
 
 test('task filters and cursor continuation are sent through the generated list call', async () => {
   let requested = ''
@@ -38,4 +38,32 @@ test('exhaustive task filtering follows every server cursor', async () => {
   expect(cursors).toEqual([null, 'cursor-2'])
   expect(page.items.map((item) => item.id)).toEqual(['task-1', 'task-2'])
   expect(page.next_cursor).toBeNull()
+})
+
+test('duplicate marking is one patch field; bulk items carry it per task', () => {
+  expect(markDuplicateUpdates([{ id: 'a', version: 1 }, { id: 'b', version: 7 }], 'target')).toEqual([
+    { id: 'a', expected_version: 1, duplicate_of_id: 'target' },
+    { id: 'b', expected_version: 7, duplicate_of_id: 'target' },
+  ])
+  expect(markDuplicateUpdates([{ id: 'a', version: 2 }], null)).toEqual([{ id: 'a', expected_version: 2, duplicate_of_id: null }])
+})
+
+test('the optimistic patch never writes duplicate_of_id into cached task records', () => {
+  expect(optimisticTaskPatch({ duplicate_of_id: 'target', priority: 'high' })).toEqual({ priority: 'high' })
+})
+
+test('duplicate calls go through the task PATCH and the atomic bulk endpoint', async () => {
+  const requests: Array<{ method: string; path: string; body: unknown }> = []
+  const client = createApiClient({
+    fetch: async (request) => {
+      requests.push({ method: request.method, path: new URL(request.url).pathname, body: await request.json() })
+      return Response.json(request.url.endsWith('/bulk') ? { items: [], next_cursor: null } : { id: 'a', version: 2 })
+    },
+  })
+  await setTaskDuplicateOf(client, 'workspace-1', { id: 'a', version: 1 }, 'target')
+  await bulkSetTaskDuplicateOf(client, 'workspace-1', [{ id: 'a', version: 2 }], null)
+  expect(requests).toEqual([
+    { method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/a', body: { expected_version: 1, duplicate_of_id: 'target' } },
+    { method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/bulk', body: { updates: [{ id: 'a', expected_version: 2, duplicate_of_id: null }] } },
+  ])
 })

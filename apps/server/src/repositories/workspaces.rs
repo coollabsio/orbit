@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_domain::{StatusCategory, WorkspaceDefaults, WorkspaceRole};
+use orbit_domain::{WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
     AttachmentMutationCoordinator, BlobStore, BlobStoreError, Database, Id, IssuedSession, Job,
     JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore, RecurringSchedule,
@@ -17,6 +17,8 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
+use super::task_relations;
+use super::tasks::TaskError;
 use crate::audit::{self, AuditEvent, AuditOutcome};
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
@@ -1646,6 +1648,12 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
+            task_relations::release_duplicates_in_tx(&mut transaction, &task_id, now)
+                .await
+                .map_err(|error| match error {
+                    TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
+                    _ => WorkspaceError::Conflict,
+                })?;
             sqlx::query("DELETE FROM tasks WHERE id = ?")
                 .bind(&task_id)
                 .execute(&mut *transaction)
@@ -1748,6 +1756,12 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
+            // Tasks go before the workspace cascade: tasks.status_id is ON DELETE RESTRICT, and
+            // SQLite may cascade into task_statuses first (it was rebuilt after tasks in 0021).
+            sqlx::query("DELETE FROM tasks WHERE workspace_id = ?")
+                .bind(&workspace_id)
+                .execute(&mut *transaction)
+                .await?;
             workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = ?")
                 .bind(workspace_id)
                 .execute(&mut *transaction)
@@ -1882,12 +1896,7 @@ async fn insert_default_project(
         .bind(&status.name)
         .bind(&status.description)
         .bind(&status.color)
-        .bind(match status.category {
-            StatusCategory::Unstarted => "unstarted",
-            StatusCategory::Started => "started",
-            StatusCategory::Completed => "completed",
-            StatusCategory::Cancelled => "cancelled",
-        })
+        .bind(status.category.as_str())
         .bind(status.position)
         .bind(status.version as i64)
         .bind(now.as_millis())
