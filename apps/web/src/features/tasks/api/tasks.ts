@@ -9,15 +9,18 @@ import {
   createAttachmentComment,
   createComment,
   createTask,
+  createTaskRelation,
   deleteComment,
   deleteTask,
   deleteTaskAttachment,
+  deleteTaskRelation,
   getTask,
   listComments,
   listGithubLinks,
   listTaskActivity,
   listCommentAttachments,
   listTaskAttachments,
+  listTaskRelations,
   listTaskTrash,
   listTasks,
   reorderTasks,
@@ -30,10 +33,12 @@ import {
 import type {
   BulkItem,
   CreateTaskBody,
+  CreateTaskRelationData,
   ListTasksData,
   PageTaskRecord,
   ReorderItem,
   TaskRecord,
+  TaskRelationRecord,
   TaskUpdateBody,
   CommentRecord,
 } from '@/api/generated/types.gen'
@@ -209,8 +214,10 @@ async function promptForConflict(error: Error, refresh: () => void) {
   if (isTaskVersionConflict(error) && await confirmAction({ title: 'Refresh task?', description: 'This task changed on the server. Refresh it now?', confirmLabel: 'Refresh' })) refresh()
 }
 
-function optimisticTaskPatch(body: Omit<TaskUpdateBody, 'expected_version'>): Partial<TaskRecord> {
-  return Object.fromEntries(Object.entries(body).filter(([, value]) => value != null)) as Partial<TaskRecord>
+/** Cache patch for an optimistic update. `duplicate_of_id` is not a task field; the server response reconciles it. */
+export function optimisticTaskPatch(body: Omit<TaskUpdateBody, 'expected_version'>): Partial<TaskRecord> {
+  const { duplicate_of_id: _duplicateOf, ...fields } = body
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value != null)) as Partial<TaskRecord>
 }
 
 export function useCreateTask(workspaceId: string) {
@@ -304,6 +311,74 @@ export function useReorderTasks(workspaceId: string) {
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
     },
     onSuccess: (page) => page.items.forEach((record) => reconcileWorkspaceTask(queryClient, workspaceId, record)),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
+  })
+}
+
+export type VersionedTask = { id: string; version: number }
+export type TaskRelationInput = NonNullable<CreateTaskRelationData['body']>
+
+/** Bulk items that mark (`duplicateOfId`) or unmark (`null`) every task in one atomic call. */
+export function markDuplicateUpdates(tasks: ReadonlyArray<VersionedTask>, duplicateOfId: string | null): BulkItem[] {
+  return tasks.map((task) => ({ id: task.id, expected_version: task.version, duplicate_of_id: duplicateOfId }))
+}
+
+export async function setTaskDuplicateOf(
+  client: ApiClient,
+  workspaceId: string,
+  task: VersionedTask,
+  duplicateOfId: string | null,
+): Promise<TaskRecord> {
+  const { data } = await updateTask({
+    client,
+    path: { workspace_id: workspaceId, task_id: task.id },
+    body: { expected_version: task.version, duplicate_of_id: duplicateOfId },
+    throwOnError: true,
+  })
+  return required(data, 'Update task response was empty.')
+}
+
+export async function bulkSetTaskDuplicateOf(
+  client: ApiClient,
+  workspaceId: string,
+  tasks: ReadonlyArray<VersionedTask>,
+  duplicateOfId: string | null,
+): Promise<PageTaskRecord> {
+  const updates = markDuplicateUpdates(tasks, duplicateOfId)
+  if (updates.length > MAX_BULK_TASK_UPDATES) throw new BulkTaskLimitError(updates.length)
+  const { data } = await bulkTasks({ client, path: { workspace_id: workspaceId }, body: { updates }, throwOnError: true })
+  return required(data, 'Bulk task response was empty.')
+}
+
+export function useTaskRelations(workspaceId: string, taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.taskRelations(workspaceId, taskId ?? ''),
+    enabled: Boolean(taskId),
+    queryFn: async (): Promise<TaskRelationRecord[]> => {
+      const { data } = await listTaskRelations({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, throwOnError: true })
+      return required(data, 'Task relations response was empty.')
+    },
+  })
+}
+
+export function useAddTaskRelation(workspaceId: string, taskId: string) {
+  const queryClient = useQueryClient()
+  return useMutation<TaskRelationRecord, Error, TaskRelationInput>({
+    mutationFn: async (body) => {
+      const { data } = await createTaskRelation({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body, throwOnError: true })
+      return required(data, 'Create relation response was empty.')
+    },
+    // both tasks' relations and `blocked` flags change: refresh every task query of the workspace
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
+  })
+}
+
+export function useRemoveTaskRelation(workspaceId: string, taskId: string) {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error, string>({
+    mutationFn: async (relationId) => {
+      await deleteTaskRelation({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, relation_id: relationId }, throwOnError: true })
+    },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
   })
 }

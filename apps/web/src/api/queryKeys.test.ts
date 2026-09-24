@@ -25,4 +25,10 @@ describe('workspace query keys', () => {
     expect(queryKeys.workspaceTrash('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
     expect(queryKeys.audit('workspace-a').slice(0, 2)).toEqual(['workspace', 'workspace-a'])
   })
+  test('task relations live under the task detail key, so task invalidation refreshes them', () => {
+    expect(queryKeys.taskRelations('workspace-a', 'task-one')).toEqual([
+      ...queryKeys.tasks.detail('workspace-a', 'task-one'), 'relations',
+    ])
+    expect(queryKeys.taskRelations('workspace-a', 'task-one').slice(0, 3)).toEqual([...queryKeys.tasks.all('workspace-a')])
+  })
 })
