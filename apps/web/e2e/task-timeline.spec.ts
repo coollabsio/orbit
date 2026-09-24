@@ -2,6 +2,20 @@ import { expect, test } from '@playwright/test'
 
 test.use({ viewport: { width: 1280, height: 800 }, timezoneId: 'Europe/Berlin' })
 
+/** The All tasks page's stored preference: the timeline layout now lives in the server-side view state. */
+const timelinePreference = {
+  page_key: 'all',
+  state: {
+    filter: { op: 'and', children: [] },
+    display: {
+      layout: 'timeline', group_by: 'status', sub_group_by: 'none', order_by: 'manual', order_direction: 'asc',
+      properties: ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels'], show_completed: 'all', show_empty_groups: false,
+    },
+  },
+  state_error: null,
+  updated_at: '2026-09-01T12:00:00Z',
+}
+
 test('drag a timeline bar, then open the task and come back to the same layout', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-23T10:00:00+02:00'))
   const task = {
@@ -29,13 +43,15 @@ test('drag a timeline bar, then open the task and come back to the same layout',
     if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
     if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#e0457b', version: 1 }], next_cursor: null }
     if (path.endsWith('/statuses')) body = { items: [{ id: 'todo', project_id: 'project-1', name: 'Todo', category: 'unstarted', color: '#888888', position: 0, version: 1 }], next_cursor: null }
-    if (path.endsWith('/tasks')) body = { items: [task], next_cursor: null }
+    if (path.endsWith('/tasks/query')) body = { items: [task], next_cursor: null }
+    // only `all` is a timeline; every other page has no stored preference and shows the default list
+    if (path.endsWith('/view-preferences/all')) body = timelinePreference
     if (path.endsWith('/tasks/task-1')) body = task
     if (path.endsWith('/github-links')) body = []
     await route.fulfill({ json: body })
   })
 
-  await page.goto('/tasks?workspace=alpha&layout=timeline')
+  await page.goto('/tasks?workspace=alpha')
   await page.getByRole('button', { name: 'Week' }).click()
   const bar = page.locator('[data-timeline-bar="task-1"]')
   await expect(bar).toBeVisible()
@@ -50,16 +66,17 @@ test('drag a timeline bar, then open the task and come back to the same layout',
   expect(patches[0]).toMatchObject({ due_start_at: '2026-09-24T22:00:00.000Z', due_at: '2026-09-28T07:00:00.000Z', expected_version: 1 })
 
   await bar.click()
-  await expect(page).toHaveURL(/\/tasks\/task-1\?.*layout=timeline/)
+  await expect(page).toHaveURL(/\/tasks\/task-1\?workspace=alpha$/)
   await page.keyboard.press('Escape')
-  await expect(page).toHaveURL(/\/tasks\?.*layout=timeline/)
+  // back on the page the task was opened from, not the task's project page
+  await expect(page).toHaveURL(/\/tasks\?workspace=alpha$/)
+  await expect(page.locator('[data-timeline-scroller]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true')
 
-  // sidebar links carry no layout param; the timeline the user came in with must stay
+  // the Overdue page loads its own preference: none is stored, so it shows the default list
   await page.getByRole('link', { name: 'Overdue' }).first().click()
   await expect(page).toHaveURL(/view=overdue/)
-  await expect(page.locator('[data-timeline-scroller]')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Week' })).toBeVisible()
+  await expect(page.locator('[data-timeline-scroller]')).toHaveCount(0)
 })
 
 test.describe('narrow screens', () => {
@@ -79,10 +96,11 @@ test.describe('narrow screens', () => {
       if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
       if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#e0457b', version: 1 }], next_cursor: null }
       if (path.endsWith('/statuses')) body = { items: [{ id: 'todo', project_id: 'project-1', name: 'Todo', category: 'unstarted', color: '#888888', position: 0, version: 1 }], next_cursor: null }
-      if (path.endsWith('/tasks')) body = { items: tasks, next_cursor: null }
+      if (path.endsWith('/tasks/query')) body = { items: tasks, next_cursor: null }
+      if (path.endsWith('/view-preferences/all')) body = timelinePreference
       await route.fulfill({ json: body })
     })
-    await page.goto('/tasks?workspace=alpha&layout=timeline')
+    await page.goto('/tasks?workspace=alpha')
     await expect(page.getByRole('button', { name: /Launch/ })).toBeVisible()
     await page.getByRole('button', { name: 'No dates (1)' }).tap()
     await expect(page.getByRole('button', { name: /Undated task/ })).toBeVisible()

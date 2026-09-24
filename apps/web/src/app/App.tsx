@@ -51,6 +51,8 @@ export default function App() {
               <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
               <Route path="tasks/:taskId" element={<TasksPage />} />
               <Route path="tasks-trash" element={<TaskTrashPage />} />
+              <Route path="views/:viewId" element={<TasksPage />} />
+              <Route path="views/:viewId/:taskId" element={<TasksPage />} />
               <Route path="docs/*" element={<Navigate to="/tasks" replace />} />
               <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
               <Route path="chat/*" element={<Navigate to="/tasks" replace />} />

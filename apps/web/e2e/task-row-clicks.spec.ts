@@ -19,7 +19,7 @@ for (const touch of [false, true]) {
         if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
         if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#123456', version: 1 }], next_cursor: null }
         if (path.endsWith('/statuses')) body = { items: [{ id: 'todo', project_id: 'project-1', name: 'Todo', category: 'unstarted', color: '#123456', position: 0, version: 1 }], next_cursor: null }
-        if (path.endsWith('/tasks')) body = { items: tasks, next_cursor: null }
+        if (path.endsWith('/tasks') || path.endsWith('/tasks/query')) body = { items: tasks, next_cursor: null }
         if (path.endsWith('/tasks/task-1')) body = tasks[0]
         await route.fulfill({ json: body })
       })

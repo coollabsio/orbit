@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
+import { ApiProblem } from '@/api/problem'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -23,7 +24,6 @@ import {
   useTaskActivity,
   useTaskAttachments,
   useTaskComments,
-  useTasks,
 } from '@/features/tasks/api/tasks'
 import { TaskBoard } from '@/features/tasks/components/TaskBoard'
 import { TaskDetail } from '@/features/tasks/components/TaskDetail'
@@ -31,20 +31,33 @@ import { TaskFilters } from '@/features/tasks/components/TaskFilters'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
-import { filterTasks, resolveLayout, resolveStatusId, statusGroups, taskApiSort, type TaskLayout } from '@/features/tasks/tasksLib'
+import { quickSearchTasks, resolveStatusId, statusGroups } from '@/features/tasks/tasksLib'
 import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
 import { TimelineControls } from '@/features/tasks/timeline/TimelineControls'
 import { useTimelineZoom } from '@/features/tasks/timeline/useTimelineZoom'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
-import { useTaskPreferences } from '@/features/tasks/taskPreferences'
-import { createDefaultsFromFilter } from '@/features/views/grouping'
-import { PRESET_FILTERS, emptyFilter, isTaskPreset } from '@/features/views/viewState'
+import { useTaskQuery } from '@/features/views/api/taskQuery'
+import { useSavedView, useViewPreference } from '@/features/views/api/views'
+import { createDefaultsFromFilter, type GroupContext } from '@/features/views/grouping'
+import { legacyFilterValues, withLegacyFilter, withLegacySort, type LegacyFilterChange } from '@/features/views/legacyFilterAdapter'
+import { useViewState, type ViewSource } from '@/features/views/useViewState'
+import { isTaskPreset, pageKeyFor, type FilterGroup, type TaskPreset } from '@/features/views/viewState'
 
-const LAYOUT_KEY = 'orbit:task_layout'
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 
 const OPTION =
   `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[active]:bg-accent data-[active]:font-medium`
+
+/** History state of a task URL: the project page it was opened from, where closing returns. */
+type TaskOrigin = { originProject: string | null }
+
+const PRESET_TITLE: Record<TaskPreset, string> = {
+  mine: 'My tasks',
+  overdue: 'Overdue',
+  due_soon: 'Due soon',
+  current_week: 'This week',
+  my_week: 'My week',
+}
 
 export function TasksPage() {
   const { workspace } = useWorkspace()
@@ -53,8 +66,9 @@ export function TasksPage() {
 
 function WorkspaceTasksPage() {
   const { workspace } = useWorkspace()
-  const { taskId } = useParams()
+  const { taskId, viewId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const projectsQuery = useProjects(workspace.id)
   const projects = projectsQuery.data ?? EMPTY_PROJECTS
@@ -64,59 +78,61 @@ function WorkspaceTasksPage() {
   const currentUser = useCurrentUser()
   const createTask = useCreateTask(workspace.id)
   const [showNewProject, setShowNewProject] = useState(false)
-
-  const urlLayout = searchParams.get('layout')
-  const layout = resolveLayout(urlLayout, localStorage.getItem(LAYOUT_KEY))
-  // a layout arriving by URL (shared link, back from a task) is also the one to remember
-  useEffect(() => {
-    if (urlLayout) localStorage.setItem(LAYOUT_KEY, layout)
-  }, [urlLayout, layout])
-  const setLayout = (next: TaskLayout) => {
-    localStorage.setItem(LAYOUT_KEY, next)
-    const params = new URLSearchParams(searchParams)
-    if (next === 'list') params.delete('layout')
-    else params.set('layout', next)
-    setSearchParams(params, { replace: true })
-  }
   const [pxPerDay, setPxPerDay] = useTimelineZoom()
   const timelineRef = useRef<TimelineHandle>(null)
-  const [preferences, setPreferences] = useTaskPreferences(workspace.id)
-  const { sort, statusFilter, assigneeFilter, unassignedFilter, labelFilter, priorityFilter, searchFilter } = preferences
-  const setPreference = <K extends keyof typeof preferences>(key: K, value: typeof preferences[K]) => {
-    setPreferences((current) => ({ ...current, [key]: value }))
-  }
-  const projectFilter = searchParams.get('project')
-  const viewParam = searchParams.get('view')
-  const viewFilter = isTaskPreset(viewParam) ? viewParam : undefined
 
-  const lastView = useRef(viewFilter)
+  // A saved view (`/views/:viewId`) or a page (`/tasks`, `?project=`, `?view=<preset>`) drives filters and display.
+  const basePath = viewId ? `/views/${viewId}` : '/tasks'
+  const projectFilter = viewId ? null : searchParams.get('project')
+  const presetParam = searchParams.get('view')
+  const preset: TaskPreset | null = !viewId && isTaskPreset(presetParam) ? presetParam : null
+  const source = useMemo<ViewSource>(() => viewId
+    ? { kind: 'view', viewId }
+    : { kind: 'page', pageKey: pageKeyFor({ projectId: projectFilter, preset }), preset, projectId: projectFilter },
+  [viewId, projectFilter, preset])
+  const viewState = useViewState(workspace.id, source)
+  const savedView = useSavedView(workspace.id, viewId)
+  // the same query useViewState reads: a page stays loading after a failed load, so the error shows from here
+  const preference = useViewPreference(workspace.id, source.kind === 'page' ? source.pageKey : 'all', source.kind === 'page')
+  // a saved view that failed to load has no state: never run the task query with defaults in its place
+  const viewUnavailable = source.kind === 'view' && !viewState.isLoading && viewState.view === undefined
+  const { filter, display } = viewState.state
+  const layout = display.layout
+  const tasksQuery = useTaskQuery(workspace.id, viewState.effective, display, !viewState.isLoading && !viewUnavailable)
+
+  // Quick search is local and never saved (spec §3); another preset or view starts with an empty box.
+  const [search, setSearch] = useState('')
+  const scopeKey = viewId ? `view:${viewId}` : `preset:${preset ?? 'all'}`
+  const lastScope = useRef(scopeKey)
   useEffect(() => {
-    if (lastView.current !== viewFilter) {
-      setPreferences((current) => ({ ...current, searchFilter: '' }))
-      lastView.current = viewFilter
+    if (lastScope.current !== scopeKey) {
+      setSearch('')
+      lastScope.current = scopeKey
     }
-  }, [viewFilter, setPreferences])
+  }, [scopeKey])
 
-  const apiStatus = projectFilter ? resolveStatusId(statusesQuery.data, projectFilter, statusFilter) : undefined
-  const tasksQuery = useTasks(workspace.id, {
-    project_id: projectFilter ?? undefined,
-    status_id: statusFilter ? apiStatus : undefined,
-    assignee_id: assigneeFilter ?? undefined,
-    unassigned: unassignedFilter || undefined,
-    label_id: labelFilter ?? undefined,
-    priority: priorityFilter ?? undefined,
-    view: viewFilter,
-    ...taskApiSort(sort),
-    limit: 50,
-  }, true)
+  // Interim single-value menu (Task 16 replaces it with FilterBar). One click can report several
+  // changes before React re-renders, so each change builds on the previous one.
+  const filterDraft = useRef<FilterGroup | null>(null)
+  useEffect(() => {
+    filterDraft.current = null
+  })
+  const changeFilter = (change: LegacyFilterChange) => {
+    const next = withLegacyFilter(filterDraft.current ?? filter, change)
+    filterDraft.current = next
+    viewState.setFilter(next)
+  }
+  const legacy = legacyFilterValues(filter, display)
+
   const detailQuery = useTask(workspace.id, taskId)
   const commentsQuery = useTaskComments(workspace.id, taskId)
   const activityQuery = useTaskActivity(workspace.id, taskId)
   const attachmentsQuery = useTaskAttachments(workspace.id, taskId)
   const commentAttachments = useCommentAttachments(workspace.id, taskId, commentsQuery.data ?? [])
 
-  const records = useMemo(() => tasksQuery.data?.pages.flatMap((page) => page.items) ?? [], [tasksQuery.data])
+  const records = tasksQuery.tasks
   const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
+  const visibleTasks = useMemo(() => quickSearchTasks(tasks, search), [tasks, search])
   const activeTask = detailQuery.data
     ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data, projects)
     : undefined
@@ -128,6 +144,15 @@ function WorkspaceTasksPage() {
     labels: labelsQuery.data ?? [],
     tasks,
   }
+  // Grouping and new-task defaults see only the page's own workflow: a project page knows only its project and its statuses.
+  const groupContext: GroupContext = {
+    statuses: projectFilter ? statusesQuery.data.filter((status) => status.projectId === projectFilter) : statusesQuery.data,
+    members: users,
+    labels: labelsQuery.data ?? [],
+    projects: projectFilter ? projects.filter((project) => project.id === projectFilter) : projects,
+    currentUserId: state.currentUserId,
+    showEmpty: display.show_empty_groups,
+  }
 
   const persisted = new URLSearchParams(searchParams)
   persisted.delete('new')
@@ -136,10 +161,13 @@ function WorkspaceTasksPage() {
   const detailSearch = detailParams.toString()
   const detailSearchSuffix = detailSearch ? `?${detailSearch}` : ''
 
-  const taskProjectId = activeTask?.projectId
+  // Closing a task returns to the page it was opened from: a list page passes its project along in the
+  // history state, and related tasks opened from the detail keep it. Without one (a link) it is `/tasks`.
+  const originProject = viewId ? null : taskId ? (location.state as TaskOrigin | null)?.originProject ?? null : projectFilter
+  const originState: TaskOrigin = { originProject }
   const closeParams = new URLSearchParams(detailParams)
   closeParams.delete('redirect')
-  if (taskProjectId) closeParams.set('project', taskProjectId)
+  if (originProject) closeParams.set('project', originProject)
   const closeSearch = closeParams.toString()
   const closeSearchSuffix = closeSearch ? `?${closeSearch}` : ''
   const redirect = taskRedirect(searchParams)
@@ -149,44 +177,38 @@ function WorkspaceTasksPage() {
     if (projectId) next.set('project', projectId)
     else next.delete('project')
     next.delete('new')
-    if (taskId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
+    if (taskId || viewId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
     else setSearchParams(next, { replace: true })
   }
-  const openTask = (id: string) => navigate(`/tasks/${id}${detailSearchSuffix}`)
-  const closeTask = () => navigate(redirect ?? `/tasks${closeSearchSuffix}`)
+  const openTask = (id: string) => navigate(`${basePath}/${id}${detailSearchSuffix}`, { state: originState })
+  const closeTask = () => navigate(redirect ?? `${basePath}${closeSearchSuffix}`)
 
   useEffect(() => {
     if (!taskId || !searchParams.has('project')) return
-    navigate(`/tasks/${taskId}${detailSearchSuffix}`, { replace: true })
-  }, [detailSearchSuffix, navigate, searchParams, taskId])
+    navigate(`${basePath}/${taskId}${detailSearchSuffix}`, { replace: true, state: { originProject: viewId ? null : searchParams.get('project') } satisfies TaskOrigin })
+  }, [basePath, detailSearchSuffix, navigate, searchParams, taskId, viewId])
 
   useEffect(() => {
     if (!taskId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') navigate(redirect ?? `/tasks${closeSearchSuffix}`)
+      if (event.key === 'Escape') navigate(redirect ?? `${basePath}${closeSearchSuffix}`)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [closeSearchSuffix, navigate, redirect, taskId])
+  }, [basePath, closeSearchSuffix, navigate, redirect, taskId])
 
   const creating = useRef(false)
   const startNewTask = async (statusKey: string | null = null, replace = false) => {
-    const projectId = projectFilter ?? projects[0]?.id
-    const statusId = projectId ? resolveStatusId(statusesQuery.data, projectId, statusKey) : undefined
+    const defaults = createDefaultsFromFilter(viewState.effective, { ...groupContext, targetProjectId: projectFilter ?? projects[0]?.id ?? null })
+    const projectId = defaults.project_id
+    const statusId = projectId
+      ? statusKey ? resolveStatusId(statusesQuery.data, projectId, statusKey) : defaults.status_id ?? resolveStatusId(statusesQuery.data, projectId, null)
+      : undefined
     if (!projectId || !statusId || creating.current) return
     creating.current = true
     try {
-      const defaults = createDefaultsFromFilter(viewFilter ? PRESET_FILTERS[viewFilter] : emptyFilter(), {
-        statuses: statusesQuery.data,
-        members: users,
-        labels: labelsQuery.data ?? [],
-        projects,
-        currentUserId: state.currentUserId,
-        showEmpty: false,
-        targetProjectId: projectId,
-      })
       const task = await createTask.mutateAsync({ ...defaults, title: 'Untitled', project_id: projectId, status_id: statusId })
-      navigate(`/tasks/${task.id}${detailSearchSuffix}`, { replace })
+      navigate(`${basePath}/${task.id}${detailSearchSuffix}`, { replace, state: originState })
     } catch {
       // The mutation exposes the server problem beside the create action.
     } finally {
@@ -195,38 +217,32 @@ function WorkspaceTasksPage() {
   }
 
   const wantsNew = searchParams.get('new') === '1'
+  const stateLoading = viewState.isLoading
   useEffect(() => {
-    if (wantsNew && projects.length > 0 && statusesQuery.data.length > 0) void startNewTask(null, true)
+    // new-task defaults come from the page's filter, so wait until it has loaded
+    if (wantsNew && !stateLoading && projects.length > 0 && statusesQuery.data.length > 0) void startNewTask(null, true)
     // The URL flag is the one-shot trigger; the ref prevents duplicate in-flight creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsNew, projects.length, statusesQuery.data.length])
+  }, [wantsNew, stateLoading, projects.length, statusesQuery.data.length])
 
   const groups = statusGroups(statusesQuery.data, projectFilter)
   const activeProject = projects.find((project) => project.id === projectFilter)
-  const viewTitle = viewFilter === 'mine'
-    ? 'My tasks'
-    : viewFilter === 'overdue'
-      ? 'Overdue'
-      : viewFilter === 'due_soon'
-        ? 'Due soon'
-        : viewFilter === 'current_week'
-          ? 'This week'
-          : viewFilter === 'my_week'
-            ? 'My week'
-            : 'All tasks'
-  const visibleTasks = filterTasks(tasks, {
-    currentUserId: state.currentUserId,
-    projectId: projectFilter,
-    statusKey: statusFilter,
-    assigneeId: assigneeFilter,
-    unassigned: unassignedFilter,
-    labelId: labelFilter,
-    priority: priorityFilter,
-    statuses: statusesQuery.data,
-    search: searchFilter,
-  })
+  const viewTitle = viewId ? savedView.data?.name ?? 'View' : preset ? PRESET_TITLE[preset] : 'All tasks'
 
-  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
+  if (viewUnavailable) {
+    const missing = savedView.error instanceof ApiProblem && savedView.error.status === 404
+    return (
+      <TaskBoundary
+        title={missing ? 'View not found' : 'View unavailable'}
+        description={missing ? 'This view may have been deleted, or you may no longer have access to it.' : 'The server could not load this view.'}
+        action={<Button variant="outline" onClick={() => navigate('/views')}>Go to views</Button>}
+      />
+    )
+  }
+  if (preference.isError) {
+    return <TaskBoundary title="Tasks unavailable" description="The server could not load the settings for this page." />
+  }
+  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isLoading || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
   if (detailQuery.isError) {
@@ -235,7 +251,7 @@ function WorkspaceTasksPage() {
   if (taskId && (commentsQuery.isError || activityQuery.isError || attachmentsQuery.isError || commentAttachments.isError)) {
     return <TaskBoundary title="Task unavailable" description="The server could not load this task." />
   }
-  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.isError) {
+  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.error) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace." />
   }
 
@@ -274,7 +290,27 @@ function WorkspaceTasksPage() {
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
-            <TaskFilters users={users} labels={labelsQuery.data ?? []} groups={groups} statusKey={statusFilter} assigneeId={assigneeFilter} unassigned={unassignedFilter} labelId={labelFilter} priority={priorityFilter} sort={sort} layout={layout} search={searchFilter} onSearchChange={(value) => setPreference('searchFilter', value)} onStatusChange={(value) => setPreference('statusFilter', value)} onAssigneeChange={(value) => setPreference('assigneeFilter', value)} onUnassignedChange={(value) => setPreference('unassignedFilter', value)} onLabelChange={(value) => setPreference('labelFilter', value)} onPriorityChange={(value) => setPreference('priorityFilter', value)} onSortChange={(value) => setPreference('sort', value)} onLayoutChange={setLayout} />
+            <TaskFilters
+              users={users}
+              labels={labelsQuery.data ?? []}
+              groups={groups}
+              statusKey={legacy.statusKey}
+              assigneeId={legacy.assigneeId}
+              unassigned={legacy.unassigned}
+              labelId={legacy.labelId}
+              priority={legacy.priority}
+              sort={legacy.sort}
+              layout={layout}
+              search={search}
+              onSearchChange={setSearch}
+              onStatusChange={(value) => changeFilter({ field: 'status', value })}
+              onAssigneeChange={(value) => changeFilter({ field: 'assignee', value })}
+              onUnassignedChange={(value) => changeFilter({ field: 'unassigned', value })}
+              onLabelChange={(value) => changeFilter({ field: 'label', value })}
+              onPriorityChange={(value) => changeFilter({ field: 'priority', value })}
+              onSortChange={(value) => viewState.setDisplay(withLegacySort(value))}
+              onLayoutChange={(value) => viewState.setDisplay({ layout: value })}
+            />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>
@@ -283,9 +319,8 @@ function WorkspaceTasksPage() {
             {layout === 'timeline'
               ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} grouped={!projectFilter} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
               : layout === 'board'
-                ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} activeTaskId={null} onOpen={openTask} />
-                : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
-            {tasksQuery.hasNextPage ? <div className="flex justify-center p-4"><Button variant="outline" disabled={tasksQuery.isFetchingNextPage} onClick={() => void tasksQuery.fetchNextPage()}>{tasksQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}</Button></div> : null}
+                ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={legacy.sort} activeTaskId={null} onOpen={openTask} />
+                : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={legacy.sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
           </div>
         </section>
       )}
@@ -293,6 +328,6 @@ function WorkspaceTasksPage() {
   )
 }
 
-function TaskBoundary({ title, description }: { title: string; description: string }) {
-  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title={title} description={description} /></section></div>
+function TaskBoundary({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
+  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title={title} description={description} action={action} /></section></div>
 }

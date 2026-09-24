@@ -59,7 +59,7 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
         { id: 'duplicate', project_id: 'project-1', name: 'Duplicate', description: '', category: 'duplicate', color: '#8b8f98', position: 1, version: 1 },
       ], next_cursor: null }
     }
-    if (path.endsWith('/tasks')) body = { items: tasks, next_cursor: null }
+    if (path.endsWith('/tasks') || path.endsWith('/tasks/query')) body = { items: tasks, next_cursor: null }
     const detail = path.match(/\/tasks\/([^/]+)$/)
     if (detail) body = tasks.find((task) => task.id === detail[1]) ?? body
     const relations = path.match(/\/tasks\/([^/]+)\/relations$/)
