@@ -2,6 +2,8 @@
 
 ## Migration history
 - Do not squash or edit a migration after a local database has applied it. Orbit checks both version and checksum at startup. If an uncommitted migration must be consolidated, compare the old and new schemas and back up the database before reconciling its migration records; do not reset user data to make the dev server start.
+- SQLite table rebuilds (to change a CHECK): the runner holds a transaction with `foreign_keys=ON`, so `PRAGMA foreign_keys=OFF` is a no-op and `ALTER TABLE … RENAME` fails on triggers that name the table. Copy rows aside, `DROP`, re-`CREATE` under the same name, re-insert under `PRAGMA defer_foreign_keys=ON`, then recreate the table's own indexes and triggers (see `0021`).
+- A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
 
 ## API retry load
 - A failed `invalidateQueries` call can refetch many active queries. Do not retry it on a short fixed UI timer; use bounded backoff so an API error cannot exhaust the shared rate limit.
