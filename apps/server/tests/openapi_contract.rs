@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 63);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 65);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 85);
+    assert_eq!(operation_count, 88);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -525,5 +525,50 @@ fn task_records_document_duplicate_and_blocked_fields() {
     assert_eq!(
         document["components"]["schemas"]["TaskRef"]["required"],
         serde_json::json!(["id", "project_id", "title"])
+    );
+}
+
+#[test]
+fn task_relation_routes_are_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations";
+    assert_eq!(
+        operation(&document, path, "get")["operationId"],
+        "list_task_relations"
+    );
+    assert_eq!(
+        operation(&document, path, "post")["operationId"],
+        "create_task_relation"
+    );
+    assert_eq!(
+        operation(&document, &format!("{path}/{{relation_id}}"), "delete")["operationId"],
+        "delete_task_relation"
+    );
+    assert!(
+        operation(&document, path, "post")["responses"]["409"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("task_conflict")
+    );
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["NewTaskRelationType"]["enum"],
+        serde_json::json!(["blocks", "blocked_by", "related"])
+    );
+    assert_eq!(
+        schemas["TaskRelationType"]["enum"],
+        serde_json::json!(["blocks", "related", "duplicate"])
+    );
+    assert_eq!(
+        schemas["TaskRelationDirection"]["enum"],
+        serde_json::json!(["outgoing", "incoming"])
+    );
+    assert_eq!(
+        schemas["TaskRelationRecord"]["properties"]["type"]["$ref"],
+        "#/components/schemas/TaskRelationType"
+    );
+    assert_eq!(
+        schemas["RelatedTask"]["required"],
+        serde_json::json!(["id", "project_id", "title", "status_id"])
     );
 }

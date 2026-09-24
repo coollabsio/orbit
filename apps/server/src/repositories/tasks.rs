@@ -2527,7 +2527,7 @@ async fn require_access(
     }
 }
 
-async fn require_access_tx(
+pub(super) async fn require_access_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
@@ -2802,7 +2802,7 @@ async fn insert_default_statuses(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn record_mutation(
+pub(super) async fn record_mutation(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
@@ -2941,7 +2941,7 @@ async fn label_in_tx(
     label_from_row(row)
 }
 
-async fn task_in_tx(
+pub(super) async fn task_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     task_id: Id,

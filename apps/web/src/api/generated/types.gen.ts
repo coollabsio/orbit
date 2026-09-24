@@ -325,6 +325,11 @@ export type MemberRecord = {
     version: number;
 };
 
+/**
+ * Relation types a client can create. Duplicates go through `duplicate_of_id` on task updates.
+ */
+export type NewTaskRelationType = 'blocks' | 'blocked_by' | 'related';
+
 export type NotificationRecord = {
     actor_user_id: string;
     comment_id?: string | null;
@@ -545,6 +550,16 @@ export type RecoveryRequestResponse = {
     detail: string;
 };
 
+/**
+ * The other task of a relation, as seen from the task being viewed.
+ */
+export type RelatedTask = {
+    id: string;
+    project_id: string;
+    status_id: string;
+    title: string;
+};
+
 export type RenameWorkspaceBody = {
     expected_version: number;
     name: string;
@@ -688,6 +703,26 @@ export type TaskRef = {
     project_id: string;
     title: string;
 };
+
+export type TaskRelationBody = {
+    task_id: string;
+    type: NewTaskRelationType;
+};
+
+export type TaskRelationDirection = 'outgoing' | 'incoming';
+
+export type TaskRelationRecord = {
+    created_at: string;
+    /**
+     * Outgoing when the viewed task is the relation's source (the blocker or the duplicate).
+     */
+    direction: TaskRelationDirection;
+    id: string;
+    task: RelatedTask;
+    type: TaskRelationType;
+};
+
+export type TaskRelationType = 'blocks' | 'related' | 'duplicate';
 
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
@@ -5601,6 +5636,188 @@ export type ListGithubLinksResponses = {
 };
 
 export type ListGithubLinksResponse = ListGithubLinksResponses[keyof ListGithubLinksResponses];
+
+export type ListTaskRelationsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations';
+};
+
+export type ListTaskRelationsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTaskRelationsError = ListTaskRelationsErrors[keyof ListTaskRelationsErrors];
+
+export type ListTaskRelationsResponses = {
+    200: Array<TaskRelationRecord>;
+};
+
+export type ListTaskRelationsResponse = ListTaskRelationsResponses[keyof ListTaskRelationsResponses];
+
+export type CreateTaskRelationData = {
+    body: TaskRelationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations';
+};
+
+export type CreateTaskRelationErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateTaskRelationError = CreateTaskRelationErrors[keyof CreateTaskRelationErrors];
+
+export type CreateTaskRelationResponses = {
+    201: TaskRelationRecord;
+};
+
+export type CreateTaskRelationResponse = CreateTaskRelationResponses[keyof CreateTaskRelationResponses];
+
+export type DeleteTaskRelationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+        relation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations/{relation_id}';
+};
+
+export type DeleteTaskRelationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteTaskRelationError = DeleteTaskRelationErrors[keyof DeleteTaskRelationErrors];
+
+export type DeleteTaskRelationResponses = {
+    204: void;
+};
+
+export type DeleteTaskRelationResponse = DeleteTaskRelationResponses[keyof DeleteTaskRelationResponses];
 
 export type RestoreTaskData = {
     body: RestoreBody;

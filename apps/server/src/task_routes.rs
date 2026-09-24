@@ -5,7 +5,7 @@ use axum::http::header::{CONTENT_TYPE, COOKIE};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::de::DeserializeOwned;
@@ -16,6 +16,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
+use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
     CreateTask, NotificationRecord, Page, SortOrder, TaskChanges, TaskError, TaskFilter,
     TaskRecord, TaskRepository, TaskSort, TaskUpdate,
@@ -113,6 +114,14 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity",
             get(list_task_activity),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations",
+            get(list_task_relations).post(create_task_relation),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations/{relation_id}",
+            delete(delete_task_relation),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/github-links",
@@ -1011,6 +1020,89 @@ async fn list_task_activity(
         )
         .await
         .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct TaskRelationBody {
+    #[serde(rename = "type")]
+    relation_type: NewTaskRelationType,
+    task_id: String,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = Vec<crate::repositories::task_relations::TaskRelationRecord>)))]
+async fn list_task_relations(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<TaskRelationRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/relations");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .task_relations(workspace_id, task_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = TaskRelationBody, responses((status = 201, body = crate::repositories::task_relations::TaskRelationRecord)))]
+async fn create_task_relation(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TaskRelationBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/relations");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    let other_id = parse_id(&body.task_id, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .add_task_relation(
+            workspace_id,
+            task_id,
+            actor_id,
+            body.relation_type,
+            other_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations/{relation_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("relation_id" = String, Path)), responses((status = 204)))]
+async fn delete_task_relation(
+    State(state): State<TaskState>,
+    Path((workspace, task, relation)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/relations/{relation}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    let relation_id = parse_id(&relation, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .remove_task_relation(
+            workspace_id,
+            task_id,
+            relation_id,
+            actor_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 

@@ -3173,6 +3173,352 @@ async fn blocked_flag_follows_open_blockers() {
     );
 }
 
+#[tokio::test]
+async fn relations_can_be_added_listed_and_removed() {
+    let fixture = Fixture::new().await;
+    let blocker = fixture.create_task("Auth token refresh").await;
+    let blocked = fixture.create_task("Login fails").await;
+    let (status, created) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&blocker)),
+        Some(json!({"type": "blocks", "task_id": id_of(&blocked)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["type"], "blocks");
+    assert_eq!(created["direction"], "outgoing");
+    assert_eq!(
+        created["task"],
+        json!({"id": id_of(&blocked), "project_id": fixture.project_id, "title": "Login fails", "status_id": fixture.status_id})
+    );
+    assert!(created["created_at"].is_string());
+
+    let (status, from_blocked) = call(
+        &fixture,
+        "GET",
+        &relations_uri(&fixture, id_of(&blocked)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(from_blocked.as_array().unwrap().len(), 1);
+    assert_eq!(from_blocked[0]["id"], created["id"]);
+    assert_eq!(from_blocked[0]["direction"], "incoming");
+    assert_eq!(from_blocked[0]["task"]["id"], blocker["id"]);
+    assert_eq!(
+        call(&fixture, "GET", &task_uri(&fixture, id_of(&blocked)), None)
+            .await
+            .1["blocked"],
+        true
+    );
+
+    let relation_uri = format!(
+        "{}/{}",
+        relations_uri(&fixture, id_of(&blocked)),
+        id_of(&created)
+    );
+    let (status, _) = call(&fixture, "DELETE", &relation_uri, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, remaining) = call(
+        &fixture,
+        "GET",
+        &relations_uri(&fixture, id_of(&blocker)),
+        None,
+    )
+    .await;
+    assert!(remaining.as_array().unwrap().is_empty());
+    let (status, _) = call(&fixture, "DELETE", &relation_uri, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn blocked_by_is_normalised_and_related_pairs_are_ordered() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    let third = fixture.create_task("Third").await;
+    let (status, created) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&first)),
+        Some(json!({"type": "blocked_by", "task_id": id_of(&second)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["type"], "blocks");
+    assert_eq!(created["direction"], "incoming");
+    assert_eq!(created["task"]["id"], second["id"]);
+    let stored: (String, String, String) =
+        sqlx::query_as("SELECT task_id, related_task_id, type FROM task_relations WHERE id = ?")
+            .bind(id_of(&created))
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        stored,
+        (
+            id_of(&second).to_owned(),
+            id_of(&first).to_owned(),
+            "blocks".to_owned()
+        )
+    );
+
+    let (status, related) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&third)),
+        Some(json!({"type": "related", "task_id": id_of(&first)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(related["type"], "related");
+    let (low, high): (String, String) =
+        sqlx::query_as("SELECT task_id, related_task_id FROM task_relations WHERE id = ?")
+            .bind(id_of(&related))
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert!(low < high);
+    let mut pair = [low, high];
+    pair.sort();
+    let mut expected = [id_of(&first).to_owned(), id_of(&third).to_owned()];
+    expected.sort();
+    assert_eq!(pair, expected);
+}
+
+#[tokio::test]
+async fn relations_convert_existing_pairs_and_reject_cycles_and_duplicates() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    let canonical = fixture.create_task("Canonical").await;
+    let (status, created) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&first)),
+        Some(json!({"type": "blocks", "task_id": id_of(&second)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, problem) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&second)),
+        Some(json!({"type": "blocks", "task_id": id_of(&first)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "task_conflict");
+    let (status, again) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&first)),
+        Some(json!({"type": "blocks", "task_id": id_of(&second)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(again["id"], created["id"]);
+
+    let (status, converted) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&second)),
+        Some(json!({"type": "related", "task_id": id_of(&first)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(converted["type"], "related");
+    let types: Vec<String> = sqlx::query_scalar("SELECT type FROM task_relations")
+        .fetch_all(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(types, ["related"]);
+
+    let (status, problem) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&first)),
+        Some(json!({"type": "related", "task_id": id_of(&first)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "task_id");
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&first)),
+        Some(json!({"type": "duplicate", "task_id": id_of(&second)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&first)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&canonical)),
+        Some(json!({"type": "related", "task_id": id_of(&first)})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a duplicate pair must be unmarked first"
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_duplicate_relation_unmarks_the_duplicate() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Duplicate").await;
+    let canonical = fixture.create_task("Canonical").await;
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&task)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, relations) = call(
+        &fixture,
+        "GET",
+        &relations_uri(&fixture, id_of(&canonical)),
+        None,
+    )
+    .await;
+    assert_eq!(relations[0]["type"], "duplicate");
+    assert_eq!(relations[0]["direction"], "incoming");
+    assert_eq!(relations[0]["task"]["id"], task["id"]);
+
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!(
+            "{}/{}",
+            relations_uri(&fixture, id_of(&canonical)),
+            relations[0]["id"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, unmarked) = call(&fixture, "GET", &task_uri(&fixture, id_of(&task)), None).await;
+    assert_eq!(unmarked["status_id"], fixture.status_id);
+    assert_eq!(unmarked["version"], 2);
+    assert!(unmarked["duplicate_of"].is_null());
+}
+
+#[tokio::test]
+async fn relations_to_trashed_tasks_are_hidden_until_restore() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&first)),
+        Some(json!({"type": "related", "task_id": id_of(&second)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let second_uri = task_uri(&fixture, id_of(&second));
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{second_uri}?expected_version=0"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, hidden) = call(
+        &fixture,
+        "GET",
+        &relations_uri(&fixture, id_of(&first)),
+        None,
+    )
+    .await;
+    assert!(hidden.as_array().unwrap().is_empty());
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("{second_uri}/restore"),
+        Some(json!({"expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, restored) = call(
+        &fixture,
+        "GET",
+        &relations_uri(&fixture, id_of(&first)),
+        None,
+    )
+    .await;
+    assert_eq!(restored.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn relation_changes_are_audited_on_both_tasks() {
+    let fixture = Fixture::new().await;
+    let blocker = fixture.create_task("Blocker").await;
+    let blocked = fixture.create_task("Blocked").await;
+    let (_, created) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&blocker)),
+        Some(json!({"type": "blocks", "task_id": id_of(&blocked)})),
+    )
+    .await;
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT resource_id, metadata_json FROM audit_events WHERE action = 'task.relation_added'",
+    )
+    .fetch_all(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 2);
+    let metadata = |resource: &str| -> Value {
+        serde_json::from_str(&rows.iter().find(|(id, _)| id == resource).unwrap().1).unwrap()
+    };
+    assert_eq!(
+        metadata(id_of(&blocker)),
+        json!({"type": "blocks", "direction": "outgoing", "related_task_id": id_of(&blocked), "related_task_project_id": fixture.project_id, "related_task_title": "Blocked"}),
+        "the blocker's event is outgoing"
+    );
+    assert_eq!(
+        metadata(id_of(&blocked)),
+        json!({"type": "blocks", "direction": "incoming", "related_task_id": id_of(&blocker), "related_task_project_id": fixture.project_id, "related_task_title": "Blocker"}),
+        "the blocked task's event is incoming"
+    );
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!(
+            "{}/{}",
+            relations_uri(&fixture, id_of(&blocker)),
+            id_of(&created)
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let removed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.relation_removed'",
+    )
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(removed, 2);
+}
+
 async fn call(
     fixture: &Fixture,
     method: &str,
@@ -3236,4 +3582,8 @@ async fn create_project(fixture: &Fixture, key: &str) -> String {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     id_of(&project).to_owned()
+}
+
+fn relations_uri(fixture: &Fixture, task_id: &str) -> String {
+    format!("{}/relations", task_uri(fixture, task_id))
 }
