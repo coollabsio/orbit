@@ -354,9 +354,9 @@ function BulkBar({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" className={BULK_BTN} onClick={onMarkDuplicate}>
+        <Button variant="ghost" className={BULK_BTN} aria-label="Mark as duplicate…" title="Mark as duplicate…" onClick={onMarkDuplicate}>
           <Copy aria-hidden className={BULK_ICON} />
-          <span className={BULK_LABEL}>Mark as duplicate…</span>
+          <span className={BULK_LABEL}>Duplicate</span>
         </Button>
         {bulkTasks.isPending ? (
           <span role="status" className="flex shrink-0 items-center gap-1.5 px-2 text-xs whitespace-nowrap text-muted-foreground">

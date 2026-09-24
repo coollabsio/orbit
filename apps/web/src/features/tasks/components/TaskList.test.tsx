@@ -260,7 +260,10 @@ test('the bulk bar hides the Duplicate status and marks the selection in one cal
   fireEvent.keyDown(document.body, { key: 'Escape' })
   await waitFor(() => expect(within(toolbar).getByRole('button', { name: 'Status' }).getAttribute('aria-expanded')).toBe('false'))
 
-  fireEvent.click(within(toolbar).getByRole('button', { name: 'Mark as duplicate…' }))
+  const markDuplicate = within(toolbar).getByRole('button', { name: 'Mark as duplicate…' })
+  // one word like the other bulk actions, so the bar keeps its width; the full action stays the accessible name
+  expect(markDuplicate.textContent).toBe('Duplicate')
+  fireEvent.click(markDuplicate)
   const picker = await view.findByRole('dialog', { name: 'Mark 2 tasks as duplicate of…' })
   fireEvent.click(await within(picker).findByRole('option', { name: /Login fails on Safari/ }))
   await waitFor(() => expect(writes(calls)).toHaveLength(1))
