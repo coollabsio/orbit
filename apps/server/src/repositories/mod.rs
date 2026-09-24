@@ -4,4 +4,5 @@ pub mod identity;
 pub mod task_filter;
 pub mod task_relations;
 pub mod tasks;
+pub mod views;
 pub mod workspaces;

@@ -100,6 +100,11 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::list_notifications,
         crate::task_routes::read_notification,
         crate::task_routes::read_all_notifications,
+        crate::view_routes::list_views,
+        crate::view_routes::create_view,
+        crate::view_routes::get_view,
+        crate::view_routes::update_view,
+        crate::view_routes::delete_view,
         crate::attachment_routes::list_task_attachments,
         crate::attachment_routes::list_comment_attachments,
         crate::attachment_routes::upload_task_attachments,
@@ -199,7 +204,12 @@ fn problem_schema(route: &str) -> &'static str {
         "TaskProblem"
     } else if route.contains("/attachments") {
         "AttachmentProblem"
-    } else if route.contains("/tasks") || route.contains("/projects") || route.contains("/labels") {
+    } else if route.contains("/tasks")
+        || route.contains("/projects")
+        || route.contains("/labels")
+        || route.contains("/views")
+        || route.contains("/view-")
+    {
         "TaskProblem"
     } else if route.starts_with("/api/v1/auth") || route.starts_with("/api/v1/setup") {
         "AuthProblem"
@@ -358,6 +368,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if attachment_operation(id) => {
             add_code(&mut responses, "404", "attachment_not_found");
         }
+        id if view_operation(id) => view_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
         _ => {}
     }
@@ -446,6 +457,8 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "delete_comment"
             | "list_task_attachments"
             | "list_comment_attachments"
+            | "create_view"
+            | "update_view"
     )
 }
 
@@ -589,6 +602,27 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     }
     if matches!(operation_id, "update_task" | "bulk_tasks") {
         add_code(responses, "409", "github_content_read_only");
+    }
+}
+
+fn view_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "list_views" | "create_view" | "get_view" | "update_view" | "delete_view"
+    )
+}
+
+fn view_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "task_resource_not_found");
+    if matches!(operation_id, "create_view" | "update_view") {
+        add_code(responses, "422", "validation_failed");
+        add_code(responses, "422", "invalid_filter");
+    }
+    if matches!(operation_id, "update_view" | "delete_view") {
+        add_code(responses, "403", "task_action_forbidden");
+    }
+    if operation_id == "update_view" {
+        add_code(responses, "409", "conflict");
     }
 }
 

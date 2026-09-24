@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 66);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 68);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 89);
+    assert_eq!(operation_count, 94);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -647,4 +647,85 @@ fn task_query_route_is_documented() {
             .unwrap()
             .contains(&serde_json::json!("path"))
     );
+}
+
+fn codes(operation: &Value, status: &str) -> Vec<String> {
+    operation["responses"][status]["description"]
+        .as_str()
+        .unwrap_or_default()
+        .split(", ")
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn saved_view_routes_are_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let views = "/api/v1/workspaces/{workspace_id}/views";
+    let view = "/api/v1/workspaces/{workspace_id}/views/{view_id}";
+    for (path, method, id) in [
+        (views, "get", "list_views"),
+        (views, "post", "create_view"),
+        (view, "get", "get_view"),
+        (view, "patch", "update_view"),
+        (view, "delete", "delete_view"),
+    ] {
+        let operation = operation(&document, path, method);
+        assert_eq!(operation["operationId"], id);
+        assert_eq!(
+            operation["responses"]["default"]["content"]["application/problem+json"]["schema"]["$ref"],
+            "#/components/schemas/TaskProblem"
+        );
+        assert!(codes(operation, "404").contains(&"task_resource_not_found".to_owned()));
+    }
+    let create = operation(&document, views, "post");
+    assert_eq!(
+        create["responses"]["201"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/SavedViewRecord"
+    );
+    assert!(codes(create, "422").contains(&"invalid_filter".to_owned()));
+    assert!(codes(create, "422").contains(&"validation_failed".to_owned()));
+    assert!(codes(create, "400").contains(&"invalid_request".to_owned()));
+    let update = operation(&document, view, "patch");
+    assert!(codes(update, "409").contains(&"conflict".to_owned()));
+    assert!(codes(update, "403").contains(&"task_action_forbidden".to_owned()));
+    assert!(
+        codes(operation(&document, view, "delete"), "403")
+            .contains(&"task_action_forbidden".to_owned())
+    );
+    assert_eq!(
+        operation(&document, views, "get")["responses"]["200"]["content"]["application/json"]["schema"]
+            ["items"]["$ref"],
+        "#/components/schemas/SavedViewRecord"
+    );
+
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["Visibility"]["enum"],
+        serde_json::json!(["personal", "workspace"])
+    );
+    let required = schemas["SavedViewRecord"]["required"].as_array().unwrap();
+    for field in [
+        "id",
+        "owner",
+        "name",
+        "visibility",
+        "state",
+        "state_error",
+        "version",
+        "is_favorite",
+        "favorite_position",
+        "can_edit",
+        "icon",
+        "color",
+    ] {
+        assert!(required.contains(&serde_json::json!(field)), "{field}");
+    }
+    assert_eq!(
+        schemas["ViewUpdateBody"]["required"],
+        serde_json::json!(["expected_version"])
+    );
+    let create_required = schemas["ViewCreateBody"]["required"].as_array().unwrap();
+    assert!(!create_required.contains(&serde_json::json!("description")));
+    assert!(create_required.contains(&serde_json::json!("state")));
 }

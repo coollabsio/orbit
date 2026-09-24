@@ -25,19 +25,23 @@ use crate::repositories::tasks::{
     CreateTask, NotificationRecord, Page, SortOrder, TaskChanges, TaskError, TaskFilter,
     TaskRecord, TaskRepository, TaskSort, TaskUpdate,
 };
+use crate::repositories::views::ViewRepository;
 
 #[derive(Clone)]
 pub struct TaskState {
     pub(crate) identity: Arc<IdentityRepository>,
     tasks: Arc<TaskRepository>,
+    pub(crate) views: Arc<ViewRepository>,
     pub(crate) cookie_mode: CookieMode,
 }
 
 impl TaskState {
     #[must_use]
     pub fn new(identity: Arc<IdentityRepository>, cookie_mode: CookieMode) -> Self {
+        let database = identity.database().clone();
         Self {
-            tasks: Arc::new(TaskRepository::new(identity.database().clone())),
+            tasks: Arc::new(TaskRepository::new(database.clone())),
+            views: Arc::new(ViewRepository::new(database)),
             identity,
             cookie_mode,
         }
@@ -50,6 +54,7 @@ impl TaskState {
         cookie_mode: CookieMode,
     ) -> Self {
         Self {
+            views: Arc::new(ViewRepository::new(tasks.database().clone())),
             identity,
             tasks,
             cookie_mode,
@@ -162,7 +167,7 @@ pub fn task_router(state: TaskState) -> Router {
         .with_state(state)
 }
 
-struct ApiJson<T>(T);
+pub(crate) struct ApiJson<T>(pub(crate) T);
 struct ApiQuery<T>(T);
 
 impl<S, T> FromRequestParts<S> for ApiQuery<T>
@@ -1808,7 +1813,9 @@ fn source_url(
         .transpose()
 }
 
-fn deserialize_source_patch<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+pub(crate) fn deserialize_source_patch<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -1866,7 +1873,7 @@ fn reject_duplicate_ids(
     }
 }
 
-async fn scope(
+pub(crate) async fn scope(
     state: &TaskState,
     headers: &HeaderMap,
     workspace: &str,
@@ -1920,7 +1927,7 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .find_map(|pair| pair.strip_prefix(&format!("{name}=")).map(str::to_owned))
 }
 
-fn parse_id(
+pub(crate) fn parse_id(
     value: &str,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
@@ -2082,7 +2089,7 @@ fn validation(
     )
 }
 
-fn task_problem(
+pub(crate) fn task_problem(
     error: TaskError,
     instance: impl Into<String>,
     request_id: Option<&Extension<RequestId>>,
@@ -2150,7 +2157,7 @@ fn task_problem(
     }
 }
 
-fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
+pub(crate) fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
     request_id.map_or("unknown", |Extension(value)| value.as_str())
 }
 const fn default_limit() -> usize {
@@ -2298,6 +2305,9 @@ impl ApiError {
 fn refresh_for_current(current: &Value) -> Option<String> {
     let workspace = current.get("workspace_id")?.as_str()?;
     let id = current.get("id")?.as_str()?;
+    if current.get("visibility").is_some() {
+        return Some(format!("/api/v1/workspaces/{workspace}/views/{id}"));
+    }
     if current.get("author_id").is_some() {
         let task = current.get("task_id")?.as_str()?;
         return Some(format!(
