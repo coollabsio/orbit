@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
+import { clearViewSessionEdits } from '@/features/views/useViewState'
 import {
   changePassword,
   login,
@@ -78,6 +79,7 @@ export function useLogout() {
     mutationFn: async () => { await logout({ client: apiClient, throwOnError: true }) },
     onSuccess: () => {
       queryClient.clear()
+      clearViewSessionEdits()
     },
   })
 }
