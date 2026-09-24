@@ -98,8 +98,10 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
   const [picker, setPicker] = useState<RelationKind | null>(null)
   const [newRelationId, setNewRelationId] = useState<string | null>(null)
   const [unmarking, setUnmarking] = useState(false)
-  // the banner animates only when the task becomes a duplicate while open, never on page load
-  const [initialDuplicateId] = useState(() => task?.duplicateOf?.id ?? null)
+  // the banner animates only when the task becomes a duplicate while open, never on page load;
+  // captured once the task has loaded, so a cold load does not count as a change
+  const [initialDuplicate, setInitialDuplicate] = useState<{ taskId: string; duplicateOfId: string | null } | null>(null)
+  if (task && initialDuplicate?.taskId !== task.id) setInitialDuplicate({ taskId: task.id, duplicateOfId: task.duplicateOf?.id ?? null })
   const openTask = (taskId: string) => onOpenTask?.(taskId)
   const choose = (target: Task) => {
     if (!task || !picker) return
@@ -160,7 +162,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                 duplicateOf={task.duplicateOf}
                 projects={projects}
                 status={status}
-                animate={task.duplicateOf.id !== initialDuplicateId}
+                animate={initialDuplicate?.taskId === task.id && task.duplicateOf.id !== initialDuplicate.duplicateOfId}
                 pending={unmarking}
                 onOpen={openTask}
                 onUnmark={() => void unmark()}

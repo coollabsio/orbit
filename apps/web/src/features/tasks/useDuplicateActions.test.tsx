@@ -112,20 +112,21 @@ test('Undo restores the earlier duplicate link of a task that was re-pointed', a
   success.mockRestore()
 })
 
-test('bulk Undo gives each task back its own earlier state', async () => {
+test('bulk Undo gives each task back its own earlier state, unmarking canonicals first', async () => {
   const calls: Call[] = []
   captureApi(calls)
   const success = spyOn(toast, 'success').mockImplementation(() => 0)
   const view = renderActions()
+  // task-1 duplicated task-2 and is listed first; task-2 must stop being a duplicate before task-1 can point at it
   await act(async () => {
-    await view.result.current.markMany([{ id: 'task-1', version: 1, duplicateOf: { id: 'task-old1' } }, { id: 'task-2', version: 4, duplicateOf: null }], target)
+    await view.result.current.markMany([{ id: 'task-1', version: 1, duplicateOf: { id: 'task-2' } }, { id: 'task-2', version: 4, duplicateOf: null }], target)
   })
 
   ;(success.mock.calls[0]![1] as unknown as ToastOptions).action.onClick()
   await waitFor(() => expect(calls).toHaveLength(2))
   expect(calls[1]!.body).toEqual({ updates: [
-    { id: 'task-1', expected_version: 2, duplicate_of_id: 'task-old1' },
     { id: 'task-2', expected_version: 5, duplicate_of_id: null },
+    { id: 'task-1', expected_version: 2, duplicate_of_id: 'task-2' },
   ] })
   success.mockRestore()
 })

@@ -3549,6 +3549,79 @@ async fn relation_changes_are_audited_on_both_tasks() {
     assert_eq!(removed, 2);
 }
 
+#[tokio::test]
+async fn marking_a_duplicate_audits_the_relation_it_replaces() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Blocker").await;
+    let canonical = fixture.create_task("Blocked").await;
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&task)),
+        Some(json!({"type": "blocks", "task_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&task)),
+        Some(json!({"expected_version": 0, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let removed: Vec<String> = sqlx::query_scalar(
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.relation_removed'",
+    )
+    .fetch_all(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(removed.len(), 2, "both tasks record the removed blocker");
+    assert!(removed.iter().all(|metadata| metadata.contains(r#""type":"blocks""#)));
+}
+
+#[tokio::test]
+async fn purging_a_canonical_task_moves_its_duplicates_out_of_the_duplicate_status() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Login fails on Safari").await;
+    let canonical = fixture.create_task("Login broken").await;
+    let started = status_id_by_category(&fixture, &fixture.project_id, "started").await;
+    let uri = task_uri(&fixture, id_of(&task));
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "status_id": started})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 1, "duplicate_of_id": id_of(&canonical)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
+        .bind(TimestampMillis::now().as_millis() - 31 * 24 * 60 * 60 * 1_000)
+        .bind(id_of(&canonical))
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    WorkspaceRepository::new((*fixture.database).clone())
+        .purge_retention(TimestampMillis::now())
+        .await
+        .unwrap();
+
+    let (status, survivor) = call(&fixture, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(survivor["status_id"], started);
+    assert_eq!(survivor["version"], 3);
+    assert_eq!(duplicate_target(&fixture, id_of(&task)).await, None);
+}
+
 async fn call(
     fixture: &Fixture,
     method: &str,

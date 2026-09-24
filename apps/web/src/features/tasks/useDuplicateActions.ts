@@ -42,7 +42,10 @@ export function useDuplicateActions(workspaceId: string) {
   /** Undo: every task goes back to its target before the mark (`null` = it was not a duplicate). */
   const restore = async (records: TaskRecord[], previous: ReadonlyMap<string, string | null>): Promise<void> => {
     try {
-      const updates = records.map((record) => ({ id: record.id, expected_version: record.version, duplicate_of_id: previous.get(record.id) ?? null }))
+      // unmarks go first: a task can only return to a canonical that is no longer a duplicate itself
+      const updates = records
+        .map((record) => ({ id: record.id, expected_version: record.version, duplicate_of_id: previous.get(record.id) ?? null }))
+        .sort((a, b) => Number(a.duplicate_of_id !== null) - Number(b.duplicate_of_id !== null))
       settle(updates.length === 1
         ? [await setTaskDuplicateOf(apiClient, workspaceId, records[0]!, updates[0]!.duplicate_of_id)]
         : (await bulkTaskDuplicateUpdates(apiClient, workspaceId, updates)).items)

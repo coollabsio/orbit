@@ -1361,7 +1361,7 @@ impl TaskRepository {
             _ => "unstarted",
         };
         let existing = sqlx::query(
-            "SELECT github_issue_links.task_id, github_issue_links.kind, tasks.project_id, tasks.deleted_at FROM github_issue_links JOIN tasks ON tasks.id = github_issue_links.task_id WHERE github_issue_links.workspace_id = ? AND repository = ? AND issue_number = ?",
+            "SELECT github_issue_links.task_id, github_issue_links.kind, tasks.project_id, tasks.status_id, tasks.deleted_at FROM github_issue_links JOIN tasks ON tasks.id = github_issue_links.task_id WHERE github_issue_links.workspace_id = ? AND repository = ? AND issue_number = ?",
         ).bind(workspace_id.to_string()).bind(&issue.repository).bind(issue.number).fetch_optional(&mut *tx).await?;
         if let Some(row) = &existing {
             let was_deleted = row.get::<Option<i64>, _>("deleted_at").is_some();
@@ -1371,24 +1371,16 @@ impl TaskRepository {
             {
                 return Err(TaskError::IntegrationConflict);
             }
+            let current_status_id: String = row.get("status_id");
             let status_id: String = if issue.state_changed || was_deleted {
                 sqlx::query_scalar(
                         "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category = ? ORDER BY position, id LIMIT 1",
                     ).bind(workspace_id.to_string()).bind(row.get::<String, _>("project_id"))
                         .bind(status_category).fetch_optional(&mut *tx).await?
-                        .unwrap_or(sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
-                            .bind(task_id.to_string()).fetch_one(&mut *tx).await?)
+                        .unwrap_or_else(|| current_status_id.clone())
             } else {
-                sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
-                    .bind(task_id.to_string())
-                    .fetch_one(&mut *tx)
-                    .await?
+                current_status_id.clone()
             };
-            let current_status_id: String =
-                sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
-                    .bind(task_id.to_string())
-                    .fetch_one(&mut *tx)
-                    .await?;
             let leaves_duplicate = current_status_id != status_id
                 && task_relations::status_category_in_tx(
                     &mut tx,
@@ -1563,15 +1555,10 @@ impl TaskRepository {
         }
 
         project_in_tx(&mut tx, workspace_id, input.project_id, false).await?;
-        let status_id = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category <> 'duplicate' ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
-        )
-        .bind(workspace_id.to_string())
-        .bind(input.project_id.to_string())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(TaskError::NotFound)
-        .and_then(parse_id)?;
+        let status_id =
+            task_relations::default_status_id_in_tx(&mut tx, workspace_id, input.project_id)
+                .await?
+                .ok_or(TaskError::NotFound)?;
 
         let existing_label = sqlx::query_scalar::<_, String>(
             "SELECT id FROM labels WHERE workspace_id = ? AND lower(name) = 'discord' ORDER BY id LIMIT 1",
@@ -2174,9 +2161,13 @@ pub(super) async fn update_task_in_tx(
         }
     }
     let project_id = update.changes.project_id.unwrap_or(current.project_id);
-    let was_duplicate = task_relations::status_category_in_tx(tx, workspace_id, current.status_id)
-        .await?
-        == task_relations::DUPLICATE;
+    // Only these changes can move the task into or out of the Duplicate status.
+    let duplicate_may_change = update.changes.duplicate_of_id.is_some()
+        || update.changes.status_id.is_some()
+        || project_id != current.project_id;
+    let was_duplicate = duplicate_may_change
+        && task_relations::status_category_in_tx(tx, workspace_id, current.status_id).await?
+            == task_relations::DUPLICATE;
     // The Duplicate status is entered only through duplicate_of_id and follows project moves.
     let status_id = match update.changes.duplicate_of_id {
         Some(Some(_)) => {
@@ -2313,7 +2304,11 @@ pub(super) async fn update_task_in_tx(
     if let Some(labels) = &update.changes.label_ids {
         replace_labels(tx, update.id, labels).await?;
     }
-    let duplicate_of = duplicate_of_in_tx(tx, update.id).await?;
+    let duplicate_of = if duplicate_may_change {
+        duplicate_of_in_tx(tx, update.id).await?
+    } else {
+        current.duplicate_of.clone()
+    };
     Ok(TaskRecord {
         project_id,
         status_id,

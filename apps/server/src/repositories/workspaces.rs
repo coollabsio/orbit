@@ -17,6 +17,8 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
+use super::task_relations;
+use super::tasks::TaskError;
 use crate::audit::{self, AuditEvent, AuditOutcome};
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
@@ -1646,6 +1648,12 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
+            task_relations::release_duplicates_in_tx(&mut transaction, &task_id, now)
+                .await
+                .map_err(|error| match error {
+                    TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
+                    _ => WorkspaceError::Conflict,
+                })?;
             sqlx::query("DELETE FROM tasks WHERE id = ?")
                 .bind(&task_id)
                 .execute(&mut *transaction)
