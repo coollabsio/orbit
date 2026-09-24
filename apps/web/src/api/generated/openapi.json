@@ -7412,6 +7412,16 @@
               }
             }
           },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "500": {
             "description": "internal_error",
             "content": {

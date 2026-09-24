@@ -383,7 +383,9 @@ async fn project_creation_is_atomic_and_statuses_are_project_scoped() {
         .unwrap();
     assert_eq!(statuses.status(), StatusCode::OK);
     let statuses = response_json(statuses).await;
-    assert_eq!(statuses["items"].as_array().unwrap().len(), 5);
+    assert_eq!(statuses["items"].as_array().unwrap().len(), 6);
+    assert_eq!(statuses["items"][5]["name"], "Duplicate");
+    assert_eq!(statuses["items"][5]["category"], "duplicate");
     assert_eq!(statuses["items"][0]["name"], "Backlog");
     assert!(
         statuses["items"]
@@ -585,7 +587,12 @@ async fn members_can_crud_all_task_area_resources_and_unknown_fields_are_rejecte
             .unwrap(),
     )
     .await;
-    let status = statuses["items"].as_array().unwrap().last().unwrap();
+    let status = statuses["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rfind(|status| status["category"] != "duplicate")
+        .unwrap();
     let deleted_status = fixture
         .app
         .clone()
@@ -2275,4 +2282,145 @@ fn cursor_hex(value: Value) -> String {
         .into_iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+#[tokio::test]
+async fn duplicate_status_is_system_managed() {
+    let fixture = Fixture::new().await;
+    let statuses_uri = format!(
+        "/api/v1/workspaces/{}/projects/{}/statuses",
+        fixture.workspace_id, fixture.project_id
+    );
+    let (status, statuses) = call(&fixture, "GET", &statuses_uri, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = statuses["items"].as_array().unwrap();
+    let duplicate = items.last().unwrap().clone();
+    assert_eq!(duplicate["name"], "Duplicate");
+    assert_eq!(duplicate["category"], "duplicate");
+    let duplicate_uri = format!("{statuses_uri}/{}", duplicate["id"].as_str().unwrap());
+
+    let (status, problem) = call(
+        &fixture,
+        "POST",
+        &statuses_uri,
+        Some(json!({"name":"Dupes", "color":"#112233", "category":"duplicate"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "category");
+
+    let (status, problem) = call(
+        &fixture,
+        "PATCH",
+        &duplicate_uri,
+        Some(json!({
+            "name":"Duplicate", "color":"#8b8f98", "category":"started",
+            "position": duplicate["position"], "expected_version": 0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "category");
+
+    let todo = items[1].clone();
+    let (status, problem) = call(
+        &fixture,
+        "PATCH",
+        &format!("{statuses_uri}/{}", todo["id"].as_str().unwrap()),
+        Some(json!({
+            "name":"Todo", "color":"#8b8f98", "category":"duplicate",
+            "position": todo["position"], "expected_version": 0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "category");
+
+    let (status, renamed) = call(
+        &fixture,
+        "PATCH",
+        &duplicate_uri,
+        Some(json!({
+            "name":"Dupe", "color":"#aabbcc", "category":"duplicate",
+            "position": duplicate["position"], "expected_version": 0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(renamed["name"], "Dupe");
+    assert_eq!(renamed["color"], "#aabbcc");
+
+    let (status, problem) = call(
+        &fixture,
+        "DELETE",
+        &format!("{duplicate_uri}?expected_version=1"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["detail"], "status_id");
+}
+
+#[tokio::test]
+async fn due_views_skip_tasks_in_the_duplicate_status() {
+    let fixture = Fixture::new().await;
+    let tasks_uri = format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id);
+    let (status, task) = call(
+        &fixture,
+        "POST",
+        &tasks_uri,
+        Some(json!({
+            "project_id": fixture.project_id,
+            "status_id": fixture.status_id,
+            "title": "Overdue duplicate",
+            "due_at": "2020-01-01T00:00:00Z"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let overdue_uri = format!("{tasks_uri}?view=overdue");
+    let (_, before) = call(&fixture, "GET", &overdue_uri, None).await;
+    assert_eq!(before["items"].as_array().unwrap().len(), 1);
+
+    let duplicate_status = status_id_by_category(&fixture, &fixture.project_id, "duplicate").await;
+    sqlx::query("UPDATE tasks SET status_id = ? WHERE id = ?")
+        .bind(&duplicate_status)
+        .bind(task["id"].as_str().unwrap())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (_, after) = call(&fixture, "GET", &overdue_uri, None).await;
+    assert!(after["items"].as_array().unwrap().is_empty());
+}
+
+async fn call(
+    fixture: &Fixture,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let request = match body {
+        Some(value) => json_request(method, uri, &fixture.owner_cookie, value),
+        None => cookie_request(method, uri, &fixture.owner_cookie),
+    };
+    let response = fixture.app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, value)
+}
+
+async fn status_id_by_category(fixture: &Fixture, project_id: &str, category: &str) -> String {
+    sqlx::query_scalar(
+        "SELECT id FROM task_statuses WHERE project_id = ? AND category = ? ORDER BY position, id LIMIT 1",
+    )
+    .bind(project_id)
+    .bind(category)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap()
 }

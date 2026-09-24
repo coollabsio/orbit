@@ -16,6 +16,6 @@ pub use ports::{
 };
 pub use tasks::{AttachmentRef, Comment, Task, TaskPriority};
 pub use workspace::{
-    DomainError, ExpectedVersion, Project, RestoreAvailability, StatusCategory, TaskStatus,
-    Workspace, WorkspaceDefaults,
+    DEFAULT_STATUSES, DomainError, ExpectedVersion, Project, RestoreAvailability, StatusCategory,
+    TaskStatus, Workspace, WorkspaceDefaults,
 };

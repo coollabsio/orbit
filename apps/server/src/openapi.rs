@@ -521,6 +521,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "update_project"
             | "create_status"
             | "update_status"
+            | "delete_status"
             | "reorder_statuses"
             | "create_label"
             | "update_label"

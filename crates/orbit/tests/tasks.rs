@@ -28,6 +28,7 @@ fn workspace_defaults_create_owner_project_and_workflow() {
             ("In Progress", StatusCategory::Started),
             ("Done", StatusCategory::Completed),
             ("Cancelled", StatusCategory::Cancelled),
+            ("Duplicate", StatusCategory::Duplicate),
         ]
     );
     assert!(
@@ -37,6 +38,21 @@ fn workspace_defaults_create_owner_project_and_workflow() {
             .all(|status| status.workspace_id == defaults.workspace.id
                 && status.project_id == defaults.project.id
                 && status.version == 0)
+    );
+    assert_eq!(
+        defaults
+            .statuses
+            .iter()
+            .map(|status| status.category.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "unstarted",
+            "unstarted",
+            "started",
+            "completed",
+            "cancelled",
+            "duplicate"
+        ]
     );
 }
 

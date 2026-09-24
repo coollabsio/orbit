@@ -1,4 +1,4 @@
-use orbit_domain::StatusCategory;
+use orbit_domain::{DEFAULT_STATUSES, StatusCategory};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -704,6 +704,9 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<StatusRecord, TaskError> {
+        if category == StatusCategory::Duplicate.as_str() {
+            return Err(TaskError::Invalid { field: "category" });
+        }
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
@@ -755,6 +758,10 @@ impl TaskRepository {
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
+        let duplicate = StatusCategory::Duplicate.as_str();
+        if (current.category == duplicate) != (category == duplicate) {
+            return Err(TaskError::Invalid { field: "category" });
+        }
         let description = description.unwrap_or_else(|| current.description.clone());
         sqlx::query("UPDATE task_statuses SET name = ?, description = ?, color = ?, category = ?, position = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND project_id = ? AND version = ?")
             .bind(&name).bind(&description).bind(&color).bind(&category).bind(position).bind(now.as_millis()).bind(status_id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
@@ -796,6 +803,9 @@ impl TaskRepository {
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
+        if current.category == StatusCategory::Duplicate.as_str() {
+            return Err(TaskError::Invalid { field: "status_id" });
+        }
         let tasks: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND status_id = ?",
         )
@@ -1075,7 +1085,7 @@ impl TaskRepository {
             let day_ms = 86_400_000;
             let start_of_utc_day = (TimestampMillis::now().as_millis() / day_ms) * day_ms;
             query.push(
-                " AND tasks.due_at IS NOT NULL AND EXISTS (SELECT 1 FROM task_statuses WHERE task_statuses.id = tasks.status_id AND task_statuses.category NOT IN ('completed', 'cancelled'))",
+                " AND tasks.due_at IS NOT NULL AND EXISTS (SELECT 1 FROM task_statuses WHERE task_statuses.id = tasks.status_id AND task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate'))",
             );
             if filter.view.as_deref() == Some("overdue") {
                 query
@@ -1398,7 +1408,7 @@ impl TaskRepository {
             return Ok(task_id);
         }
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? ORDER BY CASE WHEN category = ? THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
+            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category <> 'duplicate' ORDER BY CASE WHEN category = ? THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
         ).bind(workspace_id.to_string()).bind(issue.project_id.to_string())
             .bind(status_category)
             .fetch_optional(&mut *tx).await?.ok_or(TaskError::NotFound)?;
@@ -1504,7 +1514,7 @@ impl TaskRepository {
 
         project_in_tx(&mut tx, workspace_id, input.project_id, false).await?;
         let status_id = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
+            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category <> 'duplicate' ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
         )
         .bind(workspace_id.to_string())
         .bind(input.project_id.to_string())
@@ -2653,22 +2663,9 @@ async fn insert_default_statuses(
     project_id: Id,
     now: TimestampMillis,
 ) -> Result<(), TaskError> {
-    let statuses = [
-        ("Backlog", "#8b8f98", StatusCategory::Unstarted),
-        ("Todo", "#8b8f98", StatusCategory::Unstarted),
-        ("In Progress", "#f2c94c", StatusCategory::Started),
-        ("Done", "#4cb782", StatusCategory::Completed),
-        ("Cancelled", "#8b8f98", StatusCategory::Cancelled),
-    ];
-    for (position, (name, color, category)) in statuses.into_iter().enumerate() {
-        let category = match category {
-            StatusCategory::Unstarted => "unstarted",
-            StatusCategory::Started => "started",
-            StatusCategory::Completed => "completed",
-            StatusCategory::Cancelled => "cancelled",
-        };
+    for (position, (name, color, category)) in DEFAULT_STATUSES.into_iter().enumerate() {
         sqlx::query("INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?, ?)")
-            .bind(Id::new_v7().to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(name).bind(color).bind(category).bind(position as i64).bind(now.as_millis()).bind(now.as_millis()).execute(&mut **tx).await?;
+            .bind(Id::new_v7().to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(name).bind(color).bind(category.as_str()).bind(position as i64).bind(now.as_millis()).bind(now.as_millis()).execute(&mut **tx).await?;
     }
     Ok(())
 }

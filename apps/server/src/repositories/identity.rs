@@ -1,4 +1,4 @@
-use orbit_domain::{StatusCategory, WorkspaceDefaults};
+use orbit_domain::WorkspaceDefaults;
 use orbit_platform::{
     AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, SessionRecord, TimestampMillis,
     generate_opaque_token, normalize_email,
@@ -406,7 +406,7 @@ impl IdentityRepository {
             .bind(&status.name)
             .bind(&status.description)
             .bind(&status.color)
-            .bind(status_category(status.category))
+            .bind(status.category.as_str())
             .bind(status.position)
             .bind(status.version as i64)
             .bind(timestamp)
@@ -1224,15 +1224,6 @@ fn decode_identity(row: sqlx::sqlite::SqliteRow) -> Result<StoredIdentity, Ident
     })
 }
 
-fn status_category(category: StatusCategory) -> &'static str {
-    match category {
-        StatusCategory::Unstarted => "unstarted",
-        StatusCategory::Started => "started",
-        StatusCategory::Completed => "completed",
-        StatusCategory::Cancelled => "cancelled",
-    }
-}
-
 fn token_hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
 }
@@ -1694,7 +1685,7 @@ mod tests {
                 .scalar::<i64>("SELECT COUNT(*) FROM task_statuses")
                 .await
                 .unwrap(),
-            5
+            6
         );
     }
 

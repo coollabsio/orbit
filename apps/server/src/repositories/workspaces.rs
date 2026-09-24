@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_domain::{StatusCategory, WorkspaceDefaults, WorkspaceRole};
+use orbit_domain::{WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
     AttachmentMutationCoordinator, BlobStore, BlobStoreError, Database, Id, IssuedSession, Job,
     JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore, RecurringSchedule,
@@ -1888,12 +1888,7 @@ async fn insert_default_project(
         .bind(&status.name)
         .bind(&status.description)
         .bind(&status.color)
-        .bind(match status.category {
-            StatusCategory::Unstarted => "unstarted",
-            StatusCategory::Started => "started",
-            StatusCategory::Completed => "completed",
-            StatusCategory::Cancelled => "cancelled",
-        })
+        .bind(status.category.as_str())
         .bind(status.position)
         .bind(status.version as i64)
         .bind(now.as_millis())

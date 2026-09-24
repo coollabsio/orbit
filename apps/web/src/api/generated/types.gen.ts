@@ -4046,6 +4046,10 @@ export type DeleteStatusErrors = {
      */
     413: TaskProblem;
     /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
      * internal_error
      */
     500: TaskProblem;

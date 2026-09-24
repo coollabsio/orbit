@@ -203,7 +203,33 @@ pub enum StatusCategory {
     Started,
     Completed,
     Cancelled,
+    /// System-managed: a task enters it only by being marked as a duplicate of another task.
+    Duplicate,
 }
+
+impl StatusCategory {
+    /// The value stored in `task_statuses.category` and sent over the API.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unstarted => "unstarted",
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::Duplicate => "duplicate",
+        }
+    }
+}
+
+/// The statuses every new project starts with, in position order.
+pub const DEFAULT_STATUSES: [(&str, &str, StatusCategory); 6] = [
+    ("Backlog", "#8b8f98", StatusCategory::Unstarted),
+    ("Todo", "#8b8f98", StatusCategory::Unstarted),
+    ("In Progress", "#f2c94c", StatusCategory::Started),
+    ("Done", "#4cb782", StatusCategory::Completed),
+    ("Cancelled", "#8b8f98", StatusCategory::Cancelled),
+    ("Duplicate", "#8b8f98", StatusCategory::Duplicate),
+];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskStatus {
@@ -260,26 +286,20 @@ impl WorkspaceDefaults {
         let workspace = Workspace::new(workspace_name);
         let owner = Membership::new(workspace.id, owner_user_id, WorkspaceRole::Owner);
         let project = Project::new(workspace.id, project_name, "GEN", "#5e6ad2");
-        let statuses = [
-            ("Backlog", "#8b8f98", StatusCategory::Unstarted),
-            ("Todo", "#8b8f98", StatusCategory::Unstarted),
-            ("In Progress", "#f2c94c", StatusCategory::Started),
-            ("Done", "#4cb782", StatusCategory::Completed),
-            ("Cancelled", "#8b8f98", StatusCategory::Cancelled),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(position, (name, color, category))| {
-            TaskStatus::new(
-                workspace.id,
-                project.id,
-                name,
-                color,
-                category,
-                position as i64,
-            )
-        })
-        .collect();
+        let statuses = DEFAULT_STATUSES
+            .into_iter()
+            .enumerate()
+            .map(|(position, (name, color, category))| {
+                TaskStatus::new(
+                    workspace.id,
+                    project.id,
+                    name,
+                    color,
+                    category,
+                    position as i64,
+                )
+            })
+            .collect();
 
         Self {
             workspace,

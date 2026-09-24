@@ -1790,7 +1790,7 @@ fn category(
 ) -> Result<String, ApiError> {
     if matches!(
         value.as_str(),
-        "unstarted" | "started" | "completed" | "cancelled"
+        "unstarted" | "started" | "completed" | "cancelled" | "duplicate"
     ) {
         Ok(value)
     } else {
