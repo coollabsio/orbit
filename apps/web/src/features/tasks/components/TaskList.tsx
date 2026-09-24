@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Danger, Flag, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
+import { ChevronRight, Copy, Danger, Flag, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,9 @@ import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks, useUpdateTask 
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { groupTasksByStatus, resolveStatusId, type SortKey, type StatusGroup } from '@/features/tasks/tasksLib'
 import { TaskRow } from './TaskRow'
+import { pickerTitle } from '@/features/tasks/relationsLib'
+import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
+import { TaskPickerDialog } from './TaskPickerDialog'
 
 const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
 const OPTION =
@@ -66,6 +69,9 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
   const [selected, setSelected] = useState<string[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
+  const duplicates = useDuplicateActions(workspace.id)
+  // tasks waiting for a canonical task: one (row menu, drop on the Duplicate group) or the bulk selection
+  const [duplicatePicker, setDuplicatePicker] = useState<Task[] | null>(null)
 
   const toggle = (key: string) => setCollapsed((prev) => {
     const next = prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
@@ -118,7 +124,8 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
                 // the dropped task moves to the status of its own project that matches this group
                 const statusId = resolveStatusId(statuses, task.projectId, group.key)
                 if (statusId && statusId !== task.statusId) {
-                  updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: statusId } })
+                  if (statuses.find((status) => status.id === statusId)?.category === 'duplicate') setDuplicatePicker([task])
+                  else updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: statusId } })
                 }
               }
               endDrag()
@@ -140,17 +147,19 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
               <span>{group.name}</span>
               <span className="font-normal text-muted-foreground/70 tabular-nums">{group.tasks.length}</span>
               <div className="flex-1" />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="size-6 rounded-md border-0 text-muted-foreground/70 opacity-0 transition hover:bg-accent hover:text-foreground group-hover/hdr:opacity-100 focus-visible:opacity-100 dark:hover:bg-accent"
-                aria-label={`New task in ${group.name}`}
-                title="New task"
-                onClick={() => onAdd(group.key)}
-              >
-                <Plus className="size-3.5" />
-              </Button>
+              {group.category === 'duplicate' ? null : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-6 rounded-md border-0 text-muted-foreground/70 opacity-0 transition hover:bg-accent hover:text-foreground group-hover/hdr:opacity-100 focus-visible:opacity-100 dark:hover:bg-accent"
+                  aria-label={`New task in ${group.name}`}
+                  title="New task"
+                  onClick={() => onAdd(group.key)}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              )}
             </div>
             {!isCollapsed
               ? group.tasks.map((task) => (
@@ -167,6 +176,7 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
                     onToggleSelect={toggleSelect}
                     onDragStart={setDraggingId}
                     onDragEnd={endDrag}
+                    onRequestDuplicate={(rowTask) => setDuplicatePicker([rowTask])}
                   />
                 ))
               : null}
@@ -181,6 +191,25 @@ export function TaskList({ tasks, users, labels, statuses, groups, sort, onOpen,
           groups={groups}
           labels={labels}
           onClear={() => setSelected([])}
+          onMarkDuplicate={() => setDuplicatePicker(selectedTasks)}
+        />
+      ) : null}
+      {duplicatePicker ? (
+        <TaskPickerDialog
+          open
+          onOpenChange={(open) => { if (!open) setDuplicatePicker(null) }}
+          title={pickerTitle('duplicate', duplicatePicker.length === 1 ? duplicatePicker[0]!.identifier : duplicatePicker.length)}
+          statuses={statuses}
+          excludeIds={duplicatePicker.map((item) => item.id)}
+          excludeDuplicates
+          onSelect={(target) => {
+            if (duplicatePicker.length === 1) {
+              void duplicates.markOne(duplicatePicker[0]!, target)
+            } else {
+              void duplicates.markMany(duplicatePicker, target)
+              setSelected([])
+            }
+          }}
         />
       ) : null}
     </>
@@ -195,6 +224,7 @@ function BulkBar({
   groups,
   labels,
   onClear,
+  onMarkDuplicate,
 }: {
   tasks: Task[]
   users: User[]
@@ -202,6 +232,7 @@ function BulkBar({
   groups: StatusGroup[]
   labels: LabelRecord[]
   onClear: () => void
+  onMarkDuplicate: () => void
 }) {
   const { workspace } = useWorkspace()
   const bulkTasks = useBulkTasks(workspace.id)
@@ -276,7 +307,7 @@ function BulkBar({
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="ghost" className={BULK_BTN}><RecordCircle aria-hidden className={BULK_ICON} /><span className={BULK_LABEL}>Status</span></Button>} />
           <DropdownMenuContent side="top" className={MENU}>
-            {groups.map((group) => (
+            {groups.filter((group) => group.category !== 'duplicate').map((group) => (
               <DropdownMenuItem key={group.key} className={OPTION} onClick={() => bulkStatus(group.key)}>
                 <TaskStatusIcon status={group.status} />
                 {group.name}
@@ -323,6 +354,10 @@ function BulkBar({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button variant="ghost" className={BULK_BTN} onClick={onMarkDuplicate}>
+          <Copy aria-hidden className={BULK_ICON} />
+          <span className={BULK_LABEL}>Mark as duplicate…</span>
+        </Button>
         {bulkTasks.isPending ? (
           <span role="status" className="flex shrink-0 items-center gap-1.5 px-2 text-xs whitespace-nowrap text-muted-foreground">
             <Loader aria-hidden className="size-3.5 animate-spin" />

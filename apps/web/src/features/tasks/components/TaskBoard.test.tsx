@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createEvent, fireEvent, render } from '@testing-library/react'
+import { createEvent, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
-import type { StatusGroup } from '@/features/tasks/tasksLib'
+import { statusGroups, type StatusGroup } from '@/features/tasks/tasksLib'
 import { TaskBoard } from './TaskBoard'
 
 const originalFetch = globalThis.fetch
@@ -60,4 +60,68 @@ test('mounted board rejects an oversized atomic reorder before any server commit
   expect((await view.findByRole('alert')).textContent).toContain('at most 100')
   expect(requestBodies).toHaveLength(0)
   expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
+})
+
+const boardWorkspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
+const boardStatuses: TaskStatusDef[] = [
+  { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#aaa', category: 'unstarted', position: 0, version: 1 },
+  { id: 'dup', projectId: 'project-1', name: 'Duplicate', description: '', color: '#8b8f98', category: 'duplicate', position: 1, version: 1 },
+]
+
+function renderBoard(tasks: Task[], writes: Array<{ method: string; body: unknown }>) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method !== 'GET') writes.push({ method: request.method, body: await request.json() })
+    return Response.json({ items: [], next_cursor: null })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>
+      <WorkspaceContext.Provider value={{ workspace: boardWorkspace, workspaces: [boardWorkspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider>
+    </QueryClientProvider>
+  )
+  return render(
+    <TaskBoard tasks={tasks} users={[]} labels={[]} statuses={boardStatuses} groups={statusGroups(boardStatuses, 'project-1')} sort="manual" activeTaskId={null} onOpen={() => {}} />,
+    { wrapper },
+  )
+}
+
+const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => {} }
+
+test('dropping a card on the Duplicate column opens the picker; cancelling leaves the task where it was', async () => {
+  const writes: Array<{ method: string; body: unknown }> = []
+  const view = renderBoard([task('moving', 'todo', 0)], writes)
+  const moving = view.getByRole('heading', { name: 'Moving' }).closest('article')!
+  const duplicateColumn = view.getByText('Duplicate').closest('section')!
+  fireEvent.dragStart(moving, { dataTransfer })
+  fireEvent.drop(duplicateColumn, { dataTransfer })
+
+  const picker = await view.findByRole('dialog', { name: 'Mark ORB-0 as duplicate of…' })
+  fireEvent.keyDown(within(picker).getByPlaceholderText('Search tasks…'), { key: 'Escape' })
+  await waitFor(() => expect(view.queryByRole('dialog')).toBeNull())
+  expect(writes).toEqual([])
+  expect(view.getByText('Todo').closest('section')!.contains(view.getByRole('heading', { name: 'Moving' }))).toBe(true)
+})
+
+test('reordering inside the Duplicate column is a plain position update, never the picker', async () => {
+  const writes: Array<{ method: string; body: unknown }> = []
+  const dupA = { ...task('dupA', 'dup', 0), duplicateOf: { id: 'x', projectId: 'project-1', title: 'X' } }
+  const dupB = { ...task('dupB', 'dup', 1), duplicateOf: { id: 'x', projectId: 'project-1', title: 'X' } }
+  const view = renderBoard([dupA, dupB], writes)
+  const card = view.getByRole('heading', { name: 'dupA' }).closest('article')!
+  const duplicateColumn = view.getByText('Duplicate').closest('section')!
+  fireEvent.dragStart(card, { dataTransfer })
+  const dropEvent = createEvent.drop(duplicateColumn, { dataTransfer })
+  Object.defineProperty(dropEvent, 'clientY', { value: 10_000 })
+  fireEvent(duplicateColumn, dropEvent)
+
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(view.queryByRole('dialog')).toBeNull()
+  const updates = (writes[0]!.body as { updates: Array<Record<string, unknown>> }).updates
+  expect(updates.every((update) => !('status_id' in update) && !('duplicate_of_id' in update))).toBe(true)
+})
+
+test('a blocked card shows the blocked icon beside its identifier', () => {
+  const view = renderBoard([{ ...task('late', 'todo', 0), blocked: true }], [])
+  expect(view.getByRole('img', { name: 'Blocked' })).toBeTruthy()
 })

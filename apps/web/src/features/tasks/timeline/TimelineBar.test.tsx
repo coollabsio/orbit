@@ -25,3 +25,8 @@ test('a duplicate reads as closed work on the timeline', () => {
   const view = renderBar()
   expect(view.container.querySelector('[data-timeline-bar="a"]')!.className).toContain('opacity-50')
 })
+
+test('a blocked task shows the blocked icon in its bar label', () => {
+  const view = renderBar({ blocked: true })
+  expect(view.getByRole('img', { name: 'Blocked' })).toBeTruthy()
+})

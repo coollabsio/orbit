@@ -4,6 +4,7 @@ import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { isClosedCategory } from '@/features/tasks/taskMeta'
 import type { User } from '@/features/workspaces/models'
 import { TaskStatusIcon } from '../components/TaskStatusIcon'
+import { BlockedIndicator } from '../components/BlockedIndicator'
 import { dayIndex, spanLabel, xOf, type DragMode, type TaskSpan, type TimeRange } from './timelineLib'
 
 /** Below this width the label moves outside, to the right of the bar. */
@@ -49,6 +50,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
   const label = (
     <>
       <TaskStatusIcon status={status} size={13} />
+      {task.blocked ? <BlockedIndicator /> : null}
       <span className="truncate">{task.title || 'Untitled'}</span>
     </>
   )
