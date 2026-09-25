@@ -48,7 +48,7 @@ import { PRESS_MOTION } from '@/features/views/components/motion'
 import { SaveViewDialog, type SaveViewMode } from '@/features/views/components/SaveViewDialog'
 import { ViewHeader, ViewNotFound, ViewStateBanner } from '@/features/views/components/ViewHeader'
 import { PRESET_LABEL, type FilterOptions } from '@/features/views/filterFields'
-import { useViewState, type ViewSource } from '@/features/views/useViewState'
+import { rebaseViewSessionEdit, useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
 import { DEFAULT_DISPLAY, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
 
@@ -112,12 +112,14 @@ function WorkspaceTasksPage() {
   // Quick search is local and never saved (spec §3); another preset or view starts with an empty box.
   const [search, setSearch] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [saveDialog, setSaveDialog] = useState<SaveViewMode | null>(null)
+  // `instant`: opened from the keyboard (Cmd/Ctrl+S), so the dialog skips its entrance animation
+  const [saveDialog, setSaveDialog] = useState<{ mode: SaveViewMode; instant: boolean } | null>(null)
+  const openSaveDialog = (mode: SaveViewMode, instant = false) => setSaveDialog({ mode, instant })
   // the Views page's "New view" opens the Save view dialog on a task page, once
   const wantsSaveView = source.kind === 'page' && searchParams.get('save_view') === '1'
   useEffect(() => {
     if (!wantsSaveView) return
-    setSaveDialog('create')
+    setSaveDialog({ mode: 'create', instant: false })
     const next = new URLSearchParams(searchParams)
     next.delete('save_view')
     setSearchParams(next, { replace: true })
@@ -298,9 +300,9 @@ function WorkspaceTasksPage() {
               <ViewHeader
                 workspaceId={workspace.id}
                 controller={viewState}
-                onSaveAsNew={() => setSaveDialog('save_as_new')}
-                onEdit={() => setSaveDialog('edit')}
-                onDuplicate={() => setSaveDialog('duplicate')}
+                onSaveAsNew={(options) => openSaveDialog('save_as_new', options?.instant)}
+                onEdit={() => openSaveDialog('edit')}
+                onDuplicate={() => openSaveDialog('duplicate')}
                 onDeleted={() => navigate('/views')}
               />
             ) : (
@@ -341,7 +343,7 @@ function WorkspaceTasksPage() {
               onChange={viewState.setDisplay}
             />
             {source.kind === 'page' ? (
-              <Button type="button" variant="ghost" aria-label="Save view" className={cn('max-[899px]:w-8 max-[899px]:px-0', PRESS_MOTION)} onClick={() => setSaveDialog('create')}>
+              <Button type="button" variant="ghost" aria-label="Save view" className={cn('max-[899px]:w-8 max-[899px]:px-0', PRESS_MOTION)} onClick={() => openSaveDialog('create')}>
                 <Bookmark className="size-4" />
                 <span className="max-[899px]:hidden">Save view</span>
               </Button>
@@ -371,14 +373,17 @@ function WorkspaceTasksPage() {
             onOpenChange={(open) => {
               if (!open) setSaveDialog(null)
             }}
-            mode={saveDialog ?? 'create'}
+            mode={saveDialog?.mode ?? 'create'}
+            instant={saveDialog?.instant}
             workspaceId={workspace.id}
             // a page's preset and project scope become ordinary, editable conditions in the view
             state={{ filter: viewState.effective, display: viewState.state.display }}
             view={viewState.view}
             onSaved={(saved) => {
-              if (saveDialog === 'save_as_new') viewState.discard()
-              if (saveDialog !== 'edit') navigate(`/views/${saved.id}`)
+              if (saveDialog?.mode === 'save_as_new') viewState.discard()
+              // our own rename moved the version: unsaved edits now build on it (another tab's change still conflicts)
+              if (saveDialog?.mode === 'edit' && viewState.view) rebaseViewSessionEdit(workspace.id, saved.id, viewState.view.version, saved.version)
+              if (saveDialog?.mode !== 'edit') navigate(`/views/${saved.id}`)
             }}
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}

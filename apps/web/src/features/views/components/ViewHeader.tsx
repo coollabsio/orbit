@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Layer } from 'reicon-react'
 import { toast } from 'sonner'
@@ -15,7 +15,8 @@ import { ViewIcon } from './ViewIcon'
 export interface ViewHeaderProps {
   workspaceId: string
   controller: ViewStateController
-  onSaveAsNew: () => void
+  /** `instant` when opened from the keyboard (Cmd/Ctrl+S): the dialog skips its entrance animation. */
+  onSaveAsNew: (options?: { instant?: boolean }) => void
   onEdit: () => void
   onDuplicate: () => void
   onDeleted: () => void
@@ -24,10 +25,14 @@ export interface ViewHeaderProps {
 /** Replaces the project picker + title + spacer in the TasksPage header row on /views/:viewId. */
 export function ViewHeader({ workspaceId, controller, onSaveAsNew, onEdit, onDuplicate, onDeleted }: ViewHeaderProps) {
   const [saving, setSaving] = useState(false)
+  // read by the shortcut: a second Cmd/Ctrl+S before the re-render must still see the save in flight
+  const savingRef = useRef(false)
   const [conflictDismissed, setConflictDismissed] = useState(false)
   const { view, dirty, canEdit } = controller
 
   const save = async (overwrite = false) => {
+    if (savingRef.current) return
+    savingRef.current = true
     setConflictDismissed(false)
     setSaving(true)
     try {
@@ -36,6 +41,7 @@ export function ViewHeader({ workspaceId, controller, onSaveAsNew, onEdit, onDup
     } catch (error) {
       toast.error(error instanceof ApiProblem ? error.detail : "Orbit couldn't save the view. Try again.")
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
@@ -45,8 +51,10 @@ export function ViewHeader({ workspaceId, controller, onSaveAsNew, onEdit, onDup
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 's' || !dirty) return
       event.preventDefault()
+      // a held key repeats; one press saves once
+      if (event.repeat || savingRef.current) return
       if (canEdit) void save()
-      else onSaveAsNew()
+      else onSaveAsNew({ instant: true })
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
@@ -70,7 +78,7 @@ export function ViewHeader({ workspaceId, controller, onSaveAsNew, onEdit, onDup
           {canEdit ? (
             <Button type="button" size="sm" className={PRESS_MOTION} disabled={saving} aria-keyshortcuts="Control+S Meta+S" onClick={() => void save()}>Save</Button>
           ) : (
-            <Button type="button" size="sm" className={PRESS_MOTION} aria-keyshortcuts="Control+S Meta+S" onClick={onSaveAsNew}>Save as new view</Button>
+            <Button type="button" size="sm" className={PRESS_MOTION} aria-keyshortcuts="Control+S Meta+S" onClick={() => onSaveAsNew()}>Save as new view</Button>
           )}
           <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
         </div>

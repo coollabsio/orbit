@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
 import { useLogout } from '@/features/auth/api'
 import type { SavedView } from '@/features/views/api/views'
-import { clearViewSessionEdits, useViewState, type ViewSource } from './useViewState'
+import { clearViewSessionEdits, rebaseViewSessionEdit, useViewState, type ViewSource } from './useViewState'
 import { DEFAULT_DISPLAY, PRESET_FILTERS, defaultViewState, type FilterGroup, type ViewState } from './viewState'
 
 const originalFetch = globalThis.fetch
@@ -312,4 +312,76 @@ test('signing out drops unsaved saved-view edits', async () => {
   await waitFor(() => expect(view.result.current.controller.isLoading).toBeFalse())
   expect(view.result.current.controller.dirty).toBeFalse()
   expect(view.result.current.controller.state).toEqual(defaultViewState())
+})
+
+const patchVersions = (requests: Recorded[]) =>
+  requests.filter(({ method }) => method === 'PATCH').map(({ body }) => (body as { expected_version: number }).expected_version)
+
+test('a second save while one is in flight is ignored instead of conflicting', async () => {
+  let record = savedView()
+  let release: (() => void) | undefined
+  const requests = serve(({ method, body }) => {
+    if (method !== 'PATCH') return Response.json(record)
+    const patch = body as { expected_version: number; state: SavedView['state'] }
+    if (patch.expected_version !== record.version) return problem(409, 'conflict')
+    record = { ...record, state: patch.state, version: record.version + 1 }
+    const response = Response.json(record)
+    return new Promise<Response>((resolve) => { release = () => resolve(response) })
+  })
+  const view = renderHook(() => useViewState('workspace-1', { kind: 'view', viewId: 'view-1' }), { wrapper: withClient(testClient()) })
+  await waitFor(() => expect(view.result.current.isLoading).toBeFalse())
+
+  act(() => view.result.current.setFilter(bugs))
+  let first: Promise<void> | undefined
+  let second: Promise<void> | undefined
+  act(() => {
+    first = view.result.current.save()
+    second = view.result.current.save()
+  })
+  await waitFor(() => expect(release).toBeDefined())
+  release!()
+  await act(() => Promise.all([first, second]))
+
+  expect(patchVersions(requests)).toEqual([3])
+  expect(view.result.current).toMatchObject({ conflict: false, dirty: false })
+})
+
+test('overwrite with nothing left to save closes the conflict', async () => {
+  const requests = serve(({ method }) => method === 'PATCH' ? problem(409, 'conflict') : Response.json(savedView()))
+  const view = renderHook(() => useViewState('workspace-1', { kind: 'view', viewId: 'view-1' }), { wrapper: withClient(testClient()) })
+  await waitFor(() => expect(view.result.current.isLoading).toBeFalse())
+  act(() => view.result.current.setDisplay({ layout: 'board' }))
+  await act(() => view.result.current.save())
+  expect(view.result.current.conflict).toBeTrue()
+  // back at the saved state: no edits remain
+  act(() => view.result.current.setDisplay({ layout: 'list' }))
+
+  await act(() => view.result.current.save({ overwrite: true }))
+
+  expect(view.result.current).toMatchObject({ conflict: false, dirty: false })
+  expect(patchVersions(requests)).toEqual([3])
+})
+
+test('rebasing after our own metadata update moves only edits from that version', async () => {
+  let record = savedView()
+  const requests = serve(({ method, body }) => {
+    if (method !== 'PATCH') return Response.json(record)
+    const patch = body as { expected_version: number; state: SavedView['state'] }
+    if (patch.expected_version !== record.version) return problem(409, 'conflict')
+    record = { ...record, state: patch.state, version: record.version + 1 }
+    return Response.json(record)
+  })
+  const client = testClient()
+  const view = renderHook(() => useViewState('workspace-1', { kind: 'view', viewId: 'view-1' }), { wrapper: withClient(client) })
+  await waitFor(() => expect(view.result.current.isLoading).toBeFalse())
+  act(() => view.result.current.setFilter(bugs))
+  // Edit view renamed it (3 → 4); a rebase from another version is ignored
+  record = { ...record, name: 'Bugs (renamed)', version: 4 }
+  act(() => rebaseViewSessionEdit('workspace-1', 'view-1', 2, 4))
+  act(() => rebaseViewSessionEdit('workspace-1', 'view-1', 3, 4))
+
+  await act(() => view.result.current.save())
+
+  expect(patchVersions(requests)).toEqual([4])
+  expect(view.result.current).toMatchObject({ conflict: false, dirty: false })
 })

@@ -98,6 +98,17 @@ export function clearViewSessionEdits() {
   for (const listener of sessionListeners) listener()
 }
 
+/**
+ * Our own metadata update (Edit view: name, icon, visibility) moved the view from `fromVersion` to `toVersion`.
+ * Unsaved edits that started from `fromVersion` now build on `toVersion`, so the next Save does not conflict with
+ * ourselves. Edits based on any other version keep it: a change from another tab still conflicts.
+ */
+export function rebaseViewSessionEdit(workspaceId: string, viewId: string, fromVersion: number, toVersion: number) {
+  const slot = `${workspaceId}|${viewId}`
+  const edit = sessionEdits.get(slot)
+  if (edit && edit.baseVersion === fromVersion) setSessionEdit(slot, { ...edit, baseVersion: toVersion })
+}
+
 export function useViewState(workspaceId: string, source: ViewSource): ViewStateController {
   const page = usePageViewState(workspaceId, source.kind === 'page' ? source : null)
   const saved = useSavedViewState(workspaceId, source.kind === 'view' ? source.viewId : undefined)
@@ -215,6 +226,8 @@ function useSavedViewState(workspaceId: string, viewId: string | undefined): Vie
   const entry = useSyncExternalStore(subscribeSessionEdits, () => (slot ? sessionEdits.get(slot) : undefined))
   const edited = entry?.state
   const [conflictSlot, setConflictSlot] = useState<string | null>(null)
+  // one save at a time: a second Save (e.g. Cmd+S pressed twice) would send the same base version and conflict
+  const inFlight = useRef<Promise<void> | null>(null)
   const record = viewQuery.data
   const recordState = record ? viewStateOf(record) : null
   const base = useMemo(() => (recordState ? normalizeViewState(recordState) : defaultViewState()), [recordState])
@@ -241,12 +254,23 @@ function useSavedViewState(workspaceId: string, viewId: string | undefined): Vie
     }
   }
 
-  const save = async (opts?: { overwrite?: boolean }) => {
+  const save = (opts?: { overwrite?: boolean }): Promise<void> => {
+    if (inFlight.current) return inFlight.current
+    const run = saveOnce(opts).finally(() => { inFlight.current = null })
+    inFlight.current = run
+    return run
+  }
+
+  const saveOnce = async (opts?: { overwrite?: boolean }) => {
     if (!viewId || !record) return
     const pending = sessionEdits.get(slot)
     // an unreadable view has no edits but saves its defaults to reset it
     const body = pending ?? (stateError !== null ? { state: base, baseVersion: record.version } : undefined)
-    if (!body) return
+    if (!body) {
+      // nothing left to save (e.g. the edits were undone): Overwrite still closes the conflict
+      setConflictSlot(null)
+      return
+    }
     let version = body.baseVersion
     if (opts?.overwrite) {
       const fresh = await queryClient.fetchQuery({ ...savedViewQueryOptions(workspaceId, viewId), staleTime: 0 })

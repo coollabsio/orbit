@@ -270,6 +270,14 @@ test('?save_view=1 opens the Save view dialog and drops the parameter', async ()
   await waitFor(() => expect(page.getByTestId('location').textContent).toBe('/tasks?workspace=workspace-1'))
 })
 
+/** An unsaved edit on an open saved view: Display options → Show empty groups. */
+async function toggleEmptyGroups(page: ReturnType<typeof renderAt>) {
+  fireEvent.click(page.getByRole('button', { name: 'Display options' }))
+  await userEvent.click(await page.findByRole('switch', { name: 'Show empty groups' }))
+  // close the (non-modal) popover, which hides the header from the accessibility tree while open
+  await userEvent.keyboard('{Escape}')
+}
+
 /**
  * Another tab saved view-1 (version 1 → 2) after this tab opened it: this tab's Save gets a 409.
  * `versions` answers each GET of the view in turn; the last one repeats.
@@ -285,10 +293,7 @@ async function openConflictingView(versions: Array<ReturnType<typeof viewRecord>
   const page = renderAt('/views/view-1?workspace=workspace-1')
   expect(await page.findByText('Ship release')).toBeTruthy()
 
-  fireEvent.click(page.getByRole('button', { name: 'Display options' }))
-  await userEvent.click(await page.findByRole('switch', { name: 'Show empty groups' }))
-  // close the (non-modal) popover, which hides the header from the accessibility tree while open
-  await userEvent.keyboard('{Escape}')
+  await toggleEmptyGroups(page)
   await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
 
   expect(await page.findByRole('alertdialog')).toBeTruthy()
@@ -319,4 +324,70 @@ test('a save that conflicts with another tab can reload and drop the edits', asy
   expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0)
   expect(page.queryByRole('alertdialog')).toBeNull()
   expect(viewPatches(requests)).toHaveLength(1)
+})
+
+/** view-1 on a server that checks `expected_version` on every PATCH; `delay` holds each PATCH until released. */
+function serveVersionedView({ canEdit = true, delay = false } = {}) {
+  let record = { ...viewRecord('view-1', 'Hot bugs'), can_edit: canEdit }
+  const releases: Array<() => void> = []
+  const requests = serve(({ method, path, body }) => {
+    if (!path.endsWith('/views/view-1')) return undefined
+    if (method === 'GET') return Response.json(record)
+    const { expected_version: expected, ...fields } = body as { expected_version: number }
+    if (expected !== record.version) return problem(409, 'conflict')
+    record = { ...record, ...fields, version: record.version + 1 }
+    const response = Response.json(record)
+    return delay ? new Promise<Response>((resolve) => { releases.push(() => resolve(response)) }) : response
+  })
+  return { requests, releases }
+}
+
+test('renaming a view with unsaved edits does not make the next save conflict', async () => {
+  const { requests } = serveVersionedView()
+  const page = renderAt('/views/view-1?workspace=workspace-1')
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  await toggleEmptyGroups(page)
+
+  fireEvent.click(page.getByRole('button', { name: 'View options' }))
+  await userEvent.click(await page.findByRole('menuitem', { name: 'Edit view' }))
+  const name = await page.findByRole('textbox', { name: 'Name' })
+  await userEvent.clear(name)
+  await userEvent.type(name, 'Hot bugs triage')
+  await userEvent.click(page.getByRole('button', { name: 'Save changes' }))
+  expect(await page.findByRole('heading', { name: 'Hot bugs triage' })).toBeTruthy()
+
+  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0))
+  expect(viewPatches(requests).map(({ body }) => (body as { expected_version: number }).expected_version)).toEqual([1, 2])
+  expect(page.queryAllByRole('alertdialog')).toHaveLength(0)
+})
+
+test('pressing Cmd+S twice during a slow save sends one save and no conflict', async () => {
+  const { requests, releases } = serveVersionedView({ delay: true })
+  const page = renderAt('/views/view-1?workspace=workspace-1')
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  await toggleEmptyGroups(page)
+
+  fireEvent.keyDown(document, { key: 's', metaKey: true })
+  await waitFor(() => expect(releases).toHaveLength(1))
+  fireEvent.keyDown(document, { key: 's', metaKey: true })
+  await settle(50)
+  releases[0]?.()
+
+  await waitFor(() => expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0))
+  expect(viewPatches(requests)).toHaveLength(1)
+  expect(page.queryAllByRole('alertdialog')).toHaveLength(0)
+})
+
+test('Cmd+S on a view the user cannot edit opens Save as new view without animation', async () => {
+  serveVersionedView({ canEdit: false })
+  const page = renderAt('/views/view-1?workspace=workspace-1')
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  await toggleEmptyGroups(page)
+
+  fireEvent.keyDown(document, { key: 's', ctrlKey: true })
+
+  expect(await page.findByRole('heading', { name: 'Save as new view' })).toBeTruthy()
+  expect(document.querySelector('[data-slot="dialog-content"]')?.hasAttribute('data-instant')).toBe(true)
 })

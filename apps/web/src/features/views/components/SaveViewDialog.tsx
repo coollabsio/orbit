@@ -28,6 +28,8 @@ export interface SaveViewDialogProps {
   /** Prefills the form; required for save_as_new, duplicate, and edit. */
   view?: SavedView
   onSaved: (view: SavedView) => void
+  /** Opened from the keyboard: no entrance animation. */
+  instant?: boolean
 }
 
 const TITLE: Record<SaveViewMode, string> = { create: 'Save view', save_as_new: 'Save as new view', duplicate: 'Duplicate view', edit: 'Edit view' }
@@ -39,11 +41,11 @@ const DESCRIPTION: Record<SaveViewMode, string> = {
   edit: 'Rename this view and choose who can see it.',
 }
 
-export function SaveViewDialog({ open, onOpenChange, ...form }: SaveViewDialogProps) {
+export function SaveViewDialog({ open, onOpenChange, instant = false, ...form }: SaveViewDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open ? (
-        <DialogContent className={cn('sm:max-w-md', DIALOG_MOTION)}>
+        <DialogContent data-instant={instant || undefined} className={cn('sm:max-w-md', DIALOG_MOTION)}>
           <SaveViewForm {...form} onClose={() => onOpenChange(false)} />
         </DialogContent>
       ) : null}
@@ -51,7 +53,7 @@ export function SaveViewDialog({ open, onOpenChange, ...form }: SaveViewDialogPr
   )
 }
 
-type SaveViewFormProps = Omit<SaveViewDialogProps, 'open' | 'onOpenChange'> & { onClose: () => void }
+type SaveViewFormProps = Omit<SaveViewDialogProps, 'open' | 'onOpenChange' | 'instant'> & { onClose: () => void }
 
 function SaveViewForm({ mode, workspaceId, state, view, onSaved, onClose }: SaveViewFormProps) {
   const nameId = useId()

@@ -114,3 +114,37 @@ test('explains unreadable settings and missing views', () => {
   expect(view.getByText('View not found')).toBeTruthy()
   expect(view.getByRole('link', { name: 'Go to views' }).getAttribute('href')).toBe('/views')
 })
+
+test('a held or repeated Cmd+S saves once while the save is in flight', async () => {
+  let release: (() => void) | undefined
+  let saves = 0
+  const { controller } = fakeController({
+    dirty: true,
+    save: () => {
+      saves += 1
+      return new Promise<void>((resolve) => { release = resolve })
+    },
+  })
+  renderHeader(controller)
+  fireEvent.keyDown(document, { key: 's', metaKey: true })
+  fireEvent.keyDown(document, { key: 's', metaKey: true, repeat: true })
+  fireEvent.keyDown(document, { key: 's', metaKey: true })
+  expect(saves).toBe(1)
+
+  release?.()
+  await waitFor(() => {
+    fireEvent.keyDown(document, { key: 's', metaKey: true })
+    expect(saves).toBe(2)
+  })
+})
+
+test('Cmd+S opens Save as new view without animation; the button animates', async () => {
+  const opened: Array<{ instant?: boolean } | undefined> = []
+  const { controller } = fakeController({ dirty: true, canEdit: false })
+  const { view } = renderWithProviders(
+    <ViewHeader workspaceId="alpha" controller={controller} onSaveAsNew={(options) => opened.push(options)} onEdit={() => {}} onDuplicate={() => {}} onDeleted={() => {}} />,
+  )
+  fireEvent.keyDown(document, { key: 's', ctrlKey: true })
+  await userEvent.click(view.getByRole('button', { name: 'Save as new view' }))
+  expect(opened.map((options) => options?.instant ?? false)).toEqual([true, false])
+})
