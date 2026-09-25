@@ -79,6 +79,8 @@ pub struct Events {
     pub sequence: String,
     pub workspaces_changed: bool,
     pub profile_changed: bool,
+    /// Every change in the range is a saved-view write, so clients refresh only their views.
+    pub views_only: bool,
 }
 
 pub async fn replay(
@@ -104,11 +106,13 @@ pub async fn replay(
     let valid = after.is_some_and(|n| {
         n >= 0 && n <= latest && (n == latest || oldest.is_some_and(|first| n >= first - 1))
     });
-    let (workspaces_changed, profile_changed) = if valid && after != Some(latest) {
-        let (workspace, profile): (i64, i64) = sqlx::query_as(
+    let (workspaces_changed, profile_changed, views_only) = if valid && after != Some(latest) {
+        // LEFT JOIN: an event without its audit row counts as "not a view change"
+        let (workspace, profile, views): (i64, i64, i64) = sqlx::query_as(
             "SELECT COALESCE(MAX(a.resource_type IN ('workspace', 'membership')), 0), \
-                    COALESCE(MAX(a.resource_type = 'user'), 0) \
-             FROM outbox_events e JOIN audit_events a ON a.id = e.id \
+                    COALESCE(MAX(a.resource_type = 'user'), 0), \
+                    COALESCE(MIN(COALESCE(a.resource_type = 'saved_view', 0)), 0) \
+             FROM outbox_events e LEFT JOIN audit_events a ON a.id = e.id \
              WHERE e.scope = ? AND e.sequence > ? AND e.sequence <= ?",
         )
         .bind(workspace.to_string())
@@ -116,11 +120,11 @@ pub async fn replay(
         .bind(latest)
         .fetch_one(&mut *tx)
         .await?;
-        (workspace != 0, profile != 0)
+        (workspace != 0, profile != 0, views != 0)
     } else if valid {
-        (false, false)
+        (false, false, false)
     } else {
-        (true, true)
+        (true, true, false)
     };
     tx.commit().await?;
     // All events invalidate the same workspace cache; coalesce the ordered range.
@@ -134,6 +138,7 @@ pub async fn replay(
         sequence: latest.to_string(),
         workspaces_changed,
         profile_changed,
+        views_only,
     })
 }
 

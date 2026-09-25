@@ -170,3 +170,57 @@ test('any workspace event refreshes saved views and task queries but never view 
 
 /** Waits past the hook's 250 ms refresh flush. */
 const settleRefresh = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 400)))
+
+test('a batch of only saved-view changes refreshes just the views; anything else refreshes the workspace', async () => {
+  const originalWebSocket = globalThis.WebSocket
+  let socket: { onmessage: ((event: MessageEvent) => void) | null } | undefined
+  class FakeWebSocket {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    constructor() { socket = this }
+    close() {}
+  }
+  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+  const client = new QueryClient()
+  const body = { filter: { op: 'and', children: [] }, order_by: 'manual', order_direction: 'asc', show_completed: 'all' }
+  const keys = [
+    queryKeys.views('workspace-1'),
+    queryKeys.view('workspace-1', 'view-1'),
+    queryKeys.taskQuery('workspace-1', body),
+    queryKeys.members('workspace-1'),
+    queryKeys.viewPreference('workspace-1', 'all'),
+  ]
+  const reset = () => { for (const key of keys) client.setQueryData(key, {}) }
+  const invalidated = () => keys.map((key) => client.getQueryState(key)?.isInvalidated)
+  const send = (data: string) => act(() => socket?.onmessage?.(new MessageEvent('message', { data })))
+  const input = document.createElement('input')
+  document.body.append(input)
+  reset()
+  try {
+    const view = renderHook(() => useWorkspaceEvents('workspace-1'), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    send('{"version":1,"kind":"workspace.changed","sequence":"1","views_only":true}')
+    await waitFor(() => expect(invalidated()).toEqual([true, true, false, false, false]))
+
+    // a missing flag (an older server) counts as false
+    reset()
+    send('{"version":1,"kind":"workspace.changed","sequence":"2"}')
+    await waitFor(() => expect(invalidated()).toEqual([true, true, true, true, false]))
+
+    // a views-only event coalesced with a task change still refreshes the workspace
+    reset()
+    input.focus()
+    send('{"version":1,"kind":"workspace.changed","sequence":"3","views_only":true}')
+    send('{"version":1,"kind":"workspace.changed","sequence":"4","views_only":false}')
+    send('{"version":1,"kind":"workspace.changed","sequence":"5","views_only":true}')
+    await settleRefresh()
+    expect(invalidated()).toEqual([false, false, false, false, false])
+    input.blur()
+    await waitFor(() => expect(invalidated()).toEqual([true, true, true, true, false]))
+    view.unmount()
+  } finally {
+    input.remove()
+    globalThis.WebSocket = originalWebSocket
+    client.clear()
+  }
+})

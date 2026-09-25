@@ -17,6 +17,8 @@ export function useWorkspaceEvents(workspaceId: string) {
     let pending: string | undefined
     let pendingWorkspaces = false
     let pendingProfile = false
+    /** Every pending event only changed saved views (meaningful while `pending` is set). */
+    let pendingViewsOnly = true
     let refreshing = false
     let nextRefresh = 0
     let refreshDelay = 1000
@@ -31,15 +33,20 @@ export function useWorkspaceEvents(workspaceId: string) {
       const next = pending
       const refreshWorkspaces = pendingWorkspaces
       const refreshProfile = pendingProfile
+      const viewsOnly = pendingViewsOnly
       pending = undefined
       pendingWorkspaces = false
       pendingProfile = false
+      pendingViewsOnly = true
       try {
-        await client.invalidateQueries({
-          queryKey: queryKeys.workspace(workspaceId),
-          // preference writes are never broadcast; a refetch here could land the old value over a debounced edit
-          predicate: (query) => query.queryKey[2] !== VIEW_PREFERENCES,
-        }, { throwOnError: true })
+        await client.invalidateQueries(viewsOnly
+          // the views list key prefixes every view detail key; tasks and preferences stay untouched
+          ? { queryKey: queryKeys.views(workspaceId) }
+          : {
+              queryKey: queryKeys.workspace(workspaceId),
+              // preference writes are never broadcast; a refetch here could land the old value over a debounced edit
+              predicate: (query) => query.queryKey[2] !== VIEW_PREFERENCES,
+            }, { throwOnError: true })
         if (refreshWorkspaces) {
           await client.invalidateQueries({ queryKey: queryKeys.workspaces }, { throwOnError: true })
         }
@@ -49,6 +56,7 @@ export function useWorkspaceEvents(workspaceId: string) {
         cursor = next
         refreshDelay = 1000
       } catch {
+        pendingViewsOnly = pending === undefined ? viewsOnly : pendingViewsOnly && viewsOnly
         pending ??= next
         pendingWorkspaces ||= refreshWorkspaces
         pendingProfile ||= refreshProfile
@@ -67,6 +75,7 @@ export function useWorkspaceEvents(workspaceId: string) {
       socket.onmessage = (message) => {
         const event = parseEvent(message.data)
         if (!event) { socket?.close(); return }
+        pendingViewsOnly = (pending === undefined || pendingViewsOnly) && event.kind !== 'resync_required' && event.views_only === true
         pending = event.sequence
         pendingWorkspaces ||= event.kind === 'resync_required' || event.workspaces_changed === true
         pendingProfile ||= event.kind === 'resync_required' || event.profile_changed === true

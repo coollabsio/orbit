@@ -228,3 +228,53 @@ async fn subscription_requires_current_session_and_workspace_membership() {
             .unwrap()
     );
 }
+
+#[tokio::test]
+async fn replay_marks_batches_of_only_saved_view_changes_as_views_only() {
+    let db = TestDatabase::new().await.unwrap();
+    let workspace = Id::new_v7();
+    let record = |action: &'static str, resource: &'static str| {
+        let db = &db;
+        async move {
+            let mut tx = db.pool().begin().await.unwrap();
+            audit::record(
+                &mut tx,
+                workspace,
+                None,
+                action,
+                AuditOutcome::Success,
+                resource,
+                None,
+                "test",
+                serde_json::json!({}),
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+    };
+    use orbit_server::realtime::replay;
+    for action in [
+        "saved_view.created",
+        "saved_view.updated",
+        "saved_view.deleted",
+        "saved_view.favorites_changed",
+    ] {
+        record(action, "saved_view").await;
+    }
+    let views = replay(&db, workspace, Some(0)).await.unwrap();
+    assert_eq!(views.kind, "workspace.changed");
+    assert!(views.views_only);
+    assert!(!views.workspaces_changed);
+
+    record("task.updated", "task").await;
+    // the batch now mixes view and task changes
+    assert!(!replay(&db, workspace, Some(0)).await.unwrap().views_only);
+    assert!(!replay(&db, workspace, Some(4)).await.unwrap().views_only);
+    // nothing new and a resync are never views-only
+    assert!(!replay(&db, workspace, Some(5)).await.unwrap().views_only);
+    let resync = replay(&db, workspace, None).await.unwrap();
+    assert_eq!(resync.kind, "resync_required");
+    assert!(!resync.views_only);
+}
