@@ -128,7 +128,7 @@ test('a failed workspace refresh backs off instead of retrying every 250 ms', as
   }
 })
 
-test('any workspace event refreshes saved views, preferences and task queries', async () => {
+test('any workspace event refreshes saved views and task queries but never view preferences', async () => {
   const originalWebSocket = globalThis.WebSocket
   let socket: { onmessage: ((event: MessageEvent) => void) | null } | undefined
   class FakeWebSocket {
@@ -154,10 +154,19 @@ test('any workspace event refreshes saved views, preferences and task queries', 
     act(() => socket?.onmessage?.(new MessageEvent('message', {
       data: '{"version":1,"kind":"workspace.changed","sequence":"1"}',
     })))
-    await waitFor(() => expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([true, true, true, true]))
+    // preference writes are never broadcast, and a refetch could land the old value over a debounced edit
+    await waitFor(() => expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([true, true, false, true]))
+    act(() => socket?.onmessage?.(new MessageEvent('message', {
+      data: '{"version":1,"kind":"resync_required","sequence":"2"}',
+    })))
+    await settleRefresh()
+    expect(client.getQueryState(queryKeys.viewPreference('workspace-1', 'all'))?.isInvalidated).toBeFalse()
     view.unmount()
   } finally {
     globalThis.WebSocket = originalWebSocket
     client.clear()
   }
 })
+
+/** Waits past the hook's 250 ms refresh flush. */
+const settleRefresh = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 400)))

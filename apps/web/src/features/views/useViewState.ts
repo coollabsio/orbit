@@ -126,6 +126,8 @@ function usePageViewState(workspaceId: string, source: PageSource | null): ViewS
   const [local, setLocal] = useState<{ slot: string; state: ViewState } | null>(null)
   const latest = useRef<{ slot: string; state: ViewState } | null>(null)
   const savers = useRef(new Map<string, Autosaver<ViewState>>())
+  /** The newest state handed to each page's saver, to tell whether a finished save is still the latest. */
+  const scheduled = useRef(new Map<string, ViewState>())
   const migrating = useRef(false)
 
   const saverFor = useCallback((key: PageKey) => {
@@ -133,7 +135,10 @@ function usePageViewState(workspaceId: string, source: PageSource | null): ViewS
     let saver = savers.current.get(id)
     if (!saver) {
       saver = createAutosaver((state: ViewState) => savePreference(workspaceId, key, state), {
-        onSaved: () => {
+        onSaved: (saved) => {
+          // a refetch before the PUT landed (e.g. another cache invalidation) may have put the old server value in
+          // the cache, and the page reseeds from it: put the saved state back unless a newer one is on its way
+          if (scheduled.current.get(id) === saved) queryClient.setQueryData(queryKeys.viewPreference(workspaceId, key), saved)
           // the legacy keys go only once the migrated state is safely on the server
           if (key === 'all' && migrating.current) {
             migrating.current = false
@@ -144,7 +149,12 @@ function usePageViewState(workspaceId: string, source: PageSource | null): ViewS
       savers.current.set(id, saver)
     }
     return saver
-  }, [workspaceId])
+  }, [workspaceId, queryClient])
+
+  const schedule = useCallback((key: PageKey, state: ViewState) => {
+    scheduled.current.set(`${workspaceId}|${key}`, state)
+    saverFor(key).schedule(state)
+  }, [workspaceId, saverFor])
 
   // leaving the page sends any debounced change right away
   useEffect(() => {
@@ -171,14 +181,14 @@ function usePageViewState(workspaceId: string, source: PageSource | null): ViewS
         state = legacy.state
         migrating.current = true
         queryClient.setQueryData(queryKeys.viewPreference(workspaceId, pageKey), state)
-        saverFor(pageKey).schedule(state)
+        schedule(pageKey, state)
       } else if (legacy.found) {
         removeLegacyState(workspaceId)
       }
     }
     latest.current = { slot, state }
     setLocal({ slot, state })
-  }, [loaded, stored, slot, pageKey, workspaceId, queryClient, saverFor])
+  }, [loaded, stored, slot, pageKey, workspaceId, queryClient, schedule])
 
   const ready = local !== null && local.slot === slot
   const state = ready ? local.state : LOADING_STATE
@@ -188,7 +198,7 @@ function usePageViewState(workspaceId: string, source: PageSource | null): ViewS
     setLocal({ slot, state: next })
     // cache first, so coming back to this page starts from the newest state even before the PUT lands
     queryClient.setQueryData(queryKeys.viewPreference(workspaceId, pageKey), next)
-    saverFor(pageKey).schedule(next)
+    schedule(pageKey, next)
   }
   const current = () => (latest.current?.slot === slot ? latest.current.state : null)
   const preset = source?.preset ?? null

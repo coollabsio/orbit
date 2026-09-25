@@ -385,3 +385,35 @@ test('rebasing after our own metadata update moves only edits from that version'
   expect(patchVersions(requests)).toEqual([4])
   expect(view.result.current).toMatchObject({ conflict: false, dirty: false })
 })
+
+test('a refetch that lands the old preference before the debounced PUT does not lose the edit', async () => {
+  let stored: ViewState | null = null
+  let releasePut: (() => void) | undefined
+  const requests = serve(({ method, body }) => {
+    if (method === 'GET') return stored ? preferenceRecord(stored) : problem(404, 'task_resource_not_found')
+    // the server stores the new state only once the held PUT is released
+    return new Promise<Response>((resolve) => {
+      releasePut = () => {
+        stored = (body as { state: ViewState }).state
+        resolve(preferenceRecord(stored))
+      }
+    })
+  })
+  const client = testClient()
+  const first = renderHook(() => useViewState('workspace-1', allTasks), { wrapper: withClient(client) })
+  await waitFor(() => expect(first.result.current.isLoading).toBeFalse())
+
+  act(() => first.result.current.setFilter(bugs))
+  await waitFor(() => expect(puts(requests)).toHaveLength(1), { timeout: 2000 })
+  // e.g. a workspace-wide invalidation: the refetch still reads the old (missing) preference
+  await act(() => client.invalidateQueries({ queryKey: queryKeys.workspace('workspace-1') }))
+  await waitFor(() => expect(client.getQueryData(queryKeys.viewPreference('workspace-1', 'all'))).toBeNull())
+  await act(async () => { releasePut?.() })
+
+  await waitFor(() => expect((client.getQueryData(queryKeys.viewPreference('workspace-1', 'all')) as ViewState | null)?.filter).toEqual(bugs))
+  first.unmount()
+  // coming back to the page reseeds from the cache
+  const again = renderHook(() => useViewState('workspace-1', allTasks), { wrapper: withClient(client) })
+  await waitFor(() => expect(again.result.current.isLoading).toBeFalse())
+  expect(again.result.current.state.filter).toEqual(bugs)
+})

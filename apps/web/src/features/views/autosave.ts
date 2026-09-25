@@ -3,13 +3,14 @@
  * (never a short fixed timer; see .ai/lessons.md "API retry load"), and gives up after `maxAttempts`
  * until the next change. The caller keeps its local state either way.
  */
-export interface AutosaveOptions {
+export interface AutosaveOptions<T = unknown> {
   debounceMs?: number
   baseRetryMs?: number
   maxRetryMs?: number
   /** Attempts per value, the first save included. */
   maxAttempts?: number
-  onSaved?: () => void
+  /** Called with the value that was saved. */
+  onSaved?: (value: T) => void
   /** Timer functions; tests pass a manual clock instead of patching global timers. */
   timers?: AutosaveTimers
 }
@@ -38,7 +39,7 @@ export interface Autosaver<T> {
 
 export const AUTOSAVE_DEFAULTS = { debounceMs: 500, baseRetryMs: 1_000, maxRetryMs: 30_000, maxAttempts: 6 } as const
 
-export function createAutosaver<T>(save: (value: T) => Promise<unknown>, options: AutosaveOptions = {}): Autosaver<T> {
+export function createAutosaver<T>(save: (value: T) => Promise<unknown>, options: AutosaveOptions<T> = {}): Autosaver<T> {
   const debounceMs = options.debounceMs ?? AUTOSAVE_DEFAULTS.debounceMs
   const baseRetryMs = options.baseRetryMs ?? AUTOSAVE_DEFAULTS.baseRetryMs
   const maxRetryMs = options.maxRetryMs ?? AUTOSAVE_DEFAULTS.maxRetryMs
@@ -77,7 +78,7 @@ export function createAutosaver<T>(save: (value: T) => Promise<unknown>, options
         () => {
           failures = 0
           if (pending === current) pending = undefined
-          options.onSaved?.()
+          options.onSaved?.(current.value)
         },
         () => {
           if (pending !== current) return // a newer value already has its own timer

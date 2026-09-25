@@ -3,6 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/api/queryKeys'
 import { parseEvent } from './events'
 
+const VIEW_PREFERENCES = queryKeys.viewPreference('', '')[2]
+
 export function useWorkspaceEvents(workspaceId: string) {
   const client = useQueryClient()
   const [connected, setConnected] = useState(false)
@@ -33,7 +35,11 @@ export function useWorkspaceEvents(workspaceId: string) {
       pendingWorkspaces = false
       pendingProfile = false
       try {
-        await client.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }, { throwOnError: true })
+        await client.invalidateQueries({
+          queryKey: queryKeys.workspace(workspaceId),
+          // preference writes are never broadcast; a refetch here could land the old value over a debounced edit
+          predicate: (query) => query.queryKey[2] !== VIEW_PREFERENCES,
+        }, { throwOnError: true })
         if (refreshWorkspaces) {
           await client.invalidateQueries({ queryKey: queryKeys.workspaces }, { throwOnError: true })
         }
