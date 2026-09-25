@@ -3,6 +3,8 @@
 ## Migration history
 - Do not squash or edit a migration after a local database has applied it. Orbit checks both version and checksum at startup. If an uncommitted migration must be consolidated, compare the old and new schemas and back up the database before reconciling its migration records; do not reset user data to make the dev server start.
 - SQLite table rebuilds (to change a CHECK): the runner holds a transaction with `foreign_keys=ON`, so `PRAGMA foreign_keys=OFF` is a no-op and `ALTER TABLE … RENAME` fails on triggers that name the table. Copy rows aside, `DROP`, re-`CREATE` under the same name, re-insert under `PRAGMA defer_foreign_keys=ON`, then recreate the table's own indexes and triggers (see `0021`).
+- `scripts/dev-server-watch.sh` reruns `migrate run --seed` against `data/orbit.sqlite` on every source change, so a new migration is applied to the dev DB (and its checksum frozen) the moment it compiles. Get the SQL right in tests (`embedded_through`) before any `cargo build` of the server while the watcher runs (0023 was applied this way on 2026-09-25).
+- A new migration also needs `SUPPORTED_SCHEMA_VERSION` in `crates/platform/src/backup.rs` bumped (restore refuses newer snapshots); grepping the tests for the old version number does not find it (0026, 2026-09-25).
 - A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
 
 ## API retry load
@@ -80,3 +82,22 @@
   then `getBoundingClientRect()` on before/after variants.
 - **Build the class string with the real `cn()`** (import it from node_modules). Hand-concatenating base + override classes
   lets both survive, and the stylesheet order decides the winner, so the probe silently disagrees with the app.
+
+## Production CSP blocks injected `<style>` tags
+- Production CSP is `style-src 'self'` (`crates/platform/src/http/security.rs`). Libraries that inject a `<style>` tag at runtime (Tiptap/BlockNote `injectCSS`) break silently in production but work in dev. Turn the injection off (`_tiptapOptions: { injectCSS: false }`) and copy the CSS into our stylesheet. Same for `img-src`: external image URLs do not load in production.
+
+## Bun + happy-dom: never let `expect(domNode)` fail inside `waitFor`
+- A failing `expect(node).toBeNull()` makes Bun format the whole happy-dom node (it links to the window) for the error. It costs ~40 ms alone and ~750 ms late in the full run, and `waitFor` repeats it on every poll, so tests time out only in the full suite (SessionsPage, 2026-09-25).
+- Use `waitForAbsence(() => view.queryBy…)` from `src/test/waitForAbsence.ts`, or throw a plain `Error` in the callback.
+
+## Parallel agents: format only your own files
+- `cargo fmt --all` rewrote another agent's in-progress files under `apps/server/src/notion/` (2026-09-25). While someone
+  else works in the tree, run `cargo fmt --check` and `rustfmt` on your own files instead of formatting the workspace.
+
+## Base UI Input in tests and dark-mode checkbox states
+- `fireEvent.change` and `userEvent.clear` do not reach a *controlled* Base UI `Input` / `InputGroupInput` under happy-dom
+  (the DOM value changes, React state does not). Use `userEvent.type(input, text)` and clear with backspaces
+  (`'{Backspace}'.repeat(value.length)`) (Notion import pane, 2026-09-25).
+- shadcn checkbox fills need a `dark:` twin (`dark:data-checked:bg-primary`) to beat `dark:bg-input/30`; a new state such as
+  `data-indeterminate` needs `dark:data-indeterminate:bg-primary` too, or it renders as an outline in dark mode only.
+

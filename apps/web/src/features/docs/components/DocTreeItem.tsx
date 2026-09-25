@@ -1,15 +1,15 @@
-import { ChevronRight, MoreH as Ellipsis, DocumentText as FileText, Add as Plus, Trash as Trash2 } from 'reicon-react'
+import { ChevronRight, MoreH as Ellipsis, DocumentText as FileText, Add as Plus, Star, Trash as Trash2 } from 'reicon-react'
+import type { PageSummary } from '@/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Emoji } from '@/components/common/Emoji'
-import type { Doc } from '@/mock/types'
-import { childrenOf } from '@/features/docs/docsLib'
+import { childrenOf, pageTitle, type DropZone } from '@/features/docs/pageTree'
 
 // data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
-const menuItemClass =
+export const menuItemClass =
   'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm leading-5 text-foreground focus:bg-muted data-[danger=true]:text-destructive data-[danger=true]:focus:bg-muted data-[danger=true]:focus:text-destructive'
 
-export type DocDropZone = 'before' | 'after' | 'inside'
+export type DocDropZone = DropZone
 
 export interface DocTreeDnd {
   dragId: string | null
@@ -22,9 +22,15 @@ export interface DocTreeDnd {
   onDrop: (id: string) => void
 }
 
+/** The row menu's "Add to / Remove from favorites" item. */
+export interface DocTreeFavorites {
+  isFavorite: (id: string) => boolean
+  onToggle: (id: string, favorite: boolean) => void
+}
+
 interface DocTreeItemProps {
-  doc: Doc
-  docs: Doc[]
+  page: PageSummary
+  pages: PageSummary[]
   depth: number
   activeId: string | null
   dnd: DocTreeDnd
@@ -32,21 +38,27 @@ interface DocTreeItemProps {
   onToggle: (id: string) => void
   onOpen: (id: string) => void
   onCreateChild: (parentId: string) => void
-  onDelete: (id: string) => void
+  onTrash: (id: string) => void
+  favorites?: DocTreeFavorites
+  /** Rows that can only be reordered (Favorites): no "inside" drop zone. */
+  reorderOnly?: boolean
+  /** Marks the rows of a sidebar section (`data-section`), e.g. "favorites". */
+  section?: string
 }
 
 /** Pointer position → drop zone: edges reorder among siblings, the middle nests inside. */
-function zoneAt(element: HTMLElement, clientY: number): DocDropZone {
+function zoneAt(element: HTMLElement, clientY: number, reorderOnly = false): DocDropZone {
   const rect = element.getBoundingClientRect()
   const y = clientY - rect.top
+  if (reorderOnly) return y < rect.height / 2 ? 'before' : 'after'
   if (y < rect.height * 0.25) return 'before'
   if (y > rect.height * 0.75) return 'after'
   return 'inside'
 }
 
 export function DocTreeItem({
-  doc,
-  docs,
+  page,
+  pages,
   depth,
   activeId,
   dnd,
@@ -54,41 +66,53 @@ export function DocTreeItem({
   onToggle,
   onOpen,
   onCreateChild,
-  onDelete,
+  onTrash,
+  favorites,
+  reorderOnly = false,
+  section,
 }: DocTreeItemProps) {
-  const children = childrenOf(docs, doc.id)
-  const expanded = isExpanded(doc.id)
+  const children = childrenOf(pages, page.id)
+  const expanded = isExpanded(page.id)
+  const favorite = favorites?.isFavorite(page.id) ?? false
 
   return (
     <>
+      {/* The drag source stays mounted while dragging (faded via data-dragging); the browser cancels a drag whose
+          source leaves the DOM. */}
       <div
-        className="group/row relative flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors select-none hover:bg-sidebar-accent/50 data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground data-[dragging]:bg-foreground/5 data-[dragging]:text-foreground data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-1.5 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-[''] data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-1.5 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-['']"
-        data-active={doc.id === activeId || undefined}
-        data-dragging={dnd.dragId === doc.id || undefined}
-        data-drop={dnd.dropAt?.id === doc.id ? dnd.dropAt.zone : undefined}
+        className="group/row relative flex h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors select-none hover:bg-sidebar-accent/50 data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground data-[dragging]:bg-foreground/5 data-[dragging]:text-foreground data-[dragging]:opacity-60 data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-1.5 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-[''] data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-1.5 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-['']"
+        data-active={page.id === activeId || undefined}
+        data-dragging={dnd.dragId === page.id || undefined}
+        data-drop={dnd.dropAt?.id === page.id ? dnd.dropAt.zone : undefined}
+        data-page-id={page.id}
+        data-section={section}
         style={{ paddingLeft: 6 + depth * 16 }}
         draggable
-        onClick={() => onOpen(doc.id)}
+        role="treeitem"
+        aria-selected={page.id === activeId}
+        aria-expanded={children.length > 0 ? expanded : undefined}
+        aria-level={depth + 1}
+        onClick={() => onOpen(page.id)}
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = 'move'
-          e.dataTransfer.setData('text/doc-id', doc.id)
-          dnd.onDragStart(doc.id)
+          e.dataTransfer.setData('text/page-id', page.id)
+          dnd.onDragStart(page.id)
         }}
         onDragEnd={dnd.onDragEnd}
         onDragOver={(e) => {
-          if (!dnd.dragId || !dnd.canDropOn(doc.id)) return
+          if (!dnd.dragId || !dnd.canDropOn(page.id)) return
           e.preventDefault()
           e.stopPropagation()
           e.dataTransfer.dropEffect = 'move'
-          dnd.onDragOver(doc.id, zoneAt(e.currentTarget, e.clientY))
+          dnd.onDragOver(page.id, zoneAt(e.currentTarget, e.clientY, reorderOnly))
         }}
         onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) dnd.onDragLeave(doc.id)
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) dnd.onDragLeave(page.id)
         }}
         onDrop={(e) => {
           e.preventDefault()
           e.stopPropagation()
-          dnd.onDrop(doc.id)
+          dnd.onDrop(page.id)
         }}
       >
         {children.length > 0 ? (
@@ -101,7 +125,7 @@ export function DocTreeItem({
             aria-label={expanded ? 'Collapse' : 'Expand'}
             onClick={(e) => {
               e.stopPropagation()
-              onToggle(doc.id)
+              onToggle(page.id)
             }}
           >
             <ChevronRight className="size-3" />
@@ -110,9 +134,9 @@ export function DocTreeItem({
           <span className="inline-flex size-5 shrink-0" aria-hidden="true" />
         )}
         <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-sm leading-none text-muted-foreground/70">
-          {doc.icon ? <Emoji value={doc.icon} size={15} /> : <FileText className="size-[15px]" />}
+          {page.icon ? <Emoji value={page.icon} size={15} /> : <FileText className="size-[15px]" />}
         </span>
-        <span className="min-w-0 flex-1 truncate">{doc.title || 'Untitled'}</span>
+        <span className="min-w-0 flex-1 truncate">{pageTitle(page)}</span>
         <span
           className="invisible relative z-20 flex shrink-0 items-center gap-0.5 group-hover/row:visible group-focus-within/row:visible"
           onClick={(e) => e.stopPropagation()}
@@ -123,7 +147,7 @@ export function DocTreeItem({
             size="icon-sm"
             className="size-[22px] text-muted-foreground/70"
             aria-label="Add child page"
-            onClick={() => onCreateChild(doc.id)}
+            onClick={() => onCreateChild(page.id)}
           >
             <Plus className="size-[13px]" />
           </Button>
@@ -135,10 +159,16 @@ export function DocTreeItem({
             >
               <Ellipsis className="size-[13px]" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto min-w-32">
-              <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onDelete(doc.id)}>
+            <DropdownMenuContent align="end" className="w-auto min-w-36">
+              {favorites ? (
+                <DropdownMenuItem className={menuItemClass} onClick={() => favorites.onToggle(page.id, !favorite)}>
+                  <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
+                  {favorite ? 'Remove from favorites' : 'Add to favorites'}
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onTrash(page.id)}>
                 <Trash2 className="size-[14px]" />
-                Delete
+                Move to trash
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -148,8 +178,8 @@ export function DocTreeItem({
         ? children.map((child) => (
             <DocTreeItem
               key={child.id}
-              doc={child}
-              docs={docs}
+              page={child}
+              pages={pages}
               depth={depth + 1}
               activeId={activeId}
               dnd={dnd}
@@ -157,7 +187,10 @@ export function DocTreeItem({
               onToggle={onToggle}
               onOpen={onOpen}
               onCreateChild={onCreateChild}
-              onDelete={onDelete}
+              onTrash={onTrash}
+              favorites={favorites}
+              reorderOnly={reorderOnly}
+              section={section}
             />
           ))
         : null}

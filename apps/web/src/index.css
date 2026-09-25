@@ -3,6 +3,9 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/noto-sans";
 
+/* BlockNote's shadcn menus use Tailwind classes from its compiled bundle; scan it so they get generated. */
+@source "../node_modules/@blocknote/shadcn";
+
 @custom-variant dark (&:is(.dark *));
 
 /* hover-only affordances (e.g. relation × buttons): real hover and a fine pointer; touch keeps them visible */

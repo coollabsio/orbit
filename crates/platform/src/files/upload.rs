@@ -17,6 +17,17 @@ use crate::{
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
 const SNIFF_BYTES: usize = 8 * 1024;
+/// References to one blob (bind its id twice): task/comment attachments plus docs page files.
+pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?) \
+     + (SELECT COUNT(*) FROM page_files WHERE blob_id = ?)";
+/// Raster image types that are served inline; everything else downloads as an attachment.
+pub const INLINE_IMAGE_TYPES: [&str; 5] = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UploadLimits {
@@ -193,6 +204,45 @@ impl UploadFinalization<'_> {
         attachment: NewAttachmentReference,
         now: TimestampMillis,
     ) -> Result<FinalizedAttachment, UploadError> {
+        let blob = self
+            .finalize_blob_in_transaction(transaction, upload, now)
+            .await?;
+        let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
+        sqlx::query(
+            "INSERT INTO attachment_references (\
+                id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type,\
+                byte_size, created_at\
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(attachment.id.to_string())
+        .bind(upload.workspace_id.to_string())
+        .bind(attachment.task_id.to_string())
+        .bind(attachment.comment_id.map(|id| id.to_string()))
+        .bind(upload.owner_id.to_string())
+        .bind(blob.id.to_string())
+        .bind(&upload.display_name)
+        .bind(&upload.detected_media_type)
+        .bind(size_i64)
+        .bind(now.as_millis())
+        .execute(&mut **transaction)
+        .await?;
+
+        Ok(FinalizedAttachment {
+            blob,
+            reference_id: attachment.id,
+            created_at: now,
+        })
+    }
+
+    /// Installs the staged bytes as a (deduplicated) workspace blob and completes the pending
+    /// upload, without creating a reference. The caller must insert its own reference row (e.g. a
+    /// page file) in the same transaction, or the blob becomes reclaimable after quarantine.
+    pub async fn finalize_blob_in_transaction(
+        &self,
+        transaction: &mut Transaction<'_, Sqlite>,
+        upload: &StagedUpload,
+        now: TimestampMillis,
+    ) -> Result<FinalizedBlob, UploadError> {
         let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
         let valid: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pending_uploads \
@@ -257,25 +307,6 @@ impl UploadFinalization<'_> {
             quarantine_until: row.try_get("quarantine_until")?,
         };
 
-        sqlx::query(
-            "INSERT INTO attachment_references (\
-                id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type,\
-                byte_size, created_at\
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(attachment.id.to_string())
-        .bind(upload.workspace_id.to_string())
-        .bind(attachment.task_id.to_string())
-        .bind(attachment.comment_id.map(|id| id.to_string()))
-        .bind(upload.owner_id.to_string())
-        .bind(blob.id.to_string())
-        .bind(&upload.display_name)
-        .bind(&upload.detected_media_type)
-        .bind(size_i64)
-        .bind(now.as_millis())
-        .execute(&mut **transaction)
-        .await?;
-
         let updated = sqlx::query(
             "UPDATE pending_uploads SET state = 'complete', completed_at = ? \
              WHERE id = ? AND workspace_id = ? AND user_id = ? AND state = 'staged' \
@@ -293,11 +324,7 @@ impl UploadFinalization<'_> {
             return Err(UploadError::InvalidState);
         }
 
-        Ok(FinalizedAttachment {
-            blob,
-            reference_id: attachment.id,
-            created_at: now,
-        })
+        Ok(blob)
     }
 }
 
@@ -507,7 +534,11 @@ impl UploadService {
         let _mutation = self.mutations.begin().await;
         let mut result = ReconcileResult::default();
 
+        // Fail closed: without every reference table, no blob can be proven unreferenced.
         sqlx::query("SELECT blob_id FROM attachment_references WHERE 0")
+            .fetch_all(self.database.pool())
+            .await?;
+        sqlx::query("SELECT blob_id FROM page_files WHERE 0")
             .fetch_all(self.database.pool())
             .await?;
 
@@ -550,11 +581,11 @@ impl UploadService {
             let storage_key: String = row.try_get("storage_key")?;
             blob_inventory.remove(&storage_key);
             let mut transaction = self.database.immediate_transaction().await?;
-            let references: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?")
-                    .bind(&id)
-                    .fetch_one(&mut *transaction)
-                    .await?;
+            let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                .bind(&id)
+                .bind(&id)
+                .fetch_one(&mut *transaction)
+                .await?;
             if references == 0 {
                 let recently_published = self
                     .store
@@ -613,10 +644,7 @@ impl UploadService {
     }
 
     pub fn download_metadata(media_type: &str, display_name: &str) -> DownloadMetadata {
-        let disposition = if matches!(
-            media_type,
-            "image/jpeg" | "image/png" | "image/gif" | "image/webp"
-        ) {
+        let disposition = if INLINE_IMAGE_TYPES.contains(&media_type) {
             ContentDisposition::Inline
         } else {
             ContentDisposition::Attachment
@@ -679,6 +707,8 @@ pub(super) fn detect_media_type(bytes: &[u8]) -> &'static str {
         "image/gif"
     } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
         "image/webp"
+    } else if is_avif(bytes) {
+        "image/avif"
     } else if bytes.starts_with(b"%PDF-") {
         "application/pdf"
     } else {
@@ -694,6 +724,17 @@ pub(super) fn detect_media_type(bytes: &[u8]) -> &'static str {
             "application/octet-stream"
         }
     }
+}
+
+/// An ISO-BMFF `ftyp` box whose major or a compatible brand is `avif`/`avis`.
+fn is_avif(bytes: &[u8]) -> bool {
+    if bytes.len() < 16 || &bytes[4..8] != b"ftyp" {
+        return false;
+    }
+    let box_size = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let end = box_size.clamp(16, 256).min(bytes.len());
+    let brand = |offset: usize| matches!(&bytes[offset..offset + 4], b"avif" | b"avis");
+    brand(8) || (16..end.saturating_sub(3)).step_by(4).any(brand)
 }
 
 struct TemporaryFile {

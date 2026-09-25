@@ -29,6 +29,8 @@ const RATE_RECOVERY_ENV: &str = "ORBIT__RATE_LIMITS__RECOVERY_PER_MINUTE";
 const RATE_INVITATION_ENV: &str = "ORBIT__RATE_LIMITS__INVITATION_PER_MINUTE";
 const RATE_UPLOAD_ENV: &str = "ORBIT__RATE_LIMITS__UPLOAD_PER_MINUTE";
 const RATE_GENERAL_ENV: &str = "ORBIT__RATE_LIMITS__GENERAL_PER_MINUTE";
+const NOTION_API_BASE_ENV: &str = "ORBIT__NOTION__API_BASE";
+const NOTION_REQUESTS_PER_MINUTE_ENV: &str = "ORBIT__NOTION__REQUESTS_PER_MINUTE";
 const SECRETS_ENV_PREFIX: &str = "ORBIT__SECRETS__";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -40,6 +42,7 @@ pub struct Config {
     pub uploads: UploadConfig,
     pub metrics: MetricsConfig,
     pub rate_limits: RateLimitConfig,
+    pub notion: NotionConfig,
     pub secrets: BTreeMap<String, Secret>,
 }
 
@@ -165,6 +168,26 @@ impl Default for RateLimitConfig {
             invitation_per_minute: 60,
             upload_per_minute: 120,
             general_per_minute: 600,
+        }
+    }
+}
+
+/// The Notion import's API origin and request budget.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NotionConfig {
+    /// Notion API origin, e.g. `https://api.notion.com` (tests and smoke runs point it at a
+    /// fake server).
+    pub api_base: String,
+    /// Average request budget per import (Notion allows about 180 per minute on non-Business
+    /// plans).
+    pub requests_per_minute: u32,
+}
+
+impl Default for NotionConfig {
+    fn default() -> Self {
+        Self {
+            api_base: "https://api.notion.com".to_owned(),
+            requests_per_minute: 180,
         }
     }
 }
@@ -355,6 +378,38 @@ impl Config {
                 detail: "endpoint-class limits cannot exceed 1000000 per minute".to_owned(),
             });
         }
+        let valid_notion_base = self
+            .notion
+            .api_base
+            .parse::<Uri>()
+            .ok()
+            .is_some_and(|origin| {
+                matches!(origin.scheme_str(), Some("http" | "https"))
+                    && origin.authority().is_some()
+                    && origin.path() == "/"
+                    && origin.query().is_none()
+            });
+        if !valid_notion_base {
+            return Err(ConfigError::InvalidSetting {
+                key: "notion.api_base",
+                detail: "must be an absolute http or https origin without a path or query"
+                    .to_owned(),
+            });
+        }
+        if self.environment == EnvironmentMode::Production
+            && !self.notion.api_base.starts_with("https://")
+        {
+            return Err(ConfigError::InvalidSetting {
+                key: "notion.api_base",
+                detail: "production mode requires an https Notion API origin".to_owned(),
+            });
+        }
+        if !(1..=6_000).contains(&self.notion.requests_per_minute) {
+            return Err(ConfigError::InvalidSetting {
+                key: "notion.requests_per_minute",
+                detail: "must be between 1 and 6000".to_owned(),
+            });
+        }
         Ok(())
     }
 }
@@ -369,6 +424,7 @@ struct RawConfig {
     uploads: RawUploadConfig,
     metrics: RawMetricsConfig,
     rate_limits: RawRateLimitConfig,
+    notion: RawNotionConfig,
     secrets: BTreeMap<String, String>,
 }
 
@@ -418,6 +474,10 @@ impl RawConfig {
                 invitation_per_minute: self.rate_limits.invitation_per_minute,
                 upload_per_minute: self.rate_limits.upload_per_minute,
                 general_per_minute: self.rate_limits.general_per_minute,
+            },
+            notion: NotionConfig {
+                api_base: self.notion.api_base,
+                requests_per_minute: self.notion.requests_per_minute,
             },
             secrets: self
                 .secrets
@@ -528,6 +588,23 @@ impl Default for RawRateLimitConfig {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawNotionConfig {
+    api_base: String,
+    requests_per_minute: u32,
+}
+
+impl Default for RawNotionConfig {
+    fn default() -> Self {
+        let defaults = NotionConfig::default();
+        Self {
+            api_base: defaults.api_base,
+            requests_per_minute: defaults.requests_per_minute,
+        }
+    }
+}
+
 fn apply_environment(
     config: &mut Config,
     environment: &BTreeMap<String, String>,
@@ -587,6 +664,10 @@ fn apply_environment(
             config.rate_limits.upload_per_minute = parse_environment(key, value)?;
         } else if key == RATE_GENERAL_ENV {
             config.rate_limits.general_per_minute = parse_environment(key, value)?;
+        } else if key == NOTION_API_BASE_ENV {
+            config.notion.api_base = value.trim_end_matches('/').to_owned();
+        } else if key == NOTION_REQUESTS_PER_MINUTE_ENV {
+            config.notion.requests_per_minute = parse_environment(key, value)?;
         } else if let Some(secret_name) = key.strip_prefix(SECRETS_ENV_PREFIX) {
             apply_secret(config, key, secret_name, value)?;
         } else if key.starts_with("ORBIT__") {

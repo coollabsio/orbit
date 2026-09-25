@@ -1,0 +1,1564 @@
+[
+  {
+    "file": "list.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "All tasks, list layout grouped by status (dark).",
+    "regions": {
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      },
+      "firstGroupHeader": {
+        "x": 224,
+        "y": 49,
+        "w": 1376,
+        "h": 36
+      },
+      "rowWithLabels": {
+        "x": 224,
+        "y": 325,
+        "w": 1376,
+        "h": 40
+      },
+      "toolbar": {
+        "x": 1033,
+        "y": 8,
+        "w": 555,
+        "h": 32
+      }
+    },
+    "targets": {
+      "newTaskButton": {
+        "x": 1535,
+        "y": 24
+      },
+      "firstRowCheckbox": {
+        "x": 244,
+        "y": 105
+      },
+      "firstRowTitle": {
+        "x": 955,
+        "y": 105
+      },
+      "displayButton": {
+        "x": 1429,
+        "y": 24
+      },
+      "searchSidebar": {
+        "x": 112,
+        "y": 72
+      }
+    }
+  },
+  {
+    "file": "board.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Kanban board, all projects (dark).",
+    "regions": {
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      },
+      "firstTwoColumns": {
+        "x": 236,
+        "y": 61,
+        "w": 652,
+        "h": 939
+      },
+      "boardArea": {
+        "x": 236,
+        "y": 61,
+        "w": 320,
+        "h": 939
+      },
+      "card": {
+        "x": 243,
+        "y": 99,
+        "w": 306,
+        "h": 77
+      },
+      "toolbar": {
+        "x": 1033,
+        "y": 8,
+        "w": 555,
+        "h": 32
+      }
+    },
+    "targets": {
+      "firstCard": {
+        "x": 396,
+        "y": 138
+      },
+      "secondColumnFirstCard": {
+        "x": 728,
+        "y": 162
+      },
+      "newTaskButton": {
+        "x": 1535,
+        "y": 24
+      }
+    }
+  },
+  {
+    "file": "roadmap.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Roadmap / timeline layout with scheduled bars (dark).",
+    "regions": {
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      },
+      "zoomControls": {
+        "x": 844,
+        "y": 8,
+        "w": 167,
+        "h": 32
+      },
+      "todayMarker": {
+        "x": 1040,
+        "y": 79,
+        "w": 25,
+        "h": 20
+      },
+      "toolbar": {
+        "x": 1112,
+        "y": 8,
+        "w": 476,
+        "h": 32
+      },
+      "timelineBars": {
+        "x": 646,
+        "y": 138,
+        "w": 797,
+        "h": 856
+      },
+      "firstBar": {
+        "x": 758,
+        "y": 138,
+        "w": 248,
+        "h": 24
+      }
+    },
+    "targets": {
+      "firstBar": {
+        "x": 882,
+        "y": 150
+      },
+      "todayButton": {
+        "x": 1050,
+        "y": 24
+      }
+    }
+  },
+  {
+    "file": "my-week.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "My week view (dark).",
+    "regions": {
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      },
+      "rows": {
+        "x": 224,
+        "y": 49,
+        "w": 1376,
+        "h": 220
+      },
+      "myWeekNav": {
+        "x": 8,
+        "y": 426,
+        "w": 207,
+        "h": 32
+      }
+    },
+    "targets": {
+      "myWeekNav": {
+        "x": 112,
+        "y": 442
+      }
+    }
+  },
+  {
+    "file": "detail.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Task detail: \"Realtime updates when a teammate edits a task\" (description checklist, properties).",
+    "regions": {
+      "detailPanel": {
+        "x": 224,
+        "y": 49,
+        "w": 1376,
+        "h": 951
+      },
+      "title": {
+        "x": 264,
+        "y": 81,
+        "w": 760,
+        "h": 32
+      },
+      "description": {
+        "x": 264,
+        "y": 129,
+        "w": 760,
+        "h": 20
+      },
+      "checklist": {
+        "x": 280,
+        "y": 169,
+        "w": 744,
+        "h": 63
+      },
+      "properties": {
+        "x": 1072,
+        "y": 81,
+        "w": 240,
+        "h": 450
+      },
+      "labels": {
+        "x": 1072,
+        "y": 235,
+        "w": 240,
+        "h": 46
+      },
+      "relations": {
+        "x": 264,
+        "y": 294,
+        "w": 760,
+        "h": 73
+      },
+      "comments": {
+        "x": 264,
+        "y": 387,
+        "w": 760,
+        "h": 581
+      },
+      "commentComposer": {
+        "x": 264,
+        "y": 888,
+        "w": 760,
+        "h": 80
+      }
+    },
+    "targets": {
+      "closeButton": {
+        "x": 1574,
+        "y": 24
+      },
+      "statusProperty": {
+        "x": 1122,
+        "y": 127
+      },
+      "commentComposer": {
+        "x": 644,
+        "y": 928
+      }
+    }
+  },
+  {
+    "file": "detail-bottom.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Task detail scrolled to relations, activity and comments.",
+    "regions": {
+      "detailPanel": {
+        "x": 224,
+        "y": 49,
+        "w": 1376,
+        "h": 951
+      },
+      "title": {
+        "x": 264,
+        "y": 25,
+        "w": 760,
+        "h": 32
+      },
+      "description": {
+        "x": 264,
+        "y": 73,
+        "w": 760,
+        "h": 20
+      },
+      "checklist": {
+        "x": 280,
+        "y": 113,
+        "w": 744,
+        "h": 63
+      },
+      "properties": {
+        "x": 1072,
+        "y": 25,
+        "w": 240,
+        "h": 450
+      },
+      "labels": {
+        "x": 1072,
+        "y": 179,
+        "w": 240,
+        "h": 46
+      },
+      "relations": {
+        "x": 264,
+        "y": 238,
+        "w": 760,
+        "h": 73
+      },
+      "comments": {
+        "x": 264,
+        "y": 331,
+        "w": 760,
+        "h": 581
+      },
+      "commentComposer": {
+        "x": 264,
+        "y": 832,
+        "w": 760,
+        "h": 80
+      }
+    },
+    "targets": {
+      "closeButton": {
+        "x": 1574,
+        "y": 24
+      },
+      "statusProperty": {
+        "x": 1122,
+        "y": 71
+      },
+      "commentComposer": {
+        "x": 644,
+        "y": 872
+      }
+    }
+  },
+  {
+    "file": "palette.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Command palette (Ctrl+K) searching \"task\" (page hits capped at 2 so tasks show).",
+    "regions": {
+      "dialog": {
+        "x": 512,
+        "y": 120,
+        "w": 576,
+        "h": 414
+      },
+      "input": {
+        "x": 541,
+        "y": 130,
+        "w": 542,
+        "h": 20
+      },
+      "results": {
+        "x": 518,
+        "y": 160,
+        "w": 564,
+        "h": 368
+      }
+    },
+    "targets": {
+      "firstResult": {
+        "x": 800,
+        "y": 184
+      }
+    }
+  },
+  {
+    "file": "bulk.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "List with 4 rows selected and the floating bulk action bar.",
+    "regions": {
+      "bulkBar": {
+        "x": 630,
+        "y": 942,
+        "w": 563,
+        "h": 42
+      },
+      "selectedRows": {
+        "x": 224,
+        "y": 125,
+        "w": 1376,
+        "h": 240
+      }
+    },
+    "targets": {
+      "checkbox1": {
+        "x": 244,
+        "y": 145
+      },
+      "checkbox2": {
+        "x": 244,
+        "y": 185
+      },
+      "checkbox3": {
+        "x": 244,
+        "y": 265
+      },
+      "checkbox4": {
+        "x": 244,
+        "y": 345
+      }
+    }
+  },
+  {
+    "file": "workflow.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Project settings for Orbit: workflow statuses by category.",
+    "regions": {
+      "statusesCard": {
+        "x": 552,
+        "y": 316,
+        "w": 720,
+        "h": 637
+      },
+      "generalCard": {
+        "x": 552,
+        "y": 76,
+        "w": 720,
+        "h": 216
+      },
+      "addStatusButtons": {
+        "x": 1224,
+        "y": 394,
+        "w": 24,
+        "h": 384
+      }
+    },
+    "targets": {}
+  },
+  {
+    "file": "list-light.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "All tasks, list layout (light theme).",
+    "regions": {
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      },
+      "firstGroupHeader": {
+        "x": 224,
+        "y": 49,
+        "w": 1376,
+        "h": 36
+      },
+      "rowWithLabels": {
+        "x": 224,
+        "y": 325,
+        "w": 1376,
+        "h": 40
+      },
+      "toolbar": {
+        "x": 1033,
+        "y": 8,
+        "w": 555,
+        "h": 32
+      }
+    },
+    "targets": {
+      "newTaskButton": {
+        "x": 1535,
+        "y": 24
+      },
+      "firstRowCheckbox": {
+        "x": 244,
+        "y": 105
+      },
+      "firstRowTitle": {
+        "x": 955,
+        "y": 105
+      },
+      "displayButton": {
+        "x": 1429,
+        "y": 24
+      },
+      "searchSidebar": {
+        "x": 112,
+        "y": 72
+      }
+    }
+  },
+  {
+    "file": "board-light.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Kanban board (light theme).",
+    "regions": {
+      "firstTwoColumns": {
+        "x": 236,
+        "y": 61,
+        "w": 652,
+        "h": 939
+      },
+      "card": {
+        "x": 243,
+        "y": 99,
+        "w": 306,
+        "h": 77
+      }
+    },
+    "targets": {
+      "firstCard": {
+        "x": 396,
+        "y": 138
+      }
+    }
+  },
+  {
+    "file": "github.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Settings > GitHub: installed app and connected repositories (dev app name replaced with \"Orbit\" in the DOM).",
+    "regions": {
+      "githubCard": {
+        "x": 506,
+        "y": 76,
+        "w": 1054,
+        "h": 310
+      },
+      "settingsNav": {
+        "x": 264,
+        "y": 76,
+        "w": 204,
+        "h": 380
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "installButton": {
+        "x": 631,
+        "y": 198
+      }
+    }
+  },
+  {
+    "file": "api-tokens.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Settings > API tokens: create form (scopes, projects, service account) and active tokens.",
+    "regions": {
+      "createCard": {
+        "x": 506,
+        "y": 76,
+        "w": 1054,
+        "h": 339
+      },
+      "activeCard": {
+        "x": 506,
+        "y": 439,
+        "w": 1054,
+        "h": 102
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "createButton": {
+        "x": 576,
+        "y": 383
+      },
+      "nameInput": {
+        "x": 774,
+        "y": 188
+      }
+    }
+  },
+  {
+    "file": "sidebar-collapsed.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "List layout with the sidebar collapsed to an icon rail.",
+    "regions": {
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 56,
+        "h": 1000
+      },
+      "firstGroupHeader": {
+        "x": 56,
+        "y": 49,
+        "w": 1544,
+        "h": 36
+      },
+      "rowWithLabels": {
+        "x": 56,
+        "y": 325,
+        "w": 1544,
+        "h": 40
+      },
+      "toolbar": {
+        "x": 1033,
+        "y": 8,
+        "w": 555,
+        "h": 32
+      }
+    },
+    "targets": {
+      "newTaskButton": {
+        "x": 1535,
+        "y": 24
+      },
+      "firstRowCheckbox": {
+        "x": 76,
+        "y": 105
+      },
+      "firstRowTitle": {
+        "x": 871,
+        "y": 105
+      },
+      "displayButton": {
+        "x": 1429,
+        "y": 24
+      },
+      "searchSidebar": {
+        "x": 28,
+        "y": 72
+      }
+    }
+  },
+  {
+    "file": "detail-status-menu.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Task detail with the status dropdown open (colored workflow statuses).",
+    "regions": {
+      "statusMenu": {
+        "x": 1064,
+        "y": 147,
+        "w": 180,
+        "h": 205
+      },
+      "trigger": {
+        "x": 1064,
+        "y": 111,
+        "w": 115,
+        "h": 32
+      },
+      "properties": {
+        "x": 1072,
+        "y": 81,
+        "w": 240,
+        "h": 450
+      }
+    },
+    "targets": {
+      "statusTrigger": {
+        "x": 1122,
+        "y": 127
+      }
+    }
+  },
+  {
+    "file": "docs-page.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Docs page \"Welcome to Orbit\": cover, icon, title, rich content; full doc tree (dark).",
+    "regions": {
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      },
+      "favorites": {
+        "x": 232,
+        "y": 56,
+        "w": 243,
+        "h": 127
+      },
+      "cover": {
+        "x": 484,
+        "y": 48,
+        "w": 1116,
+        "h": 224
+      },
+      "icon": {
+        "x": 662,
+        "y": 244,
+        "w": 79,
+        "h": 64
+      },
+      "title": {
+        "x": 662,
+        "y": 308,
+        "w": 760,
+        "h": 38
+      },
+      "content": {
+        "x": 608,
+        "y": 366,
+        "w": 868,
+        "h": 635
+      },
+      "breadcrumbs": {
+        "x": 496,
+        "y": 14,
+        "w": 184,
+        "h": 19
+      },
+      "star": {
+        "x": 1524,
+        "y": 10,
+        "w": 28,
+        "h": 28
+      },
+      "saveStatus": {
+        "x": 1453,
+        "y": 16,
+        "w": 63,
+        "h": 16
+      },
+      "checklist": {
+        "x": 662,
+        "y": 708,
+        "w": 760,
+        "h": 150
+      },
+      "table": {
+        "x": 662,
+        "y": 927,
+        "w": 760,
+        "h": 74
+      }
+    },
+    "targets": {
+      "star": {
+        "x": 1538,
+        "y": 24
+      },
+      "newPage": {
+        "x": 457,
+        "y": 24
+      },
+      "docsNav": {
+        "x": 112,
+        "y": 205
+      }
+    }
+  },
+  {
+    "file": "docs-rich.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Docs page \"Architecture overview\" scrolled to the table, code block and checklist (dark).",
+    "regions": {
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      },
+      "codeBlock": {
+        "x": 662,
+        "y": 740,
+        "w": 760,
+        "h": 260
+      },
+      "table": {
+        "x": 662,
+        "y": 457,
+        "w": 760,
+        "h": 214
+      },
+      "image": {
+        "x": 662,
+        "y": 54,
+        "w": 760,
+        "h": 334
+      },
+      "content": {
+        "x": 608,
+        "y": 0,
+        "w": 868,
+        "h": 1000
+      }
+    },
+    "targets": {}
+  },
+  {
+    "file": "docs-tree.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Doc tree: Favorites, teamspaces (Engineering / Product / Company) with nested pages, Private.",
+    "regions": {
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      },
+      "favorites": {
+        "x": 232,
+        "y": 56,
+        "w": 243,
+        "h": 28
+      },
+      "engineering": {
+        "x": 232,
+        "y": 192,
+        "w": 243,
+        "h": 263
+      },
+      "product": {
+        "x": 232,
+        "y": 456,
+        "w": 243,
+        "h": 164
+      },
+      "company": {
+        "x": 232,
+        "y": 621,
+        "w": 243,
+        "h": 230
+      },
+      "defaultSpace": {
+        "x": 232,
+        "y": 126,
+        "w": 243,
+        "h": 65
+      },
+      "private": {
+        "x": 232,
+        "y": 864,
+        "w": 243,
+        "h": 94
+      },
+      "rfcChildren": {
+        "x": 232,
+        "y": 357,
+        "w": 243,
+        "h": 98
+      },
+      "activeRow": {
+        "x": 232,
+        "y": 357,
+        "w": 243,
+        "h": 32
+      }
+    },
+    "targets": {
+      "star": {
+        "x": 1538,
+        "y": 24
+      },
+      "newPage": {
+        "x": 457,
+        "y": 24
+      },
+      "docsNav": {
+        "x": 112,
+        "y": 205
+      }
+    }
+  },
+  {
+    "file": "docs-slash.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Slash menu open on an empty line of \"Design principles\" (block options).",
+    "regions": {
+      "slashMenu": {
+        "x": 662,
+        "y": 430,
+        "w": 351,
+        "h": 561
+      },
+      "caretLine": {
+        "x": 662,
+        "y": 396,
+        "w": 760,
+        "h": 30
+      },
+      "content": {
+        "x": 608,
+        "y": 366,
+        "w": 868,
+        "h": 498
+      },
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "caret": {
+        "x": 1042,
+        "y": 411
+      },
+      "slashMenu": {
+        "x": 838,
+        "y": 711
+      }
+    }
+  },
+  {
+    "file": "docs-roadmap.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Docs page \"Q4 2026 roadmap\": theme headings, checklist and page link blocks to RFCs (dark).",
+    "regions": {
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      },
+      "checklist": {
+        "x": 662,
+        "y": 170,
+        "w": 760,
+        "h": 180
+      },
+      "pageLink": {
+        "x": 662,
+        "y": 350,
+        "w": 760,
+        "h": 38
+      },
+      "pageLinks": {
+        "x": 662,
+        "y": 350,
+        "w": 760,
+        "h": 235
+      },
+      "content": {
+        "x": 608,
+        "y": 0,
+        "w": 868,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "pageLink": {
+        "x": 1042,
+        "y": 369
+      }
+    }
+  },
+  {
+    "file": "palette-docs.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Command palette searching \"roadmap\": matching pages and tasks together.",
+    "regions": {
+      "dialog": {
+        "x": 512,
+        "y": 120,
+        "w": 576,
+        "h": 214
+      },
+      "input": {
+        "x": 541,
+        "y": 130,
+        "w": 542,
+        "h": 20
+      },
+      "results": {
+        "x": 518,
+        "y": 160,
+        "w": 564,
+        "h": 168
+      },
+      "pageResult": {
+        "x": 522,
+        "y": 164,
+        "w": 556,
+        "h": 40
+      }
+    },
+    "targets": {
+      "firstResult": {
+        "x": 800,
+        "y": 184
+      },
+      "pageResult": {
+        "x": 800,
+        "y": 184
+      }
+    }
+  },
+  {
+    "file": "docs-import.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Docs > Import from Notion: connect step (token field, no token submitted).",
+    "regions": {
+      "importPane": {
+        "x": 484,
+        "y": 0,
+        "w": 1116,
+        "h": 1000
+      },
+      "connectCard": {
+        "x": 730,
+        "y": 72,
+        "w": 624,
+        "h": 218
+      },
+      "tokenInput": {
+        "x": 751,
+        "y": 193,
+        "w": 582,
+        "h": 32
+      },
+      "recentImports": {
+        "x": 730,
+        "y": 314,
+        "w": 624,
+        "h": 65
+      },
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "tokenInput": {
+        "x": 1042,
+        "y": 209
+      }
+    }
+  },
+  {
+    "file": "docs-light.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Docs page \"Welcome to Orbit\" (light theme).",
+    "regions": {
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      },
+      "favorites": {
+        "x": 232,
+        "y": 56,
+        "w": 243,
+        "h": 127
+      },
+      "cover": {
+        "x": 484,
+        "y": 48,
+        "w": 1116,
+        "h": 224
+      },
+      "icon": {
+        "x": 662,
+        "y": 244,
+        "w": 79,
+        "h": 64
+      },
+      "title": {
+        "x": 662,
+        "y": 308,
+        "w": 760,
+        "h": 38
+      },
+      "content": {
+        "x": 608,
+        "y": 366,
+        "w": 868,
+        "h": 635
+      },
+      "breadcrumbs": {
+        "x": 496,
+        "y": 14,
+        "w": 184,
+        "h": 19
+      },
+      "star": {
+        "x": 1524,
+        "y": 10,
+        "w": 28,
+        "h": 28
+      },
+      "saveStatus": {
+        "x": 1453,
+        "y": 16,
+        "w": 63,
+        "h": 16
+      },
+      "checklist": {
+        "x": 662,
+        "y": 708,
+        "w": 760,
+        "h": 150
+      },
+      "table": {
+        "x": 662,
+        "y": 927,
+        "w": 760,
+        "h": 74
+      }
+    },
+    "targets": {
+      "star": {
+        "x": 1538,
+        "y": 24
+      },
+      "newPage": {
+        "x": 457,
+        "y": 24
+      },
+      "docsNav": {
+        "x": 112,
+        "y": 205
+      }
+    }
+  },
+  {
+    "file": "docs-favorite.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Docs page \"Q4 2026 roadmap\" header: breadcrumbs with teamspace, save status, filled favorite star; page listed under Favorites.",
+    "regions": {
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      },
+      "favorites": {
+        "x": 232,
+        "y": 56,
+        "w": 243,
+        "h": 127
+      },
+      "cover": {
+        "x": 484,
+        "y": 48,
+        "w": 1116,
+        "h": 224
+      },
+      "icon": {
+        "x": 662,
+        "y": 244,
+        "w": 79,
+        "h": 64
+      },
+      "title": {
+        "x": 662,
+        "y": 308,
+        "w": 760,
+        "h": 38
+      },
+      "content": {
+        "x": 608,
+        "y": 366,
+        "w": 868,
+        "h": 635
+      },
+      "breadcrumbs": {
+        "x": 496,
+        "y": 14,
+        "w": 175,
+        "h": 19
+      },
+      "star": {
+        "x": 1524,
+        "y": 10,
+        "w": 28,
+        "h": 28
+      },
+      "saveStatus": {
+        "x": 1453,
+        "y": 16,
+        "w": 63,
+        "h": 16
+      },
+      "header": {
+        "x": 496,
+        "y": 10,
+        "w": 1092,
+        "h": 28
+      }
+    },
+    "targets": {
+      "star": {
+        "x": 1538,
+        "y": 24
+      },
+      "newPage": {
+        "x": 457,
+        "y": 24
+      },
+      "docsNav": {
+        "x": 112,
+        "y": 205
+      }
+    }
+  },
+  {
+    "file": "mail.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Mail (upcoming, mock data): folder rail, inbox thread list, reader open on a 4-message customer thread (last one expanded).",
+    "regions": {
+      "folders": {
+        "x": 224,
+        "y": 0,
+        "w": 200,
+        "h": 1000
+      },
+      "threadList": {
+        "x": 424,
+        "y": 0,
+        "w": 360,
+        "h": 1000
+      },
+      "reader": {
+        "x": 784,
+        "y": 0,
+        "w": 816,
+        "h": 1000
+      },
+      "selectedThread": {
+        "x": 425,
+        "y": 48,
+        "w": 359,
+        "h": 79
+      },
+      "readerToolbar": {
+        "x": 785,
+        "y": 0,
+        "w": 815,
+        "h": 48
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "w": 224,
+        "h": 1000
+      },
+      "expandedMessage": {
+        "x": 813,
+        "y": 385,
+        "w": 760,
+        "h": 478
+      }
+    },
+    "targets": {
+      "replyButton": {
+        "x": 887,
+        "y": 833
+      },
+      "selectedThread": {
+        "x": 605,
+        "y": 88
+      },
+      "mailNav": {
+        "x": 112,
+        "y": 239
+      }
+    }
+  },
+  {
+    "file": "mail-reply.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Mail thread with the inline reply composer open and a short reply typed (not sent).",
+    "regions": {
+      "composer": {
+        "x": 813,
+        "y": 795,
+        "w": 760,
+        "h": 173
+      },
+      "reader": {
+        "x": 784,
+        "y": 0,
+        "w": 816,
+        "h": 1000
+      },
+      "threadList": {
+        "x": 424,
+        "y": 0,
+        "w": 360,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "sendButton": {
+        "x": 841,
+        "y": 952
+      },
+      "composer": {
+        "x": 1193,
+        "y": 882
+      }
+    }
+  },
+  {
+    "file": "chat.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Chat (upcoming, mock data): #engineering with grouped messages, a Rust code block, GitHub PR chip + GitHub bot post, reactions, @mention highlight, thread preview card, member list.",
+    "regions": {
+      "channelSidebar": {
+        "x": 224,
+        "y": 0,
+        "w": 240,
+        "h": 1000
+      },
+      "messages": {
+        "x": 464,
+        "y": 48,
+        "w": 896,
+        "h": 898
+      },
+      "composer": {
+        "x": 464,
+        "y": 946,
+        "w": 896,
+        "h": 54
+      },
+      "reactionMessage": {
+        "x": 480,
+        "y": 623,
+        "w": 864,
+        "h": 80
+      },
+      "codeBlock": {
+        "x": 538,
+        "y": 180,
+        "w": 452,
+        "h": 146
+      },
+      "githubChip": {
+        "x": 1114,
+        "y": 394,
+        "w": 145,
+        "h": 20
+      },
+      "mention": {
+        "x": 480,
+        "y": 767,
+        "w": 864,
+        "h": 48
+      }
+    },
+    "targets": {
+      "reactionMessage": {
+        "x": 912,
+        "y": 663
+      },
+      "threadPreview": {
+        "x": 693,
+        "y": 507
+      },
+      "composer": {
+        "x": 912,
+        "y": 973
+      }
+    }
+  },
+  {
+    "file": "chat-thread.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Chat thread \"Rebase stale text patches?\" open in the side panel next to #engineering (6 replies, code snippet, reactions).",
+    "regions": {
+      "threadPanel": {
+        "x": 1132,
+        "y": 0,
+        "w": 468,
+        "h": 1000
+      },
+      "messages": {
+        "x": 464,
+        "y": 48,
+        "w": 668,
+        "h": 898
+      },
+      "channelSidebar": {
+        "x": 224,
+        "y": 0,
+        "w": 240,
+        "h": 1000
+      },
+      "threadRoot": {
+        "x": 480,
+        "y": 424,
+        "w": 636,
+        "h": 110
+      }
+    },
+    "targets": {
+      "closeThread": {
+        "x": 1570,
+        "y": 23
+      }
+    }
+  },
+  {
+    "file": "dm.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Direct messages (upcoming, mock data): conversation with Leo about the 0.9 release (code block, GitHub issue chip, reactions).",
+    "regions": {
+      "dmList": {
+        "x": 224,
+        "y": 0,
+        "w": 240,
+        "h": 1000
+      },
+      "conversation": {
+        "x": 464,
+        "y": 0,
+        "w": 1136,
+        "h": 1000
+      },
+      "composer": {
+        "x": 464,
+        "y": 946,
+        "w": 1136,
+        "h": 54
+      }
+    },
+    "targets": {}
+  },
+  {
+    "file": "docs-import-choose.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Notion import, \"Choose pages\" step (mocked API): Notion workspace tree with tri-state checkboxes, 20 pages selected, destination teamspace.",
+    "regions": {
+      "chooser": {
+        "x": 484,
+        "y": 97,
+        "w": 1116,
+        "h": 824
+      },
+      "selectionCount": {
+        "x": 1342,
+        "y": 64,
+        "w": 101,
+        "h": 16
+      },
+      "destination": {
+        "x": 496,
+        "y": 934,
+        "w": 428,
+        "h": 54
+      },
+      "importButton": {
+        "x": 1456,
+        "y": 956,
+        "w": 132,
+        "h": 32
+      },
+      "header": {
+        "x": 484,
+        "y": 48,
+        "w": 1116,
+        "h": 49
+      },
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "importButton": {
+        "x": 1522,
+        "y": 972
+      },
+      "firstCheckbox": {
+        "x": 530,
+        "y": 121
+      }
+    }
+  },
+  {
+    "file": "docs-import-progress.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Notion import, \"Importing\" step (mocked): progress bar at ~65% (13 of 20 pages).",
+    "regions": {
+      "progressCard": {
+        "x": 730,
+        "y": 72,
+        "w": 624,
+        "h": 224
+      },
+      "progressBar": {
+        "x": 730,
+        "y": 148,
+        "w": 624,
+        "h": 8
+      }
+    },
+    "targets": {}
+  },
+  {
+    "file": "docs-import-done.png",
+    "width": 3200,
+    "height": 2000,
+    "notes": "Notion import, \"Complete\" step (mocked): stats (pages / files / failed), links to the imported root pages, which also appear in the doc tree.",
+    "regions": {
+      "resultCard": {
+        "x": 706,
+        "y": 48,
+        "w": 672,
+        "h": 457
+      },
+      "stats": {
+        "x": 730,
+        "y": 152,
+        "w": 624,
+        "h": 64
+      },
+      "importedPages": {
+        "x": 730,
+        "y": 240,
+        "w": 624,
+        "h": 185
+      },
+      "tree": {
+        "x": 224,
+        "y": 0,
+        "w": 260,
+        "h": 1000
+      }
+    },
+    "targets": {
+      "openImported": {
+        "x": 1276,
+        "y": 254
+      }
+    }
+  }
+]

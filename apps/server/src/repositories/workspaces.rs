@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use orbit_domain::{WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
-    AttachmentMutationCoordinator, BlobStore, BlobStoreError, Database, Id, IssuedSession, Job,
-    JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore, RecurringSchedule,
-    ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig, WorkerError,
-    generate_opaque_token, normalize_email,
+    AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
+    IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
+    RecurringSchedule, ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig,
+    WorkerError, generate_opaque_token, normalize_email,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -19,6 +19,7 @@ use utoipa::ToSchema;
 
 use super::task_relations;
 use super::tasks::TaskError;
+use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditEvent, AuditOutcome};
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
@@ -269,6 +270,7 @@ impl WorkspaceRepository {
         .execute(&mut *transaction)
         .await?;
         insert_default_project(&mut transaction, &defaults, now).await?;
+        insert_default_teamspace(&mut transaction, id, actor_id, now).await?;
         audit::record(
             &mut transaction,
             id,
@@ -1660,12 +1662,11 @@ impl WorkspaceRepository {
                 .await?;
             for blob in blobs {
                 let blob_id: String = blob.get("id");
-                let references: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?",
-                )
-                .bind(&blob_id)
-                .fetch_one(&mut *transaction)
-                .await?;
+                let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                    .bind(&blob_id)
+                    .bind(&blob_id)
+                    .fetch_one(&mut *transaction)
+                    .await?;
                 if references == 0 {
                     sqlx::query(
                         "INSERT OR IGNORE INTO attachment_file_deletions \
@@ -1685,6 +1686,18 @@ impl WorkspaceRepository {
                 }
             }
         }
+        // A trashed subtree shares one deleted_at, so it expires together; pages.parent_id is
+        // ON DELETE SET NULL, so the delete order inside the batch does not matter.
+        sqlx::query(
+            "DELETE FROM pages WHERE deleted_at <= ? AND workspace_id IN \
+             (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
+        )
+        .bind(
+            now.as_millis()
+                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+        )
+        .execute(&mut *transaction)
+        .await?;
         sqlx::query(
             "DELETE FROM projects WHERE deleted_at <= ? AND workspace_id IN \
              (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
@@ -1713,14 +1726,20 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
+            // Page files hold their blobs with ON DELETE RESTRICT, so they go before the blobs.
+            attachment_references_purged +=
+                sqlx::query("DELETE FROM page_files WHERE workspace_id = ?")
+                    .bind(&workspace_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
             for row in blob_rows {
                 let blob_id: String = row.get("id");
-                let references: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?",
-                )
-                .bind(&blob_id)
-                .fetch_one(&mut *transaction)
-                .await?;
+                let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                    .bind(&blob_id)
+                    .bind(&blob_id)
+                    .fetch_one(&mut *transaction)
+                    .await?;
                 if references == 0 {
                     sqlx::query(
                         "INSERT OR IGNORE INTO attachment_file_deletions \
@@ -1759,6 +1778,16 @@ impl WorkspaceRepository {
             // Tasks go before the workspace cascade: tasks.status_id is ON DELETE RESTRICT, and
             // SQLite may cascade into task_statuses first (it was rebuilt after tasks in 0021).
             sqlx::query("DELETE FROM tasks WHERE workspace_id = ?")
+                .bind(&workspace_id)
+                .execute(&mut *transaction)
+                .await?;
+            // Pages before teamspaces (pages.teamspace_id cascades), teamspaces before the
+            // workspace, so no cascade order is left to SQLite.
+            sqlx::query("DELETE FROM pages WHERE workspace_id = ?")
+                .bind(&workspace_id)
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query("DELETE FROM teamspaces WHERE workspace_id = ?")
                 .bind(&workspace_id)
                 .execute(&mut *transaction)
                 .await?;
@@ -2012,7 +2041,7 @@ async fn require_manager(
     Ok(())
 }
 
-async fn require_role(
+pub(super) async fn require_role(
     transaction: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,

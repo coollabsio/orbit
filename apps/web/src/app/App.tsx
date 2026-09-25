@@ -7,6 +7,7 @@ import { AppShell } from '@/app/shell/AppShell'
 import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
+import { DocsPage } from '@/features/docs/pages/DocsPage'
 import { SettingsLayout } from '@/features/settings/pages/SettingsLayout'
 import { GeneralPage } from '@/features/settings/pages/GeneralPage'
 import { GithubPage } from '@/features/settings/pages/GithubPage'
@@ -51,7 +52,9 @@ export default function App() {
               <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
               <Route path="tasks/:taskId" element={<TasksPage />} />
               <Route path="tasks-trash" element={<TaskTrashPage />} />
-              <Route path="docs/*" element={<Navigate to="/tasks" replace />} />
+              <Route path="docs/trash" element={<DocsPage view="trash" />} />
+              <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
+              <Route path="docs/:pageId?" element={<DocsPage />} />
               <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
               <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
               <Route path="dm/*" element={<Navigate to="/tasks" replace />} />

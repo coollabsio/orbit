@@ -11,17 +11,25 @@ use orbit_platform::{
 
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
+use crate::import_routes::{ImportState, import_router};
 use crate::integration_routes::{IntegrationState, integration_router};
+use crate::page_file_routes::{PageFileState, page_file_router};
+use crate::page_routes::{PageState, page_router};
 use crate::static_assets::StaticAssets;
 use crate::task_routes::{TaskState, task_router};
+use crate::teamspace_routes::{TeamspaceState, teamspace_router};
 use crate::workspace_routes::{WorkspaceState, workspace_router};
 
 pub struct ApiRoutes {
     pub auth: AuthState,
     pub workspaces: WorkspaceState,
     pub tasks: TaskState,
+    pub pages: PageState,
+    pub page_files: PageFileState,
+    pub teamspaces: TeamspaceState,
     pub attachments: AttachmentState,
     pub integrations: IntegrationState,
+    pub imports: ImportState,
 }
 
 pub fn production_router(
@@ -39,8 +47,12 @@ pub fn production_router(
         .merge(realtime)
         .merge(workspace_router(api.workspaces))
         .merge(task_router(api.tasks))
+        .merge(page_router(api.pages))
+        .merge(page_file_router(api.page_files))
+        .merge(teamspace_router(api.teamspaces))
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))
+        .merge(import_router(api.imports))
         .merge(
             Router::new()
                 .route("/health/live", get(liveness))

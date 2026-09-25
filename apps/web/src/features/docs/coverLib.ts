@@ -50,3 +50,15 @@ export function dragCoverPos(start: CoverPos, dx: number, dy: number, slack: Siz
 export function nudgeCoverPos(pos: CoverPos, dx: number, dy: number): CoverPos {
   return { x: clampPct(pos.x + dx), y: clampPct(pos.y + dy) }
 }
+
+/** The server only stores http(s) cover URLs (max 2048 chars). */
+export function validCoverUrl(raw: string): string | null {
+  const url = raw.trim()
+  if (url.length === 0 || url.length > 2048) return null
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? url : null
+  } catch {
+    return null
+  }
+}

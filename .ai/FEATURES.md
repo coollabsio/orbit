@@ -4,7 +4,9 @@
 
 Milestone one persists setup, login and recovery, sessions, workspaces, memberships, invitations, projects, statuses, labels, tasks, comments, attachments, trash, and audit records. Those flows use the generated `/api/v1` client and never substitute mock records after an error.
 
-Home, Docs, Mail, Chat, direct messages, Inbox, Profile, webhooks, custom emoji administration, typing, and realtime behavior still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP, mailboxes, WebSockets, presence, and typing transport are follow-up milestones.
+Docs pages persist too (tree, content, trash, search; see Docs below).
+
+Home, Mail, Chat, direct messages, Inbox, Profile, webhooks, custom emoji administration, typing, and realtime behavior still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP, mailboxes, WebSockets, presence, and typing transport are follow-up milestones.
 
 ## Global shell
 
@@ -55,20 +57,86 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 
 ## Docs
 
-Core files: `DocsPage.tsx`, `components/DocTree.tsx`, `components/DocEditor.tsx`, `components/BlockEditor.tsx`.
+Core files: `features/docs/pages/DocsPage.tsx`, `pages/PageTrashPane.tsx`, `components/DocTree.tsx`, `components/DocEditor.tsx`,
+`editor/PageEditor.tsx` (BlockNote), `api/pages.ts` + `api/teamspaces.ts` + `api/favorites.ts` (query hooks), `autosave.ts`,
+`pageTree.ts` (pure tree and space helpers).
 
-This feature is mock-backed and does not persist across a reload.
+Pages persist in SQLite through `/api/v1/workspaces/{id}/pages`, teamspaces through `/api/v1/workspaces/{id}/teamspaces`,
+favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DELETE) and `/pages/favorites/{page_id}/move`.
 
-- Hierarchical page tree with create, delete confirmation, deep subtree deletion, reorder, and nesting drag-and-drop.
-- Navigable page breadcrumbs.
-- Page emoji icons use the shared chat emoji picker, including custom emoji.
-- Cover banners support upload/URL, change/remove, and focal-point repositioning.
-- Blocks render markdown while idle and become editable on click.
-- Slash menu includes text headings, lists, todo, quote, code, divider, page creation/linking, embed, image, and file.
-- Mentions reuse chat autocomplete but omit the right-side handle column.
-- Pasted/dropped files create media blocks.
-- Image blocks fill the editor column and open a lightbox.
-- Bare GitHub issue/PR/repository links render compact GitHub-style references through the shared markdown renderer.
+- Spaces: every page lives in a teamspace or in the caller's Private space (a page's space is its root's; sub-pages follow).
+  Every member sees and edits all teamspaces; private pages are visible only to their owner (tree, search, trash, links).
+  Each workspace starts with a default teamspace "General"; new root pages go there unless created in another space.
+- Sidebar: 48px "Documents" header (its "+" creates a page in the default teamspace), a "Teamspaces" label with "+" (create
+  dialog), one collapsible section per teamspace (hover "+" adds a page there; "…" menu: Rename inline, Delete teamspace for
+  owners/admins only — refused with a toast while it has pages or is the last one), then the Private section (lock, hover "+").
+  Empty sections show "No pages inside". Collapsed sections persist per workspace in localStorage.
+- Favorites (Notion-style): per user and workspace, nobody else sees them, not audited. A "Favorites" section (star label) sits
+  above Teamspaces and is hidden while empty; it lists favorite pages in the user's order as normal rows (icon, title, expandable
+  sub-pages with their own expand state, active highlight); the pages stay in their own space too. Toggle with the star button in
+  the page header (filled when favorited, `aria-pressed`), "Add to / Remove from favorites" in the page "…" menu and every row "…"
+  menu, or by dropping a page from another section onto the Favorites header. Dragging a favorite reorders the favorites only
+  (the page never moves); drops between Favorites and other sections do nothing. Only live pages the user can see are listed:
+  a trashed favorite drops out and comes back on restore; a page moved into someone else's private space disappears for others.
+  Add/remove/reorder are optimistic with rollback and an error toast.
+
+- Routes: `/docs` opens the first root page of the default teamspace, else the first private page, else the first page of
+  another teamspace, on desktop (phones show the page list first); no pages → "Create your first page" (default teamspace).
+  `/docs/:pageId` opens a page; a trashed or unknown id shows "Page not found" with a link back. `/docs/trash` is the page trash.
+- Page tree: create (root or child), "Move to trash" with confirmation (the whole subtree goes), HTML5 drag and drop
+  before/inside/after mapped to `move` with `parent_id` + sibling index (root siblings are per space). Drops can cross spaces:
+  onto/under a page the space follows the parent; next to a root page or onto a section header/empty row the page goes to that
+  space (`teamspace_id` or `private: true`), taking its subtree along, with a "Moved to …" toast. The tree updates
+  optimistically (space included for the whole subtree) and rolls back on error.
+- Editor: BlockNote 0.55 (rich text, markdown shortcuts, nested blocks, drag handles, undo, slash menu), lazy-loaded in its own
+  chunk. Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
+  Slash items "Sub-page" (creates a child page, inserts the link, opens it) and "Link a page" (picker over the tree).
+  Image and File blocks (slash menu, file panel, paste and drop) upload to the page; video/audio blocks stay off. Image/file
+  block URLs are limited to page-file paths, http(s) or empty (anything else is blanked on load and before saving).
+- Page files: `POST /pages/{page_id}/files` (multipart, one `file` field) → `PageFile` with a same-origin `url`
+  (`/api/v1/workspaces/{ws}/pages/{page_id}/files/{file_id}`, satisfies the CSP `img-src 'self'`); `GET` that url downloads.
+  Access = the page's: teamspace pages for every member, private pages only for their owner, trashed pages for nobody
+  (404). Bytes use the task-attachment blob layer (`UploadService`: size limits, sniffed type, per-workspace dedup);
+  png/jpeg/gif/webp/avif are served inline, everything else (SVG, HTML, …) as an attachment, always `nosniff`. Upload
+  audits `page.file_added`. Rows (`page_files`, migration 0025) go with the page (trash purge, teamspace/workspace
+  delete) and quarantine the blob; reconciliation reclaims blobs no task attachment or page file references.
+  `PageFileRepository::create_from_bytes` attaches server-held bytes (Notion import) through the same checks.
+- Header: breadcrumbs prefixed with the space (teamspace name, or a lock + "Private"; the mobile top bar too), save status
+  (Saving… / Saved / Save failed + Retry / Conflict), page menu with "Move to" (teamspaces + Private, current disabled; moves to
+  the end of that space's root) and "Move to trash".
+- Title input (empty title shows "Untitled" everywhere), emoji icon picker, cover (upload an image to the page, or an http(s)
+  URL; `cover_url` also accepts a file url of the same page only) with remove/change and focal-point repositioning.
+- Autosave: title and content debounce 800 ms; icon/cover save immediately; blur, page switch, unmount and tab hide flush.
+  One PATCH in flight at a time; each save sends the latest `expected_version`. A 409 shows a banner:
+  "Reload page" (discard local edits, load the server page) or "Overwrite" (re-send the local page on the current version).
+- Remote updates (realtime refresh, other tabs) replace the document only when there are no unsaved local edits; metadata-only
+  changes (e.g. a move) just advance the version.
+- Trash: lists pages trashed directly with their space; Restore brings back the subtree trashed with them (to the root of its
+  space if the parent is gone).
+- Search: the command palette searches page titles and body text (debounced, only for a non-empty query), shows
+  "Page · <space>" and opens `/docs/:id`.
+- Notion import (`pages/NotionImportPane.tsx`, `components/NotionImportChooser.tsx`, `api/notionImports.ts`,
+  `notionImport/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
+  Notion" opens `/docs/import`, a pane next to the tree like Trash. Steps follow the import's status at
+  `/docs/import/:importId`: Connect (password field for a Notion personal access token, sent once, never cached client-side;
+  problems map to sentences: invalid token, app key missing, import in progress + link to it, Notion unavailable) →
+  Scanning (polls every 2 s) → Choose pages (tri-state tree: checking a page includes its sub-pages, unchecking one also
+  un-checks its ancestors; filter, Select all / Clear, "N pages selected", truncated/incomplete warnings; destination
+  teamspace or Private plus optional "Inside page" of that space; sends `{all:true}` or the minimal checked roots) →
+  Importing (progress bar, failed count, Cancel with confirmation) → Complete / Failed / Cancelled / Expired (stats, conversion
+  notes, failures with titles and errors, links to the imported top-level pages, "Open imported pages", "Import more").
+  The connect step lists the member's 20 recent imports. Imports are private to their creator. Import query keys live outside
+  the workspace prefix (polled, not refetched on every realtime event); pages are refreshed when an import ends.
+  When an import fails (e.g. revoked token) or is cancelled, the pages it had created but not filled go to the trash (one
+  audited batch per top-level page; a subtree is kept if anything in it has content or is not from the import) and the report
+  counts them (`unfilled_pages_trashed`). Filled pages stay.
+- Links: the editor accepts http(s), mailto and exact in-app page links `/docs/<uuid>` (what the import writes between
+  imported pages); clicking one navigates in the app (Cmd/Ctrl/Shift-click opens a new tab). `javascript:`, `data:` and
+  other relative paths are dropped.
+
+Not supported yet: images, files, video and audio blocks (and cover uploads), real-time co-editing and presence, teamspace membership
+or per-page sharing, teamspace icons/reordering in the UI, version history, comments, templates, export, ZIP import, and permanent deletion from the page trash. External cover URLs are
+blocked by the production CSP (`img-src 'self' data: blob:`) until covers go through the upload layer.
 
 ## Mail
 
@@ -131,5 +199,5 @@ This feature is mock-backed.
 
 - Tasks, Docs, Mail, Chat, DMs, and Inbox use their own compact headers instead of the global topbar.
 - Chat uses compact messages, avatars, attachment grids, date separators, and pinned system notices; header search is an icon that expands when used.
-- Docs use matching compact body typography and scaled headings while retaining block editing and media behavior.
+- Docs drop BlockNote's side-menu gutter on phones; the page list and the page are separate screens.
 - Shared confirmation and input modals remain vertically and horizontally centered at mobile sizes.

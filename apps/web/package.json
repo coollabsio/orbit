@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@blocknote/core": "^0.55.0",
+    "@blocknote/react": "^0.55.0",
+    "@blocknote/shadcn": "^0.55.0",
     "@fontsource-variable/noto-sans": "^5.3.0",
     "@hey-api/client-fetch": "^0.13.1",
     "@tailwindcss/vite": "^4.3.3",

@@ -1,0 +1,136 @@
+/*
+ * Maps BlockNote's theme variables onto the app's shadcn tokens (src/index.css :root / .dark).
+ * BlockNote puts `bn-root`, the scheme class (`light`/`dark`), `data-color-scheme` and our className on the
+ * editor container AND on its portal roots (menus, toolbars), so this covers floating UI too.
+ * The extra [data-color-scheme] raises specificity above BlockNote's `.bn-root[data-color-scheme="dark"]`.
+ */
+.bn-root.orbit-page-editor[data-color-scheme] {
+  --bn-font-family: inherit;
+  --bn-border-radius: calc(var(--radius) * 0.8);
+
+  --bn-colors-editor-text: var(--foreground);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: var(--popover-foreground);
+  --bn-colors-menu-background: var(--popover);
+  --bn-colors-tooltip-text: var(--popover-foreground);
+  --bn-colors-tooltip-background: var(--popover);
+  --bn-colors-hovered-text: var(--accent-foreground);
+  --bn-colors-hovered-background: var(--accent);
+  --bn-colors-selected-text: var(--primary-foreground);
+  --bn-colors-selected-background: var(--primary);
+  --bn-colors-disabled-text: var(--muted-foreground);
+  --bn-colors-disabled-background: var(--muted);
+  --bn-colors-shadow: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --bn-colors-border: var(--border);
+  --bn-colors-side-menu: var(--muted-foreground);
+}
+
+
+/*
+ * Static copies of BlockNote's placeholders. BlockNote injects them through a runtime <style> element, which the
+ * production CSP (`style-src 'self'`) blocks, so without these the "type '/'" hint never shows.
+ * Specific block types come after the generic focused rule so they win, matching BlockNote's own order.
+ */
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content[data-is-empty-and-focused]:has(.ProseMirror-trailingBreak:only-child)::after {
+  content: "Enter text or type '/' for commands";
+}
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content[data-content-type='heading']:has(.ProseMirror-trailingBreak:only-child)::after {
+  content: 'Heading';
+}
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content[data-content-type='toggleListItem']:has(.ProseMirror-trailingBreak:only-child)::after {
+  content: 'Toggle';
+}
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content:is([data-content-type='bulletListItem'], [data-content-type='numberedListItem'], [data-content-type='checkListItem']):has(.ProseMirror-trailingBreak:only-child)::after {
+  content: 'List';
+}
+
+/* Inline links use the app's link style (text-primary + underline) instead of the browser default blue. */
+.orbit-page-editor .bn-editor a[data-inline-content-type='link'] {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* On phones there is no room for BlockNote's 54px side-menu gutter; blocks use the full width. */
+@media (max-width: 899px) {
+  .orbit-page-editor .bn-editor {
+    padding-inline: 0;
+  }
+}
+
+/*
+ * Tiptap's base ProseMirror stylesheet, copied verbatim from @tiptap/core 3.31.3 (`style` in dist/index.js, used by
+ * createStyleTag). PageEditor sets `_tiptapOptions.injectCSS: false` because the production CSP (`style-src 'self'`)
+ * blocks the <style> tag Tiptap would inject. Re-check this block when upgrading @tiptap/core.
+ */
+.ProseMirror {
+  position: relative;
+}
+
+.ProseMirror {
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  -webkit-font-variant-ligatures: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0; /* the above doesn't seem to work in Edge */
+}
+
+.ProseMirror [contenteditable="false"] {
+  white-space: normal;
+}
+
+.ProseMirror [contenteditable="false"] [contenteditable="true"] {
+  white-space: pre-wrap;
+}
+
+.ProseMirror pre {
+  white-space: pre-wrap;
+}
+
+img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.ProseMirror-gapcursor {
+  display: none;
+  pointer-events: none;
+  position: absolute;
+  margin: 0;
+}
+
+.ProseMirror-gapcursor:after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 1px solid black;
+  animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes ProseMirror-cursor-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.ProseMirror-hideselection *::selection {
+  background: transparent;
+}
+
+.ProseMirror-hideselection *::-moz-selection {
+  background: transparent;
+}
+
+.ProseMirror-hideselection * {
+  caret-color: transparent;
+}
+
+.ProseMirror-focused .ProseMirror-gapcursor {
+  display: block;
+}

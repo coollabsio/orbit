@@ -4,6 +4,7 @@ import { render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { GithubPage } from './GithubPage'
+import { waitForAbsence } from '@/test/waitForAbsence'
 
 const originalFetch = globalThis.fetch
 const originalSubmit = HTMLFormElement.prototype.submit
@@ -104,7 +105,7 @@ test('registration can be retried after a pending-registration error', async () 
   await userEvent.click(register)
   await view.findByRole('alert')
   window.dispatchEvent(new Event('pageshow'))
-  await waitFor(() => expect(view.queryByRole('alert')).toBeNull())
+  await waitForAbsence(() => view.queryByRole('alert'))
   await userEvent.click(register)
   await waitFor(() => expect(submitted).toBe(true))
   expect(requests).toBe(2)

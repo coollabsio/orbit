@@ -1,0 +1,103 @@
+{
+  "content": [
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Before the columns",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Left",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000002",
+      "props": {
+        "backgroundColor": "default",
+        "isToggleable": false,
+        "level": 2,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Left content",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000003",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Right item",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000004",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "bulletListItem"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "After the columns",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000005",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    }
+  ],
+  "cover": null,
+  "icon": null,
+  "report": {
+    "lossy": {
+      "column_list": 1
+    },
+    "missing_files": 0,
+    "skipped": {},
+    "truncated_blocks": 0,
+    "unresolved_page_links": 0
+  },
+  "title": "Columns"
+}

@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Add as Plus, Menu, Moon, SearchNormal as Search, Setting2 as Settings, Sun } from 'reicon-react'
+import { Lock, Add as Plus, Menu, Moon, SearchNormal as Search, Setting2 as Settings, Sun } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { useTheme } from '@/lib/themeContext'
@@ -12,15 +12,23 @@ import { threadTitleOf } from '@/lib/messagePreview'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { AppState } from '@/mock/types'
+import type { PageSummary, Teamspace } from '@/api/generated/types.gen'
+import { useCreatePage, usePageTree } from '@/features/docs/api/pages'
+import { useTeamspaces } from '@/features/docs/api/teamspaces'
+import { ancestorsOf, pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
+import { docsHidden } from './productNavigation'
 
 interface Crumb {
   label: string
   to?: string
+  icon?: React.ReactNode
 }
 
 type TaskNavigation = { projects: Project[]; tasks: Task[]; statuses: TaskStatusDef[] }
 
-function crumbsFor(pathname: string, folderParam: string | null, state: AppState, taskNavigation: TaskNavigation): { crumbs: Crumb[]; status?: React.ReactNode } {
+type DocsNavigation = { pages?: PageSummary[]; teamspaces?: Teamspace[] }
+
+function crumbsFor(pathname: string, folderParam: string | null, state: AppState, taskNavigation: TaskNavigation, docs: DocsNavigation = {}): { crumbs: Crumb[]; status?: React.ReactNode } {
   const [, root, id, sub, subId] = pathname.split('/')
   switch (root) {
     case 'tasks': {
@@ -51,13 +59,15 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
     }
     case 'docs': {
       const crumbs: Crumb[] = [{ label: 'Docs', to: '/docs' }]
-      let doc = id ? state.docs.find((d) => d.id === id) : null
-      const chain: Crumb[] = []
-      while (doc) {
-        chain.unshift({ label: doc.title, to: `/docs/${doc.id}` })
-        doc = doc.parentId ? state.docs.find((d) => d.id === doc?.parentId) : null
-      }
-      return { crumbs: [...crumbs, ...chain] }
+      if (id === 'trash') return { crumbs: [...crumbs, { label: 'Trash' }] }
+      const pages = docs.pages ?? []
+      const page = id ? pages.find((item) => item.id === id) : null
+      if (!page) return { crumbs }
+      const chain = [...ancestorsOf(pages, page.id), page].map((item) => ({ label: pageTitle(item), to: `/docs/${item.id}` }))
+      // The space is plain text: teamspaces and Private have no page of their own.
+      const space = spaceKey(page)
+      const icon = space === 'private' ? <Lock className="mr-1 inline size-3.5 align-[-2px]" aria-hidden="true" /> : undefined
+      return { crumbs: [...crumbs, { label: spaceLabel(space, docs.teamspaces), icon }, ...chain] }
     }
     case 'mail': {
       const crumbs: Crumb[] = [{ label: 'Mail', to: '/mail' }]
@@ -109,6 +119,10 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
   const statuses = useAllStatuses(workspace.id, projects.data ?? [])
   const tasks = useTasks(workspace.id, { limit: 100 })
   const location = useLocation()
+  const routeRoot = location.pathname.split('/')[1] || 'home'
+  const pageTree = usePageTree(workspace.id, routeRoot === 'docs')
+  const teamspaces = useTeamspaces(workspace.id, routeRoot === 'docs')
+  const createPage = useCreatePage(workspace.id)
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
@@ -118,8 +132,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
     statuses: statuses.data,
     tasks: tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [],
   }
-  const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state, taskNavigation)
-  const routeRoot = location.pathname.split('/')[1] || 'home'
+  const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state, taskNavigation, { pages: pageTree.data, teamspaces: teamspaces.data })
 
   const crumbBase =
     'min-w-0 shrink overflow-hidden text-[13.5px] font-medium whitespace-nowrap text-ellipsis text-muted-foreground group-data-[root=home]/topbar:text-sm group-data-[root=home]/topbar:font-semibold group-data-[root=home]/topbar:text-foreground group-data-[root=settings]/topbar:text-[13px] group-data-[root=settings]/topbar:font-semibold'
@@ -156,6 +169,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
                 </Link>
               ) : (
                 <span className={cn(crumbBase, 'data-[current=true]:max-w-[40vw] data-[current=true]:shrink-0 data-[current=true]:text-foreground')} data-current={isLast}>
+                  {crumb.icon}
                   {crumb.label}
                 </span>
               )}
@@ -186,7 +200,15 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
               <DropdownMenuItem className={menuOptionClass} onClick={() => navigate('/tasks?new=1')}>
                 Task
               </DropdownMenuItem>
-              <DropdownMenuItem className={menuOptionClass} disabled>Document</DropdownMenuItem>
+              {!docsHidden ? (
+                <DropdownMenuItem
+                  className={menuOptionClass}
+                  disabled={createPage.isPending}
+                  onClick={() => createPage.mutate({}, { onSuccess: (page) => navigate(`/docs/${page.id}`) })}
+                >
+                  Document
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem className={menuOptionClass} disabled>Email</DropdownMenuItem>
               <DropdownMenuItem className={menuOptionClass} disabled>Chat message</DropdownMenuItem>
             </DropdownMenuContent>

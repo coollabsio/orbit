@@ -10,14 +10,16 @@ function Location() {
 test('upcoming mobile sections are visible but cannot navigate', () => {
   const view = render(<MemoryRouter initialEntries={['/tasks']}><MobileDock /><Location /></MemoryRouter>)
   const dock = within(view.getByRole('navigation'))
-  for (const label of ['Home', 'Docs', 'Mail', 'Chat', 'DMs']) {
+  for (const label of ['Home', 'Mail', 'Chat', 'DMs']) {
     const button = dock.getByRole('button', { name: label }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     expect(button.textContent).not.toContain('Soon')
     fireEvent.click(button)
     expect(view.getByTestId('location').textContent).toBe('/tasks')
   }
-  expect(dock.getAllByRole('link')).toHaveLength(2)
+  expect(dock.getAllByRole('link')).toHaveLength(3)
+  fireEvent.click(dock.getByRole('link', { name: 'Docs' }))
+  expect(view.getByTestId('location').textContent).toBe('/docs')
   fireEvent.click(dock.getByRole('link', { name: 'Settings' }))
   expect(view.getByTestId('location').textContent).toBe('/settings')
   fireEvent.click(dock.getByRole('link', { name: 'Tasks' }))

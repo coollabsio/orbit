@@ -1,0 +1,210 @@
+{
+  "content": [
+    {
+      "children": [
+        {
+          "children": [],
+          "content": [
+            {
+              "styles": {},
+              "text": "Apple",
+              "type": "text"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000001",
+          "props": {
+            "backgroundColor": "default",
+            "textAlignment": "left",
+            "textColor": "default"
+          },
+          "type": "bulletListItem"
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "content": [
+                {
+                  "styles": {},
+                  "text": "A note about pears",
+                  "type": "text"
+                }
+              ],
+              "id": "00000000-0000-4000-8000-000000000002",
+              "props": {
+                "backgroundColor": "default",
+                "textAlignment": "left",
+                "textColor": "default"
+              },
+              "type": "paragraph"
+            }
+          ],
+          "content": [
+            {
+              "styles": {},
+              "text": "Pear",
+              "type": "text"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000003",
+          "props": {
+            "backgroundColor": "default",
+            "textAlignment": "left",
+            "textColor": "default"
+          },
+          "type": "bulletListItem"
+        }
+      ],
+      "content": [
+        {
+          "styles": {},
+          "text": "Fruits",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000004",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "bulletListItem"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Step one",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000005",
+      "props": {
+        "backgroundColor": "default",
+        "start": 3,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "numberedListItem"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Step two",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000006",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "numberedListItem"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Roman step",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000007",
+      "props": {
+        "backgroundColor": "default",
+        "start": 1,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "numberedListItem"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Finish Q3 goals",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000008",
+      "props": {
+        "backgroundColor": "default",
+        "checked": false,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "checkListItem"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Ship the importer",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000009",
+      "props": {
+        "backgroundColor": "default",
+        "checked": true,
+        "textAlignment": "left",
+        "textColor": "purple"
+      },
+      "type": "checkListItem"
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "content": [
+            {
+              "styles": {},
+              "text": "Inside the toggle",
+              "type": "text"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000010",
+          "props": {
+            "backgroundColor": "default",
+            "textAlignment": "left",
+            "textColor": "default"
+          },
+          "type": "paragraph"
+        }
+      ],
+      "content": [
+        {
+          "styles": {},
+          "text": "Additional project details",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000011",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "toggleListItem"
+    }
+  ],
+  "cover": null,
+  "icon": null,
+  "report": {
+    "lossy": {
+      "numbered_list_format": 1
+    },
+    "missing_files": 0,
+    "skipped": {},
+    "truncated_blocks": 0,
+    "unresolved_page_links": 0
+  },
+  "title": "Lists"
+}

@@ -3,31 +3,32 @@
 // Filtering stays ours (`shouldFilter={false}`) so the substring match is unchanged.
 import { useMemo, useState } from 'react'
 import { DocumentText as FileText } from 'reicon-react'
+import type { PageSummary } from '@/api/generated/types.gen'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { Emoji } from '@/components/common/Emoji'
 import { Modal } from '@/components/common/Modal'
-import type { Doc } from '@/mock/types'
-import { ancestorsOf } from '@/features/docs/docsLib'
+import { ancestorsOf, pageTitle } from '@/features/docs/pageTree'
 
 export function PageLinkDialog({
-  docs,
+  pages,
   excludeId,
   onPick,
   onClose,
 }: {
-  docs: Doc[]
+  pages: PageSummary[]
   /** The current page: linking to itself makes no sense (the docs reference excludeId). */
   excludeId: string
-  onPick: (doc: Doc) => void
+  onPick: (page: PageSummary) => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return docs
-      .filter((d) => d.id !== excludeId)
-      .filter((d) => !q || d.title.toLowerCase().includes(q))
-  }, [docs, excludeId, query])
+    return pages
+      .filter((page) => page.id !== excludeId)
+      .filter((page) => !q || pageTitle(page).toLowerCase().includes(q))
+  }, [pages, excludeId, query])
 
   return (
     <Modal title="Link a page" onClose={onClose}>
@@ -35,19 +36,19 @@ export function PageLinkDialog({
         <CommandInput autoFocus placeholder="Search pages…" value={query} onValueChange={setQuery} />
         <CommandList className="max-h-[320px]">
           <CommandEmpty className="px-3 py-7 text-[13px] text-muted-foreground/70">No pages found</CommandEmpty>
-          {results.map((doc) => {
-            const parent = ancestorsOf(docs, doc.id).at(-1)
+          {results.map((page) => {
+            const parent = ancestorsOf(pages, page.id).at(-1)
             return (
               <CommandItem
-                key={doc.id}
-                value={doc.id}
+                key={page.id}
+                value={page.id}
                 className="gap-[9px] rounded-[7px] px-2.5 py-2 text-foreground"
-                onSelect={() => onPick(doc)}
+                onSelect={() => onPick(page)}
               >
-                <FileText className="size-4" />
+                {page.icon ? <Emoji value={page.icon} size={16} /> : <FileText className="size-4" />}
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate">{doc.title || 'Untitled'}</span>
-                  {parent ? <span className="truncate text-[11px] text-muted-foreground/70">{parent.title}</span> : null}
+                  <span className="truncate">{pageTitle(page)}</span>
+                  {parent ? <span className="truncate text-[11px] text-muted-foreground/70">{pageTitle(parent)}</span> : null}
                 </span>
               </CommandItem>
             )

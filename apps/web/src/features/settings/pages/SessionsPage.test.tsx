@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, waitFor } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
 import { sessionView } from '@/features/settings/api/sessions'
 import { SessionsPage } from './SessionsPage'
+import { waitForAbsence } from '@/test/waitForAbsence'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -62,6 +63,6 @@ test('sign out all sequences requests and reports and retries every partial fail
   expect(revoked).toEqual(['other-1', 'other-2'])
 
   fireEvent.click(view.getByRole('button', { name: 'Retry failed sessions' }))
-  await waitFor(() => expect(view.queryByRole('alert')).toBeNull())
+  await waitForAbsence(() => view.queryByRole('alert'))
   expect(revoked).toEqual(['other-1', 'other-2', 'other-1'])
 })

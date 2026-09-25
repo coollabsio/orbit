@@ -870,3 +870,55 @@ async fn identical_kind_policy_registration_is_idempotent() {
     store.register_kind(kind.clone()).unwrap();
     store.register_kind(kind).unwrap();
 }
+
+#[tokio::test]
+async fn graceful_shutdown_requeues_without_spending_attempts() {
+    let (database, store) = store().await;
+    let kind = JobKind::new("interruptible").with_retry_policy(2, vec![Duration::ZERO]);
+    let id = JobQueue::new(store.clone())
+        .enqueue(Job::new(
+            kind.clone(),
+            json!({}),
+            TimestampMillis::from_millis(0),
+        ))
+        .await
+        .unwrap();
+    // More shutdowns than the job has attempts: none of them may count.
+    for _ in 0..4 {
+        let started = Arc::new(Notify::new());
+        let handler_started = started.clone();
+        let worker = Worker::new(
+            store.clone(),
+            WorkerConfig::new(1)
+                .unwrap()
+                .with_poll_interval(Duration::from_millis(5)),
+        )
+        .with_handler(kind.clone(), move |context| {
+            let started = handler_started.clone();
+            async move {
+                started.notify_one();
+                context.cancelled().await;
+                Err(JobError::Retryable("interrupted by shutdown".to_owned()))
+            }
+        })
+        .unwrap();
+        let shutdown = CancellationToken::new();
+        let task = tokio::spawn(worker.run(shutdown.clone()));
+        tokio::time::timeout(Duration::from_secs(2), started.notified())
+            .await
+            .expect("handler starts");
+        shutdown.cancel();
+        task.await.unwrap().unwrap();
+
+        let stored = store.get(id).await.unwrap().unwrap();
+        assert_eq!(stored.state, JobState::Queued);
+        assert_eq!(stored.attempt_count, 0);
+        let attempts: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM job_attempts WHERE job_id = ?")
+                .bind(id.to_string())
+                .fetch_one(database.pool())
+                .await
+                .unwrap();
+        assert_eq!(attempts, 0);
+    }
+}

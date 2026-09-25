@@ -4,14 +4,15 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Separator } from '@/components/ui/separator'
+import { docsHidden } from './productNavigation'
 
 const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
   { to: '/', label: 'Home', icon: Home, enabled: false },
-  { to: '/docs', label: 'Docs', icon: FileText, enabled: false },
+  { to: '/docs', label: 'Docs', icon: FileText, enabled: true },
   { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
-]
+].filter((link) => !(docsHidden && link.to === '/docs'))
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
 export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {

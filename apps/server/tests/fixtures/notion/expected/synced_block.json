@@ -1,0 +1,60 @@
+{
+  "content": [
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "⭐ ",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": "Callout in synced block",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "backgroundColor": "default",
+        "textColor": "default"
+      },
+      "type": "quote"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "⭐ ",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": "Callout in synced block",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000002",
+      "props": {
+        "backgroundColor": "default",
+        "textColor": "default"
+      },
+      "type": "quote"
+    }
+  ],
+  "cover": null,
+  "icon": null,
+  "report": {
+    "lossy": {
+      "callout": 2
+    },
+    "missing_files": 0,
+    "skipped": {
+      "synced_block_unavailable": 1
+    },
+    "truncated_blocks": 0,
+    "unresolved_page_links": 0
+  },
+  "title": "Synced"
+}

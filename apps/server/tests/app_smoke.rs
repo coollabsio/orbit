@@ -192,7 +192,7 @@ async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
             .scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        21
+        26
     );
 
     let readiness = app
@@ -453,7 +453,10 @@ async fn critical_durable_schedules_exist_before_serve() {
         .await
         .unwrap();
 
-    assert_eq!(kinds, ["integrity.weekly", "workspace.retention"]);
+    assert_eq!(
+        kinds,
+        ["integrity.weekly", "notion.cleanup", "workspace.retention"]
+    );
     assert!(app.production_services_ready());
 }
 

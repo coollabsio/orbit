@@ -68,7 +68,7 @@ test('name edits use the shared save popup and Reset restores the saved name', a
   await userEvent.clear(name)
   await userEvent.type(name, 'Ada Lovelace')
   expect(view.getByRole('button', { name: 'Save Changes' })).toBeTruthy()
-  expect(view.getByText('Careful — you have unsaved changes!')).toBeTruthy()
+  expect(view.getByText('You have unsaved changes.')).toBeTruthy()
   fireEvent.click(view.getByRole('button', { name: 'Reset' }))
   expect(name.value).toBe('Owner')
   expect(view.queryByRole('button', { name: 'Save Changes' })).toBeNull()

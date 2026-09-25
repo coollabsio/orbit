@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { ProjectGithubCard } from './ProjectGithubCard'
+import { waitForAbsence } from '@/test/waitForAbsence'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -75,7 +76,7 @@ test('choosing No repository disconnects a linked project', async () => {
   expect(save.hasAttribute('disabled')).toBe(false)
   fireEvent.click(save)
   await waitFor(() => expect(deleted).toBe(true))
-  await waitFor(() => expect(view.queryByRole('button', { name: 'Save Changes' })).toBeNull())
+  await waitForAbsence(() => view.queryByRole('button', { name: 'Save Changes' }))
 })
 
 test('Reset restores the saved repository and label without a request', async () => {

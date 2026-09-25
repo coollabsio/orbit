@@ -3577,7 +3577,11 @@ async fn marking_a_duplicate_audits_the_relation_it_replaces() {
     .await
     .unwrap();
     assert_eq!(removed.len(), 2, "both tasks record the removed blocker");
-    assert!(removed.iter().all(|metadata| metadata.contains(r#""type":"blocks""#)));
+    assert!(
+        removed
+            .iter()
+            .all(|metadata| metadata.contains(r#""type":"blocks""#))
+    );
 }
 
 #[tokio::test]

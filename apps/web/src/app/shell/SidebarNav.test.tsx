@@ -59,3 +59,21 @@ test('settings pages are not duplicated in the main sidebar', () => {
   expect(view.queryByRole('link', { name: 'Members' })).toBeNull()
   expect(view.queryByRole('link', { name: 'Sessions' })).toBeNull()
 })
+
+test('docs are enabled in the sidebar and highlight on page routes', () => {
+  const view = render(
+    <MemoryRouter initialEntries={['/tasks']}>
+      <SidebarNav />
+      <Location />
+    </MemoryRouter>,
+  )
+
+  const docs = view.getByRole('link', { name: 'Docs' })
+  expect(docs.textContent).not.toContain('Coming soon')
+  fireEvent.click(docs)
+  expect(view.getByTestId('location').textContent).toBe('/docs')
+  expect(view.getByRole('link', { name: 'Docs' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  for (const label of ['Mail', 'Chat']) {
+    expect(view.queryByRole('link', { name: label })).toBeNull()
+  }
+})

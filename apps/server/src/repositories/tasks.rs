@@ -2497,14 +2497,14 @@ fn priority_rank(priority: &str) -> i64 {
     }
 }
 
-fn escape_like(value: &str) -> String {
+pub(super) fn escape_like(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_")
 }
 
-async fn require_access(
+pub(super) async fn require_access(
     pool: &sqlx::SqlitePool,
     workspace_id: Id,
     actor_id: Id,

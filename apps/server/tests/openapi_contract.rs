@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 65);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 82);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 88);
+    assert_eq!(operation_count, 112);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -58,6 +58,23 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/github",
         "/api/v1/workspaces/{workspace_id}/github/manifest",
         "/api/v1/workspaces/{workspace_id}/projects/{project_id}/github",
+        "/api/v1/workspaces/{workspace_id}/pages",
+        "/api/v1/workspaces/{workspace_id}/pages/trash",
+        "/api/v1/workspaces/{workspace_id}/pages/search",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/move",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/restore",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/favorite",
+        "/api/v1/workspaces/{workspace_id}/pages/favorites",
+        "/api/v1/workspaces/{workspace_id}/pages/favorites/{page_id}/move",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files/{file_id}",
+        "/api/v1/workspaces/{workspace_id}/teamspaces",
+        "/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}",
+        "/api/v1/workspaces/{workspace_id}/imports/notion",
+        "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}",
+        "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}/start",
+        "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}/cancel",
     ] {
         assert!(document["paths"].get(path).is_some(), "missing {path}");
     }
@@ -279,6 +296,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         [
             "application/octet-stream",
             "application/pdf",
+            "image/avif",
             "image/gif",
             "image/jpeg",
             "image/png",
@@ -571,4 +589,223 @@ fn task_relation_routes_are_documented() {
         schemas["RelatedTask"]["required"],
         serde_json::json!(["id", "project_id", "title", "status_id"])
     );
+}
+
+#[test]
+fn teamspace_routes_and_page_space_fields_are_documented() {
+    let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let path = "/api/v1/workspaces/{workspace_id}/teamspaces";
+    let item = format!("{path}/{{teamspace_id}}");
+    assert_eq!(
+        operation(&document, path, "get")["operationId"],
+        "list_teamspaces"
+    );
+    assert_eq!(
+        operation(&document, path, "post")["operationId"],
+        "create_teamspace"
+    );
+    assert_eq!(
+        operation(&document, &item, "patch")["operationId"],
+        "update_teamspace"
+    );
+    let delete = operation(&document, &item, "delete");
+    assert_eq!(delete["operationId"], "delete_teamspace");
+    for (status, code) in [
+        ("403", "workspace_action_forbidden"),
+        ("409", "teamspace_not_empty"),
+        ("422", "last_teamspace"),
+    ] {
+        assert!(
+            delete["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{status} {code}"
+        );
+    }
+    let schemas = &document["components"]["schemas"];
+    assert!(
+        schemas["Teamspace"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("is_default"))
+    );
+    for schema in ["Page", "PageSummary", "TrashedPage", "PageSearchResult"] {
+        let required = schemas[schema]["required"].as_array().unwrap();
+        for field in ["teamspace_id", "private"] {
+            assert!(
+                required.contains(&serde_json::json!(field)),
+                "{schema}.{field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn page_favorite_routes_are_documented() {
+    let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let pages = "/api/v1/workspaces/{workspace_id}/pages";
+    let list = operation(&document, &format!("{pages}/favorites"), "get");
+    assert_eq!(list["operationId"], "list_page_favorites");
+    assert_eq!(
+        list["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageFavoriteList"
+    );
+    let favorite = format!("{pages}/{{page_id}}/favorite");
+    let add = operation(&document, &favorite, "put");
+    assert_eq!(add["operationId"], "add_page_favorite");
+    assert_eq!(
+        add["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageFavorite"
+    );
+    let remove = operation(&document, &favorite, "delete");
+    assert_eq!(remove["operationId"], "remove_page_favorite");
+    assert!(remove["responses"].get("204").is_some());
+    let reorder = operation(
+        &document,
+        &format!("{pages}/favorites/{{page_id}}/move"),
+        "post",
+    );
+    assert_eq!(reorder["operationId"], "move_page_favorite");
+    for (status, code) in [
+        ("404", "page_not_found"),
+        ("422", "validation_failed"),
+        ("400", "invalid_request"),
+    ] {
+        assert!(
+            reorder["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{status} {code}"
+        );
+    }
+    for operation_json in [add, remove] {
+        assert!(
+            operation_json["responses"]["404"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("page_not_found")
+        );
+    }
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["PageFavorite"]["required"],
+        serde_json::json!(["page_id", "position"])
+    );
+}
+
+#[test]
+fn page_file_routes_are_documented() {
+    let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let files = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files";
+    let upload = operation(&document, files, "post");
+    assert_eq!(upload["operationId"], "upload_page_file");
+    assert_eq!(
+        upload["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"],
+        "#/components/schemas/PageFileUploadBody"
+    );
+    assert_eq!(
+        upload["responses"]["201"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageFile"
+    );
+    for (status, code) in [
+        ("400", "invalid_multipart"),
+        ("404", "page_file_not_found"),
+        ("413", "upload_too_large"),
+        ("422", "validation_failed"),
+        ("401", "authentication_required"),
+        ("403", "origin_forbidden"),
+    ] {
+        assert!(
+            upload["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{status} {code}"
+        );
+    }
+    let download = operation(&document, &format!("{files}/{{file_id}}"), "get");
+    assert_eq!(download["operationId"], "download_page_file");
+    let content = download["responses"]["200"]["content"].as_object().unwrap();
+    assert_eq!(
+        content["image/png"]["schema"]["$ref"],
+        "#/components/schemas/PageFileDownload"
+    );
+    assert!(content.contains_key("image/avif"));
+    assert_eq!(
+        document["components"]["schemas"]["PageFile"]["required"],
+        serde_json::json!([
+            "id",
+            "page_id",
+            "url",
+            "file_name",
+            "mime_type",
+            "size_bytes",
+            "created_at"
+        ])
+    );
+}
+
+#[test]
+fn notion_import_routes_are_documented() {
+    let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let base = "/api/v1/workspaces/{workspace_id}/imports/notion";
+    let create = operation(&document, base, "post");
+    assert_eq!(create["operationId"], "create_notion_import");
+    assert_eq!(
+        create["responses"]["201"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/NotionImport"
+    );
+    for (status, code) in [
+        ("409", "app_key_missing"),
+        ("409", "import_in_progress"),
+        ("422", "notion_token_invalid"),
+        ("502", "notion_unavailable"),
+        ("404", "notion_import_not_found"),
+        ("403", "origin_forbidden"),
+    ] {
+        assert!(
+            create["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{status} {code}"
+        );
+    }
+    assert_eq!(
+        operation(&document, base, "get")["operationId"],
+        "list_notion_imports"
+    );
+    let detail = format!("{base}/{{import_id}}");
+    assert_eq!(
+        operation(&document, &detail, "get")["operationId"],
+        "get_notion_import"
+    );
+    let start = operation(&document, &format!("{detail}/start"), "post");
+    assert_eq!(start["operationId"], "start_notion_import");
+    assert!(
+        start["responses"]["409"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("notion_import_state_conflict")
+    );
+    assert_eq!(
+        operation(&document, &format!("{detail}/cancel"), "post")["operationId"],
+        "cancel_notion_import"
+    );
+    let schema = &document["components"]["schemas"]["NotionImport"];
+    let properties = schema["properties"].as_object().unwrap();
+    assert!(!properties.contains_key("token"));
+    assert!(!properties.contains_key("token_ciphertext"));
+    for field in [
+        "status",
+        "progress",
+        "tree",
+        "report",
+        "destination",
+        "root_page_ids",
+    ] {
+        assert!(properties.contains_key(field), "{field}");
+    }
 }

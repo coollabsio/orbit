@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
+use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditOutcome};
 
 #[derive(Clone)]
@@ -415,6 +416,9 @@ impl IdentityRepository {
             .await
             .map_err(SetupError::Unavailable)?;
         }
+        insert_default_teamspace(&mut transaction, defaults.workspace.id, user_id, now)
+            .await
+            .map_err(SetupError::Unavailable)?;
         let session = insert_session(&mut transaction, session_id, &session_token, user_id, now)
             .await
             .map_err(SetupError::Unavailable)?;

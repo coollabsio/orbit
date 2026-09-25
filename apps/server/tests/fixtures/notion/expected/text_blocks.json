@@ -1,0 +1,264 @@
+{
+  "content": [
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Lacinato kale is a variety of kale.",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [],
+      "id": "00000000-0000-4000-8000-000000000002",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Heading one",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000003",
+      "props": {
+        "backgroundColor": "default",
+        "isToggleable": false,
+        "level": 1,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {
+            "textColor": "green"
+          },
+          "text": "Lacinato kale",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000004",
+      "props": {
+        "backgroundColor": "default",
+        "isToggleable": false,
+        "level": 2,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "content": [
+            {
+              "styles": {},
+              "text": "Hidden under the heading",
+              "type": "text"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000005",
+          "props": {
+            "backgroundColor": "default",
+            "textAlignment": "left",
+            "textColor": "default"
+          },
+          "type": "paragraph"
+        }
+      ],
+      "content": [
+        {
+          "styles": {},
+          "text": "Toggle heading",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000006",
+      "props": {
+        "backgroundColor": "blue",
+        "isToggleable": true,
+        "level": 3,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Heading four",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000007",
+      "props": {
+        "backgroundColor": "default",
+        "isToggleable": false,
+        "level": 4,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "content": [
+            {
+              "styles": {},
+              "text": "— Shakespeare",
+              "type": "text"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000008",
+          "props": {
+            "backgroundColor": "default",
+            "textAlignment": "left",
+            "textColor": "default"
+          },
+          "type": "paragraph"
+        }
+      ],
+      "content": [
+        {
+          "styles": {},
+          "text": "To be or not to be...",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000009",
+      "props": {
+        "backgroundColor": "default",
+        "textColor": "gray"
+      },
+      "type": "quote"
+    },
+    {
+      "children": [],
+      "id": "00000000-0000-4000-8000-000000000010",
+      "props": {},
+      "type": "divider"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "const a = 3\nconsole.log(a)",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000011",
+      "props": {
+        "language": "javascript"
+      },
+      "type": "codeBlock"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Example",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000012",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "int main() {}",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000013",
+      "props": {
+        "language": "cpp"
+      },
+      "type": "codeBlock"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {
+            "code": true
+          },
+          "text": "e=mc^2",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000014",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "centered? no, colored",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000015",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "red"
+      },
+      "type": "paragraph"
+    }
+  ],
+  "cover": null,
+  "icon": "🥬",
+  "report": {
+    "lossy": {
+      "code_caption": 1,
+      "equation": 1
+    },
+    "missing_files": 0,
+    "skipped": {},
+    "truncated_blocks": 0,
+    "unresolved_page_links": 0
+  },
+  "title": "Text blocks"
+}

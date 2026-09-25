@@ -7,6 +7,7 @@ import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { statusGroups, type StatusGroup } from '@/features/tasks/tasksLib'
 import { TaskBoard } from './TaskBoard'
+import { waitForAbsence } from '@/test/waitForAbsence'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -100,7 +101,7 @@ test('dropping a card on the Duplicate column opens the picker; cancelling leave
 
   const picker = await view.findByRole('dialog', { name: 'Mark ORB-0 as duplicate of…' })
   fireEvent.keyDown(within(picker).getByPlaceholderText('Search tasks…'), { key: 'Escape' })
-  await waitFor(() => expect(view.queryByRole('dialog')).toBeNull())
+  await waitForAbsence(() => view.queryByRole('dialog'))
   expect(writes).toEqual([])
   expect(view.getByText('Todo').closest('section')!.contains(view.getByRole('heading', { name: 'Moving' }))).toBe(true)
 })

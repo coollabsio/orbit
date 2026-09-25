@@ -107,6 +107,30 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::attachment_routes::delete_comment_attachment,
         crate::attachment_routes::download_task_attachment,
         crate::attachment_routes::download_comment_attachment,
+        crate::page_routes::list_pages,
+        crate::page_routes::create_page,
+        crate::page_routes::get_page,
+        crate::page_routes::update_page,
+        crate::page_routes::move_page,
+        crate::page_routes::delete_page,
+        crate::page_routes::restore_page,
+        crate::page_routes::list_page_trash,
+        crate::page_routes::search_pages,
+        crate::page_routes::list_page_favorites,
+        crate::page_routes::add_page_favorite,
+        crate::page_routes::remove_page_favorite,
+        crate::page_routes::move_page_favorite,
+        crate::page_file_routes::upload_page_file,
+        crate::page_file_routes::download_page_file,
+        crate::teamspace_routes::list_teamspaces,
+        crate::teamspace_routes::create_teamspace,
+        crate::teamspace_routes::update_teamspace,
+        crate::teamspace_routes::delete_teamspace,
+        crate::import_routes::create_notion_import,
+        crate::import_routes::list_notion_imports,
+        crate::import_routes::get_notion_import,
+        crate::import_routes::start_notion_import,
+        crate::import_routes::cancel_notion_import,
     )
 )]
 struct ApiDocument;
@@ -197,7 +221,13 @@ fn problem_schema(route: &str) -> &'static str {
         "TaskProblem"
     } else if route.contains("/attachments") {
         "AttachmentProblem"
-    } else if route.contains("/tasks") || route.contains("/projects") || route.contains("/labels") {
+    } else if route.contains("/tasks")
+        || route.contains("/projects")
+        || route.contains("/labels")
+        || route.contains("/pages")
+        || route.contains("/teamspaces")
+        || route.contains("/imports/")
+    {
         "TaskProblem"
     } else if route.starts_with("/api/v1/auth") || route.starts_with("/api/v1/setup") {
         "AuthProblem"
@@ -356,7 +386,17 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if attachment_operation(id) => {
             add_code(&mut responses, "404", "attachment_not_found");
         }
+        "upload_page_file" => {
+            add_code(&mut responses, "400", "invalid_multipart");
+            add_code(&mut responses, "404", "page_file_not_found");
+            add_code(&mut responses, "413", "upload_too_large");
+            add_code(&mut responses, "422", "validation_failed");
+        }
+        "download_page_file" => add_code(&mut responses, "404", "page_file_not_found"),
+        id if notion_import_operation(id) => notion_import_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
+        id if page_operation(id) => page_errors(id, &mut responses),
+        id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         _ => {}
     }
 
@@ -381,7 +421,10 @@ fn unsafe_operation(operation_id: &str) -> bool {
     !(operation_id.starts_with("list_")
         || operation_id.starts_with("get_")
         || operation_id.starts_with("download_")
-        || matches!(operation_id, "me" | "setup_status" | "export_global_audit"))
+        || matches!(
+            operation_id,
+            "me" | "setup_status" | "export_global_audit" | "search_pages"
+        ))
 }
 
 fn invalid_request_operation(operation_id: &str) -> bool {
@@ -443,7 +486,55 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "delete_comment"
             | "list_task_attachments"
             | "list_comment_attachments"
+            | "create_page"
+            | "update_page"
+            | "move_page"
+            | "delete_page"
+            | "restore_page"
+            | "search_pages"
+            | "move_page_favorite"
+            | "create_teamspace"
+            | "update_teamspace"
+            | "delete_teamspace"
+            | "create_notion_import"
+            | "start_notion_import"
     )
+}
+
+fn notion_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_notion_import"
+            | "list_notion_imports"
+            | "get_notion_import"
+            | "start_notion_import"
+            | "cancel_notion_import"
+    )
+}
+
+fn notion_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "notion_import_not_found");
+    match operation_id {
+        "create_notion_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "notion_token_invalid");
+            add_code(responses, "502", "notion_unavailable");
+        }
+        "start_notion_import" => {
+            add_code(responses, "404", "page_not_found");
+            add_code(responses, "404", "teamspace_not_found");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "notion_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+            add_code(responses, "422", "notion_import_too_large");
+        }
+        "cancel_notion_import" => add_code(responses, "409", "notion_import_state_conflict"),
+        _ => {}
+    }
 }
 
 fn workspace_resource_errors(responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
@@ -584,18 +675,78 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     }
 }
 
-fn add_download_media_types(operation_id: &str, operation: &mut utoipa::openapi::path::Operation) {
-    if !matches!(
+fn page_operation(operation_id: &str) -> bool {
+    matches!(
         operation_id,
-        "download_task_attachment" | "download_comment_attachment"
-    ) {
-        return;
+        "list_pages"
+            | "create_page"
+            | "get_page"
+            | "update_page"
+            | "move_page"
+            | "delete_page"
+            | "restore_page"
+            | "list_page_trash"
+            | "search_pages"
+            | "list_page_favorites"
+            | "add_page_favorite"
+            | "remove_page_favorite"
+            | "move_page_favorite"
+    )
+}
+
+fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "page_not_found");
+    if matches!(operation_id, "create_page" | "move_page") {
+        add_code(responses, "404", "teamspace_not_found");
     }
+    if matches!(
+        operation_id,
+        "create_page" | "update_page" | "move_page" | "search_pages" | "move_page_favorite"
+    ) {
+        add_code(responses, "422", "validation_failed");
+    }
+    if matches!(
+        operation_id,
+        "update_page" | "move_page" | "delete_page" | "restore_page"
+    ) {
+        add_code(responses, "409", "conflict");
+    }
+}
+
+fn teamspace_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "list_teamspaces" | "create_teamspace" | "update_teamspace" | "delete_teamspace"
+    )
+}
+
+fn teamspace_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "teamspace_not_found");
+    if matches!(operation_id, "create_teamspace" | "update_teamspace") {
+        add_code(responses, "422", "validation_failed");
+    }
+    if matches!(operation_id, "update_teamspace" | "delete_teamspace") {
+        add_code(responses, "409", "conflict");
+    }
+    if operation_id == "delete_teamspace" {
+        add_code(responses, "403", "workspace_action_forbidden");
+        add_code(responses, "409", "teamspace_not_empty");
+        add_code(responses, "422", "last_teamspace");
+    }
+}
+
+fn add_download_media_types(operation_id: &str, operation: &mut utoipa::openapi::path::Operation) {
+    let schema = match operation_id {
+        "download_task_attachment" | "download_comment_attachment" => "AttachmentDownload",
+        "download_page_file" => "PageFileDownload",
+        _ => return,
+    };
     let Some(RefOr::T(response)) = operation.responses.responses.get_mut("200") else {
         return;
     };
     for media_type in [
         "application/pdf",
+        "image/avif",
         "image/gif",
         "image/jpeg",
         "image/png",
@@ -605,7 +756,7 @@ fn add_download_media_types(operation_id: &str, operation: &mut utoipa::openapi:
     ] {
         response.content.insert(
             media_type.to_owned(),
-            Content::new(Some(Ref::from_schema_name("AttachmentDownload"))),
+            Content::new(Some(Ref::from_schema_name(schema))),
         );
     }
 }

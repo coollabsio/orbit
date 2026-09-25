@@ -1,0 +1,135 @@
+{
+  "content": [
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Plan",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "backgroundColor": "default",
+        "isToggleable": false,
+        "level": 1,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "content": [
+                        {
+                          "styles": {},
+                          "text": "SELECT 1;",
+                          "type": "text"
+                        }
+                      ],
+                      "id": "00000000-0000-4000-8000-000000000002",
+                      "props": {
+                        "language": "sql"
+                      },
+                      "type": "codeBlock"
+                    }
+                  ],
+                  "content": [
+                    {
+                      "styles": {},
+                      "text": "Level 4 quote",
+                      "type": "text"
+                    }
+                  ],
+                  "id": "00000000-0000-4000-8000-000000000003",
+                  "props": {
+                    "backgroundColor": "default",
+                    "textColor": "default"
+                  },
+                  "type": "quote"
+                }
+              ],
+              "content": [
+                {
+                  "styles": {},
+                  "text": "Level 3",
+                  "type": "text"
+                }
+              ],
+              "id": "00000000-0000-4000-8000-000000000004",
+              "props": {
+                "backgroundColor": "default",
+                "checked": true,
+                "textAlignment": "left",
+                "textColor": "default"
+              },
+              "type": "checkListItem"
+            }
+          ],
+          "content": [
+            {
+              "styles": {},
+              "text": "Level 2",
+              "type": "text"
+            }
+          ],
+          "id": "00000000-0000-4000-8000-000000000005",
+          "props": {
+            "backgroundColor": "default",
+            "textAlignment": "left",
+            "textColor": "default"
+          },
+          "type": "bulletListItem"
+        }
+      ],
+      "content": [
+        {
+          "styles": {},
+          "text": "Level 1",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000006",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "toggleListItem"
+    },
+    {
+      "children": [],
+      "id": "00000000-0000-4000-8000-000000000007",
+      "props": {
+        "pageId": "01900000-0000-7000-8000-000000000002"
+      },
+      "type": "page"
+    }
+  ],
+  "cover": {
+    "expiry_time": "2025-04-24T22:49:22.765Z",
+    "name": null,
+    "owner_id": "20000000-0000-4000-8000-000000000012",
+    "source": "cover",
+    "type": "file",
+    "url": "https://prod-files-secure.s3.us-west-2.amazonaws.com/ws/cover/cover.png?X-Amz-Signature=c"
+  },
+  "icon": "🐞",
+  "report": {
+    "lossy": {},
+    "missing_files": 0,
+    "skipped": {},
+    "truncated_blocks": 0,
+    "unresolved_page_links": 0
+  },
+  "title": "Nested page"
+}

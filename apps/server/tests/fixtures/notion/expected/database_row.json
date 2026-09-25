@@ -1,0 +1,1169 @@
+{
+  "content": [
+    {
+      "children": [],
+      "content": {
+        "columnWidths": [
+          null,
+          null
+        ],
+        "headerCols": 1,
+        "rows": [
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Name",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Launch checklist",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Attachments",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Project brief.pdf, Resume.pdf",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Blocked",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "No",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Contact email",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "content": [
+                      {
+                        "styles": {},
+                        "text": "alex@example.com",
+                        "type": "text"
+                      }
+                    ],
+                    "href": "mailto:alex@example.com",
+                    "type": "link"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Contact phone",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "+1 415 555 0123",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Created by",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Ada Lovelace",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Created time",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "2026-09-01 09:00 UTC",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Done",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Yes",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Double estimate",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "16",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Due date",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "2026-09-15 → 2026-09-18",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Estimate",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Estimates",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "8",
+                    "type": "text"
+                  },
+                  {
+                    "styles": {},
+                    "text": ", ",
+                    "type": "text"
+                  },
+                  {
+                    "styles": {},
+                    "text": "5",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Label",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Ready",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Last edited by",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Unknown user",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Last edited time",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "2026-09-04 14:30 UTC",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Meeting",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "2026-09-15 09:00 (America/Los_Angeles)",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Office",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "San Francisco",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Owner",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Ada Lovelace, Grace Hopper",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Priority",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "High",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Project link",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "content": [
+                      {
+                        "styles": {},
+                        "text": "https://example.com/projects/launch",
+                        "type": "text"
+                      }
+                    ],
+                    "href": "https://example.com/projects/launch",
+                    "type": "link"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Projects",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "content": [
+                      {
+                        "styles": {},
+                        "text": "Launch project",
+                        "type": "text"
+                      }
+                    ],
+                    "href": "/docs/01900000-0000-7000-8000-000000000004",
+                    "type": "link"
+                  },
+                  {
+                    "styles": {},
+                    "text": ", +1 linked page",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Ratio",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "0.25",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Status",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "In progress",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Summary",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Ship ",
+                    "type": "text"
+                  },
+                  {
+                    "styles": {
+                      "bold": true
+                    },
+                    "text": "v1",
+                    "type": "text"
+                  },
+                  {
+                    "content": [
+                      {
+                        "styles": {},
+                        "text": " docs",
+                        "type": "text"
+                      }
+                    ],
+                    "href": "https://example.com/docs",
+                    "type": "link"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Tags",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Backend, Import",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Task ID",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "TASK-42",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Total estimate",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "Verification",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              },
+              {
+                "content": [
+                  {
+                    "styles": {},
+                    "text": "verified until 2026-10-01 09:00 UTC",
+                    "type": "text"
+                  }
+                ],
+                "props": {
+                  "backgroundColor": "default",
+                  "colspan": 1,
+                  "rowspan": 1,
+                  "textAlignment": "left",
+                  "textColor": "default"
+                },
+                "type": "tableCell"
+              }
+            ]
+          }
+        ],
+        "type": "tableContent"
+      },
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "textColor": "default"
+      },
+      "type": "table"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Row body text",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000002",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    }
+  ],
+  "cover": {
+    "type": "external",
+    "url": "https://example.com/cover.png"
+  },
+  "icon": null,
+  "report": {
+    "lossy": {
+      "property:future_property": 1
+    },
+    "missing_files": 0,
+    "skipped": {},
+    "truncated_blocks": 0,
+    "unresolved_page_links": 1
+  },
+  "title": "Launch checklist"
+}

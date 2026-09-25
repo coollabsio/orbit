@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        21
+        26
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 21
+            binary_version: 26
         }
     ));
 }
@@ -613,5 +613,473 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
     assert!(
         chained.contains("duplicate relations cannot chain"),
         "{chained}"
+    );
+}
+
+#[tokio::test]
+async fn pages_migration_scopes_parents_to_their_workspace() {
+    // Pinned to 0022: later migrations add space columns every page insert must set.
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 22)
+        .run(&db)
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>(
+            "SELECT COUNT(*) FROM pragma_table_info('pages') WHERE name IN \
+             ('content_json', 'content_text', 'cover_position', 'updated_by', 'trashed_with')"
+        )
+        .await
+        .unwrap(),
+        5
+    );
+    let [
+        user,
+        first,
+        second,
+        first_owner,
+        second_owner,
+        root,
+        foreign,
+    ]: [Id; 7] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{first}', 'First', 0, '{first_owner}', 1, 1),
+                ('{second}', 'Second', 0, '{second_owner}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{first_owner}', '{first}', '{user}', 'owner', 0, 1, 1),
+                ('{second_owner}', '{second}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO pages (id, workspace_id, creator_id, updated_by, created_at, updated_at)
+         VALUES ('{root}', '{first}', '{user}', '{user}', 1, 1),
+                ('{foreign}', '{second}', '{user}', '{user}', 1, 1);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    let cross_insert = db
+        .execute(&format!(
+            "INSERT INTO pages (id, workspace_id, parent_id, creator_id, updated_by, created_at, updated_at) \
+             VALUES ('{}', '{second}', '{root}', '{user}', '{user}', 1, 1)",
+            Id::new_v7()
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        cross_insert.contains("page parent must belong to the workspace"),
+        "{cross_insert}"
+    );
+    let cross_move = db
+        .execute(&format!(
+            "UPDATE pages SET parent_id = '{root}' WHERE id = '{foreign}'"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        cross_move.contains("page parent must belong to the workspace"),
+        "{cross_move}"
+    );
+    let moved = db
+        .execute(&format!(
+            "UPDATE pages SET workspace_id = '{second}' WHERE id = '{root}'"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(moved.contains("page workspace is immutable"), "{moved}");
+}
+
+#[tokio::test]
+async fn page_spaces_migration_backfills_a_general_teamspace_per_workspace() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 22)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        first,
+        second,
+        first_owner,
+        second_owner,
+        root,
+        child,
+        trashed,
+        foreign,
+    ]: [Id; 9] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, deleted_at)
+         VALUES ('{first}', 'First', 0, '{first_owner}', 1, 1, NULL),
+                ('{second}', 'Second', 0, '{second_owner}', 1, 1, 5);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{first_owner}', '{first}', '{user}', 'owner', 0, 1, 1),
+                ('{second_owner}', '{second}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO pages (id, workspace_id, parent_id, creator_id, updated_by, created_at, updated_at, deleted_at, trashed_with)
+         VALUES ('{root}', '{first}', NULL, '{user}', '{user}', 1, 1, NULL, NULL),
+                ('{child}', '{first}', '{root}', '{user}', '{user}', 1, 1, NULL, NULL),
+                ('{trashed}', '{first}', NULL, '{user}', '{user}', 1, 1, 9, '{trashed}'),
+                ('{foreign}', '{second}', NULL, '{user}', '{user}', 1, 1, NULL, NULL);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+    let teamspaces: Vec<(String, String, String, i64, i64, Option<String>)> = sqlx::query_as(
+        "SELECT id, workspace_id, name, position, version, created_by FROM teamspaces \
+         ORDER BY workspace_id = ? DESC",
+    )
+    .bind(first.to_string())
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(teamspaces.len(), 2, "trashed workspaces get one too");
+    for (teamspace, workspace) in teamspaces.iter().zip([first, second]) {
+        assert!(
+            teamspace.0.parse::<Id>().is_ok(),
+            "backfilled id {} must be a canonical UUIDv7",
+            teamspace.0
+        );
+        assert_eq!(teamspace.1, workspace.to_string());
+        assert_eq!(
+            (teamspace.2.as_str(), teamspace.3, teamspace.4),
+            ("General", 0, 0)
+        );
+        assert_eq!(teamspace.5.as_deref(), Some(user.to_string().as_str()));
+    }
+    let general = teamspaces[0].0.clone();
+    let foreign_general = teamspaces[1].0.clone();
+    let pages: Vec<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT id, teamspace_id, owner_id FROM pages ORDER BY id")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(pages.len(), 4);
+    for (id, teamspace_id, owner_id) in &pages {
+        let expected = if *id == foreign.to_string() {
+            &foreign_general
+        } else {
+            &general
+        };
+        assert_eq!(teamspace_id.as_ref(), Some(expected), "{id}");
+        assert_eq!(owner_id, &None);
+    }
+
+    let insert = |parent: Option<Id>, teamspace: Option<&str>, owner: Option<Id>| {
+        let quote = |value: Option<String>| value.map_or("NULL".to_owned(), |v| format!("'{v}'"));
+        format!(
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, creator_id, updated_by, created_at, updated_at) \
+             VALUES ('{}', '{first}', {}, {}, {}, '{user}', '{user}', 1, 1)",
+            Id::new_v7(),
+            quote(parent.map(|id| id.to_string())),
+            quote(teamspace.map(str::to_owned)),
+            quote(owner.map(|id| id.to_string())),
+        )
+    };
+    for (sql, message) in [
+        (
+            insert(None, None, None),
+            "page must belong to exactly one space",
+        ),
+        (
+            insert(None, Some(&general), Some(user)),
+            "page must belong to exactly one space",
+        ),
+        (
+            insert(None, Some(&foreign_general), None),
+            "page teamspace must belong to the workspace",
+        ),
+        (
+            insert(Some(root), None, Some(user)),
+            "page must share its parent's space",
+        ),
+        (
+            format!(
+                "UPDATE pages SET teamspace_id = NULL, owner_id = '{user}' WHERE id = '{child}'"
+            ),
+            "page must share its parent's space",
+        ),
+        (
+            format!("UPDATE pages SET owner_id = '{user}' WHERE id = '{root}'"),
+            "page must belong to exactly one space",
+        ),
+        (
+            format!("UPDATE teamspaces SET workspace_id = '{second}' WHERE id = '{general}'"),
+            "teamspace workspace is immutable",
+        ),
+    ] {
+        let error = db.execute(&sql).await.unwrap_err().to_string();
+        assert!(error.contains(message), "{sql}: {error}");
+    }
+    db.execute(&insert(None, None, Some(user))).await.unwrap();
+
+    // Deleting a teamspace cascades to its pages, even a trashed parent with its child: the
+    // parent_id SET NULL on the child must not trip the space triggers.
+    db.execute(&format!(
+        "UPDATE pages SET deleted_at = 10, trashed_with = '{root}' WHERE id IN ('{root}', '{child}')"
+    ))
+    .await
+    .unwrap();
+    db.execute(&format!("DELETE FROM teamspaces WHERE id = '{general}'"))
+        .await
+        .unwrap();
+    let remaining: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT workspace_id, owner_id FROM pages ORDER BY workspace_id = ? DESC")
+            .bind(first.to_string())
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        remaining,
+        [
+            (first.to_string(), Some(user.to_string())),
+            (second.to_string(), None),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn page_favorites_migration_scopes_rows_and_cascades() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 23)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        first,
+        second,
+        first_owner,
+        second_owner,
+        page,
+        other,
+        foreign,
+    ]: [Id; 8] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, deleted_at)
+         VALUES ('{first}', 'First', 0, '{first_owner}', 1, 1, NULL),
+                ('{second}', 'Second', 0, '{second_owner}', 1, 1, NULL);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{first_owner}', '{first}', '{user}', 'owner', 0, 1, 1),
+                ('{second_owner}', '{second}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO pages (id, workspace_id, parent_id, owner_id, creator_id, updated_by, created_at, updated_at)
+         VALUES ('{page}', '{first}', NULL, '{user}', '{user}', '{user}', 1, 1),
+                ('{other}', '{first}', NULL, '{user}', '{user}', '{user}', 1, 1),
+                ('{foreign}', '{second}', NULL, '{user}', '{user}', '{user}', 1, 1);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    let favorite = |workspace: Id, page: Id, position: i64| {
+        format!(
+            "INSERT INTO page_favorites (workspace_id, user_id, page_id, position, created_at) \
+             VALUES ('{workspace}', '{user}', '{page}', {position}, 1)"
+        )
+    };
+    db.execute(&favorite(first, page, 0)).await.unwrap();
+    db.execute(&favorite(first, other, 1)).await.unwrap();
+    db.execute(&favorite(second, foreign, 0)).await.unwrap();
+    for (sql, message) in [
+        (
+            favorite(second, page, 1),
+            "favorite page must belong to the workspace",
+        ),
+        (favorite(first, page, 2), "UNIQUE constraint failed"),
+        (favorite(first, foreign, 2), "favorite page must belong"),
+        (
+            format!("UPDATE page_favorites SET page_id = '{foreign}' WHERE page_id = '{other}'"),
+            "favorite identity is immutable",
+        ),
+        (
+            format!("UPDATE page_favorites SET position = -1 WHERE page_id = '{page}'"),
+            "CHECK constraint failed",
+        ),
+    ] {
+        let error = db.execute(&sql).await.unwrap_err().to_string();
+        assert!(error.contains(message), "{sql}: {error}");
+    }
+
+    // A hard-deleted page takes its favorites along; so does a deleted workspace.
+    db.execute(&format!("DELETE FROM pages WHERE id = '{page}'"))
+        .await
+        .unwrap();
+    db.execute(&format!("DELETE FROM workspaces WHERE id = '{second}'"))
+        .await
+        .unwrap();
+    let remaining: Vec<(String,)> = sqlx::query_as("SELECT page_id FROM page_favorites")
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(remaining, [(other.to_string(),)]);
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn page_files_migration_scopes_rows_and_releases_blobs() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 24)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        first,
+        second,
+        first_owner,
+        second_owner,
+        teamspace,
+        page,
+        private,
+        foreign,
+        blob,
+        foreign_blob,
+    ]: [Id; 11] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, deleted_at)
+         VALUES ('{first}', 'First', 0, '{first_owner}', 1, 1, NULL),
+                ('{second}', 'Second', 0, '{second_owner}', 1, 1, NULL);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{first_owner}', '{first}', '{user}', 'owner', 0, 1, 1),
+                ('{second_owner}', '{second}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO teamspaces (id, workspace_id, name, created_at, updated_at)
+         VALUES ('{teamspace}', '{first}', 'Team', 1, 1);
+         INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, creator_id, updated_by, created_at, updated_at)
+         VALUES ('{page}', '{first}', NULL, '{teamspace}', NULL, '{user}', '{user}', 1, 1),
+                ('{private}', '{first}', NULL, NULL, '{user}', '{user}', '{user}', 1, 1),
+                ('{foreign}', '{second}', NULL, NULL, '{user}', '{user}', '{user}', 1, 1);
+         INSERT INTO attachment_blobs (id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until)
+         VALUES ('{blob}', '{first}', 'a', 1, 'k1', 1, 0),
+                ('{foreign_blob}', '{second}', 'b', 1, 'k2', 1, 0);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    let file = |workspace: Id, page: Id, blob: Id, name: &str| {
+        format!(
+            "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
+             size_bytes, uploaded_by, created_at) \
+             VALUES ('{}', '{workspace}', '{page}', '{blob}', '{name}', 'image/png', 1, '{user}', 1)",
+            Id::new_v7()
+        )
+    };
+    db.execute(&file(first, page, blob, "a.png")).await.unwrap();
+    db.execute(&file(first, private, blob, "b.png"))
+        .await
+        .unwrap();
+    for (sql, message) in [
+        (
+            file(first, foreign, blob, "x.png"),
+            "page file scope mismatch",
+        ),
+        (
+            file(first, page, foreign_blob, "x.png"),
+            "page file scope mismatch",
+        ),
+        (file(first, page, blob, ""), "CHECK constraint failed"),
+        (
+            format!("UPDATE page_files SET page_id = '{private}' WHERE page_id = '{page}'"),
+            "page file scope is immutable",
+        ),
+        (
+            format!("DELETE FROM attachment_blobs WHERE id = '{blob}'"),
+            "FOREIGN KEY constraint failed",
+        ),
+    ] {
+        let error = db.execute(&sql).await.unwrap_err().to_string();
+        assert!(error.contains(message), "{sql}: {error}");
+    }
+
+    // A hard-deleted page takes its rows along and quarantines the blob for a day.
+    db.execute(&format!("DELETE FROM pages WHERE id = '{page}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM page_files")
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        db.scalar::<i64>(&format!(
+            "SELECT quarantine_until FROM attachment_blobs WHERE id = '{blob}'"
+        ))
+        .await
+        .unwrap()
+            > orbit_platform::TimestampMillis::now().as_millis() + 23 * 60 * 60 * 1_000
+    );
+    // The workspace cascade removes the rest; the blob is then deletable.
+    db.execute(&format!("DELETE FROM workspaces WHERE id = '{first}'"))
+        .await
+        .unwrap();
+    db.execute(&format!("DELETE FROM attachment_blobs WHERE id = '{blob}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM page_files")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
     );
 }

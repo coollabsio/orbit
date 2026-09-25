@@ -198,6 +198,31 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0021_task_relations.sql"),
                     true,
                 ),
+                Migration::new(
+                    22,
+                    include_str!("../../../../apps/server/migrations/0022_pages.sql"),
+                    false,
+                ),
+                Migration::new(
+                    23,
+                    include_str!("../../../../apps/server/migrations/0023_page_spaces.sql"),
+                    false,
+                ),
+                Migration::new(
+                    24,
+                    include_str!("../../../../apps/server/migrations/0024_page_favorites.sql"),
+                    false,
+                ),
+                Migration::new(
+                    25,
+                    include_str!("../../../../apps/server/migrations/0025_page_files.sql"),
+                    false,
+                ),
+                Migration::new(
+                    26,
+                    include_str!("../../../../apps/server/migrations/0026_notion_imports.sql"),
+                    false,
+                ),
             ],
         )
     }
