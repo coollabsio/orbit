@@ -162,25 +162,31 @@ export function useDeleteView(workspaceId: string) {
 }
 
 type ListSnapshot = { previous: SavedView[] | undefined }
+type FavoriteSnapshot = ListSnapshot & { previousView: SavedView | undefined }
 
 export function useSetFavorite(workspaceId: string) {
   const queryClient = useQueryClient()
   const listKey = queryKeys.views(workspaceId)
-  return useMutation<void, Error, { viewId: string; favorite: boolean }, ListSnapshot>({
+  return useMutation<void, Error, { viewId: string; favorite: boolean }, FavoriteSnapshot>({
     mutationFn: async ({ viewId, favorite }) => {
       const path = { workspace_id: workspaceId, view_id: viewId }
       if (favorite) await favoriteView({ client: apiClient, path, throwOnError: true })
       else await unfavoriteView({ client: apiClient, path, throwOnError: true })
     },
     onMutate: async ({ viewId, favorite }) => {
-      await queryClient.cancelQueries({ queryKey: listKey, exact: true })
+      const viewKey = queryKeys.view(workspaceId, viewId)
+      await Promise.all([queryClient.cancelQueries({ queryKey: listKey, exact: true }), queryClient.cancelQueries({ queryKey: viewKey })])
       const previous = queryClient.getQueryData<SavedView[]>(listKey)
+      const previousView = queryClient.getQueryData<SavedView>(viewKey)
       queryClient.setQueryData<SavedView[]>(listKey, (views) =>
         views?.map((view) => view.id === viewId ? { ...view, is_favorite: favorite } : view))
-      return { previous }
+      // the open view's header star reads the detail query
+      queryClient.setQueryData<SavedView>(viewKey, (view) => view && { ...view, is_favorite: favorite })
+      return { previous, previousView }
     },
-    onError: (_error, _input, snapshot) => {
+    onError: (_error, { viewId }, snapshot) => {
       if (snapshot?.previous) queryClient.setQueryData(listKey, snapshot.previous)
+      if (snapshot?.previousView) queryClient.setQueryData(queryKeys.view(workspaceId, viewId), snapshot.previousView)
     },
     // the list and the open view both carry `is_favorite`
     onSettled: () => void queryClient.invalidateQueries({ queryKey: listKey }),

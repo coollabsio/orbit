@@ -122,10 +122,13 @@ test('favoriting flips the star at once and uses PUT or DELETE', async () => {
   const requests = serve(() => new Promise<Response>((resolve) => { release = () => resolve(new Response(null, { status: 204 })) }))
   const client = testClient()
   client.setQueryData(queryKeys.views('workspace-1'), [savedView()])
+  client.setQueryData(queryKeys.view('workspace-1', 'view-1'), savedView())
   const view = renderHook(() => useSetFavorite('workspace-1'), { wrapper: withClient(client) })
 
   act(() => view.result.current.mutate({ viewId: 'view-1', favorite: true }))
   await waitFor(() => expect(client.getQueryData<SavedView[]>(queryKeys.views('workspace-1'))?.[0]?.is_favorite).toBeTrue())
+  // the open view's header star too
+  expect(client.getQueryData<SavedView>(queryKeys.view('workspace-1', 'view-1'))?.is_favorite).toBeTrue()
   await waitFor(() => expect(requests).toHaveLength(1))
   release?.()
   await waitFor(() => expect(view.result.current.isSuccess).toBeTrue())
@@ -143,11 +146,13 @@ test('a failed favorite toggle restores the star', async () => {
   serve(() => problem(500, 'internal_error'))
   const client = testClient()
   client.setQueryData(queryKeys.views('workspace-1'), [savedView()])
+  client.setQueryData(queryKeys.view('workspace-1', 'view-1'), savedView())
   const view = renderHook(() => useSetFavorite('workspace-1'), { wrapper: withClient(client) })
 
   await act(async () => { await view.result.current.mutateAsync({ viewId: 'view-1', favorite: true }).catch(() => undefined) })
 
   expect(client.getQueryData<SavedView[]>(queryKeys.views('workspace-1'))?.[0]?.is_favorite).toBeFalse()
+  expect(client.getQueryData<SavedView>(queryKeys.view('workspace-1', 'view-1'))?.is_favorite).toBeFalse()
 })
 
 test('reordering favorites sends the full order and updates positions at once', async () => {

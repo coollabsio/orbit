@@ -21,15 +21,7 @@ import {
 } from '../filterTree'
 import { countConditions, emptyFilter, isGroup, type Condition, type FilterField, type FilterGroup, type FilterNode, type FilterOperator } from '../viewState'
 import { FilterValuePicker } from './FilterValuePicker'
-import { POPOVER_MOTION } from './motion'
-
-/**
- * Modal entrance (spec § Motion): 200 ms fade + scale(0.95 → 1) on the strong ease-out, from the centre as a modal
- * should. Reduced motion keeps the fade only; `data-instant` (opened from the keyboard) turns it off. Closing is
- * instant: the content unmounts with `open`, like the views popovers.
- */
-const DIALOG_MOTION =
-  'origin-center duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:data-open:zoom-in-100 data-[instant]:animate-none'
+import { DIALOG_MOTION, POPOVER_MOTION } from './motion'
 
 const OPERATOR_ITEM = 'h-6 px-2 text-xs text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground'
 

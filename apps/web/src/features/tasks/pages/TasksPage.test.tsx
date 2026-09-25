@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { queryKeys } from '@/api/queryKeys'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
-import { PRESET_FILTERS } from '@/features/views/viewState'
+import { DEFAULT_DISPLAY, PRESET_FILTERS } from '@/features/views/viewState'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { TasksPage } from './TasksPage'
 
@@ -230,4 +230,93 @@ test('switching to a page whose preference is still loading shows loading, not t
   expect((await page.findAllByText('Overdue')).length).toBe(2)
   expect(await page.findByText('Ship release')).toBeTruthy()
   expect(taskQueries(requests)).toHaveLength(queriesBefore + 1)
+})
+
+/** A saved view record as the server returns it (no stored state: the view shows the defaults). */
+const viewRecord = (id: string, name: string, version = 1) => ({
+  id, workspace_id: 'workspace-1', owner: { user_id: 'user-1', display_name: 'Ann' }, name, description: '',
+  icon: null, color: null, visibility: 'personal', state: null, state_error: null, version, is_favorite: false, favorite_position: null,
+  can_edit: true, created_at: '2026-09-01T12:00:00Z', updated_at: '2026-09-01T12:00:00Z',
+})
+
+test('Save view on a preset project page stores the preset and project as conditions', async () => {
+  const requests = serve(({ method, path }) => method === 'POST' && path.endsWith('/views') ? Response.json(viewRecord('view-new', 'Late launch'), { status: 201 }) : undefined)
+  const page = renderAt('/tasks?workspace=workspace-1&view=overdue&project=project-1')
+  expect(await page.findByText('Ship release')).toBeTruthy()
+
+  await userEvent.click(page.getByRole('button', { name: 'Save view' }))
+  const dialog = await page.findByRole('dialog')
+  await userEvent.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Late launch')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save view' }))
+
+  await waitFor(() => expect(page.getByTestId('location').textContent).toBe('/views/view-new'))
+  const posts = requests.filter(({ method, path }) => method === 'POST' && path.endsWith('/views'))
+  expect(posts).toHaveLength(1)
+  expect(posts[0]?.body).toMatchObject({
+    name: 'Late launch',
+    visibility: 'personal',
+    state: {
+      filter: { op: 'and', children: [...PRESET_FILTERS.overdue.children, { field: 'project', operator: 'is', value: ['project-1'] }] },
+      display: DEFAULT_DISPLAY,
+    },
+  })
+})
+
+test('?save_view=1 opens the Save view dialog and drops the parameter', async () => {
+  serve()
+  const page = renderAt('/tasks?workspace=workspace-1&save_view=1')
+
+  expect(await page.findByRole('heading', { name: 'Save view' })).toBeTruthy()
+  await waitFor(() => expect(page.getByTestId('location').textContent).toBe('/tasks?workspace=workspace-1'))
+})
+
+/**
+ * Another tab saved view-1 (version 1 → 2) after this tab opened it: this tab's Save gets a 409.
+ * `versions` answers each GET of the view in turn; the last one repeats.
+ */
+async function openConflictingView(versions: Array<ReturnType<typeof viewRecord>>) {
+  let reads = 0
+  const requests = serve(({ method, path, body }) => {
+    if (!path.endsWith('/views/view-1')) return undefined
+    if (method === 'GET') return Response.json(versions[Math.min(reads++, versions.length - 1)])
+    const expected = (body as { expected_version: number }).expected_version
+    return expected === 2 ? Response.json({ ...viewRecord('view-1', 'Hot bugs', 3), state: (body as { state: unknown }).state }) : problem(409, 'conflict')
+  })
+  const page = renderAt('/views/view-1?workspace=workspace-1')
+  expect(await page.findByText('Ship release')).toBeTruthy()
+
+  fireEvent.click(page.getByRole('button', { name: 'Display options' }))
+  await userEvent.click(await page.findByRole('switch', { name: 'Show empty groups' }))
+  // close the (non-modal) popover, which hides the header from the accessibility tree while open
+  await userEvent.keyboard('{Escape}')
+  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
+
+  expect(await page.findByRole('alertdialog')).toBeTruthy()
+  // the edits survive the conflict (behind the modal, so hidden from the accessibility tree)
+  expect(page.getAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(1)
+  return { page, requests }
+}
+
+const viewPatches = (requests: Recorded[]) => requests.filter(({ method, path }) => method === 'PATCH' && path.endsWith('/views/view-1'))
+
+test('a save that conflicts with another tab can overwrite with the fresh version', async () => {
+  const { page, requests } = await openConflictingView([viewRecord('view-1', 'Hot bugs', 1), viewRecord('view-1', 'Hot bugs', 2)])
+
+  await userEvent.click(page.getByRole('button', { name: 'Overwrite' }))
+
+  await waitFor(() => expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0))
+  expect(viewPatches(requests).map(({ body }) => (body as { expected_version: number }).expected_version)).toEqual([1, 2])
+  expect(viewPatches(requests)[1]?.body).toMatchObject({ state: { display: { show_empty_groups: true } } })
+  expect(page.queryByRole('alertdialog')).toBeNull()
+})
+
+test('a save that conflicts with another tab can reload and drop the edits', async () => {
+  const { page, requests } = await openConflictingView([viewRecord('view-1', 'Hot bugs', 1), viewRecord('view-1', 'Hot bugs triage', 2)])
+
+  await userEvent.click(page.getByRole('button', { name: 'Reload' }))
+
+  expect(await page.findByRole('heading', { name: 'Hot bugs triage' })).toBeTruthy()
+  expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0)
+  expect(page.queryByRole('alertdialog')).toBeNull()
+  expect(viewPatches(requests)).toHaveLength(1)
 })

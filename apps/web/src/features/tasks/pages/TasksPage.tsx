@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
+import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
+import { cn } from 'cn'
 import { ApiProblem } from '@/api/problem'
 import { Button } from '@/components/ui/button'
 import {
@@ -43,6 +44,9 @@ import { groupCreateFields, type GroupValues } from '@/features/views/layoutGrou
 import { AdvancedFilterDialog } from '@/features/views/components/AdvancedFilterDialog'
 import { DisplayPopover } from '@/features/views/components/DisplayPopover'
 import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
+import { PRESS_MOTION } from '@/features/views/components/motion'
+import { SaveViewDialog, type SaveViewMode } from '@/features/views/components/SaveViewDialog'
+import { ViewHeader, ViewNotFound, ViewStateBanner } from '@/features/views/components/ViewHeader'
 import { PRESET_LABEL, type FilterOptions } from '@/features/views/filterFields'
 import { useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
@@ -108,6 +112,16 @@ function WorkspaceTasksPage() {
   // Quick search is local and never saved (spec §3); another preset or view starts with an empty box.
   const [search, setSearch] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [saveDialog, setSaveDialog] = useState<SaveViewMode | null>(null)
+  // the Views page's "New view" opens the Save view dialog on a task page, once
+  const wantsSaveView = source.kind === 'page' && searchParams.get('save_view') === '1'
+  useEffect(() => {
+    if (!wantsSaveView) return
+    setSaveDialog('create')
+    const next = new URLSearchParams(searchParams)
+    next.delete('save_view')
+    setSearchParams(next, { replace: true })
+  }, [wantsSaveView, searchParams, setSearchParams])
   const scopeKey = viewId ? `view:${viewId}` : `preset:${preset ?? 'all'}`
   const lastScope = useRef(scopeKey)
   useEffect(() => {
@@ -245,17 +259,12 @@ function WorkspaceTasksPage() {
   }, [wantsNew, stateLoading, projects.length, statusesQuery.data.length])
 
   const activeProject = projects.find((project) => project.id === projectFilter)
-  const viewTitle = viewId ? savedView.data?.name ?? 'View' : preset ? PRESET_TITLE[preset] : 'All tasks'
+  const viewTitle = preset ? PRESET_TITLE[preset] : 'All tasks'
 
   if (viewUnavailable) {
-    const missing = savedView.error instanceof ApiProblem && savedView.error.status === 404
-    return (
-      <TaskBoundary
-        title={missing ? 'View not found' : 'View unavailable'}
-        description={missing ? 'This view may have been deleted, or you may no longer have access to it.' : 'The server could not load this view.'}
-        action={<Button variant="outline" onClick={() => navigate('/views')}>Go to views</Button>}
-      />
-    )
+    // a 404 is a deleted view or someone else's personal view; any other error keeps the generic boundary
+    if (savedView.error instanceof ApiProblem && savedView.error.status === 404) return <ViewNotFound />
+    return <TaskBoundary title="View unavailable" description="The server could not load this view." />
   }
   if (preference.isError) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load the settings for this page." />
@@ -285,30 +294,43 @@ function WorkspaceTasksPage() {
             <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
               <Menu className="size-[18px]" />
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button type="button" variant="ghost" className="h-auto min-w-0 gap-[7px] rounded-md border-0 px-[7px] py-[5px] font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground dark:hover:bg-accent" aria-label="Select project">
-                    {activeProject ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: activeProject.color }} /> : null}
-                    <span>{activeProject?.name ?? 'All projects'}</span><ChevronDown className="size-3.5" />
-                  </Button>
-                }
+            {source.kind === 'view' ? (
+              <ViewHeader
+                workspaceId={workspace.id}
+                controller={viewState}
+                onSaveAsNew={() => setSaveDialog('save_as_new')}
+                onEdit={() => setSaveDialog('edit')}
+                onDuplicate={() => setSaveDialog('duplicate')}
+                onDeleted={() => navigate('/views')}
               />
-              <DropdownMenuContent className="flex w-auto min-w-[190px] flex-col gap-px p-1">
-                <DropdownMenuItem className={OPTION} data-active={projectFilter === null || undefined} onClick={() => setProjectFilter(null)}><SquareCheck className="size-3.5" />All projects</DropdownMenuItem>
-                {projects.map((project) => <div key={project.id} className="relative flex items-center">
-                  <DropdownMenuItem className={`${OPTION} min-w-0 flex-1 pr-8`} data-active={project.id === projectFilter || undefined} onClick={() => setProjectFilter(project.id)}>
-                    <span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
-                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="absolute right-1 flex size-6 items-center justify-center rounded-md px-0 py-0 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground dark:hover:bg-accent" aria-label={`${project.name} settings`} title="Project settings" onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}><Settings className="size-3.5" /></DropdownMenuItem>
-                </div>)}
-                <DropdownMenuSeparator className="my-1 shrink-0" />
-                <DropdownMenuItem className={OPTION} onClick={() => setShowNewProject(true)}><Plus className="size-3.5" />New project</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
-            <div className="flex-1" />
+            ) : (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button type="button" variant="ghost" className="h-auto min-w-0 gap-[7px] rounded-md border-0 px-[7px] py-[5px] font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground dark:hover:bg-accent" aria-label="Select project">
+                        {activeProject ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: activeProject.color }} /> : null}
+                        <span>{activeProject?.name ?? 'All projects'}</span><ChevronDown className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent className="flex w-auto min-w-[190px] flex-col gap-px p-1">
+                    <DropdownMenuItem className={OPTION} data-active={projectFilter === null || undefined} onClick={() => setProjectFilter(null)}><SquareCheck className="size-3.5" />All projects</DropdownMenuItem>
+                    {projects.map((project) => <div key={project.id} className="relative flex items-center">
+                      <DropdownMenuItem className={`${OPTION} min-w-0 flex-1 pr-8`} data-active={project.id === projectFilter || undefined} onClick={() => setProjectFilter(project.id)}>
+                        <span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
+                        <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="absolute right-1 flex size-6 items-center justify-center rounded-md px-0 py-0 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground dark:hover:bg-accent" aria-label={`${project.name} settings`} title="Project settings" onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}><Settings className="size-3.5" /></DropdownMenuItem>
+                    </div>)}
+                    <DropdownMenuSeparator className="my-1 shrink-0" />
+                    <DropdownMenuItem className={OPTION} onClick={() => setShowNewProject(true)}><Plus className="size-3.5" />New project</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
+                <div className="flex-1" />
+              </>
+            )}
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
             <TaskSearchBox value={search} onChange={setSearch} />
             <FilterButton filter={viewState.state.filter} options={filterOptions} onChange={viewState.setFilter} onOpenAdvanced={() => setAdvancedOpen(true)} />
@@ -318,9 +340,16 @@ function WorkspaceTasksPage() {
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
               onChange={viewState.setDisplay}
             />
+            {source.kind === 'page' ? (
+              <Button type="button" variant="ghost" aria-label="Save view" className={cn('max-[899px]:w-8 max-[899px]:px-0', PRESS_MOTION)} onClick={() => setSaveDialog('create')}>
+                <Bookmark className="size-4" />
+                <span className="max-[899px]:hidden">Save view</span>
+              </Button>
+            ) : null}
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>
+          {viewState.stateError ? <ViewStateBanner /> : null}
           <FilterBar
             key={source.kind === 'view' ? source.viewId : source.pageKey}
             filter={viewState.state.filter}
@@ -337,6 +366,21 @@ function WorkspaceTasksPage() {
             onApply={viewState.setFilter}
             validate={(next) => validateFilterOnServer(workspace.id, next)}
           />
+          <SaveViewDialog
+            open={saveDialog !== null}
+            onOpenChange={(open) => {
+              if (!open) setSaveDialog(null)
+            }}
+            mode={saveDialog ?? 'create'}
+            workspaceId={workspace.id}
+            // a page's preset and project scope become ordinary, editable conditions in the view
+            state={{ filter: viewState.effective, display: viewState.state.display }}
+            view={viewState.view}
+            onSaved={(saved) => {
+              if (saveDialog === 'save_as_new') viewState.discard()
+              if (saveDialog !== 'edit') navigate(`/views/${saved.id}`)
+            }}
+          />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
           <div className={`min-h-0 flex-1 ${layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
             {layout === 'timeline'
@@ -351,6 +395,6 @@ function WorkspaceTasksPage() {
   )
 }
 
-function TaskBoundary({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
-  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title={title} description={description} action={action} /></section></div>
+function TaskBoundary({ title, description }: { title: string; description: string }) {
+  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title={title} description={description} /></section></div>
 }
