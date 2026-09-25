@@ -31,7 +31,7 @@ import { TaskFilters } from '@/features/tasks/components/TaskFilters'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
-import { quickSearchTasks, resolveStatusId, statusGroups } from '@/features/tasks/tasksLib'
+import { quickSearchTasks, resolveStatusId } from '@/features/tasks/tasksLib'
 import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
 import { TimelineControls } from '@/features/tasks/timeline/TimelineControls'
 import { useTimelineZoom } from '@/features/tasks/timeline/useTimelineZoom'
@@ -40,9 +40,11 @@ import { useTaskQuery } from '@/features/views/api/taskQuery'
 import { useSavedView, useViewPreference } from '@/features/views/api/views'
 import { createDefaultsFromFilter, type GroupContext } from '@/features/views/grouping'
 import { groupCreateFields, type GroupValues } from '@/features/views/layoutGroups'
-import { legacyFilterValues, withLegacyFilter, withLegacySort, type LegacyFilterChange } from '@/features/views/legacyFilterAdapter'
+import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
+import { PRESET_LABEL, type FilterOptions } from '@/features/views/filterFields'
+import { legacyFilterValues, withLegacySort } from '@/features/views/legacyFilterAdapter'
 import { useViewState, type ViewSource } from '@/features/views/useViewState'
-import { isTaskPreset, pageKeyFor, type FilterGroup, type TaskPreset } from '@/features/views/viewState'
+import { isTaskPreset, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 
@@ -112,17 +114,6 @@ function WorkspaceTasksPage() {
     }
   }, [scopeKey])
 
-  // Interim single-value menu (Task 16 replaces it with FilterBar). One click can report several
-  // changes before React re-renders, so each change builds on the previous one.
-  const filterDraft = useRef<FilterGroup | null>(null)
-  useEffect(() => {
-    filterDraft.current = null
-  })
-  const changeFilter = (change: LegacyFilterChange) => {
-    const next = withLegacyFilter(filterDraft.current ?? filter, change)
-    filterDraft.current = next
-    viewState.setFilter(next)
-  }
   const legacy = legacyFilterValues(filter, display)
 
   const detailQuery = useTask(workspace.id, taskId)
@@ -138,6 +129,14 @@ function WorkspaceTasksPage() {
     ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data, projects)
     : undefined
   const users = membersQuery.data ?? []
+  const filterOptions: FilterOptions = {
+    statuses: statusesQuery.data,
+    members: users,
+    labels: labelsQuery.data ?? [],
+    projects,
+    currentUserId: currentUser.data?.id ?? '',
+  }
+  const presetLabel = source.kind === 'page' && source.preset ? PRESET_LABEL[source.preset] : null
   const state = {
     currentUserId: currentUser.data?.id ?? '',
     users,
@@ -244,7 +243,6 @@ function WorkspaceTasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsNew, stateLoading, projects.length, statusesQuery.data.length])
 
-  const groups = statusGroups(statusesQuery.data, projectFilter)
   const activeProject = projects.find((project) => project.id === projectFilter)
   const viewTitle = viewId ? savedView.data?.name ?? 'View' : preset ? PRESET_TITLE[preset] : 'All tasks'
 
@@ -311,30 +309,25 @@ function WorkspaceTasksPage() {
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
+            <FilterButton filter={viewState.state.filter} options={filterOptions} onChange={viewState.setFilter} />
             <TaskFilters
-              users={users}
-              labels={labelsQuery.data ?? []}
-              groups={groups}
-              statusKey={legacy.statusKey}
-              assigneeId={legacy.assigneeId}
-              unassigned={legacy.unassigned}
-              labelId={legacy.labelId}
-              priority={legacy.priority}
               sort={legacy.sort}
               layout={layout}
               search={search}
               onSearchChange={setSearch}
-              onStatusChange={(value) => changeFilter({ field: 'status', value })}
-              onAssigneeChange={(value) => changeFilter({ field: 'assignee', value })}
-              onUnassignedChange={(value) => changeFilter({ field: 'unassigned', value })}
-              onLabelChange={(value) => changeFilter({ field: 'label', value })}
-              onPriorityChange={(value) => changeFilter({ field: 'priority', value })}
               onSortChange={(value) => viewState.setDisplay(withLegacySort(value))}
               onLayoutChange={(value) => viewState.setDisplay({ layout: value })}
             />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>
+          <FilterBar
+            key={source.kind === 'view' ? source.viewId : source.pageKey}
+            filter={viewState.state.filter}
+            options={filterOptions}
+            onChange={viewState.setFilter}
+            presetLabel={presetLabel}
+          />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
           <div className={`min-h-0 flex-1 ${layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
             {layout === 'timeline'

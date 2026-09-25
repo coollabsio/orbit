@@ -1,0 +1,366 @@
+import { useEffect, useState, type ReactElement } from 'react'
+import { Add as Plus, Filter, Hierarchy, Lock, Xmark as X } from 'reicon-react'
+import { cn } from 'cn'
+import { Button } from '@/components/ui/button'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  FIELD_META,
+  FIELD_ORDER,
+  MAX_FILTER_CONDITIONS,
+  defaultValue,
+  isCompleteCondition,
+  listValue,
+  operatorLabel,
+  operatorNeedsValue,
+  selectedOptions,
+  valueSummary,
+  withOperator,
+  type FilterOptions,
+} from '../filterFields'
+import { shouldIgnoreShortcut } from '../shortcuts'
+import { countConditions, isFlatFilter, type Condition, type FilterField, type FilterGroup, type FilterOperator } from '../viewState'
+import { FilterValuePicker, ValueGlyph } from './FilterValuePicker'
+import { POPOVER_MOTION } from './motion'
+
+const FILTER_BUTTON =
+  'data-[active]:bg-primary/10 data-[active]:text-primary data-[active]:ring-1 data-[active]:ring-inset data-[active]:ring-primary/25 max-[899px]:w-8 max-[899px]:px-0'
+const CHIP = 'inline-flex h-7 max-w-full origin-left items-stretch overflow-hidden rounded-md border border-border bg-background text-xs'
+const SEGMENT = 'inline-flex min-w-0 items-center gap-1.5 px-2 whitespace-nowrap'
+const SEGMENT_BUTTON = cn(SEGMENT, 'border-l border-border outline-none transition-colors duration-150 ease-out hover-fine:hover:bg-muted focus-visible:bg-muted aria-expanded:bg-muted')
+
+/** Title of the add controls once the tree is at the cap. */
+const FULL_TITLE = `Filters can have at most ${MAX_FILTER_CONDITIONS} conditions`
+
+/**
+ * ANDs a condition onto the tree: appended to an AND root, otherwise the root is wrapped. An OR root with at
+ * most one child means the same as an AND root, so it takes the condition directly and gains no level.
+ */
+function appendCondition(filter: FilterGroup, condition: Condition): FilterGroup {
+  if (filter.op === 'and') return { ...filter, children: [...filter.children, condition] }
+  if (filter.children.length <= 1) return { op: 'and', children: [...filter.children, condition] }
+  return { op: 'and', children: [filter, condition] }
+}
+
+function replaceLastChild(filter: FilterGroup, condition: Condition): FilterGroup {
+  return { ...filter, children: [...filter.children.slice(0, -1), condition] }
+}
+
+interface AddFilterPopoverProps {
+  filter: FilterGroup
+  options: FilterOptions
+  onChange: (filter: FilterGroup) => void
+  onOpenAdvanced?: () => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  instant: boolean
+  trigger: ReactElement
+}
+
+/** Field list → value picker in one popover. A new condition joins the tree once it is complete. */
+function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onOpenChange, instant, trigger }: AddFilterPopoverProps) {
+  const [draft, setDraft] = useState<Condition | null>(null)
+  const [added, setAdded] = useState(false)
+  const close = () => {
+    onOpenChange(false)
+    setDraft(null)
+    setAdded(false)
+  }
+  const pickField = (field: FilterField) => {
+    const operator = FIELD_META[field].defaultOperator
+    setDraft({ field, operator, value: defaultValue(field, operator) })
+  }
+  const change = (next: Condition) => {
+    setDraft(next)
+    if (isCompleteCondition(next)) {
+      onChange(added ? replaceLastChild(filter, next) : appendCondition(filter, next))
+      setAdded(true)
+    } else if (added) {
+      onChange({ ...filter, children: filter.children.slice(0, -1) })
+      setAdded(false)
+    }
+  }
+  return (
+    <Popover open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())} modal={false}>
+      <PopoverTrigger render={trigger} />
+      {open ? (
+        <PopoverContent align="start" data-instant={instant || undefined} className={cn('w-auto gap-0 p-0', POPOVER_MOTION)}>
+          {draft ? (
+            <FilterValuePicker condition={draft} options={options} onChange={change} onDone={close} />
+          ) : (
+            <Command label="Filter by" className="w-60 rounded-lg! bg-transparent">
+              <CommandInput autoFocus aria-label="Filter by" placeholder="Filter by…" />
+              <CommandList>
+                <CommandEmpty className="py-4 text-xs text-muted-foreground">No matching fields</CommandEmpty>
+                <CommandGroup>
+                  {FIELD_ORDER.map((field) => {
+                    const Icon = FIELD_META[field].icon
+                    return (
+                      <CommandItem key={field} value={field} keywords={[FIELD_META[field].label]} onSelect={() => pickField(field)}>
+                        <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                        {FIELD_META[field].label}
+                      </CommandItem>
+                    )
+                  })}
+                </CommandGroup>
+                {onOpenAdvanced ? (
+                  <>
+                    <CommandSeparator />
+                    <CommandGroup>
+                      <CommandItem
+                        value="advanced"
+                        keywords={['Advanced filter']}
+                        onSelect={() => {
+                          close()
+                          onOpenAdvanced()
+                        }}
+                      >
+                        <Hierarchy className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                        Advanced filter
+                      </CommandItem>
+                    </CommandGroup>
+                  </>
+                ) : null}
+              </CommandList>
+            </Command>
+          )}
+        </PopoverContent>
+      ) : null}
+    </Popover>
+  )
+}
+
+export interface FilterButtonProps {
+  filter: FilterGroup
+  options: FilterOptions
+  onChange: (filter: FilterGroup) => void
+  onOpenAdvanced?: () => void
+}
+
+/** Header "Filter" button. `F` opens it (never while typing); keyboard opens skip the animation. */
+export function FilterButton({ filter, options, onChange, onOpenAdvanced }: FilterButtonProps) {
+  const [open, setOpen] = useState(false)
+  const [instant, setInstant] = useState(false)
+  const count = countConditions(filter)
+  // at the limit a new condition could push the effective tree past the server's 50
+  const full = count >= MAX_FILTER_CONDITIONS
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'f' && event.key !== 'F') return
+      if (full || event.shiftKey || shouldIgnoreShortcut(event)) return
+      event.preventDefault()
+      setInstant(true)
+      setOpen(true)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [full])
+  return (
+    <AddFilterPopover
+      filter={filter}
+      options={options}
+      onChange={onChange}
+      onOpenAdvanced={onOpenAdvanced}
+      open={open}
+      instant={instant}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setInstant(false)
+      }}
+      trigger={
+        <Button type="button" variant="ghost" aria-label="Filter tasks" aria-keyshortcuts="F" disabled={full} title={full ? FULL_TITLE : undefined} data-active={count > 0 || undefined} className={FILTER_BUTTON}>
+          <Filter className="size-4" />
+          <span className="max-[899px]:hidden">Filter</span>
+          {count > 0 ? (
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">{count}</span>
+          ) : null}
+        </Button>
+      }
+    />
+  )
+}
+
+export interface FilterBarProps {
+  filter: FilterGroup
+  options: FilterOptions
+  onChange: (filter: FilterGroup) => void
+  /** Non-removable chip for the page's preset scope, e.g. "Overdue". */
+  presetLabel?: string | null
+  onOpenAdvanced?: () => void
+}
+
+/** The chip row under the header. Renders nothing when there is no scope and no filter. */
+export function FilterBar({ filter, options, onChange, presetLabel = null, onOpenAdvanced }: FilterBarProps) {
+  const [live, setLive] = useState(false)
+  const [adding, setAdding] = useState(false)
+  // the same cap as FilterButton: a 47th condition could push a scoped page past the server's 50
+  const full = countConditions(filter) >= MAX_FILTER_CONDITIONS
+  // chips present on first paint appear as-is; only chips added later animate in
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setLive(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  if (!presetLabel && filter.children.length === 0) return null
+  const flat = isFlatFilter(filter)
+  const replaceAt = (index: number, next: Condition) => onChange({ ...filter, children: filter.children.map((child, i) => (i === index ? next : child)) })
+  const removeAt = (index: number) => onChange({ ...filter, children: filter.children.filter((_, i) => i !== index) })
+  return (
+    <div role="toolbar" aria-label="Filters" className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-background px-3 py-1.5 max-[899px]:px-2">
+      {presetLabel ? (
+        <span
+          title="Always applied on this page"
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-primary/25 bg-primary/10 px-2 text-xs font-medium text-primary"
+        >
+          <Lock className="size-3" aria-hidden="true" />
+          {presetLabel}
+        </span>
+      ) : null}
+      {flat ? (
+        filter.children.map((node, index) => (
+          <ConditionChip
+            key={index}
+            condition={node as Condition}
+            options={options}
+            enter={live}
+            onChange={(next) => replaceAt(index, next)}
+            onRemove={() => removeAt(index)}
+          />
+        ))
+      ) : (
+        <AdvancedChip count={countConditions(filter)} enter={live} onOpen={onOpenAdvanced} />
+      )}
+      <AddFilterPopover
+        filter={filter}
+        options={options}
+        onChange={onChange}
+        onOpenAdvanced={onOpenAdvanced}
+        open={adding}
+        instant={false}
+        onOpenChange={setAdding}
+        trigger={
+          <Button type="button" variant="ghost" size="icon-xs" aria-label="Add filter" disabled={full} title={full ? FULL_TITLE : undefined} className="text-muted-foreground">
+            <Plus />
+          </Button>
+        }
+      />
+    </div>
+  )
+}
+
+interface ConditionChipProps {
+  condition: Condition
+  options: FilterOptions
+  enter: boolean
+  onChange: (next: Condition) => void
+  onRemove: () => void
+}
+
+/** `Field · operator · values ×` as one segmented pill. */
+function ConditionChip({ condition, options, enter, onChange, onRemove }: ConditionChipProps) {
+  const [animate] = useState(enter)
+  const [draft, setDraft] = useState<Condition | null>(null)
+  const [operatorOpen, setOperatorOpen] = useState(false)
+  const meta = FIELD_META[condition.field]
+  const Icon = meta.icon
+  const shown = draft ?? condition
+  const count = meta.kind === 'list' ? listValue(shown).length : 1
+  const glyphs = selectedOptions(shown, options).slice(0, 3)
+  const summary = valueSummary(shown, options)
+  const operatorText = operatorLabel(shown.operator, count)
+
+  const edit = (next: Condition) => {
+    setDraft(next)
+    if (isCompleteCondition(next)) onChange(next)
+  }
+  // emptying the values of a chip removes it; abandoning an operator switch keeps the old condition
+  const closeValues = () => {
+    if (draft && !isCompleteCondition(draft) && draft.operator === condition.operator) onRemove()
+    setDraft(null)
+  }
+  const pickOperator = (operator: FilterOperator) => {
+    setOperatorOpen(false)
+    const next = withOperator(condition, operator)
+    if (isCompleteCondition(next)) onChange(next)
+    else setDraft(next)
+  }
+
+  return (
+    <div data-filter-chip={condition.field} className={cn(CHIP, animate && 'animate-filter-chip-enter')}>
+      <span className={cn(SEGMENT, 'text-muted-foreground')}>
+        <Icon className="size-3.5" aria-hidden="true" />
+        {meta.label}
+      </span>
+      {meta.operators.length > 1 ? (
+        <DropdownMenu open={operatorOpen} onOpenChange={setOperatorOpen} modal={false}>
+          <DropdownMenuTrigger
+            render={
+              <button type="button" className={cn(SEGMENT_BUTTON, 'text-muted-foreground')} aria-label={`${meta.label} operator: ${operatorText}`}>
+                {operatorText}
+              </button>
+            }
+          />
+          {operatorOpen ? (
+            <DropdownMenuContent align="start" className="w-auto min-w-40">
+              {meta.operators.map((operator) => (
+                <DropdownMenuItem key={operator} data-selected={operator === shown.operator || undefined} className="data-selected:font-medium" onClick={() => pickOperator(operator)}>
+                  {operatorLabel(operator, count)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          ) : null}
+        </DropdownMenu>
+      ) : (
+        <span className={cn(SEGMENT, 'border-l border-border text-muted-foreground')}>{operatorText}</span>
+      )}
+      {operatorNeedsValue(shown.operator) ? (
+        <Popover open={draft !== null} onOpenChange={(open) => (open ? setDraft(condition) : closeValues())} modal={false}>
+          <PopoverTrigger
+            render={
+              <button type="button" className={cn(SEGMENT_BUTTON, 'font-medium text-foreground')} aria-label={`${meta.label} values: ${summary || 'none'}`}>
+                {glyphs.length > 0 ? (
+                  <span aria-hidden="true" className="flex items-center gap-0.5">
+                    {glyphs.map((option) => <ValueGlyph key={option.value} glyph={option.glyph} size={12} />)}
+                  </span>
+                ) : null}
+                <span className="max-w-56 truncate">{summary || 'Choose…'}</span>
+              </button>
+            }
+          />
+          {draft ? (
+            <PopoverContent align="start" className={cn('w-auto gap-0 p-0', POPOVER_MOTION)}>
+              <FilterValuePicker condition={draft} options={options} onChange={edit} onDone={closeValues} />
+            </PopoverContent>
+          ) : null}
+        </Popover>
+      ) : null}
+      <button
+        type="button"
+        aria-label={`Remove ${meta.label.toLowerCase()} filter`}
+        onClick={onRemove}
+        className="inline-flex w-6 items-center justify-center border-l border-border text-muted-foreground outline-none transition-colors duration-150 hover-fine:hover:bg-muted hover-fine:hover:text-foreground focus-visible:bg-muted"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  )
+}
+
+function AdvancedChip({ count, enter, onOpen }: { count: number; enter: boolean; onOpen?: () => void }) {
+  const [animate] = useState(enter)
+  return (
+    <button
+      type="button"
+      disabled={!onOpen}
+      onClick={onOpen}
+      className={cn(
+        CHIP,
+        'items-center gap-1.5 px-2 font-medium text-foreground transition-[background-color,transform] duration-150 ease-out hover-fine:hover:bg-muted active:scale-[0.97] disabled:cursor-default disabled:active:scale-100',
+        animate && 'animate-filter-chip-enter',
+      )}
+    >
+      <Hierarchy className="size-3.5 text-muted-foreground" aria-hidden="true" />
+      {`Advanced filter · ${count} ${count === 1 ? 'condition' : 'conditions'}`}
+    </button>
+  )
+}

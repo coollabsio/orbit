@@ -226,7 +226,8 @@ test('switching to a page whose preference is still loading shows loading, not t
   expect(taskQueries(requests)).toHaveLength(queriesBefore)
 
   releaseOverdue?.()
-  expect(await page.findByText('Overdue')).toBeTruthy()
+  // the page title and the preset's fixed filter chip
+  expect((await page.findAllByText('Overdue')).length).toBe(2)
   expect(await page.findByText('Ship release')).toBeTruthy()
   expect(taskQueries(requests)).toHaveLength(queriesBefore + 1)
 })

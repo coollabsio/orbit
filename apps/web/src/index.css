@@ -233,3 +233,27 @@
     animation-name: relation-enter-fade;
   }
 }
+
+/* new filter chip: 150ms fade + scale(0.97 → 1) on the strong ease-out; removal is instant */
+@theme {
+  --animate-filter-chip-enter: filter-chip-enter 150ms cubic-bezier(0.23, 1, 0.32, 1) both;
+
+  @keyframes filter-chip-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+}
+
+@keyframes views-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-filter-chip-enter {
+    animation-name: views-fade-in;
+  }
+}
