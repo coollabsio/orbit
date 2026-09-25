@@ -125,16 +125,33 @@ export function listValue(condition: Condition): string[] {
   return Array.isArray(condition.value) ? condition.value.filter((value): value is string => typeof value === 'string') : []
 }
 
+/** A member picked by ID rather than from the list, e.g. your own ID written by the legacy migration instead of `me`. */
+function memberByIdOption(value: string, options: FilterOptions): ValueOption | undefined {
+  const person = options.members.find((candidate) => candidate.id === value)
+  return person ? { value, label: person.name, glyph: { kind: 'member', member: person, name: person.name } } : undefined
+}
+
 /** The chosen list values as options, in the order the user picked them. Unknown IDs are dropped. */
 export function selectedOptions(condition: Condition, options: FilterOptions): ValueOption[] {
   if (FIELD_META[condition.field].kind !== 'list') return []
   const known = new Map(valueOptions(condition.field, options).map((option) => [option.value, option]))
   return listValue(condition).flatMap((value): ValueOption[] => {
-    const option = known.get(value)
-    if (option) return [option]
-    const person = options.members.find((candidate) => candidate.id === value)
-    return person ? [{ value, label: person.name, glyph: { kind: 'member', member: person, name: person.name } }] : []
+    const option = known.get(value) ?? memberByIdOption(value, options)
+    return option ? [option] : []
   })
+}
+
+/**
+ * Chosen values the picker would not list: a member chosen by ID, or an ID that no longer exists ("Unknown label").
+ * The picker shows them as extra rows, so they can still be seen and cleared.
+ */
+export function unlistedOptions(condition: Condition, options: FilterOptions): ValueOption[] {
+  const meta = FIELD_META[condition.field]
+  if (meta.kind !== 'list') return []
+  const listed = new Set(valueOptions(condition.field, options).map((option) => option.value))
+  return listValue(condition)
+    .filter((value) => !listed.has(value))
+    .map((value) => memberByIdOption(value, options) ?? { value, label: `Unknown ${meta.label.toLowerCase()}`, glyph: { kind: 'dot', color: 'var(--muted-foreground)' } })
 }
 
 export function isDateValue(value: unknown): value is DateValue {

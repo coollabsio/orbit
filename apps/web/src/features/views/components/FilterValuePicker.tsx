@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
-import { FIELD_META, isDateValue, listValue, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
+import { FIELD_META, isDateValue, listValue, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
 import type { Condition, DateValue } from '../viewState'
 
 export interface FilterValuePickerProps {
@@ -47,13 +47,15 @@ function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
   const meta = FIELD_META[condition.field]
   const toggle = (value: string) =>
     onChange({ ...condition, value: selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value] })
+  // chosen values the list lacks (a member picked by ID, a deleted label) come first, so they can be unchecked
+  const rows = [...unlistedOptions(condition, options), ...valueOptions(condition.field, options)]
   return (
     <Command label={`Search ${meta.plural}`} className="w-64 rounded-lg! bg-transparent">
       <CommandInput autoFocus aria-label={`Search ${meta.plural}`} placeholder={`Search ${meta.plural}…`} />
       <CommandList>
         <CommandEmpty className="py-4 text-xs text-muted-foreground">No {meta.plural} match</CommandEmpty>
         <CommandGroup>
-          {valueOptions(condition.field, options).map((option) => {
+          {rows.map((option) => {
             const checked = selected.includes(option.value)
             return (
               <CommandItem key={option.value} value={option.value} keywords={[option.label]} aria-checked={checked} onSelect={() => toggle(option.value)}>

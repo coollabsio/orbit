@@ -59,3 +59,21 @@ test('text filters apply trimmed input on Enter', async () => {
   expect(read(view)).toEqual({ field: 'text', operator: 'contains', value: 'release notes' })
   expect(done).toBe(1)
 })
+
+test('a selected member missing from the list, like your own ID from a migrated filter, shows checked and can be cleared', async () => {
+  const view = render(<Harness initial={{ field: 'assignee', operator: 'is', value: ['user-1'] }} />)
+  const own = view.getByRole('option', { name: 'Ada' })
+  expect(own.getAttribute('aria-checked')).toBe('true')
+  expect(view.getByRole('option', { name: 'Me' }).getAttribute('aria-checked')).toBe('false')
+  await userEvent.click(own)
+  expect(read(view).value).toEqual([])
+})
+
+test('an unknown selected value shows as a checked row that can be cleared', async () => {
+  const view = render(<Harness initial={{ field: 'label', operator: 'includes_any', value: ['label-gone', 'label-bug'] }} />)
+  const unknown = view.getByRole('option', { name: 'Unknown label' })
+  expect(unknown.getAttribute('aria-checked')).toBe('true')
+  await userEvent.click(unknown)
+  expect(read(view).value).toEqual(['label-bug'])
+  expect(view.queryAllByRole('option', { name: 'Unknown label' }).length).toBe(0)
+})
