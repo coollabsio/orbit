@@ -8,6 +8,9 @@ import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useUpdateTask } from '@/features/tasks/api/tasks'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { groupTasks, type GroupContext } from '@/features/views/grouping'
+import { groupAccent } from '@/features/views/layoutGroups'
+import type { GroupBy } from '@/features/views/viewState'
 import { TimelineBar } from './TimelineBar'
 import { TimelineHeader } from './TimelineHeader'
 import { TimelineRowLabel } from './TimelineRowLabel'
@@ -33,7 +36,9 @@ export interface TaskTimelineProps {
   projects: Project[]
   statuses: TaskStatusDef[]
   users: User[]
-  grouped: boolean
+  /** Sections follow the view's grouping; 'none' is one flat list. Sub-grouping does not apply here. */
+  groupBy: GroupBy
+  groupContext: GroupContext
   pxPerDay: number
   onZoomChange: (px: number) => void
   onOpen: (taskId: string) => void
@@ -42,7 +47,7 @@ export interface TaskTimelineProps {
 }
 
 /** Roadmap timeline: one row per task, bars span due_start_at → due_at. */
-export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
+export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupContext, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
   const [today] = useState(() => todayProp ?? new Date())
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -64,7 +69,9 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
   const lastScroll = useRef<{ start: string; left: number; top: number; px: number } | null>(null)
 
   const range = computeRange(rowDates(tasks), today)
-  const rows = buildTimelineRows({ tasks, projects, statuses, grouped, overrides })
+  // an empty group has nothing to draw on a timeline, so show_empty_groups does not apply here
+  const groups = groupBy === 'none' ? null : groupTasks(tasks, groupBy, { ...groupContext, showEmpty: false })
+  const rows = buildTimelineRows({ tasks, groups, statuses, overrides })
   const statusById = new Map(statuses.map((status) => [status.id, status]))
   const projectById = new Map(projects.map((project) => [project.id, project]))
   const userById = new Map(users.map((user) => [user.id, user]))
@@ -260,6 +267,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
                 row={row}
                 status={status}
                 assignee={assignee}
+                groupContext={groupContext}
                 onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}
                 onOpen={onOpen}
                 onReveal={row.kind === 'task' && row.span ? () => reveal(row.span!.start) : undefined}
@@ -280,7 +288,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, grouped, pxPerD
                   <div
                     aria-hidden="true"
                     className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full opacity-45"
-                    style={{ left: xOf(range, row.span.start, pxPerDay), width: (differenceInCalendarDays(row.span.end, row.span.start) + 1) * pxPerDay, background: row.project.color }}
+                    style={{ left: xOf(range, row.span.start, pxPerDay), width: (differenceInCalendarDays(row.span.end, row.span.start) + 1) * pxPerDay, background: groupAccent(row.group, groupContext) }}
                   />
                 ) : null}
                 {undated && ghost?.taskId === row.task.id && !drag ? (

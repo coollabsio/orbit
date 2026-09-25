@@ -1,5 +1,6 @@
 import type { BulkItem, CreateTaskBody, TaskUpdateBody } from '@/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
+import { statusKeyOf } from '@/features/tasks/taskMeta'
 import { dropUpdate, groupTasks, type GroupContext, type TaskGroup } from './grouping'
 import type { DisplayOptions, GroupBy } from './viewState'
 
@@ -165,4 +166,16 @@ export function groupCreateFields(values: GroupValues): GroupCreateFields {
     else if (field === 'label') result.body.label_ids = value ? [value] : []
   }
   return result
+}
+
+const MUTED_ACCENT = 'var(--muted-foreground)'
+
+/** Colour of a group's timeline summary bar: the project/label/status colour, else muted. */
+export function groupAccent(group: Pick<TaskGroup, 'field' | 'value'>, ctx: GroupContext): string {
+  switch (group.field) {
+    case 'project': return ctx.projects.find((project) => project.id === group.value)?.color ?? MUTED_ACCENT
+    case 'label': return ctx.labels.find((label) => label.id === group.value)?.color ?? MUTED_ACCENT
+    case 'status': return ctx.statuses.find((status) => statusKeyOf(status) === group.value)?.color ?? MUTED_ACCENT
+    default: return MUTED_ACCENT
+  }
 }

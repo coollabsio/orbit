@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { TaskGroup } from '@/features/views/grouping'
 import {
   MAX_ZOOM, MIN_ZOOM, ZOOM_PRESETS, anchoredScrollLeft, applyDrag, buildTimelineRows, clampZoom, computeRange,
   dayAt, dayIndex, dayIndexAtX, drawRange, isOverdue, isSameEdit, monthMarks, presetOf, rowDates, spanLabel,
@@ -35,6 +36,9 @@ const projects = [
   { id: 'p1', name: 'Web', key: 'WEB', color: '#e0457b', version: 1 },
   { id: 'p2', name: 'API', key: 'API', color: '#26b5ce', version: 1 },
 ] as Project[]
+
+const projectGroup = (project: Project, tasks: Task[]): TaskGroup =>
+  ({ key: `project:${project.id}`, field: 'project', value: project.id, label: project.name, tasks })
 
 describe('day scale', () => {
   const range = { start: local(2026, 3, 1), days: 60 }
@@ -231,30 +235,43 @@ describe('buildTimelineRows', () => {
   const cancelled = task('cancelled', { statusId: 'gone', position: 3 })
   const other = task('other', { projectId: 'p2', statusId: 'todo2', dueAt: iso(local(2026, 4, 1, 9)) })
   const all = [dated, earlier, sameStartShorter, undatedA, undatedB, doneTask, cancelled, other]
+  const groups = [
+    projectGroup(projects[0]!, all.filter((item) => item.projectId === 'p1')),
+    projectGroup(projects[1]!, all.filter((item) => item.projectId === 'p2')),
+  ]
 
-  test('grouped: project header, dated rows by start/end/position, collapsed "No dates"', () => {
-    const rows = buildTimelineRows({ tasks: all, projects, statuses, grouped: true, overrides: {} })
+  test('grouped: header, dated rows by start/end/position, collapsed "No dates"', () => {
+    const rows = buildTimelineRows({ tasks: all, groups, statuses, overrides: {} })
     expect(rows.map((row) => row.key)).toEqual([
-      'group:p1', 'task:earlier', 'task:shorter', 'task:dated', 'task:doneTask', 'undated:p1',
-      'group:p2', 'task:other',
+      'group:project:p1', 'task:project:p1:earlier', 'task:project:p1:shorter', 'task:project:p1:dated', 'task:project:p1:doneTask', 'undated:project:p1',
+      'group:project:p2', 'task:project:p2:other',
     ])
     const header = rows[0]!
-    expect(header).toMatchObject({ kind: 'group', done: 1, total: 6, open: true, span: { start: local(2026, 3, 1), end: local(2026, 3, 20) } })
+    expect(header).toMatchObject({ kind: 'group', group: { label: 'Web' }, done: 1, total: 6, open: true, span: { start: local(2026, 3, 1), end: local(2026, 3, 20) } })
     expect(rows[5]).toMatchObject({ kind: 'undated', count: 3, open: false })
   })
 
   test('overrides open "No dates" (sorted by position) and collapse groups', () => {
-    const rows = buildTimelineRows({ tasks: all, projects, statuses, grouped: true, overrides: { 'undated:p1': true, 'group:p2': false } })
-    expect(rows.map((row) => row.key).slice(5)).toEqual(['undated:p1', 'task:undatedB', 'task:undatedA', 'task:cancelled', 'group:p2'])
+    const rows = buildTimelineRows({ tasks: all, groups, statuses, overrides: { 'undated:project:p1': true, 'group:project:p2': false } })
+    expect(rows.map((row) => row.key).slice(5)).toEqual([
+      'undated:project:p1', 'task:project:p1:undatedB', 'task:project:p1:undatedA', 'task:project:p1:cancelled', 'group:project:p2',
+    ])
   })
 
-  test('flat (single project) has no group rows', () => {
-    const rows = buildTimelineRows({ tasks: [dated, undatedA], projects, statuses, grouped: false, overrides: {} })
+  test('without groups the rows are flat', () => {
+    const rows = buildTimelineRows({ tasks: [dated, undatedA], groups: null, statuses, overrides: {} })
     expect(rows.map((row) => row.key)).toEqual(['task:dated', 'undated:all'])
   })
 
+  test('a task in two groups gets its own row in each', () => {
+    const bug: TaskGroup = { key: 'label:bug', field: 'label', value: 'bug', label: 'Bug', tasks: [dated] }
+    const ui: TaskGroup = { key: 'label:ui', field: 'label', value: 'ui', label: 'UI', tasks: [dated] }
+    const rows = buildTimelineRows({ tasks: [dated], groups: [bug, ui], statuses, overrides: {} })
+    expect(rows.map((row) => row.key)).toEqual(['group:label:bug', 'task:label:bug:dated', 'group:label:ui', 'task:label:ui:dated'])
+  })
+
   test('groups without tasks are dropped and empty input gives no rows', () => {
-    expect(buildTimelineRows({ tasks: [], projects, statuses, grouped: true, overrides: {} })).toEqual([])
+    expect(buildTimelineRows({ tasks: [], groups: [projectGroup(projects[0]!, [])], statuses, overrides: {} })).toEqual([])
   })
 
   test('rowDates lists span bounds for the range', () => {
@@ -276,6 +293,6 @@ test('duplicates are closed: never overdue and left out of the project total', (
   const open = task('open', { dueAt: iso(local(2026, 3, 1, 9)) })
   const duplicate = task('dup-task', { statusId: 'dup', dueAt: iso(local(2026, 3, 1, 9)) })
   expect(isOverdue(duplicate, 'duplicate', local(2026, 3, 20))).toBe(false)
-  const [header] = buildTimelineRows({ tasks: [open, duplicate], projects, statuses: [...statuses, dupStatus], grouped: true, overrides: {} })
+  const [header] = buildTimelineRows({ tasks: [open, duplicate], groups: [projectGroup(projects[0]!, [open, duplicate])], statuses: [...statuses, dupStatus], overrides: {} })
   expect(header).toMatchObject({ kind: 'group', done: 0, total: 1 })
 })

@@ -1,6 +1,7 @@
 import { addDays, addMonths, differenceInCalendarDays, eachMonthOfInterval, format, max, min, startOfDay, startOfMonth } from 'date-fns'
-import type { Project, StatusCategory, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { StatusCategory, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { isClosedCategory } from '@/features/tasks/taskMeta'
+import type { TaskGroup } from '@/features/views/grouping'
 
 export type ZoomPreset = 'week' | 'month' | 'quarter'
 export const ZOOM_PRESETS: Record<ZoomPreset, number> = { week: 44, month: 16, quarter: 5 }
@@ -118,47 +119,47 @@ export function isOverdue(task: Task, category: StatusCategory | undefined, toda
 }
 
 export type TimelineRow =
-  | { kind: 'group'; key: string; project: Project; done: number; total: number; span: { start: Date; end: Date } | null; open: boolean }
+  | { kind: 'group'; key: string; group: TaskGroup; done: number; total: number; span: { start: Date; end: Date } | null; open: boolean }
   | { kind: 'task'; key: string; task: Task; span: TaskSpan | null }
   | { kind: 'undated'; key: string; count: number; open: boolean }
 
-/** Project groups start open; "No dates" sections start collapsed. */
+/** Groups start open; "No dates" sections start collapsed. */
 const isOpen = (overrides: Record<string, boolean>, key: string) => overrides[key] ?? !key.startsWith('undated:')
 
-function sectionRows(tasks: Task[], undatedKey: string, overrides: Record<string, boolean>): TimelineRow[] {
+/** `taskKeyPrefix` keeps rows unique when one task sits in several groups (labels, assignees). */
+function sectionRows(tasks: Task[], undatedKey: string, taskKeyPrefix: string, overrides: Record<string, boolean>): TimelineRow[] {
   const withSpan = tasks.map((task) => ({ task, span: taskSpan(task) }))
   const dated = withSpan
     .filter((item): item is { task: Task; span: TaskSpan } => item.span !== null)
     .sort((a, b) => a.span.start.getTime() - b.span.start.getTime() || a.span.end.getTime() - b.span.end.getTime() || a.task.position - b.task.position)
   const undated = withSpan.filter((item) => item.span === null).sort((a, b) => a.task.position - b.task.position)
-  const rows: TimelineRow[] = dated.map(({ task, span }) => ({ kind: 'task', key: `task:${task.id}`, task, span }))
+  const rows: TimelineRow[] = dated.map(({ task, span }) => ({ kind: 'task', key: `${taskKeyPrefix}${task.id}`, task, span }))
   if (undated.length > 0) {
     const open = isOpen(overrides, undatedKey)
     rows.push({ kind: 'undated', key: undatedKey, count: undated.length, open })
-    if (open) rows.push(...undated.map(({ task }) => ({ kind: 'task' as const, key: `task:${task.id}`, task, span: null })))
+    if (open) rows.push(...undated.map(({ task }) => ({ kind: 'task' as const, key: `${taskKeyPrefix}${task.id}`, task, span: null })))
   }
   return rows
 }
 
-/** Grouped = one section per project (all-projects view); flat = one project, no sections. */
+/** One section per group from the view's grouping (`groups`), or flat rows when `groups` is null. */
 export function buildTimelineRows(input: {
   tasks: Task[]
-  projects: Project[]
+  groups: TaskGroup[] | null
   statuses: TaskStatusDef[]
-  grouped: boolean
   overrides: Record<string, boolean>
 }): TimelineRow[] {
-  const { tasks, projects, statuses, grouped, overrides } = input
-  if (!grouped) return sectionRows(tasks, 'undated:all', overrides)
+  const { tasks, groups, statuses, overrides } = input
+  if (!groups) return sectionRows(tasks, 'undated:all', 'task:', overrides)
   const categoryOf = new Map(statuses.map((status) => [status.id, status.category]))
-  return projects.flatMap((project) => {
-    const own = tasks.filter((task) => task.projectId === project.id)
+  return groups.flatMap((group) => {
+    const own = group.tasks
     if (own.length === 0) return []
-    const key = `group:${project.id}`
+    const key = `group:${group.key}`
     const open = isOpen(overrides, key)
     const spans = own.map(taskSpan).filter((span): span is TaskSpan => span !== null)
     const header: TimelineRow = {
-      kind: 'group', key, project, open,
+      kind: 'group', key, group, open,
       done: own.filter((task) => categoryOf.get(task.statusId) === 'completed').length,
       total: own.filter((task) => {
         const category = categoryOf.get(task.statusId)
@@ -166,7 +167,7 @@ export function buildTimelineRows(input: {
       }).length,
       span: spans.length > 0 ? { start: min(spans.map((s) => s.start)), end: max(spans.map((s) => s.end)) } : null,
     }
-    return open ? [header, ...sectionRows(own, `undated:${project.id}`, overrides)] : [header]
+    return open ? [header, ...sectionRows(own, `undated:${group.key}`, `task:${group.key}:`, overrides)] : [header]
   })
 }
 

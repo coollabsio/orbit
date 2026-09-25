@@ -6,6 +6,8 @@ import { toast } from 'sonner'
 import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { GroupContext } from '@/features/views/grouping'
+import type { GroupBy } from '@/features/views/viewState'
 import { TaskTimeline } from './TaskTimeline'
 import { computeRange, dayIndex, rowDates } from './timelineLib'
 
@@ -36,11 +38,17 @@ const statuses: TaskStatusDef[] = [
 ]
 const projects = [{ id: 'p1', name: 'Web', key: 'WEB', color: '#e0457b', version: 1 }] as Project[]
 
-type Extra = { onOpen?: (id: string) => void; grouped?: boolean; pxPerDay?: number }
+const labels = [
+  { id: 'bug', name: 'Bug', color: '#eb5757', version: 1, workspace_id: 'ws' },
+  { id: 'ui', name: 'UI', color: '#26b5ce', version: 1, workspace_id: 'ws' },
+]
+const context: GroupContext = { statuses, members: [], labels, projects, currentUserId: 'u1', showEmpty: false }
+
+type Extra = { onOpen?: (id: string) => void; groupBy?: GroupBy; pxPerDay?: number }
 
 function timelineElement(tasks: Task[], extra: Extra = {}) {
   return (
-    <TaskTimeline tasks={tasks} projects={projects} statuses={statuses} users={[]} grouped={extra.grouped ?? true}
+    <TaskTimeline tasks={tasks} projects={projects} statuses={statuses} users={[]} groupBy={extra.groupBy ?? 'project'} groupContext={context}
       pxPerDay={extra.pxPerDay ?? 10} onZoomChange={() => {}} onOpen={extra.onOpen ?? (() => {})} today={today} />
   )
 }
@@ -226,7 +234,7 @@ test('ctrl+wheel zooms in and plain wheel does not', () => {
   const view = render(
     <QueryClientProvider client={client}>
       <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
-        <TaskTimeline tasks={[ranged]} projects={projects} statuses={statuses} users={[]} grouped pxPerDay={10} onZoomChange={(px) => zooms.push(px)} onOpen={() => {}} today={today} />
+        <TaskTimeline tasks={[ranged]} projects={projects} statuses={statuses} users={[]} groupBy="project" groupContext={context} pxPerDay={10} onZoomChange={(px) => zooms.push(px)} onOpen={() => {}} today={today} />
       </WorkspaceContext.Provider>
     </QueryClientProvider>,
   )
@@ -416,4 +424,32 @@ test('scrolling does not write to storage until the timeline goes away', () => {
   expect(sessionStorage.getItem('orbit:timeline_scroll:ws')).toBeNull()
   view.unmount()
   expect(sessionStorage.getItem('orbit:timeline_scroll:ws')).not.toBeNull()
+})
+
+test('without grouping the timeline is one flat list', () => {
+  const view = renderTimeline([ranged, task('b')], { groupBy: 'none' })
+  expect(view.queryByText('Web')).toBeNull()
+  expect(view.queryByText('0/2')).toBeNull()
+  expect(view.getByRole('button', { name: 'No dates (1)' })).toBeTruthy()
+})
+
+test('grouping by status gives each status its own section in workflow order', () => {
+  const done = task('d', { statusId: 'done', dueAt: local(2026, 9, 5, 9).toISOString() })
+  const view = renderTimeline([ranged, done], { groupBy: 'status' })
+  const headers = view.getAllByRole('button', { expanded: true }).map((button) => button.textContent)
+  expect(headers).toEqual(['Todo0/1', 'Done1/1'])
+})
+
+test('a task with two labels shows under both label sections', () => {
+  const tagged = task('a', { labels: ['bug', 'ui'], dueStartAt: local(2026, 9, 1).toISOString(), dueAt: local(2026, 9, 10, 9).toISOString() })
+  const view = renderTimeline([tagged], { groupBy: 'label' })
+  expect(view.getByText('Bug')).toBeTruthy()
+  expect(view.getByText('UI')).toBeTruthy()
+  expect(view.container.querySelectorAll('[data-timeline-bar="a"]')).toHaveLength(2)
+})
+
+test('collapsing a group hides its rows', () => {
+  const view = renderTimeline([ranged], { groupBy: 'project' })
+  fireEvent.click(view.getByRole('button', { name: /^Web/ }))
+  expect(view.container.querySelector('[data-timeline-bar="a"]')).toBeNull()
 })

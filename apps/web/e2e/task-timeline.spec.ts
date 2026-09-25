@@ -8,7 +8,7 @@ const timelinePreference = {
   state: {
     filter: { op: 'and', children: [] },
     display: {
-      layout: 'timeline', group_by: 'status', sub_group_by: 'none', order_by: 'manual', order_direction: 'asc',
+      layout: 'timeline', group_by: 'project', sub_group_by: 'none', order_by: 'manual', order_direction: 'asc',
       properties: ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels'], show_completed: 'all', show_empty_groups: false,
     },
   },

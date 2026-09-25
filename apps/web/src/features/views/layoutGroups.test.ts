@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from './grouping'
 import {
-  ALL_TASKS_KEY, acceptsDrop, boardGrid, canDrag, cellTasks, groupCreateFields, listSections, placementUpdates, planDrop, valuesOf, zoneIdOf,
+  ALL_TASKS_KEY, acceptsDrop, boardGrid, canDrag, cellTasks, groupAccent, groupCreateFields, listSections, placementUpdates, planDrop, valuesOf, zoneIdOf,
 } from './layoutGroups'
 import { DEFAULT_DISPLAY, type DisplayOptions } from './viewState'
 
@@ -173,4 +173,13 @@ describe('boardGrid', () => {
     expect(cellTasks(todo, urgent).map((item) => item.id)).toEqual(['late', 'hot'])
     expect(cellTasks(todo, null).map((item) => item.id)).toEqual(['late', 'calm', 'hot'])
   })
+})
+
+test('group accents come from the project, label or status colour, else muted', () => {
+  const withLabel: GroupContext = { ...ctx, labels: [{ id: 'bug', name: 'Bug', color: '#eb5757', version: 1, workspace_id: 'w' }] }
+  expect(groupAccent({ field: 'project', value: 'p2' }, withLabel)).toBe('#26b5ce')
+  expect(groupAccent({ field: 'label', value: 'bug' }, withLabel)).toBe('#eb5757')
+  expect(groupAccent({ field: 'status', value: 'unstarted:todo' }, withLabel)).toBe('#888')
+  expect(groupAccent({ field: 'priority', value: 'urgent' }, withLabel)).toBe('var(--muted-foreground)')
+  expect(groupAccent({ field: 'label', value: null }, withLabel)).toBe('var(--muted-foreground)')
 })
