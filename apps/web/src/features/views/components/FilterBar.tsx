@@ -19,6 +19,7 @@ import {
   withOperator,
   type FilterOptions,
 } from '../filterFields'
+import { appendCondition } from '../filterTree'
 import { shouldIgnoreShortcut } from '../shortcuts'
 import { countConditions, isFlatFilter, type Condition, type FilterField, type FilterGroup, type FilterOperator } from '../viewState'
 import { FilterValuePicker, ValueGlyph } from './FilterValuePicker'
@@ -32,16 +33,6 @@ const SEGMENT_BUTTON = cn(SEGMENT, 'border-l border-border outline-none transiti
 
 /** Title of the add controls once the tree is at the cap. */
 const FULL_TITLE = `Filters can have at most ${MAX_FILTER_CONDITIONS} conditions`
-
-/**
- * ANDs a condition onto the tree: appended to an AND root, otherwise the root is wrapped. An OR root with at
- * most one child means the same as an AND root, so it takes the condition directly and gains no level.
- */
-function appendCondition(filter: FilterGroup, condition: Condition): FilterGroup {
-  if (filter.op === 'and') return { ...filter, children: [...filter.children, condition] }
-  if (filter.children.length <= 1) return { op: 'and', children: [...filter.children, condition] }
-  return { op: 'and', children: [filter, condition] }
-}
 
 function replaceLastChild(filter: FilterGroup, condition: Condition): FilterGroup {
   return { ...filter, children: [...filter.children.slice(0, -1), condition] }

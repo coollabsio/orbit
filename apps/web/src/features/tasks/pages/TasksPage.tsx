@@ -40,10 +40,12 @@ import { useTaskQuery } from '@/features/views/api/taskQuery'
 import { useSavedView, useViewPreference } from '@/features/views/api/views'
 import { createDefaultsFromFilter, type GroupContext } from '@/features/views/grouping'
 import { groupCreateFields, type GroupValues } from '@/features/views/layoutGroups'
+import { AdvancedFilterDialog } from '@/features/views/components/AdvancedFilterDialog'
 import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
 import { PRESET_LABEL, type FilterOptions } from '@/features/views/filterFields'
 import { legacyFilterValues, withLegacySort } from '@/features/views/legacyFilterAdapter'
 import { useViewState, type ViewSource } from '@/features/views/useViewState'
+import { validateFilterOnServer } from '@/features/views/validateFilter'
 import { isTaskPreset, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
@@ -105,6 +107,7 @@ function WorkspaceTasksPage() {
 
   // Quick search is local and never saved (spec §3); another preset or view starts with an empty box.
   const [search, setSearch] = useState('')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const scopeKey = viewId ? `view:${viewId}` : `preset:${preset ?? 'all'}`
   const lastScope = useRef(scopeKey)
   useEffect(() => {
@@ -309,7 +312,7 @@ function WorkspaceTasksPage() {
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
-            <FilterButton filter={viewState.state.filter} options={filterOptions} onChange={viewState.setFilter} />
+            <FilterButton filter={viewState.state.filter} options={filterOptions} onChange={viewState.setFilter} onOpenAdvanced={() => setAdvancedOpen(true)} />
             <TaskFilters
               sort={legacy.sort}
               layout={layout}
@@ -327,6 +330,15 @@ function WorkspaceTasksPage() {
             options={filterOptions}
             onChange={viewState.setFilter}
             presetLabel={presetLabel}
+            onOpenAdvanced={() => setAdvancedOpen(true)}
+          />
+          <AdvancedFilterDialog
+            open={advancedOpen}
+            onOpenChange={setAdvancedOpen}
+            filter={viewState.state.filter}
+            options={filterOptions}
+            onApply={viewState.setFilter}
+            validate={(next) => validateFilterOnServer(workspace.id, next)}
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
           <div className={`min-h-0 flex-1 ${layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
