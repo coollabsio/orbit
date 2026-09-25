@@ -89,7 +89,7 @@ function OptionSelect<T extends string>({ label, value, items, onChange }: { lab
         if (typeof next === 'string') onChange(next as T)
       }}
     >
-      <SelectTrigger size="sm" className="w-36" aria-label={label}>
+      <SelectTrigger size="sm" className="w-40" aria-label={label}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

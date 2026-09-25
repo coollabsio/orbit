@@ -55,6 +55,15 @@ test('sub-grouping skips the current grouping and hides on timeline', async () =
   expect(view.queryByRole('combobox', { name: 'Sub-grouping' })).toBeNull()
 })
 
+test('option selects are wide enough for "No sub-grouping"', async () => {
+  const view = render(<Harness />)
+  open(view)
+  // at w-36 (144px) the longest label clipped to "No sub-groupir"; the 320px panel has room for w-40
+  for (const name of ['Grouping', 'Sub-grouping', 'Ordering', 'Completed tasks']) {
+    expect((await view.findByRole('combobox', { name })).classList.contains('w-40')).toBe(true)
+  }
+})
+
 test('direction is disabled for manual ordering and toggles otherwise', async () => {
   const view = render(<Harness />)
   open(view)

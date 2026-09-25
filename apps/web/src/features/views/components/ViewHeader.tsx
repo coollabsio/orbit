@@ -72,8 +72,8 @@ export function ViewHeader({ workspaceId, controller, onSaveAsNew, onEdit, onDup
       </div>
       <div className="flex-1" />
       {dirty ? (
-        <div role="group" aria-label="Unsaved view changes" className="flex animate-view-bar-enter items-center gap-1">
-          <span className="mr-1 text-xs text-muted-foreground max-[899px]:hidden">Unsaved changes</span>
+        <div role="group" aria-label="Unsaved view changes" className="flex shrink-0 animate-view-bar-enter items-center gap-1">
+          <span className="mr-1 text-xs whitespace-nowrap text-muted-foreground max-[899px]:hidden">Unsaved changes</span>
           <Button type="button" variant="ghost" size="sm" className={PRESS_MOTION} onClick={() => controller.discard()}>Discard</Button>
           {canEdit ? (
             <Button type="button" size="sm" className={PRESS_MOTION} disabled={saving} aria-keyshortcuts="Control+S Meta+S" onClick={() => void save()}>Save</Button>

@@ -70,6 +70,14 @@ test('editors get Discard and Save, and Ctrl+S saves', async () => {
   await waitFor(() => expect(calls).toEqual(['discard', 'save']))
 })
 
+test('a crowded header shrinks the view name, never the unsaved controls', () => {
+  const { view } = renderHeader(fakeController({ dirty: true }).controller)
+  const bar = view.getByRole('group', { name: 'Unsaved view changes' })
+  // the timeline toolbar leaves little room: without these the label wraps onto two lines
+  expect(bar.classList.contains('shrink-0')).toBe(true)
+  expect(within(bar).getByText('Unsaved changes').classList.contains('whitespace-nowrap')).toBe(true)
+})
+
 test('non-editors get Save as new view, and Cmd+S opens it', async () => {
   let asNew = 0
   const { controller } = fakeController({ dirty: true, canEdit: false })
