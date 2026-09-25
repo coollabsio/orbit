@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { NavLink, useLocation } from 'react-router'
+import { NavLink } from 'react-router'
 import { cn } from 'cn'
 import { useReorderFavorites, useSavedViews } from '@/features/views/api/views'
 import { ViewIcon } from '@/features/views/components/ViewIcon'
@@ -9,14 +9,13 @@ import { SidebarSection, sidebarItemClass, sidebarLabelClass } from './SidebarNa
 
 /** The dragged item fades and stays mounted (a drag cancels if its source leaves the DOM); a 2px pink line marks the drop. */
 const DRAG_STATES =
-  'data-[dragging=true]:opacity-50 data-[drop-target=true]:before:absolute data-[drop-target=true]:before:inset-x-1 data-[drop-target=true]:before:top-0 data-[drop-target=true]:before:h-0.5 data-[drop-target=true]:before:rounded-full data-[drop-target=true]:before:bg-primary data-[drop-edge=after]:before:top-auto data-[drop-edge=after]:before:bottom-0'
+  'data-[dragging=true]:opacity-50 data-[drop-target=true]:before:absolute data-[drop-target=true]:before:inset-x-1 data-[drop-target=true]:before:h-0.5 data-[drop-target=true]:before:rounded-full data-[drop-target=true]:before:bg-primary data-[drop-edge=before]:before:top-0 data-[drop-edge=after]:before:bottom-0'
 
 /** Sidebar section above Personal; hidden until the user favorites a view. Drag or Alt+Arrow to reorder. */
 export function FavoritesNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const { workspace } = useWorkspace()
   const viewsQuery = useSavedViews(workspace.id)
   const reorder = useReorderFavorites(workspace.id)
-  const location = useLocation()
   const [order, setOrder] = useState<string[] | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
@@ -48,50 +47,55 @@ export function FavoritesNav({ collapsed = false, onNavigate }: { collapsed?: bo
   return (
     <>
       <SidebarSection label="Favorites" collapsed={collapsed} />
-      {favorites.map((view, index) => (
-        <NavLink
-          key={view.id}
-          to={viewPath(view.id)}
-          draggable
-          className={cn(sidebarItemClass(location.pathname === viewPath(view.id), collapsed), DRAG_STATES)}
-          data-dragging={dragId === view.id || undefined}
-          data-drop-target={(overId === view.id && dragId !== view.id) || undefined}
-          // dropping takes the target's slot, so moving down lands below it
-          data-drop-edge={overId === view.id && dragId && favorites.findIndex((item) => item.id === dragId) < index ? 'after' : undefined}
-          aria-label={view.name}
-          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-          title={collapsed ? view.name : undefined}
-          onClick={onNavigate}
-          onDragStart={(event) => {
-            setDragId(view.id)
-            event.dataTransfer.effectAllowed = 'move'
-            event.dataTransfer.setData('text/plain', view.id)
-          }}
-          onDragOver={(event) => {
-            if (!dragId) return
-            event.preventDefault()
-            event.dataTransfer.dropEffect = 'move'
-            setOverId(view.id)
-          }}
-          onDrop={(event) => {
-            event.preventDefault()
-            if (dragId) move(dragId, index)
-            endDrag()
-          }}
-          onDragEnd={endDrag}
-          onKeyDown={(event) => {
-            if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
-            event.preventDefault()
-            move(view.id, event.key === 'ArrowUp' ? index - 1 : index + 1)
-            // React may move the focused node while reordering; keep focus on it for the next press
-            const link = event.currentTarget
-            requestAnimationFrame(() => link.focus())
-          }}
-        >
-          <ViewIcon icon={view.icon} color={view.color} className="size-[18px] opacity-90" />
-          <span className={sidebarLabelClass(collapsed)}>{view.name}</span>
-        </NavLink>
-      ))}
+      {favorites.map((view, index) => {
+        const target = overId === view.id && dragId !== null && dragId !== view.id
+        // dropping takes the target's slot, so a downward move lands below it and an upward one above
+        const edge = target ? (favorites.findIndex((item) => item.id === dragId) < index ? 'after' : 'before') : undefined
+        return (
+          <NavLink
+            key={view.id}
+            to={viewPath(view.id)}
+            draggable
+            // prefix match, like the Tasks link: an open task (/views/:id/:taskId) keeps its view lit
+            className={({ isActive }) => cn(sidebarItemClass(isActive, collapsed), DRAG_STATES)}
+            data-dragging={dragId === view.id || undefined}
+            data-drop-target={target || undefined}
+            data-drop-edge={edge}
+            aria-label={view.name}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            title={collapsed ? view.name : undefined}
+            onClick={onNavigate}
+            onDragStart={(event) => {
+              setDragId(view.id)
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('text/plain', view.id)
+            }}
+            onDragOver={(event) => {
+              if (!dragId) return
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+              setOverId(view.id)
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              if (dragId) move(dragId, index)
+              endDrag()
+            }}
+            onDragEnd={endDrag}
+            onKeyDown={(event) => {
+              if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+              event.preventDefault()
+              move(view.id, event.key === 'ArrowUp' ? index - 1 : index + 1)
+              // React may move the focused node while reordering; keep focus on it for the next press
+              const link = event.currentTarget
+              requestAnimationFrame(() => link.focus())
+            }}
+          >
+            <ViewIcon icon={view.icon} color={view.color} className="size-[18px] opacity-90" />
+            <span className={sidebarLabelClass(collapsed)}>{view.name}</span>
+          </NavLink>
+        )
+      })}
     </>
   )
 }

@@ -45,9 +45,29 @@ test('dragging a favorite keeps it mounted and saves the full order', async () =
   fireEvent.dragOver(beta, { dataTransfer })
   expect(alpha.getAttribute('data-dragging')).toBe('true')
   expect(beta.getAttribute('data-drop-target')).toBe('true')
+  expect(beta.getAttribute('data-drop-edge')).toBe('before')
   fireEvent.drop(beta, { dataTransfer })
   expect(names(view.getAllByRole('link'))).toEqual(['Alpha view', 'Beta view'])
   await waitFor(() => expect(requests.find((request) => request.method === 'PUT')?.body).toEqual({ view_ids: ['view-a', 'view-b'] }))
+})
+
+test('dragging a favorite downward marks the drop below the target', () => {
+  const { view } = renderWithProviders(<FavoritesNav />, { views: [ALPHA, BETA] })
+  const beta = view.getByRole('link', { name: 'Beta view' })
+  const alpha = view.getByRole('link', { name: 'Alpha view' })
+  const dataTransfer = { setData: () => {}, getData: () => '', effectAllowed: 'all', dropEffect: 'none' }
+  fireEvent.dragStart(beta, { dataTransfer })
+  fireEvent.dragOver(alpha, { dataTransfer })
+  expect(alpha.getAttribute('data-drop-target')).toBe('true')
+  expect(alpha.getAttribute('data-drop-edge')).toBe('after')
+  fireEvent.dragEnd(beta, { dataTransfer })
+  expect(alpha.getAttribute('data-drop-edge')).toBeNull()
+})
+
+test('a favorite stays highlighted while one of its tasks is open', () => {
+  const { view } = renderWithProviders(<FavoritesNav />, { views: [ALPHA, BETA], route: '/views/view-a/task-1' })
+  expect(view.getByRole('link', { name: 'Alpha view' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  expect(view.getByRole('link', { name: 'Beta view' }).classList.contains('bg-sidebar-accent')).toBe(false)
 })
 
 test('Alt+Arrow keys reorder from the keyboard', async () => {
