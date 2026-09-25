@@ -79,8 +79,8 @@ type ListDrag = { taskId: string; from: GroupValues }
 /** `index` = insertion slot among the zone's other rows; null when the order is not manual. */
 type ListDrop = { zone: string; index: number | null }
 /**
- * Where a drop lands: the innermost group section. A collapsed group with sub-groups stands in for its
- * first sub-group. `rowsShown` is false when the zone's rows are not on screen (collapsed).
+ * Where a drop lands: the innermost group section on screen. A collapsed group with sub-groups is one zone
+ * with the group's values only. `rowsShown` is false when the zone's rows are not on screen (collapsed).
  */
 type DropZone = { id: string; values: GroupValues; tasks: Task[]; rowsShown: boolean }
 
@@ -286,13 +286,10 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           )
         }
         if (isCollapsed) {
-          // the sub-groups are hidden, so the collapsed group takes drops for its first one (appended at its end)
-          const first = subGroups[0]
-          const target = first
-            ? { id: zoneIdOf(valuesOf(group, first)), values: valuesOf(group, first), tasks: first.tasks, rowsShown: false }
-            : { id: zone, values, tasks: group.tasks, rowsShown: false }
+          // the sub-groups are hidden, so the collapsed group itself takes drops: only the group field changes
+          // (a hidden sub-group value must never be written) and the task goes to the group's end
           return (
-            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps(target)}>
+            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps({ id: zone, values, tasks: group.tasks, rowsShown: false })}>
               {renderHeader(group, zone, values, 'group')}
             </section>
           )

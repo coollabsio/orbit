@@ -388,20 +388,35 @@ test('a sub-group inside the Duplicate status group offers no +', () => {
   expect(within(duplicate).queryAllByRole('button', { name: 'New task in Urgent' })).toHaveLength(0)
 })
 
-test('a collapsed group with sub-groups still accepts drops, appending to its first sub-group', async () => {
+function dropOnCollapsedDoing(order: DisplayOptions['order_by']) {
   const writes = captureWrites()
-  const view = renderList([task(1), { ...task(2), statusId: 'doing' }], { statuses: [status, doingStatus], display: { sub_group_by: 'priority' } })
+  // Doing's only (first) sub-group is Urgent; the dragged task has no priority
+  const view = renderList([task(1), { ...task(2), statusId: 'doing', priority: 'urgent' }], {
+    statuses: [status, doingStatus], display: { sub_group_by: 'priority', order_by: order },
+  })
   fireEvent.click(view.getByRole('button', { name: 'Collapse Doing' }))
   const doing = view.getByRole('button', { name: 'Expand Doing' }).closest('section')!
   fireEvent.dragStart(rowOf(view, 'Task 1'), { dataTransfer })
   fireEvent.dragOver(doing, { dataTransfer })
   expect(doing.hasAttribute('data-drop-over')).toBe(true)
   dropAt(doing, 0)
+  return writes
+}
 
+test('a collapsed group with sub-groups still accepts drops; only the group field changes, appended at its end', async () => {
+  const writes = dropOnCollapsedDoing('manual')
   await waitFor(() => expect(writes).toHaveLength(1))
   expect(writes[0]).toEqual({
     method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/bulk',
     body: { updates: [{ id: 'task-1', expected_version: 1, position: 3, status_id: 'doing' }] },
+  })
+})
+
+test('with a non-manual order, a drop on a collapsed group with sub-groups patches only the group field', async () => {
+  const writes = dropOnCollapsedDoing('created')
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0]).toEqual({
+    method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-1', body: { expected_version: 1, status_id: 'doing' },
   })
 })
 
