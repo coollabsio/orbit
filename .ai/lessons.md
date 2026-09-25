@@ -30,6 +30,10 @@
 - Headless Firefox `--screenshot` does not wait for `loading="lazy"` images inside a scroll container (they show alt text). Data-URL images should load eagerly anyway; for real URLs, accept the artifact or test on a bare page.
 - Headless Firefox `--screenshot` captures CSS animations at frame 0: anything with an enter animation (modal fade, `slide-in-right` panels) is invisible/off-screen in the PNG. Verify such UI with a static test page that links the built CSS and sets `*{animation:none!important}`; a 50%-black backdrop is also invisible on the near-black canvas, so do not read its absence as "not rendered".
 - Browser-default `text-align: center` on `<button>` inherits into child spans — the base reset must set `text-align: left` on buttons.
+- `cargo test --workspace` stops at the first failing test binary; use `--no-fail-fast` to see the whole suite.
+- Playwright rewrites the tracked `apps/web/test-results/.last-run.json` on every run — restore it with `git checkout --` and never commit it.
+- Under bun + happy-dom, a failing `toBeNull()` on an element or a failing `waitFor` on a full page can exhaust a 4 GB memory cap with no output. Assert negatives by count and keep rendered page tests focused.
+- Tailwind v4 emits variant rules in its own order, not class order: two `data-[…]:` variants that set the same property (e.g. `top`) at equal specificity can resolve the wrong way. Make such variants mutually exclusive instead of relying on override order.
 
 ## HTML5 drag and drop: never unmount the drag source on dragstart
 - Symptom: kanban cards went invisible while dragging and no drop indicator appeared.
