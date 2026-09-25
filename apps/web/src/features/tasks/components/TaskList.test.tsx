@@ -1,14 +1,16 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
-import type { WorkspaceRecord } from '@/api/generated/types.gen'
-import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
-import type { User } from '@/features/workspaces/models'
-import { statusGroups, type StatusGroup } from '@/features/tasks/tasksLib'
 import { toast } from 'sonner'
+import type { WorkspaceRecord } from '@/api/generated/types.gen'
+import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { GroupContext } from '@/features/views/grouping'
+import type { GroupValues } from '@/features/views/layoutGroups'
+import { DEFAULT_DISPLAY, type DisplayOptions } from '@/features/views/viewState'
+import type { User } from '@/features/workspaces/models'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { TaskList } from './TaskList'
 
 const originalFetch = globalThis.fetch
@@ -22,9 +24,13 @@ const status: TaskStatusDef = {
   id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#aaa',
   category: 'unstarted', position: 0, version: 1,
 }
-const groups: StatusGroup[] = [{
-  key: 'unstarted:todo', name: 'Todo', category: 'unstarted', status, statusIds: [status.id],
-}]
+const doingStatus: TaskStatusDef = { ...status, id: 'doing', name: 'Doing', category: 'started', position: 1 }
+const duplicateStatus: TaskStatusDef = {
+  id: 'dup', projectId: 'project-1', name: 'Duplicate', description: '', color: '#8b8f98',
+  category: 'duplicate', position: 1, version: 1,
+}
+const launch = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1 } as Project
+const docs = { ...launch, id: 'project-2', name: 'Docs', key: 'DOC' } as Project
 const user: User = {
   id: 'user-1', membershipId: 'membership-1', name: 'Ada Lovelace', handle: 'ada', email: 'ada@example.com',
   role: 'Member', color: '#8b5cf6', online: true, title: '', roleIds: [], version: 1,
@@ -43,8 +49,32 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider>
 }
 
+type ListOptions = {
+  onOpen?: (taskId: string) => void
+  onAdd?: (values: GroupValues) => void
+  users?: User[]
+  statuses?: TaskStatusDef[]
+  display?: Partial<DisplayOptions>
+  scope?: string
+}
+
+function renderList(tasks: Task[], options: ListOptions = {}) {
+  const statuses = options.statuses ?? [status]
+  const groupContext: GroupContext = {
+    statuses, members: options.users ?? [], labels: [], projects: [launch, docs], currentUserId: 'user-1', showEmpty: false,
+  }
+  return render(
+    <TaskList
+      tasks={tasks} users={options.users ?? []} labels={[]} statuses={statuses} projects={[launch, docs]}
+      display={{ ...DEFAULT_DISPLAY, ...options.display }} groupContext={groupContext} collapseScope={options.scope ?? 'all'}
+      onOpen={options.onOpen ?? (() => {})} onAdd={options.onAdd ?? (() => {})}
+    />,
+    { wrapper },
+  )
+}
+
 function viewFor(tasks: Task[], onOpen = () => {}, users: User[] = []) {
-  return render(<TaskList tasks={tasks} users={users} labels={[]} statuses={[status]} groups={groups} sort="manual" onOpen={onOpen} onAdd={() => {}} />, { wrapper })
+  return renderList(tasks, { onOpen, users })
 }
 
 async function chooseUrgent(view: ReturnType<typeof render>) {
@@ -53,6 +83,35 @@ async function chooseUrgent(view: ReturnType<typeof render>) {
   // then clicks the option, waiting until the opened popover is actually actionable.
   fireEvent.click(within(toolbar).getByRole('button', { name: 'Priority' }))
   await userEvent.click(await view.findByRole('menuitem', { name: /^Urgent/ }, { timeout: 5000 }))
+}
+
+type Write = { method: string; path: string; body: unknown }
+function captureWrites(): Write[] {
+  const writes: Write[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method !== 'GET') writes.push({ method: request.method, path: new URL(request.url).pathname, body: await request.json() })
+    return Response.json({ items: [], next_cursor: null })
+  }) as unknown as typeof fetch
+  return writes
+}
+
+const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => {}, getData: () => '' }
+const rowOf = (view: ReturnType<typeof render>, title: string) => view.getByText(title).closest('[data-task-row]')!
+const zoneOf = (view: ReturnType<typeof render>, label: string) => view.getByRole('button', { name: `Collapse ${label}` }).closest('section')!
+function dropAt(target: Element, clientY: number) {
+  const event = createEvent.drop(target, { dataTransfer })
+  Object.defineProperty(event, 'clientY', { value: clientY })
+  fireEvent(target, event)
+}
+/** Negative check: `assertion` keeps holding for `ms`, long enough for a stray mutation to reach fetch. */
+async function staysTrue(assertion: () => void, ms = 100) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    assertion()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  assertion()
 }
 
 test('bulk toolbar rejects more than 100 selected tasks without a server request', async () => {
@@ -158,6 +217,18 @@ test('remembers collapsed groups after the task list reloads', () => {
   expect(reloadedView.queryByText('Task 1')).toBeNull()
 })
 
+test('collapsed groups are remembered per page', () => {
+  const allTasks = renderList([task(1)], { scope: 'all' })
+  fireEvent.click(allTasks.getByRole('button', { name: 'Collapse Todo' }))
+  allTasks.unmount()
+
+  const projectPage = renderList([task(1)], { scope: 'project:project-1' })
+  expect(projectPage.getByRole('button', { name: 'Collapse Todo' }).getAttribute('aria-expanded')).toBe('true')
+  projectPage.unmount()
+
+  expect(renderList([task(1)], { scope: 'all' }).getByRole('button', { name: 'Expand Todo' })).toBeTruthy()
+})
+
 test('bulk toolbar Escape closes an open menu first, then clears the selection', async () => {
   const view = viewFor([task(1), task(2)])
   for (const checkbox of view.getAllByRole('checkbox')) fireEvent.click(checkbox)
@@ -173,11 +244,172 @@ test('bulk toolbar Escape closes an open menu first, then clears the selection',
   expect(view.queryByRole('toolbar', { name: 'Selected tasks' })).toBeNull()
 }, 20000)
 
-const duplicateStatus: TaskStatusDef = {
-  id: 'dup', projectId: 'project-1', name: 'Duplicate', description: '', color: '#8b8f98',
-  category: 'duplicate', position: 1, version: 1,
-}
-const listProject = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1 }
+test('grouping by priority orders groups from urgent to no priority', () => {
+  const view = renderList([task(1), { ...task(2), priority: 'urgent' }], { display: { group_by: 'priority' } })
+  const headers = view.getAllByRole('button', { name: /^Collapse / }).map((button) => button.getAttribute('aria-label'))
+  expect(headers).toEqual(['Collapse Urgent', 'Collapse No priority'])
+})
+
+test('without grouping the list is flat, with no headers', () => {
+  const view = renderList([task(1), task(2)], { display: { group_by: 'none' } })
+  expect(view.queryAllByRole('button', { name: /^Collapse / })).toEqual([])
+  expect(view.getByText('Task 1')).toBeTruthy()
+  expect(view.getByText('Task 2')).toBeTruthy()
+})
+
+test('sub-groups render as collapsible headers inside each group', () => {
+  const view = renderList([task(1), { ...task(2), priority: 'urgent' }], { display: { sub_group_by: 'priority' } })
+  const todo = zoneOf(view, 'Todo')
+  expect(within(todo).getByRole('button', { name: 'Collapse No priority' })).toBeTruthy()
+
+  fireEvent.click(within(todo).getByRole('button', { name: 'Collapse Urgent' }))
+  expect(view.queryByText('Task 2')).toBeNull()
+  expect(view.getByText('Task 1')).toBeTruthy()
+
+  fireEvent.click(view.getByRole('button', { name: 'Collapse Todo' }))
+  expect(view.queryByText('Task 1')).toBeNull()
+  expect(view.queryByRole('button', { name: 'Expand Urgent' })).toBeNull()
+})
+
+test('the + in a sub-group header passes the group and sub-group values', () => {
+  const added: GroupValues[] = []
+  const view = renderList([{ ...task(1), priority: 'urgent' }], { display: { sub_group_by: 'priority' }, onAdd: (values) => added.push(values) })
+  fireEvent.click(within(zoneOf(view, 'Todo')).getByRole('button', { name: 'New task in Urgent' }))
+  expect(added).toEqual([[{ field: 'status', value: 'unstarted:todo' }, { field: 'priority', value: 'urgent' }]])
+})
+
+test('show_empty_groups adds headers for statuses without tasks', () => {
+  const hidden = renderList([task(1)], { statuses: [status, doingStatus] })
+  expect(hidden.queryByRole('button', { name: 'Collapse Doing' })).toBeNull()
+  hidden.unmount()
+
+  const shown = renderList([task(1)], { statuses: [status, doingStatus], display: { show_empty_groups: true } })
+  expect(within(zoneOf(shown, 'Doing')).getByText('0')).toBeTruthy()
+})
+
+test('rows render only the properties chosen in the display options', () => {
+  const dated = { ...task(1), dueAt: '2026-09-30T09:00:00.000Z' }
+  const minimal = renderList([dated], { display: { properties: ['id'] } })
+  expect(minimal.getByText('ORB-1')).toBeTruthy()
+  expect(minimal.queryByRole('button', { name: 'Status: Todo' })).toBeNull()
+  expect(minimal.queryByRole('button', { name: /^Priority:/ })).toBeNull()
+  expect(minimal.queryByRole('button', { name: 'Assign task' })).toBeNull()
+  expect(minimal.container.querySelector('[data-property="due_date"]')).toBeNull()
+  minimal.unmount()
+
+  const chosen = renderList([dated], { display: { properties: ['status', 'priority', 'due_date', 'project', 'updated'] } })
+  expect(chosen.queryByText('ORB-1')).toBeNull()
+  expect(chosen.getByRole('button', { name: 'Status: Todo' })).toBeTruthy()
+  expect(chosen.getByRole('button', { name: 'Priority: No priority' })).toBeTruthy()
+  expect(chosen.container.querySelector('[data-property="due_date"]')).not.toBeNull()
+  expect(chosen.container.querySelector('[data-property="project"]')!.textContent).toBe('Launch')
+  expect(chosen.container.querySelector('[data-property="updated"]')).not.toBeNull()
+  expect(chosen.container.querySelector('[data-property="created"]')).toBeNull()
+})
+
+test('dropping a row on another priority group sets that priority', async () => {
+  const writes = captureWrites()
+  const view = renderList([task(1), { ...task(2), priority: 'urgent' }], { display: { group_by: 'priority', order_by: 'created' } })
+  fireEvent.dragStart(rowOf(view, 'Task 1'), { dataTransfer })
+  dropAt(zoneOf(view, 'Urgent'), 0)
+
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0]).toEqual({
+    method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-1', body: { expected_version: 1, priority: 'urgent' },
+  })
+})
+
+test('a drop with no matching status in the task\'s project shows a toast and writes nothing', async () => {
+  const writes = captureWrites()
+  const errorToast = spyOn(toast, 'error').mockImplementation(() => 0)
+  const docsTodo: TaskStatusDef = { ...status, id: 'todo-2', projectId: 'project-2' }
+  const view = renderList(
+    [{ ...task(1), projectId: 'project-2', statusId: 'todo-2' }, { ...task(2), statusId: 'doing' }],
+    { statuses: [status, doingStatus, docsTodo] },
+  )
+  fireEvent.dragStart(rowOf(view, 'Task 1'), { dataTransfer })
+  dropAt(zoneOf(view, 'Doing'), 0)
+
+  await waitFor(() => expect(errorToast).toHaveBeenCalledTimes(1))
+  expect(String(errorToast.mock.calls[0]![0])).toContain('No matching status')
+  await staysTrue(() => expect(writes).toEqual([]))
+  errorToast.mockRestore()
+})
+
+test('manual order: dropping a row above its group\'s first row writes only the changed positions', async () => {
+  const writes = captureWrites()
+  const view = renderList([task(1), task(2), task(3)])
+  fireEvent.dragStart(rowOf(view, 'Task 3'), { dataTransfer })
+  dropAt(zoneOf(view, 'Todo'), -1)
+
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0]!.path).toBe('/api/v1/workspaces/workspace-1/tasks/bulk')
+  expect(writes[0]!.body).toEqual({ updates: [
+    { id: 'task-3', expected_version: 1, position: 1 },
+    { id: 'task-1', expected_version: 1, position: 2 },
+    { id: 'task-2', expected_version: 1, position: 3 },
+  ] })
+})
+
+test('with a non-manual order, dropping inside the same group changes nothing', async () => {
+  const writes = captureWrites()
+  const view = renderList([task(1), task(2)], { display: { order_by: 'created' } })
+  fireEvent.dragStart(rowOf(view, 'Task 2'), { dataTransfer })
+  dropAt(zoneOf(view, 'Todo'), -1)
+  await staysTrue(() => expect(writes).toEqual([]))
+})
+
+test('the dragged row stays mounted and fades while dragging', () => {
+  const view = renderList([task(1), task(2)])
+  const row = rowOf(view, 'Task 1')
+  fireEvent.dragStart(row, { dataTransfer })
+  expect(row.isConnected).toBe(true)
+  expect(row.getAttribute('data-dragging')).toBe('true')
+  fireEvent.dragEnd(row)
+  expect(row.hasAttribute('data-dragging')).toBe(false)
+})
+
+test('show_empty_groups also lists empty sub-groups inside each group', () => {
+  const view = renderList([task(1)], { display: { sub_group_by: 'priority', show_empty_groups: true } })
+  const urgent = within(zoneOf(view, 'Todo')).getByRole('button', { name: 'Collapse Urgent' }).closest('section')!
+  expect(within(urgent).getByText('0')).toBeTruthy()
+  expect(within(zoneOf(view, 'Todo')).getByRole('button', { name: 'Collapse No priority' })).toBeTruthy()
+})
+
+test('a sub-group inside the Duplicate status group offers no +', () => {
+  const view = renderList(
+    [{ ...task(1), priority: 'urgent' }, { ...asDuplicate(task(2)), priority: 'urgent' }],
+    { statuses: [status, duplicateStatus], display: { sub_group_by: 'priority' } },
+  )
+  expect(within(zoneOf(view, 'Todo')).getByRole('button', { name: 'New task in Urgent' })).toBeTruthy()
+  const duplicate = zoneOf(view, 'Duplicate')
+  expect(within(duplicate).getByRole('button', { name: 'Collapse Urgent' })).toBeTruthy()
+  // a count, not the element: printing a happy-dom element in a failure message exhausts memory
+  expect(within(duplicate).queryAllByRole('button', { name: 'New task in Urgent' })).toHaveLength(0)
+})
+
+test('a collapsed group with sub-groups still accepts drops, appending to its first sub-group', async () => {
+  const writes = captureWrites()
+  const view = renderList([task(1), { ...task(2), statusId: 'doing' }], { statuses: [status, doingStatus], display: { sub_group_by: 'priority' } })
+  fireEvent.click(view.getByRole('button', { name: 'Collapse Doing' }))
+  const doing = view.getByRole('button', { name: 'Expand Doing' }).closest('section')!
+  fireEvent.dragStart(rowOf(view, 'Task 1'), { dataTransfer })
+  fireEvent.dragOver(doing, { dataTransfer })
+  expect(doing.hasAttribute('data-drop-over')).toBe(true)
+  dropAt(doing, 0)
+
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0]).toEqual({
+    method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/bulk',
+    body: { updates: [{ id: 'task-1', expected_version: 1, position: 3, status_id: 'doing' }] },
+  })
+})
+
+test('grouped by project with a non-manual order, rows cannot be dragged', () => {
+  const view = renderList([task(1)], { display: { group_by: 'project', order_by: 'created' } })
+  expect(rowOf(view, 'Task 1').getAttribute('draggable')).toBe('false')
+})
+
 const canonical = {
   id: 'task-91c0', workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title: 'Login fails on Safari',
   description: '', position: 9, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
@@ -190,7 +422,7 @@ function relationsApi(calls: Call[]) {
     const path = new URL(request.url).pathname
     const body = request.method === 'GET' ? undefined : await request.json() as Record<string, unknown>
     calls.push({ method: request.method, path, body })
-    if (path.endsWith('/projects')) return Response.json({ items: [listProject], next_cursor: null })
+    if (path.endsWith('/projects')) return Response.json({ items: [launch], next_cursor: null })
     if (path.endsWith('/tasks/bulk')) {
       const updates = body!.updates as Array<{ id: string; expected_version: number }>
       return Response.json({ items: updates.map((update) => ({ ...canonical, id: update.id, version: update.expected_version + 1 })), next_cursor: null })
@@ -203,8 +435,7 @@ const writes = (calls: Call[]) => calls.filter((call) => call.method !== 'GET')
 const asDuplicate = (value: Task): Task => ({ ...value, statusId: 'dup', duplicateOf: { id: 'task-91c0', projectId: 'project-1', title: 'Login fails on Safari' } })
 
 function viewWithDuplicate(tasks: Task[]) {
-  const statuses = [status, duplicateStatus]
-  return render(<TaskList tasks={tasks} users={[]} labels={[]} statuses={statuses} groups={statusGroups(statuses, 'project-1')} sort="manual" onOpen={() => {}} onAdd={() => {}} />, { wrapper })
+  return renderList(tasks, { statuses: [status, duplicateStatus] })
 }
 
 test('a blocked task shows the blocked icon beside its identifier', () => {
@@ -237,11 +468,8 @@ test('dropping a row on the Duplicate group asks for the canonical task and writ
   relationsApi(calls)
   const view = viewWithDuplicate([task(1), asDuplicate(task(2))])
   expect(view.queryByRole('button', { name: 'New task in Duplicate' })).toBeNull()
-  const row = view.getByText('Task 1').closest('[draggable="true"]')!
-  const duplicateGroup = view.getByRole('button', { name: 'Collapse Duplicate' }).closest('section')!
-  const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => {}, getData: () => 'task-1' }
-  fireEvent.dragStart(row, { dataTransfer })
-  fireEvent.drop(duplicateGroup, { dataTransfer })
+  fireEvent.dragStart(rowOf(view, 'Task 1'), { dataTransfer })
+  fireEvent.drop(zoneOf(view, 'Duplicate'), { dataTransfer })
   expect(await view.findByRole('dialog', { name: 'Mark ORB-1 as duplicate of…' })).toBeTruthy()
   expect(writes(calls)).toEqual([])
 })

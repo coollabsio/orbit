@@ -32,17 +32,6 @@ export function statusGroups(statuses: TaskStatusDef[], projectId: string | null
   return groups
 }
 
-export interface TaskGroup extends StatusGroup {
-  tasks: Task[]
-}
-
-/** Tasks bucketed into status groups (empty groups dropped), ordered by `sort` inside a group. */
-export function groupTasksByStatus(tasks: Task[], groups: StatusGroup[], sort: SortKey = 'manual'): TaskGroup[] {
-  return groups
-    .map((group) => ({ ...group, tasks: sortTasks(tasks.filter((t) => group.statusIds.includes(t.statusId)), sort) }))
-    .filter((group) => group.tasks.length > 0)
-}
-
 /** The status of `projectId` that belongs to a group key; falls back to the project's default status. */
 export function resolveStatusId(statuses: TaskStatusDef[], projectId: string, key: string | null): string | undefined {
   const match = key ? statuses.find((s) => s.projectId === projectId && statusKeyOf(s) === key) : undefined

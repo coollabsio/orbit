@@ -39,6 +39,7 @@ import { taskRedirect } from '@/features/tasks/taskNavigation'
 import { useTaskQuery } from '@/features/views/api/taskQuery'
 import { useSavedView, useViewPreference } from '@/features/views/api/views'
 import { createDefaultsFromFilter, type GroupContext } from '@/features/views/grouping'
+import { groupCreateFields, type GroupValues } from '@/features/views/layoutGroups'
 import { legacyFilterValues, withLegacyFilter, withLegacySort, type LegacyFilterChange } from '@/features/views/legacyFilterAdapter'
 import { useViewState, type ViewSource } from '@/features/views/useViewState'
 import { isTaskPreset, pageKeyFor, type FilterGroup, type TaskPreset } from '@/features/views/viewState'
@@ -153,6 +154,8 @@ function WorkspaceTasksPage() {
     currentUserId: state.currentUserId,
     showEmpty: display.show_empty_groups,
   }
+  // collapsed groups are remembered per page (not part of the view state)
+  const collapseScope = source.kind === 'view' ? `view:${source.viewId}` : source.pageKey
 
   const persisted = new URLSearchParams(searchParams)
   persisted.delete('new')
@@ -198,16 +201,32 @@ function WorkspaceTasksPage() {
   }, [basePath, closeSearchSuffix, navigate, redirect, taskId])
 
   const creating = useRef(false)
-  const startNewTask = async (statusKey: string | null = null, replace = false) => {
-    const defaults = createDefaultsFromFilter(viewState.effective, { ...groupContext, targetProjectId: projectFilter ?? projects[0]?.id ?? null })
-    const projectId = defaults.project_id
-    const statusId = projectId
-      ? statusKey ? resolveStatusId(statusesQuery.data, projectId, statusKey) : defaults.status_id ?? resolveStatusId(statusesQuery.data, projectId, null)
-      : undefined
-    if (!projectId || !statusId || creating.current) return
+  /** `values` = the group (and sub-group) whose + was pressed; each value wins over the filter default for its field. */
+  const startNewTask = async (values: GroupValues = [], replace = false) => {
+    if (creating.current) return
+    const fromGroup = groupCreateFields(values)
+    const fromFilter = createDefaultsFromFilter(viewState.effective, {
+      ...groupContext,
+      targetProjectId: fromGroup.projectId ?? projectFilter ?? projects[0]?.id ?? null,
+    })
+    // a project group wins; otherwise the filter's single project, then the page or first project
+    const projectId = fromGroup.projectId ?? fromFilter.project_id
+    if (!projectId) return
+    // the filter's status was resolved in the filter's project; only reuse it for that project
+    const filterStatusId = fromFilter.project_id === projectId ? fromFilter.status_id : undefined
+    const statusId = fromGroup.statusKey
+      ? resolveStatusId(statusesQuery.data, projectId, fromGroup.statusKey)
+      : filterStatusId ?? resolveStatusId(statusesQuery.data, projectId, null)
+    if (!statusId) return
     creating.current = true
     try {
-      const task = await createTask.mutateAsync({ ...defaults, title: 'Untitled', project_id: projectId, status_id: statusId })
+      const task = await createTask.mutateAsync({
+        ...fromFilter,
+        ...fromGroup.body,
+        title: 'Untitled',
+        project_id: projectId,
+        status_id: statusId,
+      })
       navigate(`${basePath}/${task.id}${detailSearchSuffix}`, { replace, state: originState })
     } catch {
       // The mutation exposes the server problem beside the create action.
@@ -220,7 +239,7 @@ function WorkspaceTasksPage() {
   const stateLoading = viewState.isLoading
   useEffect(() => {
     // new-task defaults come from the page's filter, so wait until it has loaded
-    if (wantsNew && !stateLoading && projects.length > 0 && statusesQuery.data.length > 0) void startNewTask(null, true)
+    if (wantsNew && !stateLoading && projects.length > 0 && statusesQuery.data.length > 0) void startNewTask([], true)
     // The URL flag is the one-shot trigger; the ref prevents duplicate in-flight creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsNew, stateLoading, projects.length, statusesQuery.data.length])
@@ -322,7 +341,7 @@ function WorkspaceTasksPage() {
               ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} grouped={!projectFilter} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
               : layout === 'board'
                 ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={legacy.sort} activeTaskId={null} onOpen={openTask} />
-                : <TaskList key={workspace.id} tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={legacy.sort} onOpen={openTask} onAdd={(key) => void startNewTask(key)} />}
+                : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => void startNewTask(values)} />}
           </div>
         </section>
       )}
