@@ -223,6 +223,49 @@ impl Fixture {
         .await
     }
 
+    async fn set_text(&self, page: &Value, text: &str) {
+        let version = self.get(id_of(page)).await["version"].as_u64().unwrap();
+        let (status, body) = self
+            .call(
+                "PATCH",
+                &self.page_uri(id_of(page)),
+                Some(json!({
+                    "expected_version": version,
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    async fn purge(&self, page_id: &str) {
+        let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = ?")
+            .bind(page_id)
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap();
+        let (status, body) = self
+            .call(
+                "DELETE",
+                &format!(
+                    "{}/permanent?expected_version={version}",
+                    self.page_uri(page_id)
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    }
+
+    /// `(parent_id, trashed_with)` of a stored page.
+    async fn get_raw(&self, page_id: &str) -> (Option<String>, Option<String>) {
+        sqlx::query_as("SELECT parent_id, trashed_with FROM pages WHERE id = ?")
+            .bind(page_id)
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
+    }
+
     async fn search(&self, query: &str) -> (StatusCode, Value) {
         self.call(
             "GET",
@@ -604,17 +647,12 @@ async fn search_matches_titles_and_body_text() {
     let titled = fixture.create(json!({"title": "Roadmap 2027"})).await;
     let body = fixture.create(json!({"title": "Notes"})).await;
     let long_intro = "intro ".repeat(40);
-    let (status, _) = fixture
-        .call(
-            "PATCH",
-            &fixture.page_uri(id_of(&body)),
-            Some(json!({
-                "expected_version": 0,
-                "content": [{"type": "paragraph", "content": [{"type": "text", "text": format!("{long_intro}The ROADMAP lives here 100% of the time")}]}]
-            })),
+    fixture
+        .set_text(
+            &body,
+            &format!("{long_intro}The ROADMAP lives here 100% of the time"),
         )
         .await;
-    assert_eq!(status, StatusCode::OK);
     let trashed = fixture.create(json!({"title": "Old roadmap"})).await;
     fixture.trash(id_of(&trashed)).await;
 
@@ -624,18 +662,27 @@ async fn search_matches_titles_and_body_text() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["id"], titled["id"]);
     assert_eq!(items[0]["snippet"], "");
+    assert_eq!(items[0]["snippet_highlights"], json!([]));
+    assert_eq!(
+        items[0]["title_highlights"],
+        json!([{"start": 0, "end": 7}])
+    );
     assert_eq!(items[1]["id"], body["id"]);
     assert_eq!(items[1]["title"], "Notes");
+    assert_eq!(items[1]["title_highlights"], json!([]));
     let snippet = items[1]["snippet"].as_str().unwrap();
     assert!(snippet.starts_with('…'), "{snippet}");
     assert!(snippet.contains("The ROADMAP lives here"), "{snippet}");
+    assert_eq!(highlighted(&items[1]), ["ROADMAP"]);
 
     let (_, results) = fixture.search("100%25").await;
     assert_eq!(results["items"].as_array().unwrap().len(), 1);
-    let (_, results) = fixture.search("%25").await;
-    assert_eq!(results["items"].as_array().unwrap().len(), 1);
-    let (_, results) = fixture.search("%20").await;
-    assert!(results["items"].as_array().unwrap().is_empty());
+    // Nothing searchable (no letter or digit) and blank queries find nothing.
+    for query in ["%25", "%20", "*", "%22%22"] {
+        let (status, results) = fixture.search(query).await;
+        assert_eq!(status, StatusCode::OK, "{query}");
+        assert!(results["items"].as_array().unwrap().is_empty(), "{query}");
+    }
     let (status, problem) = fixture.search(&"x".repeat(201)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(problem["detail"], "q");
@@ -651,6 +698,579 @@ async fn search_matches_titles_and_body_text() {
     }
     let (_, results) = fixture.search("roadmap").await;
     assert_eq!(results["items"].as_array().unwrap().len(), 20);
+}
+
+#[tokio::test]
+async fn search_folds_diacritics_matches_prefixes_and_ranks_titles_first() {
+    let fixture = Fixture::new().await;
+    let uber = fixture.create(json!({"title": "Über uns"})).await;
+    let cafe = fixture.create(json!({"title": "Menu"})).await;
+    fixture
+        .set_text(&cafe, "Das Café liegt über dem Fluss")
+        .await;
+    for query in ["über", "uber", "ÜBER", "Uber"] {
+        let (status, results) = fixture.search(&encode(query)).await;
+        assert_eq!(status, StatusCode::OK, "{query}");
+        // The title match ranks above the body match.
+        assert_eq!(
+            result_ids(&results),
+            [id_of(&uber), id_of(&cafe)],
+            "{query}"
+        );
+    }
+    let (_, results) = fixture.search(&encode("uber")).await;
+    assert_eq!(
+        results["items"][0]["title_highlights"],
+        json!([{"start": 0, "end": 4}])
+    );
+    assert_eq!(highlighted(&results["items"][1]), ["über"]);
+    let (_, results) = fixture.search("cafe").await;
+    assert_eq!(result_ids(&results), [id_of(&cafe)]);
+    assert_eq!(highlighted(&results["items"][0]), ["Café"]);
+
+    // The last word matches as a prefix, earlier words must match whole; all words must match.
+    let (_, results) = fixture.search("flu").await;
+    assert_eq!(result_ids(&results), [id_of(&cafe)]);
+    let (_, results) = fixture.search("caf%20fluss").await;
+    assert!(result_ids(&results).is_empty());
+    let (_, results) = fixture.search("cafe%20flu").await;
+    assert_eq!(result_ids(&results), [id_of(&cafe)]);
+    let (_, results) = fixture.search("cafe%20missing").await;
+    assert!(result_ids(&results).is_empty());
+
+    // FTS syntax in the input is plain text, never an error.
+    for query in [
+        "\"",
+        "\"cafe",
+        "cafe\"",
+        "*",
+        "cafe*",
+        "caf*e",
+        ":",
+        "title:cafe",
+        "body:x",
+        "-cafe",
+        "cafe -fluss",
+        "NEAR",
+        "NEAR(cafe fluss)",
+        "cafe AND fluss",
+        "cafe OR x",
+        "NOT cafe",
+        "(cafe",
+        "cafe)",
+        "()",
+        "^cafe",
+        "{title}: cafe",
+        "cafe + fluss",
+        "'",
+        "\u{2}cafe\u{3}",
+        "🙂",
+        "a\"b\"c",
+    ] {
+        let (status, results) = fixture.search(&encode(query)).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {results}");
+    }
+    let (_, results) = fixture.search(&encode("NEAR(cafe fluss)")).await;
+    assert!(result_ids(&results).is_empty(), "NEAR is a word here");
+    let (_, results) = fixture.search(&encode("\"café\" (fluss)")).await;
+    assert_eq!(result_ids(&results), [id_of(&cafe)]);
+
+    // Title and body changes are searchable right away.
+    let (status, _) = fixture
+        .call(
+            "PATCH",
+            &fixture.page_uri(id_of(&uber)),
+            Some(json!({"expected_version": 0, "title": "Impressum"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, results) = fixture.search("uber").await;
+    assert_eq!(result_ids(&results), [id_of(&cafe)]);
+    let (_, results) = fixture.search("impressum").await;
+    assert_eq!(result_ids(&results), [id_of(&uber)]);
+    fixture.set_text(&cafe, "Neuer Text").await;
+    let (_, results) = fixture.search("fluss").await;
+    assert!(result_ids(&results).is_empty());
+    let (_, results) = fixture.search("neuer").await;
+    assert_eq!(result_ids(&results), [id_of(&cafe)]);
+}
+
+#[tokio::test]
+async fn search_only_returns_live_pages_the_caller_can_see() {
+    let fixture = Fixture::new().await;
+    let (_, member_cookie) =
+        add_member(&fixture, &fixture.workspace_id, "member@example.com").await;
+    let shared = fixture.create(json!({"title": "Quokka shared"})).await;
+    let private = fixture
+        .create(json!({"private": true, "title": "Quokka private"}))
+        .await;
+    let private_child = fixture
+        .create(json!({"parent_id": id_of(&private), "title": "Quokka private child"}))
+        .await;
+    let trashed = fixture.create(json!({"title": "Quokka trashed"})).await;
+    fixture.trash(id_of(&trashed)).await;
+    let foreign_workspace = create_workspace(&fixture, "Foreign").await;
+    let (status, foreign) = fixture
+        .call(
+            "POST",
+            &format!("/api/v1/workspaces/{foreign_workspace}/pages"),
+            Some(json!({"title": "Quokka foreign"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{foreign}");
+
+    let (_, found) = fixture.search("quokka").await;
+    let mut owner_ids = result_ids(&found);
+    owner_ids.sort_unstable();
+    let mut expected = vec![id_of(&shared), id_of(&private), id_of(&private_child)];
+    expected.sort_unstable();
+    assert_eq!(owner_ids, expected);
+    let (status, member) = call_as(
+        &fixture,
+        &member_cookie,
+        "GET",
+        &format!("{}/search?q=quokka", fixture.pages_uri()),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result_ids(&member), [id_of(&shared)]);
+    let (status, _) = call_as(
+        &fixture,
+        &member_cookie,
+        "GET",
+        &format!("/api/v1/workspaces/{foreign_workspace}/pages/search?q=quokka"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Restored pages come back; purged ones leave the index.
+    let (status, _) = fixture.restore(id_of(&trashed)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        fixture.search("trashed").await.1["items"][0]["id"],
+        trashed["id"]
+    );
+    fixture.trash(id_of(&trashed)).await;
+    fixture.purge(id_of(&trashed)).await;
+    assert!(result_ids(&fixture.search("trashed").await.1).is_empty());
+    let orphans: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM page_search) + (SELECT COUNT(*) FROM page_search_rows) \
+         - 2 * (SELECT COUNT(*) FROM pages)",
+    )
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(orphans, 0);
+}
+
+#[tokio::test]
+async fn delete_forever_purges_a_trashed_batch_by_permission() {
+    let fixture = Fixture::new().await;
+    let (_, member_cookie) =
+        add_member(&fixture, &fixture.workspace_id, "member@example.com").await;
+    let (admin_id, admin_cookie) =
+        add_member(&fixture, &fixture.workspace_id, "admin@example.com").await;
+    sqlx::query("UPDATE memberships SET role = 'admin' WHERE user_id = ?")
+        .bind(admin_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let parent = fixture.create(json!({"title": "Parent"})).await;
+    let child = fixture
+        .create(json!({"parent_id": id_of(&parent), "title": "Child"}))
+        .await;
+    let early = fixture
+        .create(json!({"parent_id": id_of(&parent), "title": "Early"}))
+        .await;
+    let live = fixture.create(json!({"title": "Live"})).await;
+    fixture.favorite(id_of(&child)).await;
+    fixture.trash(id_of(&early)).await;
+    fixture.trash(id_of(&parent)).await;
+    let purge_uri = |page: &Value, version: u64| {
+        format!(
+            "{}/permanent?expected_version={version}",
+            fixture.page_uri(id_of(page))
+        )
+    };
+
+    // Live pages and pages trashed along with an ancestor are not trash entries.
+    let (status, problem) = fixture.call("DELETE", &purge_uri(&live, 0), None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "page_not_trashed");
+    let (status, problem) = fixture.call("DELETE", &purge_uri(&child, 1), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "page_not_trashed");
+    let (status, problem) = fixture
+        .call(
+            "DELETE",
+            &purge_uri(&json!({"id": Id::new_v7().to_string()}), 0),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(problem["code"], "page_not_found");
+    // Members may not purge teamspace pages; stale versions conflict.
+    let (status, problem) = call_as(
+        &fixture,
+        &member_cookie,
+        "DELETE",
+        &purge_uri(&parent, 1),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "workspace_action_forbidden");
+    let (status, problem) = fixture.call("DELETE", &purge_uri(&parent, 0), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "conflict");
+
+    let (status, body) = call_as(
+        &fixture,
+        &admin_cookie,
+        "DELETE",
+        &purge_uri(&parent, 1),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    // The batch (parent + child) is gone; Early, trashed on its own before, stays in the trash.
+    assert_eq!(fixture.trash_ids().await, [id_of(&early)]);
+    let remaining: Vec<String> = sqlx::query_scalar("SELECT title FROM pages ORDER BY title")
+        .fetch_all(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(remaining, ["Early", "Live"]);
+    assert_eq!(
+        fixture.get_raw(id_of(&early)).await,
+        (None::<String>, Some(id_of(&early).to_owned()))
+    );
+    let favorites: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM page_favorites")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(favorites, 0);
+    let (status, restored) = fixture.restore(id_of(&early)).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["parent_id"], Value::Null);
+
+    // Private pages: only their owner can see (404 for others) and purge them.
+    let (status, diary) = call_as(
+        &fixture,
+        &member_cookie,
+        "POST",
+        &fixture.pages_uri(),
+        Some(json!({"private": true, "title": "Member diary"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = call_as(
+        &fixture,
+        &member_cookie,
+        "DELETE",
+        &format!("{}?expected_version=0", fixture.page_uri(id_of(&diary))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, problem) = fixture.call("DELETE", &purge_uri(&diary, 1), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(problem["code"], "page_not_found");
+    let (status, _) = call_as(
+        &fixture,
+        &member_cookie,
+        "DELETE",
+        &purge_uri(&diary, 1),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let audits: Vec<(String, String)> = sqlx::query_as(
+        "SELECT resource_id, metadata_json FROM audit_events WHERE action = 'page.purged' ORDER BY occurred_at, id",
+    )
+    .fetch_all(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        audits,
+        [
+            (id_of(&parent).to_owned(), r#"{"pages":2}"#.to_owned()),
+            (id_of(&diary).to_owned(), r#"{"pages":1}"#.to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn empty_trash_purges_only_what_the_caller_may_purge() {
+    let fixture = Fixture::new().await;
+    let (_, member_cookie) =
+        add_member(&fixture, &fixture.workspace_id, "member@example.com").await;
+    let shared = fixture.create(json!({"title": "Shared"})).await;
+    let shared_child = fixture
+        .create(json!({"parent_id": id_of(&shared), "title": "Shared child"}))
+        .await;
+    let own = fixture
+        .create(json!({"private": true, "title": "Owner private"}))
+        .await;
+    let live = fixture.create(json!({"title": "Live"})).await;
+    fixture.trash(id_of(&shared)).await;
+    fixture.trash(id_of(&own)).await;
+    let (_, mine) = call_as(
+        &fixture,
+        &member_cookie,
+        "POST",
+        &fixture.pages_uri(),
+        Some(json!({"private": true, "title": "Member private"})),
+    )
+    .await;
+    call_as(
+        &fixture,
+        &member_cookie,
+        "DELETE",
+        &format!("{}?expected_version=0", fixture.page_uri(id_of(&mine))),
+        None,
+    )
+    .await;
+    let empty_uri = format!("{}/trash/empty", fixture.pages_uri());
+
+    // A member empties only their own private trash; the teamspace trash stays.
+    let (status, emptied) = call_as(&fixture, &member_cookie, "POST", &empty_uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{emptied}");
+    assert_eq!(emptied, json!({"purged": 1}));
+    let mut expected = vec![id_of(&shared).to_owned(), id_of(&own).to_owned()];
+    expected.sort();
+    assert_eq!(fixture.trash_ids().await, expected);
+
+    // The owner (an admin) empties teamspace pages and their own private pages.
+    let (status, emptied) = fixture.call("POST", &empty_uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{emptied}");
+    assert_eq!(emptied, json!({"purged": 2}));
+    assert!(fixture.trash_ids().await.is_empty());
+    let titles: Vec<String> = sqlx::query_scalar("SELECT title FROM pages ORDER BY title")
+        .fetch_all(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(titles, ["Live"]);
+    assert_eq!(fixture.get(id_of(&live)).await["title"], "Live");
+    let (status, _) = fixture
+        .call("GET", &fixture.page_uri(id_of(&shared_child)), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, emptied) = fixture.call("POST", &empty_uri, None).await;
+    assert_eq!(emptied, json!({"purged": 0}));
+    let purged: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE action = 'page.purged'")
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(purged, 3);
+}
+
+#[tokio::test]
+async fn duplicate_copies_a_page_or_subtree_after_the_original() {
+    let fixture = Fixture::new().await;
+    let (_, member_cookie) =
+        add_member(&fixture, &fixture.workspace_id, "member@example.com").await;
+    let first = fixture.create(json!({"title": "First"})).await;
+    let source = fixture
+        .create(json!({"title": "Source", "icon": "🚀"}))
+        .await;
+    let last = fixture.create(json!({"title": "Last"})).await;
+    let child_a = fixture
+        .create(json!({"parent_id": id_of(&source), "title": "A"}))
+        .await;
+    let child_b = fixture
+        .create(json!({"parent_id": id_of(&source), "title": "B"}))
+        .await;
+    let grandchild = fixture
+        .create(json!({"parent_id": id_of(&child_a), "title": "A1"}))
+        .await;
+    let gone = fixture
+        .create(json!({"parent_id": id_of(&source), "title": "Gone"}))
+        .await;
+    fixture.trash(id_of(&gone)).await;
+    let content = json!([
+        {"id": "p", "type": "paragraph", "content": [
+            {"type": "text", "text": "See ", "styles": {}},
+            {"type": "link", "href": format!("/docs/{}", id_of(&child_b)), "content": [{"type": "text", "text": "B", "styles": {}}]},
+            {"type": "link", "href": format!("/docs/{}", id_of(&first)), "content": [{"type": "text", "text": "outside", "styles": {}}]},
+            {"type": "text", "text": format!("/docs/{}", id_of(&child_b)), "styles": {}}
+        ], "children": []},
+        {"id": "c", "type": "page", "props": {"pageId": id_of(&child_a)}, "children": []},
+        {"id": "o", "type": "page", "props": {"pageId": id_of(&last)}, "children": []}
+    ]);
+    let (status, updated) = fixture
+        .call(
+            "PATCH",
+            &fixture.page_uri(id_of(&source)),
+            Some(json!({"expected_version": 0, "content": content, "cover_url": "https://example.com/c.png", "cover_position": "50,20"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let (status, _) = fixture
+        .call(
+            "PATCH",
+            &fixture.page_uri(id_of(&grandchild)),
+            Some(json!({"expected_version": 0, "content": [
+                {"id": "g", "type": "paragraph", "content": [{"type": "link", "href": format!("/docs/{}", id_of(&source)), "content": [{"type": "text", "text": "up", "styles": {}}]}], "children": []}
+            ]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let duplicate_uri = |page: &Value| format!("{}/duplicate", fixture.page_uri(id_of(page)));
+
+    // Without sub-pages: just the page, links unchanged (the children were not copied).
+    let (status, copy) = fixture
+        .call(
+            "POST",
+            &duplicate_uri(&source),
+            Some(json!({"include_children": false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{copy}");
+    assert_eq!(copy["title"], "Source (copy)");
+    assert_eq!(copy["icon"], "🚀");
+    assert_eq!(copy["cover_url"], "https://example.com/c.png");
+    assert_eq!(copy["cover_position"], "50,20");
+    assert_eq!(copy["version"], 0);
+    assert_eq!(copy["position"], 2);
+    assert_eq!(copy["content"], updated["content"]);
+    assert_eq!(
+        fixture.get(id_of(&copy)).await["content"],
+        updated["content"]
+    );
+    let roots = |tree: &[Value]| {
+        tree.iter()
+            .filter(|page| page["parent_id"].is_null())
+            .map(|page| page["title"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        roots(&fixture.tree().await),
+        ["First", "Source", "Source (copy)", "Last"]
+    );
+
+    // With sub-pages: the live subtree in order, and links inside it point at the copies.
+    let (status, deep) = fixture
+        .call(
+            "POST",
+            &duplicate_uri(&source),
+            Some(json!({"include_children": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{deep}");
+    assert_eq!(deep["position"], 2);
+    assert_eq!(
+        roots(&fixture.tree().await),
+        ["First", "Source", "Source (copy)", "Source (copy)", "Last"]
+    );
+    let tree = fixture.tree().await;
+    let children_of = |parent: &str| {
+        tree.iter()
+            .filter(|page| page["parent_id"] == parent)
+            .map(|page| {
+                (
+                    page["title"].as_str().unwrap(),
+                    id_of(page),
+                    page["position"].as_i64().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let copied = children_of(id_of(&deep));
+    assert_eq!(
+        copied
+            .iter()
+            .map(|(title, _, position)| (*title, *position))
+            .collect::<Vec<_>>(),
+        [("A", 0), ("B", 1)]
+    );
+    let (a_copy, b_copy) = (copied[0].1, copied[1].1);
+    let a1 = children_of(a_copy);
+    assert_eq!(a1.len(), 1);
+    assert_eq!(a1[0].0, "A1");
+    let deep = fixture.get(id_of(&deep)).await;
+    let blocks = deep["content"].as_array().unwrap();
+    let inline = blocks[0]["content"].as_array().unwrap();
+    assert_eq!(inline[1]["href"], format!("/docs/{b_copy}"));
+    assert_eq!(inline[2]["href"], format!("/docs/{}", id_of(&first)));
+    assert_eq!(inline[3]["text"], format!("/docs/{}", id_of(&child_b)));
+    assert_eq!(blocks[1]["props"]["pageId"], a_copy);
+    assert_eq!(blocks[2]["props"]["pageId"], id_of(&last));
+    let a1_copy = fixture.get(a1[0].1).await;
+    assert_eq!(
+        a1_copy["content"][0]["content"][0]["href"],
+        format!("/docs/{}", id_of(&deep))
+    );
+    // The originals are untouched.
+    assert_eq!(
+        fixture.get(id_of(&source)).await["content"],
+        updated["content"]
+    );
+    assert_eq!(fixture.get(id_of(&child_a)).await["position"], 0);
+
+    // Empty titles, other members, invisible and trashed pages.
+    let untitled = fixture.create(json!({})).await;
+    let (_, copy) = fixture
+        .call("POST", &duplicate_uri(&untitled), Some(json!({})))
+        .await;
+    assert_eq!(copy["title"], "Untitled (copy)");
+    let long = fixture.create(json!({"title": "é".repeat(500)})).await;
+    let (_, copy) = fixture
+        .call("POST", &duplicate_uri(&long), Some(json!({})))
+        .await;
+    assert_eq!(copy["title"].as_str().unwrap().chars().count(), 500);
+    assert!(copy["title"].as_str().unwrap().ends_with(" (copy)"));
+    let (status, copy) = call_as(
+        &fixture,
+        &member_cookie,
+        "POST",
+        &duplicate_uri(&first),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{copy}");
+    assert_eq!(copy["creator_id"], copy["updated_by"]);
+    assert_ne!(copy["creator_id"], fixture.owner_id.to_string());
+    let diary = fixture
+        .create(json!({"private": true, "title": "Diary"}))
+        .await;
+    let (status, problem) = call_as(
+        &fixture,
+        &member_cookie,
+        "POST",
+        &duplicate_uri(&diary),
+        Some(json!({"include_children": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(problem["code"], "page_not_found");
+    let (status, private_copy) = fixture
+        .call("POST", &duplicate_uri(&diary), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(private_copy["private"], true);
+    let (status, _) = fixture
+        .call("POST", &duplicate_uri(&gone), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = fixture
+        .call("POST", &duplicate_uri(&first), Some(json!({"deep": true})))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let duplicated: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'page.duplicated' AND resource_id = ?",
+    )
+    .bind(a_copy)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(duplicated, 1);
+    let (_, found) = fixture.search("A1").await;
+    assert_eq!(found["items"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -1479,6 +2099,48 @@ fn titles(pages: &[Value]) -> Vec<&str> {
     pages
         .iter()
         .map(|page| page["title"].as_str().unwrap())
+        .collect()
+}
+
+fn result_ids(results: &Value) -> Vec<&str> {
+    results["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(id_of)
+        .collect()
+}
+
+/// The snippet text under each highlight range (UTF-16 offsets).
+fn highlighted(result: &Value) -> Vec<String> {
+    let snippet = result["snippet"]
+        .as_str()
+        .unwrap()
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    result["snippet_highlights"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|range| {
+            let start = range["start"].as_u64().unwrap() as usize;
+            let end = range["end"].as_u64().unwrap() as usize;
+            String::from_utf16(&snippet[start..end]).unwrap()
+        })
+        .collect()
+}
+
+/// Percent-encodes a query-string value.
+fn encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() {
+                (byte as char).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
         .collect()
 }
 

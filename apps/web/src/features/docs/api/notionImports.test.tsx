@@ -13,6 +13,7 @@ import {
   notionImportErrorMessage,
   useCancelNotionImport,
   useNotionImport,
+  useNotionImportTree,
   useStartNotionImport,
 } from './notionImports'
 
@@ -30,14 +31,15 @@ const notionImport = (patch: Partial<NotionImport> = {}): NotionImport => ({
 const problem = (status: number, code: string) =>
   new ApiProblem({ type: 'about:blank', title: 'Problem', status, code, detail: code, instance: '/imports', request_id: 'request-1' })
 
-type Call = { method: string; path: string; body: unknown }
+type Call = { method: string; path: string; search: string; body: unknown }
 
 function mockFetch(handler: (call: Call) => Response | Promise<Response>) {
   const calls: Call[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     const text = await request.text()
-    const call = { method: request.method, path: new URL(request.url).pathname, body: text ? JSON.parse(text) : undefined }
+    const url = new URL(request.url)
+    const call = { method: request.method, path: url.pathname, search: url.search, body: text ? JSON.parse(text) : undefined }
     calls.push(call)
     return handler(call)
   }) as unknown as typeof fetch
@@ -74,7 +76,7 @@ test('the token is posted once to the collection', async () => {
   const calls = mockFetch(() => Response.json(notionImport(), { status: 201 }))
   const created = await createNotionImportRequest(createApiClient(), 'workspace-1', 'ntn_secret')
   expect(created.id).toBe('import-1')
-  expect(calls).toEqual([{ method: 'POST', path: base, body: { token: 'ntn_secret' } }])
+  expect(calls).toEqual([{ method: 'POST', path: base, search: '', body: { token: 'ntn_secret' } }])
 })
 
 test('an import is polled while scanning and stops at a final state, refreshing the page tree', async () => {
@@ -105,6 +107,20 @@ test('an import is polled while scanning and stops at a final state, refreshing 
   const final = polls()
   await act(() => new Promise((resolve) => setTimeout(resolve, 80)))
   expect(polls()).toBe(final)
+  // Polling never asks for the (large) scan tree.
+  expect(calls.filter((call) => call.path === `${base}/import-1`).every((call) => call.search === '')).toBe(true)
+})
+
+test('the scan tree is fetched once with ?include=tree under its own key and not polled', async () => {
+  const tree = { nodes: [{ notion_id: 'a', parent_id: null, title: 'A', kind: 'page' as const, icon: null, child_count: 0 }], truncated: false, incomplete: false }
+  const calls = mockFetch((call) => Response.json(notionImport({ status: 'ready', tree: call.search === '?include=tree' ? tree : null })))
+  const { client, wrapper } = setupClient()
+  const view = renderHook(() => useNotionImportTree('workspace-1', 'import-1'), { wrapper })
+  await waitFor(() => expect(view.result.current.data).toEqual(tree))
+  await act(() => new Promise((resolve) => setTimeout(resolve, 80)))
+  expect(calls).toEqual([{ method: 'GET', path: `${base}/import-1`, search: '?include=tree', body: undefined }])
+  expect(client.getQueryData<unknown>(queryKeys.notionImports.tree('workspace-1', 'import-1'))).toEqual(tree)
+  expect(client.getQueryData(queryKeys.notionImports.detail('workspace-1', 'import-1'))).toBeUndefined()
 })
 
 test('start sends selection and destination and stores the queued import', async () => {
@@ -117,6 +133,7 @@ test('start sends selection and destination and stores the queued import', async
   expect(calls[0]).toEqual({
     method: 'POST',
     path: `${base}/import-1/start`,
+    search: '',
     body: { selection: { notion_ids: ['a'] }, destination: { private: true } },
   })
   expect(client.getQueryData<NotionImport>(queryKeys.notionImports.detail('workspace-1', 'import-1'))?.status).toBe('queued')

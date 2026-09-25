@@ -16,6 +16,31 @@ async fn quick_and_full_checks_accept_a_healthy_database() {
 }
 
 #[tokio::test]
+async fn full_check_accepts_updated_fts5_tables() {
+    // SQLite 3.46.0's PRAGMA integrity_check reports "malformed inverted index" for an FTS5
+    // table after two UPDATEs of a row; FTS5's own check (and every query) is fine.
+    let database = orbit_platform::TestDatabase::new().await.unwrap();
+    database
+        .execute(
+            "CREATE VIRTUAL TABLE probe_search USING fts5(title, body);\
+             INSERT INTO probe_search (rowid, title, body) VALUES (1, 'a', 'x');\
+             UPDATE probe_search SET body = 'x0' WHERE rowid = 1;\
+             UPDATE probe_search SET body = 'x01' WHERE rowid = 1;",
+        )
+        .await
+        .unwrap();
+    IntegrityService::new(database.clone())
+        .full()
+        .await
+        .unwrap();
+    let stale: i64 = database
+        .scalar("SELECT COUNT(*) FROM probe_search WHERE probe_search MATCH 'x0'")
+        .await
+        .unwrap();
+    assert_eq!(stale, 0);
+}
+
+#[tokio::test]
 async fn a_failed_quick_check_makes_readiness_fail() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("corrupt.sqlite");

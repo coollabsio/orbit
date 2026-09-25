@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::Deserialize;
@@ -47,6 +47,10 @@ pub fn teamspace_router(state: TeamspaceState) -> Router {
             "/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}",
             patch(update_teamspace).delete(delete_teamspace),
         )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}/move",
+            post(move_teamspace),
+        )
         .with_state(state)
 }
 
@@ -67,6 +71,15 @@ struct TeamspaceUpdateBody {
     /// Absent: unchanged. `null`: cleared.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     icon: Option<Option<String>>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct MoveTeamspaceBody {
+    expected_version: u64,
+    /// Index among the workspace's teamspaces; larger values move it last. Index 0 makes it the
+    /// default teamspace.
+    position: i64,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/teamspaces", params(("workspace_id" = String, Path)), responses((status = 200, body = TeamspaceList)))]
@@ -189,6 +202,38 @@ async fn delete_teamspace(
         .map_err(|error| teamspace_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}/move", params(("workspace_id" = String, Path), ("teamspace_id" = String, Path)), request_body = MoveTeamspaceBody, responses((status = 200, body = TeamspaceList)))]
+async fn move_teamspace(
+    State(state): State<TeamspaceState>,
+    Path((workspace, teamspace)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<MoveTeamspaceBody>,
+) -> Result<Json<TeamspaceList>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/teamspaces/{teamspace}/move");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let request = request_id.as_ref();
+    let teamspace_id = parse_id(&teamspace, &instance, request)?;
+    if body.position < 0 {
+        return Err(validation("position", &instance, request));
+    }
+    state
+        .teamspaces
+        .move_teamspace(
+            workspace_id,
+            teamspace_id,
+            actor_id,
+            body.expected_version,
+            body.position,
+            request_id_value(request),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| teamspace_problem(error, instance, request))
+}
+
 async fn scope(
     state: &TeamspaceState,
     headers: &HeaderMap,
@@ -234,6 +279,10 @@ fn icon(
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<String, ApiError> {
+    // An emoji (or a short custom emoji code); `null` clears it, a blank string is rejected.
+    if value.trim().is_empty() {
+        return Err(validation("icon", instance, request_id));
+    }
     bounded(value, 64, 256, "icon", instance, request_id)
 }
 

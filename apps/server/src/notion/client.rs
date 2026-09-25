@@ -71,6 +71,8 @@ impl Default for NotionClientConfig {
     fn default() -> Self {
         Self {
             base_url: DEFAULT_BASE_URL.to_owned(),
+            // Notion allows 180 requests per minute per connection on Free/Plus plans (600 on
+            // Business/Enterprise), so 3/s fits every plan; 429s still wait for `Retry-After`.
             requests_per_second: 3.0,
             max_attempts: 5,
             initial_backoff: Duration::from_millis(500),

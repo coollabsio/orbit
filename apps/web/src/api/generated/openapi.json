@@ -4153,7 +4153,7 @@
         "tags": [
           "crate::import_routes"
         ],
-        "summary": "One of the caller's imports: status, tree (once scanned), progress and report.",
+        "summary": "One of the caller's imports: status, progress and report. The scan tree (once scanned) only\nwith `?include=tree`.",
         "operationId": "get_notion_import",
         "parameters": [
           {
@@ -4170,6 +4170,19 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "`tree` adds the scan tree; without it `tree` is `null`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional parts of an import detail response.",
+              "enum": [
+                "tree"
+              ]
             }
           },
           {
@@ -4194,7 +4207,7 @@
             }
           },
           "400": {
-            "description": "invalid_proxy_headers",
+            "description": "invalid_proxy_headers, invalid_request",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6819,7 +6832,7 @@
           {
             "name": "q",
             "in": "query",
-            "description": "Case-insensitive text matched against titles and body text; at most 200 characters.",
+            "description": "Words matched against titles and body text, ignoring case and diacritics; every word must\nmatch, the last one as a prefix. Search syntax (quotes, `*`, `:`, `-`, `NEAR`, parentheses)\nis treated as plain text. At most 200 characters.",
             "required": true,
             "schema": {
               "type": "string"
@@ -6990,6 +7003,131 @@
           },
           "401": {
             "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/pages/trash/empty": {
+      "post": {
+        "tags": [
+          "crate::page_routes"
+        ],
+        "summary": "Deletes forever every trashed page the caller may purge: their own private pages, plus teamspace\npages for workspace owners and admins.",
+        "operationId": "empty_page_trash",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageTrashEmptied"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7425,6 +7563,149 @@
           },
           "422": {
             "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/pages/{page_id}/duplicate": {
+      "post": {
+        "tags": [
+          "crate::page_routes"
+        ],
+        "summary": "Copies a page (\"<title> (copy)\", right after the original), optionally with its sub-pages.\nFiles are shared with the copies and links inside the copied pages point at the copies.",
+        "operationId": "duplicate_page",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicatePageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8190,6 +8471,142 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/pages/{page_id}/permanent": {
+      "delete": {
+        "tags": [
+          "crate::page_routes"
+        ],
+        "summary": "Deletes a page in the trash forever, with the sub-pages trashed along with it. Your own private\npages, or teamspace pages as a workspace owner or admin (members get 403).",
+        "operationId": "purge_page",
+        "parameters": [
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, workspace_action_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, conflict, page_not_trashed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/pages/{page_id}/restore": {
       "post": {
         "tags": [
@@ -8276,6 +8693,440 @@
           },
           "404": {
             "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions": {
+      "get": {
+        "tags": [
+          "crate::page_routes"
+        ],
+        "summary": "The page's history, newest first (without content). Visible like the page itself.",
+        "operationId": "list_page_versions",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "`next_cursor` from the previous response, for older versions.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Versions per response, 1 to 100 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageVersionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}": {
+      "get": {
+        "tags": [
+          "crate::page_routes"
+        ],
+        "summary": "One version of the page, with its content.",
+        "operationId": "get_page_version",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageVersion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found, page_version_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}/restore": {
+      "post": {
+        "tags": [
+          "crate::page_routes"
+        ],
+        "summary": "Puts a version's title, icon and content back on the page (cover and place stay). The current\nstate is kept as a `restore` version first. Audited `page.restored_version`.",
+        "operationId": "restore_page_version",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found, page_version_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14957,6 +15808,158 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}/move": {
+      "post": {
+        "tags": [
+          "crate::teamspace_routes"
+        ],
+        "operationId": "move_teamspace",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveTeamspaceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamspaceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "teamspace_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/transfer-ownership": {
       "post": {
         "tags": [
@@ -15976,6 +16979,16 @@
           }
         }
       },
+      "DuplicatePageBody": {
+        "type": "object",
+        "properties": {
+          "include_children": {
+            "type": "boolean",
+            "description": "Also copy the page's live sub-pages (the whole subtree, in order). Defaults to `false`."
+          }
+        },
+        "additionalProperties": false
+      },
       "GithubLink": {
         "type": "object",
         "required": [
@@ -16448,6 +17461,26 @@
         },
         "additionalProperties": false
       },
+      "MoveTeamspaceBody": {
+        "type": "object",
+        "required": [
+          "expected_version",
+          "position"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "position": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Index among the workspace's teamspaces; larger values move it last. Index 0 makes it the\ndefault teamspace."
+          }
+        },
+        "additionalProperties": false
+      },
       "NewTaskRelationType": {
         "type": "string",
         "description": "Relation types a client can create. Duplicates go through `duplicate_of_id` on task updates.",
@@ -16587,7 +17620,7 @@
               },
               {
                 "$ref": "#/components/schemas/NotionImportTree",
-                "description": "The scan result, once ready. Only in single-import responses; `null` in lists."
+                "description": "The scan result, once ready. Only in `GET …/imports/notion/{id}?include=tree`; `null`\neverywhere else (the default detail, lists, create, start and cancel), so polling\nstays light."
               }
             ]
           },
@@ -16929,9 +17962,14 @@
           "updated_by",
           "created_at",
           "updated_at",
-          "deleted_at"
+          "deleted_at",
+          "collab_epoch"
         ],
         "properties": {
+          "collab_epoch": {
+            "type": "string",
+            "description": "Identifies the page's collaborative document. Pass it as the `epoch` query parameter of\nthe co-editing socket (`GET /api/v1/workspaces/{workspace_id}/pages/{page_id}/collab`); it\nchanges when the stored document is reset (backup restore, converter change), and a\nsocket opened with an older value is closed with 4409."
+          },
           "content": {
             "type": "array",
             "items": {},
@@ -17140,7 +18178,9 @@
           "private",
           "title",
           "icon",
-          "snippet"
+          "snippet",
+          "snippet_highlights",
+          "title_highlights"
         ],
         "properties": {
           "icon": {
@@ -17164,7 +18204,14 @@
           },
           "snippet": {
             "type": "string",
-            "description": "About 160 characters of body text around the first match, or from the start."
+            "description": "Plain body text around the best match (about 24 words, `…` where text was cut), or the\nstart of the body when only the title matched."
+          },
+          "snippet_highlights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TextRange"
+            },
+            "description": "Matched words in `snippet`."
           },
           "teamspace_id": {
             "type": [
@@ -17175,6 +18222,13 @@
           },
           "title": {
             "type": "string"
+          },
+          "title_highlights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TextRange"
+            },
+            "description": "Matched words in `title`."
           }
         }
       },
@@ -17251,6 +18305,21 @@
           }
         }
       },
+      "PageTrashEmptied": {
+        "type": "object",
+        "description": "Result of emptying the trash.",
+        "required": [
+          "purged"
+        ],
+        "properties": {
+          "purged": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Trash entries (pages trashed directly) deleted forever, sub-pages not counted.",
+            "minimum": 0
+          }
+        }
+      },
       "PageUpdateBody": {
         "type": "object",
         "required": [
@@ -17299,6 +18368,155 @@
           }
         },
         "additionalProperties": false
+      },
+      "PageVersion": {
+        "type": "object",
+        "description": "A stored version with its content.",
+        "required": [
+          "id",
+          "page_id",
+          "kind",
+          "title",
+          "icon",
+          "created_at",
+          "created_by",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {},
+            "description": "BlockNote blocks as they were; opaque to the server."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageVersionAuthor"
+              }
+            ]
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PageVersionKind"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "PageVersionAuthor": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "PageVersionKind": {
+        "type": "string",
+        "description": "Why a version was stored.",
+        "enum": [
+          "auto",
+          "restore",
+          "import"
+        ]
+      },
+      "PageVersionList": {
+        "type": "object",
+        "description": "A page's versions, newest first.",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PageVersionSummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next (older) versions; `null` on the last page."
+          }
+        }
+      },
+      "PageVersionSummary": {
+        "type": "object",
+        "description": "A stored version without its content.",
+        "required": [
+          "id",
+          "page_id",
+          "kind",
+          "title",
+          "icon",
+          "created_at",
+          "created_by"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the version was stored; the page looked like this at that moment."
+          },
+          "created_by": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageVersionAuthor",
+                "description": "Who last edited this state (the importer for `import`); `null` when the user is gone."
+              }
+            ]
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PageVersionKind"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
       },
       "Page_AuditEvent": {
         "type": "object",
@@ -18998,6 +20216,26 @@
           }
         },
         "additionalProperties": false
+      },
+      "TextRange": {
+        "type": "object",
+        "description": "A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`\nexclusive.",
+        "required": [
+          "start",
+          "end"
+        ],
+        "properties": {
+          "end": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "start": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
       },
       "TransferBody": {
         "type": "object",

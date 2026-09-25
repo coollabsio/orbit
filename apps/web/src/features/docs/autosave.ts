@@ -1,8 +1,9 @@
-// Page autosave: debounced, single-flight, version-chained. Framework free so it can be tested with fake timers.
+// Page metadata autosave (title, icon, cover): debounced, single-flight, version-chained. Framework free so it can be
+// tested with fake timers. Content is not saved here: it syncs live through the page's collaborative document
+// (`features/docs/collab`), and the server projects it into `content` itself.
 import type { Page, PageUpdateBody } from '@/api/generated/types.gen'
-import { relativeTime } from '@/lib/format'
 
-export type PagePatch = Omit<PageUpdateBody, 'expected_version'>
+export type PagePatch = Omit<PageUpdateBody, 'expected_version' | 'content'>
 
 /**
  * - `idle`: nothing edited since the page opened
@@ -176,22 +177,5 @@ export class PageAutosaver {
   private setState(state: AutosaveState) {
     this.state = state
     this.options.onStateChange?.(state)
-  }
-}
-
-/** Header label for the save state; `idle` falls back to when the page was last edited. */
-export function saveStatusLabel(state: AutosaveState, updatedAt: string): string {
-  switch (state.status) {
-    case 'pending':
-    case 'saving':
-      return 'Saving…'
-    case 'saved':
-      return 'Saved'
-    case 'error':
-      return 'Save failed'
-    case 'conflict':
-      return 'Conflict'
-    default:
-      return `Edited ${relativeTime(updatedAt)}`
   }
 }

@@ -51,7 +51,7 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
-    assert_eq!(snapshot.manifest.schema_version, 26);
+    assert_eq!(snapshot.manifest.schema_version, 29);
     assert_eq!(
         snapshot.manifest.application_version,
         env!("CARGO_PKG_VERSION")
@@ -136,6 +136,34 @@ async fn restore_refuses_a_database_with_a_held_ownership_lock() {
         .unwrap_err();
 
     assert!(matches!(error, BackupError::RestoreTargetOwned { .. }));
+}
+
+#[tokio::test]
+async fn restore_rotates_collaborative_document_epochs() {
+    // Clients still hold post-backup document state; a new generation makes them reset.
+    let fixture = Fixture::new().await;
+    let before: String = fixture
+        .database
+        .scalar("SELECT generation FROM page_collab_meta WHERE id = 1")
+        .await
+        .unwrap();
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    let restored_database = fixture._root.path().join("restored.sqlite");
+    let restored_attachments = fixture._root.path().join("restored-attachments");
+    fixture
+        .service
+        .restore_to(&snapshot.id, &restored_database, &restored_attachments)
+        .await
+        .unwrap();
+    let database = Database::open(&DatabaseConfig::new(&restored_database))
+        .await
+        .unwrap();
+    let after: String = database
+        .scalar("SELECT generation FROM page_collab_meta WHERE id = 1")
+        .await
+        .unwrap();
+    assert_ne!(before, after);
+    assert_eq!(after.len(), 32);
 }
 
 #[tokio::test]

@@ -41,13 +41,13 @@ function text(value: unknown): string {
   return out
 }
 
-/** Props that carry imported data: file URLs, page targets, heading levels, check state, code language. */
+/** Props that carry imported data: file URLs, page targets, heading levels, check state, code language, callout emoji, colors. */
 function keyProps(blocks: unknown[]): unknown[] {
   const out: unknown[] = []
   for (const block of blocks) {
     if (!isRecord(block) || !isRecord(block.props)) continue
     const props = block.props
-    const pick = ['url', 'name', 'pageId', 'level', 'checked', 'language', 'isToggleable']
+    const pick = ['url', 'name', 'pageId', 'level', 'checked', 'language', 'isToggleable', 'emoji', 'textColor', 'backgroundColor']
     out.push(Object.fromEntries(pick.filter((key) => key in props).map((key) => [key, props[key]])))
     if (Array.isArray(block.children)) out.push(...keyProps(block.children))
   }
@@ -61,6 +61,18 @@ const goldens = readdirSync(GOLDEN_DIR)
 describe('Notion converter goldens load into the page editor', () => {
   test('golden files exist', () => {
     expect(goldens.length).toBeGreaterThan(10)
+  })
+
+  test('Notion callouts load as callout blocks with their emoji, colors and nested children', () => {
+    const golden = JSON.parse(readFileSync(join(GOLDEN_DIR, 'callout.json'), 'utf8')) as { content: unknown[] }
+    const editor = BlockNoteEditor.create({ schema: pageEditorSchema, initialContent: golden.content as never })
+    const [first, second, , fourth] = editor.document
+    expect(first.type).toBe('callout')
+    expect(first.props).toEqual({ emoji: '⭐', backgroundColor: 'gray', textColor: 'default' })
+    expect(first.children.map((child) => child.type)).toEqual(['paragraph'])
+    expect(second.props).toEqual({ emoji: '💡', backgroundColor: 'default', textColor: 'red' })
+    expect(fourth.props).toMatchObject({ backgroundColor: 'blue' })
+    expect(fourth.children.map((child) => child.type)).toEqual(['bulletListItem'])
   })
 
   for (const name of goldens) {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
-import { createTeamspace, deleteTeamspace, listTeamspaces, updateTeamspace } from '@/api/generated/sdk.gen'
+import { createTeamspace, deleteTeamspace, listTeamspaces, moveTeamspace, updateTeamspace } from '@/api/generated/sdk.gen'
 import type { CreateTeamspaceBody, Teamspace } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 import { queryKeys } from '@/api/queryKeys'
@@ -61,15 +61,24 @@ export function useCreateTeamspace(workspaceId: string) {
   })
 }
 
-export function useRenameTeamspace(workspaceId: string) {
+export interface UpdateTeamspaceInput {
+  teamspaceId: string
+  version: number
+  name?: string
+  /** An emoji; `null` removes the icon (the sidebar shows the default teamspace glyph). */
+  icon?: string | null
+}
+
+/** Renames a teamspace and/or changes its icon (`PATCH`, only the given fields). */
+export function useUpdateTeamspace(workspaceId: string) {
   const queryClient = useQueryClient()
   const key = queryKeys.teamspaces(workspaceId)
-  return useMutation<Teamspace, Error, { teamspaceId: string; version: number; name: string }>({
-    mutationFn: async ({ teamspaceId, version, name }) => {
+  return useMutation<Teamspace, Error, UpdateTeamspaceInput>({
+    mutationFn: async ({ teamspaceId, version, name, icon }) => {
       const { data } = await updateTeamspace({
         client: apiClient,
         path: { workspace_id: workspaceId, teamspace_id: teamspaceId },
-        body: { expected_version: version, name },
+        body: { expected_version: version, ...(name === undefined ? {} : { name }), ...(icon === undefined ? {} : { icon }) },
         throwOnError: true,
       })
       if (!data) throw new Error('Update teamspace response was empty.')
@@ -82,6 +91,62 @@ export function useRenameTeamspace(workspaceId: string) {
     },
     // A stale version (409) or a deleted teamspace (404): show the server's list.
     onError: () => void queryClient.invalidateQueries({ queryKey: key }),
+  })
+}
+
+export const useRenameTeamspace = useUpdateTeamspace
+
+/**
+ * Index for `POST /teamspaces/{id}/move` when `dragId` is dropped before/after `targetId`, counted without the
+ * dragged teamspace (what the server expects). Null for unknown ids and drops that change nothing.
+ */
+export function teamspaceDropIndex(ids: readonly string[], dragId: string, targetId: string, zone: 'before' | 'after'): number | null {
+  const from = ids.indexOf(dragId)
+  const rest = ids.filter((id) => id !== dragId)
+  const target = rest.indexOf(targetId)
+  if (from < 0 || target < 0) return null
+  const index = zone === 'before' ? target : target + 1
+  return index === from ? null : index
+}
+
+/** Local version of a move: the teamspace lands at `position`, all are renumbered 0..n, the first is the default. */
+export function reorderTeamspaces(teamspaces: readonly Teamspace[], teamspaceId: string, position: number): Teamspace[] {
+  const ordered = sortTeamspaces([...teamspaces])
+  const moved = ordered.find((item) => item.id === teamspaceId)
+  if (!moved) return ordered
+  const rest = ordered.filter((item) => item.id !== teamspaceId)
+  const at = Math.max(0, Math.min(position, rest.length))
+  return [...rest.slice(0, at), moved, ...rest.slice(at)].map((item, index) => ({ ...item, position: index, is_default: index === 0 }))
+}
+
+type TeamspacesSnapshot = { teamspaces: Teamspace[] | undefined }
+
+/** Moves a teamspace to `position` (0 makes it the default); optimistic with rollback. */
+export function useMoveTeamspace(workspaceId: string) {
+  const queryClient = useQueryClient()
+  const key = queryKeys.teamspaces(workspaceId)
+  return useMutation<Teamspace[], Error, { teamspaceId: string; version: number; position: number }, TeamspacesSnapshot>({
+    mutationFn: async ({ teamspaceId, version, position }) => {
+      const { data } = await moveTeamspace({
+        client: apiClient,
+        path: { workspace_id: workspaceId, teamspace_id: teamspaceId },
+        body: { expected_version: version, position },
+        throwOnError: true,
+      })
+      if (!data) throw new Error('Move teamspace response was empty.')
+      return data.items
+    },
+    onMutate: async ({ teamspaceId, position }) => {
+      await queryClient.cancelQueries({ queryKey: key })
+      const teamspaces = queryClient.getQueryData<Teamspace[]>(key)
+      if (teamspaces) queryClient.setQueryData(key, reorderTeamspaces(teamspaces, teamspaceId, position))
+      return { teamspaces }
+    },
+    onError: (_error, _input, snapshot) => {
+      if (snapshot?.teamspaces) queryClient.setQueryData(key, snapshot.teamspaces)
+      void queryClient.invalidateQueries({ queryKey: key })
+    },
+    onSuccess: (teamspaces) => queryClient.setQueryData(key, teamspaces),
   })
 }
 

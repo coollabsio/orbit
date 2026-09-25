@@ -51,6 +51,105 @@
   text-underline-offset: 2px;
 }
 
+/*
+ * Callout block (CalloutBlock.tsx). The box is the whole `.bn-block`, so nested blocks sit inside it like in Notion.
+ * React node views put a `.react-renderer` wrapper between `.bn-block` and `.bn-block-content`, hence both forms in
+ * the `:has()` lists. `backgroundColor` defaults to gray (no data attribute then). The tint is mixed here instead of
+ * using BlockNote's color rules (saturated in dark mode): full strength on light, a faint wash on dark.
+ * `default` = no fill, just a border.
+ */
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'], > .react-renderer > .bn-block-content[data-content-type='callout']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-gray-background);
+  --orbit-callout-strength: 100%;
+  margin-block: 4px;
+  padding: 12px 14px 12px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background-color: color-mix(in oklab, var(--orbit-callout-tint) var(--orbit-callout-strength), transparent);
+}
+.orbit-page-editor[data-color-scheme='dark'] .bn-block:has(> .bn-block-content[data-content-type='callout'], > .react-renderer > .bn-block-content[data-content-type='callout']) {
+  --orbit-callout-strength: 24%;
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='brown'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='brown']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-brown-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='red'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='red']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-red-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='orange'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='orange']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-orange-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='yellow'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='yellow']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-yellow-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='green'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='green']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-green-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='blue'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='blue']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-blue-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='purple'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='purple']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-purple-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='pink'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='pink']) {
+  --orbit-callout-tint: var(--bn-colors-highlights-pink-background);
+}
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'][data-background-color='default'], > .react-renderer > .bn-block-content[data-content-type='callout'][data-background-color='default']) {
+  border-color: var(--border);
+  background-color: transparent;
+}
+.orbit-page-editor .bn-block-content[data-content-type='callout'] {
+  position: relative;
+  padding: 0;
+  background-color: transparent;
+}
+/* Nested blocks line up with the callout text (emoji column + gap), not with the emoji. */
+.orbit-page-editor .bn-block:has(> .bn-block-content[data-content-type='callout'], > .react-renderer > .bn-block-content[data-content-type='callout']) > .bn-block-group {
+  margin-left: 32px;
+}
+.orbit-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.orbit-callout-emoji {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+.orbit-callout-emoji:hover {
+  background-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+.orbit-callout-emoji:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--ring) 50%, transparent);
+}
+.orbit-page-editor .bn-editor[contenteditable='false'] .orbit-callout-emoji {
+  cursor: default;
+  pointer-events: none;
+}
+.orbit-callout-content {
+  flex: 1;
+  min-width: 0;
+  padding-block: 1px;
+}
+/* Placeholder next to the emoji (BlockNote's sits after the whole row, which is off to the right here). */
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content[data-content-type='callout']:has(.ProseMirror-trailingBreak:only-child)::after {
+  content: 'Callout';
+  position: absolute;
+  top: 1px;
+  left: 32px;
+}
+
 /* On phones there is no room for BlockNote's 54px side-menu gutter; blocks use the full width. */
 @media (max-width: 899px) {
   .orbit-page-editor .bn-editor {

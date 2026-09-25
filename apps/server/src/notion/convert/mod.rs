@@ -5,7 +5,7 @@
 //! answers "which Orbit page is this Notion page?" and "which Orbit URL has this file?".
 //!
 //! Output follows Orbit's editor schema (`apps/web/src/features/docs/editor/schema.ts`,
-//! BlockNote 0.55 default blocks + the custom `page` block): every block is
+//! BlockNote 0.55 default blocks + the custom `page` and `callout` blocks): every block is
 //! `{ id, type, props, content?, children }` with all props spelled out.
 //!
 //! Lossy mappings are counted in [`ConvertReport`] (see the module docs of each block type in
@@ -87,7 +87,7 @@ impl Resolver for MapResolver {
 pub struct ConvertReport {
     /// Blocks dropped, by type (`table_of_contents`, `breadcrumb`, `unsupported:form`, …).
     pub skipped: BTreeMap<String, u32>,
-    /// Blocks or values converted with information loss, by kind (`callout`, `column_list`, …).
+    /// Blocks or values converted with information loss, by kind (`column_list`, `equation`, …).
     pub lossy: BTreeMap<String, u32>,
     /// Page links, mentions, child pages and relations to Notion pages outside the import.
     pub unresolved_page_links: u32,
@@ -544,28 +544,27 @@ fn simple(
     out.push(make_block(ctx, kind, props, items(content), children));
 }
 
-/// Callout → quote prefixed with the callout emoji (lossy).
+/// Default callout emoji (same as the editor's `callout` block).
+const DEFAULT_CALLOUT_EMOJI: &str = "💡";
+
+/// Callout → Orbit's `callout` block (emoji, colors, rich text, nested children). A Notion icon
+/// that is not an emoji (native icon, custom emoji, image) becomes the default emoji and is
+/// counted as `callout_icon`.
 fn callout(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Value>) {
-    ctx.lossy("callout");
     let data = node.block.data();
-    let mut content = Vec::new();
-    let icon = data.get("icon");
-    let prefix = emoji_icon(icon).or_else(|| {
-        icon.and_then(|icon| str_at(icon, &["custom_emoji", "name"]))
-            .map(|name| format!(":{name}:"))
+    let icon = data.get("icon").filter(|icon| !icon.is_null());
+    let emoji = emoji_icon(icon).unwrap_or_else(|| {
+        if icon.is_some() {
+            ctx.lossy("callout_icon");
+        }
+        DEFAULT_CALLOUT_EMOJI.to_owned()
     });
-    if let Some(prefix) = prefix {
-        content.push(plain(format!("{prefix} ")));
-    }
-    content.extend(inline(data, ctx));
+    let mut props = Map::new();
+    props.insert("emoji".into(), json!(emoji));
+    props.extend(quote_props(data));
+    let content = inline(data, ctx);
     let children = convert_blocks(&node.children, ctx);
-    out.push(make_block(
-        ctx,
-        "quote",
-        quote_props(data),
-        items(content),
-        children,
-    ));
+    out.push(make_block(ctx, "callout", props, items(content), children));
 }
 
 fn code(data: &Value, ctx: &mut ConvertContext<'_>, out: &mut Vec<Value>) {

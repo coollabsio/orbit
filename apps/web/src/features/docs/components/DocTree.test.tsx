@@ -23,7 +23,7 @@ const page = (id: string, parent_id: string | null, position: number, teamspace_
 
 const fullPage = (summary: PageSummary): Page => ({
   ...summary, workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
-  updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null,
+  updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
 })
 
 const problem = (status: number, code: string) =>
@@ -40,8 +40,21 @@ const tree = [
   page('draft', 'notes', 0, null, 'Draft'),
 ]
 
-function setup({ canDelete = true, handler }: { canDelete?: boolean; handler?: (call: Call) => Response | undefined } = {}) {
+function setup({
+  canDelete = true,
+  handler,
+  activeId = null,
+  pages = tree,
+  collapsed,
+}: {
+  canDelete?: boolean
+  handler?: (call: Call) => Response | undefined
+  activeId?: string | null
+  pages?: PageSummary[]
+  collapsed?: string[]
+} = {}) {
   window.localStorage.clear()
+  if (collapsed) window.localStorage.setItem('orbit:docs_collapsed_spaces:workspace-1', JSON.stringify(collapsed))
   const calls: Call[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
@@ -58,25 +71,28 @@ function setup({ canDelete = true, handler }: { canDelete?: boolean; handler?: (
     return new Promise<Response>(() => {})
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
-  const view = render(
+  const ui = (active: string | null, currentPages: PageSummary[]) => (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/docs']}>
         <ConfirmationModalHost />
         <DocTree
           workspaceId="workspace-1"
-          pages={tree}
+          pages={currentPages}
           isPending={false}
           isError={false}
           onRetry={() => {}}
-          activeId={null}
+          activeId={active}
           trashActive={false}
           canDeleteTeamspaces={canDelete}
           onTrash={() => {}}
         />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
-  return { view, calls }
+  const view = render(ui(activeId, pages))
+  /** Simulates navigation (the parent passes the new active page id). */
+  const setActive = (id: string | null, nextPages = pages) => view.rerender(ui(id, nextPages))
+  return { view, calls, setActive }
 }
 
 const row = (view: ReturnType<typeof render>, space: string) => view.container.querySelector(`[data-space="${space}"]`) as HTMLElement
@@ -319,4 +335,184 @@ test('the row menu adds and removes favorites', async () => {
   await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.path === '/pages/roadmap/favorite')).toBeTrue())
   await waitFor(() => expect(favoriteRow(view, 'roadmap')).toBeNull())
   expect(favoriteRow(view, 'notes')).toBeTruthy()
+})
+
+const deepTree = [
+  page('roadmap', null, 0, 't1', 'Roadmap'),
+  page('spec', 'roadmap', 0, 't1', 'Spec'),
+  page('details', 'spec', 0, 't1', 'Details'),
+  page('other', null, 1, 't1', 'Other'),
+  page('child', 'other', 0, 't1', 'Child'),
+  page('notes', null, 0, null, 'My notes'),
+]
+
+function trackScrolls() {
+  const scrolled: { id: string | null; options: unknown }[] = []
+  const original = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+    scrolled.push({ id: this.getAttribute('data-page-id'), options })
+  } as typeof Element.prototype.scrollIntoView
+  return { scrolled, restore: () => void (Element.prototype.scrollIntoView = original) }
+}
+
+test('navigating to a page opens its collapsed section and ancestors, then scrolls it into view', async () => {
+  const scrolls = trackScrolls()
+  try {
+    const { view, setActive } = setup({ pages: deepTree, collapsed: ['teamspace:t1'] })
+    await view.findByRole('group', { name: 'General' })
+    expect(view.queryByText('Details')).toBeNull()
+    // The user opens another row first; revealing never closes it.
+    fireEvent.click(row(view, 'teamspace:t1'))
+    fireEvent.click(within(pageRow(view, 'other')).getByRole('button', { name: 'Expand' }))
+    fireEvent.click(row(view, 'teamspace:t1'))
+    expect(view.queryByText('Roadmap')).toBeNull()
+
+    setActive('details')
+    expect(row(view, 'teamspace:t1').getAttribute('aria-expanded')).toBe('true')
+    expect(pageRow(view, 'roadmap').getAttribute('aria-expanded')).toBe('true')
+    expect(pageRow(view, 'spec').getAttribute('aria-expanded')).toBe('true')
+    expect(pageRow(view, 'details').getAttribute('aria-selected')).toBe('true')
+    expect(view.getByText('Child')).toBeTruthy()
+    expect(JSON.parse(window.localStorage.getItem('orbit:docs_collapsed_spaces:workspace-1') ?? '[]')).toEqual([])
+    await waitFor(() => expect(scrolls.scrolled.some((call) => call.id === 'details')).toBeTrue())
+    expect(scrolls.scrolled.find((call) => call.id === 'details')?.options).toEqual({ block: 'nearest' })
+
+    // Collapsing while on the page sticks (only a change of the active page reveals again).
+    fireEvent.click(row(view, 'teamspace:t1'))
+    setActive('details', [...deepTree])
+    expect(row(view, 'teamspace:t1').getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(row(view, 'teamspace:t1'))
+    fireEvent.click(within(pageRow(view, 'roadmap')).getByRole('button', { name: 'Collapse' }))
+    setActive('details', [...deepTree])
+    expect(view.queryByText('Details')).toBeNull()
+    setActive('spec')
+    expect(pageRow(view, 'roadmap').getAttribute('aria-expanded')).toBe('true')
+  } finally {
+    scrolls.restore()
+  }
+})
+
+test('a page opened before the tree loads is revealed once it arrives; favorites keep their own rows', async () => {
+  const { view, setActive } = setup({ pages: [], activeId: 'details', collapsed: ['teamspace:t1'], handler: favoritesHandler(['roadmap']) })
+  await view.findByRole('group', { name: 'General' })
+  setActive('details', deepTree)
+  await view.findByRole('group', { name: 'Favorites' })
+  expect(pageRow(view, 'details')).toBeTruthy()
+  expect(pageRow(view, 'details').hasAttribute('data-section')).toBeFalse()
+  // The favorite row of the ancestor stays collapsed: Favorites has its own expansion state.
+  expect(favoriteRow(view, 'roadmap').getAttribute('aria-expanded')).toBe('false')
+})
+
+const threeTeamspaces = (call: Call) =>
+  call.method === 'GET' && call.path === '/teamspaces'
+    ? Response.json({ items: [teamspace('t1', 'General', 0), teamspace('t2', 'Design', 1), { ...teamspace('t3', 'Ops', 2), icon: '🚀' }] })
+    : undefined
+
+const teamspaceOrder = (view: ReturnType<typeof render>) =>
+  [...view.container.querySelectorAll('[data-space^="teamspace:"]')].map((element) => element.getAttribute('data-space'))
+
+test('the first teamspace is labelled Default; the menu moves teamspaces up and down', async () => {
+  const { view, calls } = setup({
+    handler: (call) =>
+      call.path.endsWith('/move')
+        ? Response.json({ items: [{ ...teamspace('t2', 'Design', 0), version: 2 }, teamspace('t1', 'General', 1), teamspace('t3', 'Ops', 2)] })
+        : threeTeamspaces(call),
+  })
+  await view.findByRole('group', { name: 'Ops' })
+  expect(within(row(view, 'teamspace:t1')).getByText('Default')).toBeTruthy()
+  expect(within(row(view, 'teamspace:t2')).queryByText('Default')).toBeNull()
+
+  fireEvent.click(view.getByRole('button', { name: 'General options' }))
+  const up = await view.findByRole('menuitem', { name: 'Move up' })
+  expect(up.getAttribute('aria-disabled')).toBe('true')
+  expect(view.getByRole('menuitem', { name: 'Change icon' })).toBeTruthy()
+  await userEvent.click(view.getByRole('menuitem', { name: 'Move down' }))
+  await waitFor(() => expect(calls.some((call) => call.path === '/teamspaces/t1/move')).toBeTrue())
+  expect(calls.find((call) => call.path === '/teamspaces/t1/move')?.body).toEqual({ expected_version: 1, position: 1 })
+  await waitFor(() => expect(teamspaceOrder(view)).toEqual(['teamspace:t2', 'teamspace:t1', 'teamspace:t3']))
+  expect(within(row(view, 'teamspace:t2')).getByText('Default')).toBeTruthy()
+
+  fireEvent.click(view.getByRole('button', { name: 'Ops options' }))
+  expect((await view.findByRole('menuitem', { name: 'Move down' })).getAttribute('aria-disabled')).toBe('true')
+})
+
+test('dragging a teamspace header reorders optimistically (pages are untouched)', async () => {
+  // The move never answers, so the list shows the optimistic order.
+  const { view, calls } = setup({ handler: threeTeamspaces })
+  await view.findByRole('group', { name: 'Ops' })
+  const transfer = dataTransfer()
+  fireEvent.dragStart(row(view, 'teamspace:t1'), { dataTransfer: transfer })
+  expect(transfer.getData('application/x-orbit-teamspace')).toBe('t1')
+  expect(transfer.getData('text/page-id')).toBe('')
+  // The source stays mounted and faded.
+  expect(row(view, 'teamspace:t1').getAttribute('data-dragging')).toBe('true')
+  // Page rows and the Private header ignore a teamspace drag.
+  fireEvent.dragOver(pageRow(view, 'notes'), { dataTransfer: transfer })
+  expect(pageRow(view, 'notes').getAttribute('data-drop')).toBeNull()
+  fireEvent.dragOver(row(view, 'private'), { dataTransfer: transfer })
+  expect(row(view, 'private').getAttribute('data-drop')).toBeNull()
+  // happy-dom has no layout: the pointer counts as the lower half → "after".
+  const target = row(view, 'teamspace:t2')
+  fireEvent.dragOver(target, { dataTransfer: transfer })
+  expect(target.getAttribute('data-reorder')).toBe('after')
+  expect(target.getAttribute('data-drop')).toBeNull()
+  fireEvent.drop(target, { dataTransfer: transfer })
+  fireEvent.dragEnd(row(view, 'teamspace:t1'), { dataTransfer: transfer })
+  await waitFor(() => expect(calls.some((call) => call.path === '/teamspaces/t1/move')).toBeTrue())
+  expect(calls.find((call) => call.path === '/teamspaces/t1/move')?.body).toEqual({ expected_version: 1, position: 1 })
+  expect(teamspaceOrder(view)).toEqual(['teamspace:t2', 'teamspace:t1', 'teamspace:t3'])
+  expect(calls.some((call) => call.path.startsWith('/pages/') && call.path.endsWith('/move'))).toBeFalse()
+})
+
+test('a failed teamspace drag rolls back the order', async () => {
+  const { view, calls } = setup({ handler: (call) => (call.path.endsWith('/move') ? problem(409, 'conflict') : threeTeamspaces(call)) })
+  await view.findByRole('group', { name: 'Ops' })
+  const transfer = dataTransfer()
+  fireEvent.dragStart(row(view, 'teamspace:t3'), { dataTransfer: transfer })
+  fireEvent.dragOver(row(view, 'teamspace:t1'), { dataTransfer: transfer })
+  fireEvent.drop(row(view, 'teamspace:t1'), { dataTransfer: transfer })
+  await waitFor(() => expect(calls.some((call) => call.path === '/teamspaces/t3/move')).toBeTrue())
+  expect(calls.find((call) => call.path === '/teamspaces/t3/move')?.body).toEqual({ expected_version: 1, position: 1 })
+  await waitFor(() => expect(teamspaceOrder(view)).toEqual(['teamspace:t1', 'teamspace:t2', 'teamspace:t3']))
+})
+
+test('a page dragged onto a teamspace header still moves into that space (no reorder)', async () => {
+  const { view, calls } = setup({ handler: threeTeamspaces })
+  await view.findByRole('group', { name: 'Ops' })
+  const transfer = dataTransfer()
+  fireEvent.dragStart(pageRow(view, 'notes'), { dataTransfer: transfer })
+  const header = row(view, 'teamspace:t2')
+  fireEvent.dragOver(header, { dataTransfer: transfer })
+  expect(header.getAttribute('data-drop')).toBe('inside')
+  expect(header.getAttribute('data-reorder')).toBeNull()
+  fireEvent.drop(header, { dataTransfer: transfer })
+  await waitFor(() => expect(calls.some((call) => call.path === '/pages/notes/move')).toBeTrue())
+  expect(calls.some((call) => call.path.startsWith('/teamspaces/'))).toBeFalse()
+})
+
+test('"Change icon" picks an emoji; "Remove" returns to the default glyph', async () => {
+  const { view, calls } = setup({
+    handler: (call) => {
+      if (call.method !== 'PATCH') return threeTeamspaces(call)
+      const id = call.path.split('/')[2]
+      const base = id === 't3' ? teamspace('t3', 'Ops', 2) : teamspace('t2', 'Design', 1)
+      return Response.json({ ...base, icon: call.body?.icon ?? null, version: 2 })
+    },
+  })
+  await view.findByRole('group', { name: 'Ops' })
+  fireEvent.click(view.getByRole('button', { name: 'Design options' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Change icon' }))
+  const picker = await view.findByRole('dialog', { name: 'Icon for Design' })
+  expect(within(picker).queryByRole('button', { name: 'Remove' })).toBeNull()
+  await userEvent.click(await within(picker).findByTitle('grinning face'))
+  await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBeTrue())
+  expect(calls.find((call) => call.method === 'PATCH')).toMatchObject({ path: '/teamspaces/t2', body: { expected_version: 1, icon: '😀' } })
+  await waitFor(() => expect(within(row(view, 'teamspace:t2')).queryByText('😀')).toBeTruthy())
+
+  fireEvent.click(view.getByRole('button', { name: 'Ops options' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Change icon' }))
+  const second = await view.findByRole('dialog', { name: 'Icon for Ops' })
+  await userEvent.click(within(second).getByRole('button', { name: 'Remove' }))
+  await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(2))
+  expect(calls.filter((call) => call.method === 'PATCH')[1]).toMatchObject({ path: '/teamspaces/t3', body: { expected_version: 1, icon: null } })
 })

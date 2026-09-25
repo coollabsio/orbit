@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use axum::serve::ListenerExt;
 use base64::Engine;
 use orbit_platform::{
     BackupService, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry, HttpLimits,
@@ -214,11 +215,7 @@ impl App {
             database.clone(),
             PageFileRepository::new(database.clone(), attachment_state.uploads.clone()),
             NotionImportSettings {
-                client: NotionClientConfig {
-                    base_url: config.notion.api_base.clone(),
-                    requests_per_second: f64::from(config.notion.requests_per_minute) / 60.0,
-                    ..NotionClientConfig::default()
-                },
+                client: NotionClientConfig::default(),
                 app_key,
                 max_file_bytes: config.uploads.max_file_bytes,
             },
@@ -402,6 +399,10 @@ impl App {
                 .map_err(|error| error.to_string())
         });
         let http_shutdown = CancellationToken::new();
+        // Small y-sync frames otherwise wait for Nagle + delayed ACK (~40 ms stalls).
+        let listener = listener.tap_io(|stream| {
+            let _ = stream.set_nodelay(true);
+        });
         let server = axum::serve(
             listener,
             self.router
@@ -442,6 +443,10 @@ impl App {
         if tokio::time::timeout(BACKGROUND_DRAIN, drain).await.is_err() {
             abort_services(&mut services);
             return Err(AppError::DrainTimeout);
+        }
+        // Open documents: write and project every pending edit, close their sockets (1012).
+        if let Some(hub) = crate::collab::CollabHub::existing(&self.database) {
+            hub.shutdown().await;
         }
         http_result
             .expect("HTTP server result is recorded during drain")

@@ -31,6 +31,41 @@ describe('schema', () => {
     expect(pageEditorSchema.blockSchema.page.content).toBe('none')
     expect(pageEditorSchema.blockSchema.page.propSchema.pageId.default).toBe('')
   })
+
+  test('has the callout block: inline content, emoji and color props with Notion-like defaults', () => {
+    const callout = pageEditorSchema.blockSchema.callout
+    expect(EDITOR_BLOCK_TYPES.has('callout')).toBe(true)
+    expect(callout.content).toBe('inline')
+    expect(callout.propSchema.emoji.default).toBe('💡')
+    expect(callout.propSchema.backgroundColor.default).toBe('gray')
+    expect(callout.propSchema.textColor.default).toBe('default')
+  })
+
+  test('a callout keeps rich text, props and nested children through the internal clipboard HTML', async () => {
+    const e = BlockNoteEditor.create({
+      schema: pageEditorSchema,
+      initialContent: [
+        {
+          type: 'callout',
+          props: { emoji: '⭐', backgroundColor: 'red' },
+          content: [
+            { type: 'text', text: 'Hello ', styles: {} },
+            { type: 'text', text: 'bold', styles: { bold: true } },
+          ],
+          children: [{ type: 'paragraph', content: 'inside' }],
+        },
+      ],
+    })
+    const parsed = await e.tryParseHTMLToBlocks(await e.blocksToFullHTML(e.document))
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0].type).toBe('callout')
+    expect(parsed[0].props).toEqual({ emoji: '⭐', backgroundColor: 'red', textColor: 'default' })
+    expect(parsed[0].content).toEqual(e.document[0].content)
+    expect(parsed[0].children.map((child) => child.type)).toEqual(['paragraph'])
+
+    // Other apps get the emoji followed by the text.
+    expect(await e.blocksToHTMLLossy(e.document)).toContain('⭐ </span>')
+  })
 })
 
 describe('getPageSlashMenuItems', () => {
@@ -60,6 +95,23 @@ describe('getPageSlashMenuItems', () => {
     linkItems[0].onItemClick()
     expect(actions.onLinkPage).toHaveBeenCalledTimes(1)
     expect(actions.onSubpage).not.toHaveBeenCalled()
+  })
+
+  test('offers Callout right after Quote in Basic blocks; it turns the empty line into a callout', () => {
+    const e = editor()
+    const items = getPageSlashMenuItems(e, actions, '')
+    const titles = items.map((item) => item.title)
+    expect(titles.indexOf('Callout')).toBe(titles.indexOf('Quote') + 1)
+    expect(items.find((item) => item.title === 'Callout')?.group).toBe(PAGE_ITEMS_GROUP)
+    for (const alias of ['callout', 'note', 'tip', 'warning', 'info']) {
+      expect(getPageSlashMenuItems(e, actions, alias).map((item) => item.title)).toContain('Callout')
+    }
+    expect(getPageSlashMenuItems(e, actions, 'call')[0].title).toBe('Callout')
+
+    e.setTextCursorPosition(e.document[0].id)
+    getPageSlashMenuItems(e, actions, 'callout')[0].onItemClick()
+    expect(e.document[0].type).toBe('callout')
+    expect(e.document[0].props).toEqual({ emoji: '💡', backgroundColor: 'gray', textColor: 'default' })
   })
 
   test('a title match is selected first, before alias-only matches ("/sub" → Sub-page)', () => {

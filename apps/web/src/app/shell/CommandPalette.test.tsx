@@ -33,8 +33,14 @@ function setup(onClose = () => {}) {
       pageSearches.push(new URL(url).searchParams.get('q') ?? '')
       return Response.json({
         items: [
-          { id: 'page-handbook', parent_id: null, teamspace_id: 'teamspace-1', private: false, title: 'Team handbook', icon: null, snippet: 'How we onboard new people' },
-          { id: 'page-diary', parent_id: null, teamspace_id: null, private: true, title: 'Onboarding diary', icon: null, snippet: 'My onboard notes' },
+          {
+            id: 'page-handbook', parent_id: null, teamspace_id: 'teamspace-1', private: false, title: 'Team handbook', icon: null,
+            snippet: 'How we onboard new people', snippet_highlights: [{ start: 7, end: 14 }], title_highlights: [],
+          },
+          {
+            id: 'page-diary', parent_id: null, teamspace_id: null, private: true, title: 'Onboarding diary', icon: null,
+            snippet: 'My <b>onboard</b> notes', snippet_highlights: [{ start: 6, end: 13 }], title_highlights: [{ start: 0, end: 10 }],
+          },
         ],
       })
     }
@@ -152,4 +158,20 @@ test('page search runs only for a non-empty query and opens the page', async () 
   expect(view.getByRole('option', { name: /Onboarding diary/ }).textContent).toContain('Page · Private')
   fireEvent.click(page)
   expect(view.getByTestId('location').textContent).toBe('/docs/page-handbook')
+})
+
+test('page hits show the snippet with the matched words in bold, as text', async () => {
+  const view = setup()
+  const input = await view.findByPlaceholderText('Search tasks, pages and navigation…')
+  await userEvent.type(input, 'onboard')
+  const handbook = await view.findByRole('option', { name: /Team handbook/ }, { timeout: 2000 })
+  const snippet = handbook.querySelector('[data-snippet]')!
+  expect(snippet.textContent).toBe('How we onboard new people')
+  expect([...snippet.querySelectorAll('strong')].map((node) => node.textContent)).toEqual(['onboard'])
+
+  const diary = view.getByRole('option', { name: /Onboarding diary/ })
+  expect([...diary.querySelectorAll('strong')].map((node) => node.textContent)).toEqual(['Onboarding', 'onboard'])
+  // Markup in page text stays text.
+  expect(diary.querySelector('[data-snippet]')!.textContent).toBe('My <b>onboard</b> notes')
+  expect(diary.querySelector('b')).toBeNull()
 })

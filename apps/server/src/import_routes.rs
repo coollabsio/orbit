@@ -10,14 +10,14 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use orbit_platform::{Id, RequestId};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
 use crate::notion::import::{
     ImportDestination, ImportError, ImportSelection, NotionImport, NotionImportService,
 };
 use crate::repositories::identity::IdentityRepository;
-use crate::task_routes::{ApiError, ApiJson, authenticate_session, validation};
+use crate::task_routes::{ApiError, ApiJson, ApiQuery, authenticate_session, validation};
 
 #[derive(Clone)]
 pub struct ImportState {
@@ -98,6 +98,24 @@ struct StartNotionImportBody {
     destination: NotionImportDestinationBody,
 }
 
+/// Optional parts of an import detail response.
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum NotionImportInclude {
+    /// The scan tree (up to 5,000 nodes). Fetch it once when the import is `ready`; polling
+    /// leaves it out.
+    Tree,
+}
+
+#[derive(Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct NotionImportDetailQuery {
+    /// `tree` adds the scan tree; without it `tree` is `null`.
+    #[param(inline)]
+    include: Option<NotionImportInclude>,
+}
+
 #[derive(Serialize, ToSchema)]
 struct NotionImportList {
     items: Vec<NotionImport>,
@@ -167,11 +185,13 @@ async fn list_notion_imports(
         .map_err(|error| import_problem(error, &instance, request))
 }
 
-/// One of the caller's imports: status, tree (once scanned), progress and report.
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}", params(("workspace_id" = String, Path), ("import_id" = String, Path)), responses((status = 200, body = NotionImport)))]
+/// One of the caller's imports: status, progress and report. The scan tree (once scanned) only
+/// with `?include=tree`.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}", params(("workspace_id" = String, Path), ("import_id" = String, Path), NotionImportDetailQuery), responses((status = 200, body = NotionImport)))]
 async fn get_notion_import(
     State(state): State<ImportState>,
     Path((workspace, import)): Path<(String, String)>,
+    ApiQuery(query): ApiQuery<NotionImportDetailQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<NotionImport>, ApiError> {
@@ -183,7 +203,12 @@ async fn get_notion_import(
         .map_err(|_| import_not_found(&instance, request))?;
     state
         .service
-        .get(workspace_id, user_id, import_id)
+        .get(
+            workspace_id,
+            user_id,
+            import_id,
+            query.include == Some(NotionImportInclude::Tree),
+        )
         .await
         .map(Json)
         .map_err(|error| import_problem(error, &instance, request))

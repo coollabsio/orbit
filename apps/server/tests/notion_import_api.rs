@@ -613,6 +613,20 @@ impl Harness {
         import
     }
 
+    /// The detail with `?include=tree` (the chooser's one-off request).
+    async fn detail_with_tree(&self, cookie: &str, id: &str) -> Value {
+        let (status, import) = self
+            .call(
+                cookie,
+                "GET",
+                &format!("{}/{id}?include=tree", self.imports_uri()),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{import}");
+        import
+    }
+
     async fn token_stored(&self, id: &str) -> bool {
         sqlx::query_scalar::<_, Option<Vec<u8>>>(
             "SELECT token_ciphertext FROM notion_imports WHERE id = ?",
@@ -727,7 +741,7 @@ async fn scan_builds_the_tree_and_never_exposes_the_token() {
         .call_raw(
             &harness.owner_cookie,
             "GET",
-            &format!("{}/{id}", harness.imports_uri()),
+            &format!("{}/{id}?include=tree", harness.imports_uri()),
             None,
         )
         .await;
@@ -775,6 +789,51 @@ async fn scan_builds_the_tree_and_never_exposes_the_token() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["items"].as_array().unwrap().len(), 1);
     assert_eq!(list["items"][0]["tree"], Value::Null);
+}
+
+#[tokio::test]
+async fn import_detail_leaves_the_tree_out_unless_asked() {
+    let harness = Harness::new().await;
+    let id = harness.scanned(&harness.owner_cookie).await;
+
+    // Polling gets the light detail: status and progress, no tree.
+    let light = harness.detail(&harness.owner_cookie, &id).await;
+    assert_eq!(light["status"], "ready");
+    assert_eq!(light["tree"], Value::Null);
+
+    let full = harness.detail_with_tree(&harness.owner_cookie, &id).await;
+    assert_eq!(full["status"], "ready");
+    assert_eq!(full["tree"]["nodes"].as_array().unwrap().len(), 8);
+    assert_eq!(full["tree"]["truncated"], false);
+    let mut without_tree = full.clone();
+    without_tree["tree"] = Value::Null;
+    assert_eq!(without_tree, light, "only the tree differs");
+
+    // Unknown include values are rejected instead of silently ignored.
+    for query in ["include=trees", "include_tree=true"] {
+        let (status, problem) = harness
+            .call(
+                &harness.owner_cookie,
+                "GET",
+                &format!("{}/{id}?{query}", harness.imports_uri()),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+        assert_eq!(problem["code"], "invalid_request");
+    }
+
+    // Another member cannot see it with the flag either.
+    let (_, member_cookie) = harness.add_member("member@example.com").await;
+    let (status, _) = harness
+        .call(
+            &member_cookie,
+            "GET",
+            &format!("{}/{id}?include=tree", harness.imports_uri()),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -1493,7 +1552,7 @@ async fn scan_stops_listing_at_the_cap_and_marks_the_tree_truncated() {
     let harness = Harness::new().await;
     harness.fake.endless.store(true, Ordering::SeqCst);
     let id = harness.scanned(&harness.owner_cookie).await;
-    let import = harness.detail(&harness.owner_cookie, &id).await;
+    let import = harness.detail_with_tree(&harness.owner_cookie, &id).await;
     assert_eq!(import["status"], "ready");
     assert_eq!(import["tree"]["truncated"], true);
     assert_eq!(import["tree"]["nodes"].as_array().unwrap().len(), 5_000);
@@ -1543,7 +1602,7 @@ async fn cancelling_a_scan_stops_its_listing_promptly() {
         4,
         "no request after the cancel"
     );
-    let import = harness.detail(&harness.owner_cookie, &id).await;
+    let import = harness.detail_with_tree(&harness.owner_cookie, &id).await;
     assert_eq!(import["status"], "cancelled");
     assert_eq!(import["tree"], Value::Null);
     assert!(!harness.token_stored(&id).await);

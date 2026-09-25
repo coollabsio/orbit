@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 82);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 89);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 112);
+    assert_eq!(operation_count, 119);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -69,8 +69,12 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/pages/favorites/{page_id}/move",
         "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files",
         "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files/{file_id}",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}/restore",
         "/api/v1/workspaces/{workspace_id}/teamspaces",
         "/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}",
+        "/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}/move",
         "/api/v1/workspaces/{workspace_id}/imports/notion",
         "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}",
         "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}/start",
@@ -696,6 +700,58 @@ fn page_favorite_routes_are_documented() {
 }
 
 #[test]
+fn page_version_routes_are_documented() {
+    let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let versions = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions";
+    let list = operation(&document, versions, "get");
+    assert_eq!(list["operationId"], "list_page_versions");
+    assert_eq!(
+        list["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageVersionList"
+    );
+    assert_eq!(parameter_names(list, "query"), ["cursor", "limit"]);
+    let get = operation(&document, &format!("{versions}/{{version_id}}"), "get");
+    assert_eq!(get["operationId"], "get_page_version");
+    assert_eq!(
+        get["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageVersion"
+    );
+    let restore = operation(
+        &document,
+        &format!("{versions}/{{version_id}}/restore"),
+        "post",
+    );
+    assert_eq!(restore["operationId"], "restore_page_version");
+    assert_eq!(
+        restore["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/Page"
+    );
+    for (operation_json, status, code) in [
+        (list, "404", "page_not_found"),
+        (list, "400", "invalid_cursor"),
+        (list, "422", "validation_failed"),
+        (get, "404", "page_version_not_found"),
+        (restore, "404", "page_not_found"),
+        (restore, "404", "page_version_not_found"),
+        (restore, "409", "conflict"),
+    ] {
+        assert!(
+            operation_json["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{} {status} {code}",
+            operation_json["operationId"]
+        );
+    }
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["PageVersionKind"]["enum"],
+        serde_json::json!(["auto", "restore", "import"])
+    );
+}
+
+#[test]
 fn page_file_routes_are_documented() {
     let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
     let files = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files";
@@ -808,4 +864,52 @@ fn notion_import_routes_are_documented() {
     ] {
         assert!(properties.contains_key(field), "{field}");
     }
+}
+
+#[test]
+fn page_purge_duplicate_and_search_highlights_are_documented() {
+    let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let pages = "/api/v1/workspaces/{workspace_id}/pages";
+    let purge = operation(
+        &document,
+        &format!("{pages}/{{page_id}}/permanent"),
+        "delete",
+    );
+    assert_eq!(purge["operationId"], "purge_page");
+    assert_eq!(parameter_names(purge, "query"), ["expected_version"]);
+    for (status, code) in [
+        ("403", "workspace_action_forbidden"),
+        ("404", "page_not_found"),
+        ("409", "page_not_trashed"),
+        ("409", "conflict"),
+    ] {
+        assert!(
+            purge["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{status} {code}"
+        );
+    }
+    let empty = operation(&document, &format!("{pages}/trash/empty"), "post");
+    assert_eq!(empty["operationId"], "empty_page_trash");
+    assert_eq!(
+        empty["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageTrashEmptied"
+    );
+    let duplicate = operation(&document, &format!("{pages}/{{page_id}}/duplicate"), "post");
+    assert_eq!(duplicate["operationId"], "duplicate_page");
+    assert_eq!(
+        duplicate["responses"]["201"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/Page"
+    );
+    let schemas = &document["components"]["schemas"];
+    let required = schemas["PageSearchResult"]["required"].as_array().unwrap();
+    for field in ["snippet", "snippet_highlights", "title_highlights"] {
+        assert!(required.contains(&serde_json::json!(field)), "{field}");
+    }
+    assert_eq!(
+        schemas["TextRange"]["required"],
+        serde_json::json!(["start", "end"])
+    );
 }

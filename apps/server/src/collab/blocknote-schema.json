@@ -1,0 +1,390 @@
+{
+ "blocks": {
+  "bulletListItem": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textAlignment",
+     "prop": true,
+     "missing": {
+      "value": "left"
+     }
+    }
+   ]
+  },
+  "callout": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "emoji",
+     "prop": true,
+     "missing": {
+      "value": "💡"
+     }
+    },
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "gray"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    }
+   ]
+  },
+  "checkListItem": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textAlignment",
+     "prop": true,
+     "missing": {
+      "value": "left"
+     }
+    },
+    {
+     "name": "checked",
+     "prop": true,
+     "missing": {
+      "value": false
+     }
+    }
+   ]
+  },
+  "codeBlock": {
+   "content": "plain",
+   "attrs": [
+    {
+     "name": "language",
+     "prop": true,
+     "missing": {
+      "value": "text"
+     }
+    }
+   ]
+  },
+  "divider": {
+   "content": "none",
+   "attrs": []
+  },
+  "file": {
+   "content": "none",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "name",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "url",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "caption",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    }
+   ]
+  },
+  "heading": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textAlignment",
+     "prop": true,
+     "missing": {
+      "value": "left"
+     }
+    },
+    {
+     "name": "level",
+     "prop": true,
+     "missing": {
+      "value": 1
+     }
+    },
+    {
+     "name": "isToggleable",
+     "prop": true,
+     "missing": {
+      "value": false
+     }
+    }
+   ]
+  },
+  "image": {
+   "content": "none",
+   "attrs": [
+    {
+     "name": "textAlignment",
+     "prop": true,
+     "missing": {
+      "value": "left"
+     }
+    },
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "name",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "url",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "caption",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "showPreview",
+     "prop": true,
+     "missing": {
+      "value": true
+     }
+    },
+    {
+     "name": "previewWidth",
+     "prop": true,
+     "missing": {
+      "undefined": true
+     }
+    }
+   ]
+  },
+  "numberedListItem": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textAlignment",
+     "prop": true,
+     "missing": {
+      "value": "left"
+     }
+    },
+    {
+     "name": "start",
+     "prop": true,
+     "missing": {
+      "undefined": true
+     }
+    }
+   ]
+  },
+  "page": {
+   "content": "none",
+   "attrs": [
+    {
+     "name": "pageId",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    }
+   ]
+  },
+  "paragraph": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textAlignment",
+     "prop": true,
+     "missing": {
+      "value": "left"
+     }
+    }
+   ]
+  },
+  "quote": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    }
+   ]
+  },
+  "table": {
+   "content": "table",
+   "attrs": [
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    }
+   ]
+  },
+  "toggleListItem": {
+   "content": "inline",
+   "attrs": [
+    {
+     "name": "backgroundColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textColor",
+     "prop": true,
+     "missing": {
+      "value": "default"
+     }
+    },
+    {
+     "name": "textAlignment",
+     "prop": true,
+     "missing": {
+      "value": "left"
+     }
+    }
+   ]
+  }
+ },
+ "cell": {
+  "attrs": [
+   "textColor",
+   "backgroundColor",
+   "textAlignment",
+   "colspan",
+   "rowspan",
+   "colwidth"
+  ],
+  "defaults": {
+   "textColor": "default",
+   "backgroundColor": "default",
+   "textAlignment": "left",
+   "colspan": 1,
+   "rowspan": 1,
+   "colwidth": null
+  }
+ },
+ "styles": {
+  "backgroundColor": "string",
+  "bold": "boolean",
+  "code": "boolean",
+  "italic": "boolean",
+  "strike": "boolean",
+  "textColor": "string",
+  "underline": "boolean"
+ },
+ "container_attrs": [
+  "id"
+ ]
+}

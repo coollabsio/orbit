@@ -23,6 +23,7 @@ import {
   reconcileNotionImport,
   useCancelNotionImport,
   useNotionImport,
+  useNotionImportTree,
   useNotionImports,
 } from '@/features/docs/api/notionImports'
 import { isPageNotFound, usePageTree } from '@/features/docs/api/pages'
@@ -416,9 +417,10 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
   )
 }
 
-/** Step 3 wrapper: header with the workspace name and a cancel action, then the chooser. */
+/** Step 3 wrapper: header with the workspace name and a cancel action, then the chooser (scan tree fetched once). */
 function ChooseStep({ workspaceId, item }: { workspaceId: string; item: NotionImport }) {
   const cancel = useCancel(workspaceId, item)
+  const scan = useNotionImportTree(workspaceId, item.id)
   const tree = usePageTree(workspaceId)
   const teamspaces = useTeamspaces(workspaceId)
   return (
@@ -432,8 +434,17 @@ function ChooseStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
           </Button>
         }
       />
-      {item.tree ? (
-        <NotionImportChooser workspaceId={workspaceId} item={item} tree={item.tree} teamspaces={teamspaces.data} pages={tree.data} />
+      {scan.data ? (
+        <NotionImportChooser workspaceId={workspaceId} item={item} tree={scan.data} teamspaces={teamspaces.data} pages={tree.data} />
+      ) : scan.isError || (scan.isSuccess && !scan.data) ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="alert">
+          <p className="text-sm text-muted-foreground">
+            {scan.isError ? notionImportErrorMessage(scan.error) : 'The scanned page list is not available.'}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={() => void scan.refetch()}>
+            Retry
+          </Button>
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <Spinner className="text-muted-foreground" />

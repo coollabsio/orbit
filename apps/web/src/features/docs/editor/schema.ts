@@ -1,5 +1,6 @@
 import { BlockNoteSchema, defaultBlockSpecs, type BlockNoteEditor } from '@blocknote/core'
 import { createReactBlockSpec } from '@blocknote/react'
+import { CALLOUT_DEFAULT_BACKGROUND, CALLOUT_DEFAULT_EMOJI, CalloutExternalView, CalloutView } from './CalloutBlock'
 import { PageBlockExternalView, PageBlockView } from './PageBlockCard'
 
 /** Media blocks without page-file support: video and audio stay out (images and files upload as page files). */
@@ -28,10 +29,31 @@ export const pageBlockSpec = createReactBlockSpec(
   },
 )
 
+/**
+ * A Notion-style callout: an emoji (click to change) next to rich text, in a rounded colored box; nested blocks
+ * sit inside the box. `backgroundColor`/`textColor` are BlockNote color names (the block "Colors" menu edits them).
+ */
+export const calloutBlockSpec = createReactBlockSpec(
+  {
+    type: 'callout',
+    propSchema: {
+      emoji: { default: CALLOUT_DEFAULT_EMOJI },
+      backgroundColor: { default: CALLOUT_DEFAULT_BACKGROUND },
+      textColor: { default: 'default' },
+    },
+    content: 'inline',
+  },
+  {
+    render: CalloutView,
+    toExternalHTML: CalloutExternalView,
+  },
+)
+
 export const pageEditorSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...baseBlockSpecs,
     page: pageBlockSpec(),
+    callout: calloutBlockSpec(),
   },
 })
 

@@ -1,6 +1,7 @@
 //! Docs teamspaces: shared page spaces inside a workspace. Every member sees, creates and renames
 //! them; owners and admins delete them, and only while they hold no live pages. The default
-//! teamspace is derived, never stored: the lowest `(position, id)` in the workspace.
+//! teamspace is derived, never stored: the lowest `(position, id)` in the workspace, so moving a
+//! teamspace to the top makes it the default.
 
 use orbit_domain::WorkspaceRole;
 use orbit_platform::{Database, Id, TimestampMillis};
@@ -105,18 +106,8 @@ impl TeamspaceRepository {
         actor_id: Id,
     ) -> Result<TeamspaceList, TeamspaceError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query(&format!(
-            "SELECT {TEAMSPACE_COLUMNS} FROM teamspaces WHERE workspace_id = ? ORDER BY position, id"
-        ))
-        .bind(workspace_id.to_string())
-        .fetch_all(self.database.pool())
-        .await?;
-        let items = rows
-            .into_iter()
-            .enumerate()
-            .map(|(index, row)| teamspace_from_row(row, index == 0))
-            .collect::<Result<_, _>>()?;
-        Ok(TeamspaceList { items })
+        let mut connection = self.database.pool().acquire().await?;
+        ordered_teamspaces(&mut connection, workspace_id).await
     }
 
     /// Appends a teamspace after the last one.
@@ -228,8 +219,106 @@ impl TeamspaceRepository {
         })
     }
 
+    /// Moves a teamspace to index `position` (clamped to the end) and renumbers the workspace's
+    /// teamspaces 0..n. Any member may reorder; the teamspace that ends up first becomes the
+    /// default. Only the moved teamspace's version changes.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn move_teamspace(
+        &self,
+        workspace_id: Id,
+        teamspace_id: Id,
+        actor_id: Id,
+        expected_version: u64,
+        position: i64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TeamspaceList, TeamspaceError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let current = teamspace_in_tx(&mut tx, workspace_id, teamspace_id).await?;
+        check_version(expected_version, &current)?;
+        let mut order = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM teamspaces WHERE workspace_id = ? ORDER BY position, id",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect::<Result<Vec<_>, _>>()?;
+        order.retain(|id| *id != teamspace_id);
+        let index = usize::try_from(position.max(0))
+            .unwrap_or(order.len())
+            .min(order.len());
+        order.insert(index, teamspace_id);
+        for (position, id) in order.iter().enumerate() {
+            if *id == teamspace_id {
+                sqlx::query(
+                    "UPDATE teamspaces SET position = ?, updated_at = ?, version = version + 1 \
+                     WHERE id = ? AND workspace_id = ? AND version = ?",
+                )
+                .bind(position as i64)
+                .bind(now.as_millis())
+                .bind(id.to_string())
+                .bind(workspace_id.to_string())
+                .bind(expected_version as i64)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                sqlx::query(
+                    "UPDATE teamspaces SET position = ? WHERE id = ? AND workspace_id = ? AND position <> ?",
+                )
+                .bind(position as i64)
+                .bind(id.to_string())
+                .bind(workspace_id.to_string())
+                .bind(position as i64)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        record_mutation(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            "teamspace.moved",
+            "teamspace",
+            teamspace_id,
+            request_id,
+            now,
+        )
+        .await?;
+        let list = ordered_teamspaces(&mut tx, workspace_id).await?;
+        tx.commit().await?;
+        Ok(list)
+    }
+
     /// Deletes an empty teamspace together with its trashed pages. Requires owner or admin.
     pub async fn delete_teamspace(
+        &self,
+        workspace_id: Id,
+        teamspace_id: Id,
+        actor_id: Id,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TeamspaceError> {
+        let result = self
+            .delete_teamspace_unchecked(
+                workspace_id,
+                teamspace_id,
+                actor_id,
+                expected_version,
+                request_id,
+                now,
+            )
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn delete_teamspace_unchecked(
         &self,
         workspace_id: Id,
         teamspace_id: Id,
@@ -283,6 +372,25 @@ impl TeamspaceRepository {
         tx.commit().await?;
         Ok(())
     }
+}
+
+/// The workspace's teamspaces ordered by `position, id`; the first one is the default.
+async fn ordered_teamspaces(
+    connection: &mut sqlx::SqliteConnection,
+    workspace_id: Id,
+) -> Result<TeamspaceList, TeamspaceError> {
+    let rows = sqlx::query(&format!(
+        "SELECT {TEAMSPACE_COLUMNS} FROM teamspaces WHERE workspace_id = ? ORDER BY position, id"
+    ))
+    .bind(workspace_id.to_string())
+    .fetch_all(&mut *connection)
+    .await?;
+    let items = rows
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| teamspace_from_row(row, index == 0))
+        .collect::<Result<_, _>>()?;
+    Ok(TeamspaceList { items })
 }
 
 /// Creates the default "General" teamspace of a new workspace, inside its creating transaction.

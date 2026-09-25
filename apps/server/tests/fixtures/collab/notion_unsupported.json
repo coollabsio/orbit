@@ -1,0 +1,257 @@
+{
+ "blocks": [
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Kept child of a future block",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000001",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {
+      "bold": true
+     },
+     "text": "Team Sync",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000002",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Summary text",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000003",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Overview",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000004",
+   "props": {
+    "backgroundColor": "default",
+    "isToggleable": false,
+    "level": 3,
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "heading"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Tab 1 content",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000005",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Details",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000006",
+   "props": {
+    "backgroundColor": "default",
+    "isToggleable": false,
+    "level": 3,
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "heading"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Tab 2 content",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000007",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  }
+ ],
+ "y_update": "AT8BAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAwlwYXJhZ3JhcGgHAAECBgQAAQMcS2VwdCBjaGlsZCBvZiBhIGZ1dHVyZSBibG9jaygAAQIPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAQIJdGV4dENvbG9yAXcHZGVmYXVsdCgAAQINdGV4dEFsaWdubWVudAF3BGxlZnQoAAEBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxhwEBAw5ibG9ja0NvbnRhaW5lcgcAASQDCXBhcmFncmFwaAcAASUGBgABJgRib2xkAnt9hAEnCVRlYW0gU3luY4YBMARib2xkBG51bGwoAAElD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAElCXRleHRDb2xvcgF3B2RlZmF1bHQoAAElDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABJAJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMocBJAMOYmxvY2tDb250YWluZXIHAAE2AwlwYXJhZ3JhcGgHAAE3BgQAATgMU3VtbWFyeSB0ZXh0KAABNw9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABNwl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABNw10ZXh0QWxpZ25tZW50AXcEbGVmdCgAATYCaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDOHATYDDmJsb2NrQ29udGFpbmVyBwABSQMHaGVhZGluZwcAAUoGBAABSwhPdmVydmlldygAAUoPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAUoJdGV4dENvbG9yAXcHZGVmYXVsdCgAAUoNdGV4dEFsaWdubWVudAF3BGxlZnQoAAFKBWxldmVsAX0DKAABSgxpc1RvZ2dsZWFibGUBeSgAAUkCaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDSHAUkDDmJsb2NrQ29udGFpbmVyBwABWgMJcGFyYWdyYXBoBwABWwYEAAFcDVRhYiAxIGNvbnRlbnQoAAFbD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFbCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFbDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABWgJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNYcBWgMOYmxvY2tDb250YWluZXIHAAFuAwdoZWFkaW5nBwABbwYEAAFwB0RldGFpbHMoAAFvD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFvCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFvDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABbwVsZXZlbAF9AygAAW8MaXNUb2dnbGVhYmxlAXkoAAFuAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA2hwFuAw5ibG9ja0NvbnRhaW5lcgcAAX4DCXBhcmFncmFwaAcAAX8GBAABgAENVGFiIDIgY29udGVudCgAAX8PYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAX8JdGV4dENvbG9yAXcHZGVmYXVsdCgAAX8NdGV4dEFsaWdubWVudAF3BGxlZnQoAAF+AmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA3AA==",
+ "expected": [
+  {
+   "id": "00000000-0000-4000-8000-000000000001",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Kept child of a future block",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000002",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Team Sync",
+     "styles": {
+      "bold": true
+     }
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000003",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Summary text",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000004",
+   "type": "heading",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "level": 3,
+    "isToggleable": false
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Overview",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000005",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Tab 1 content",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000006",
+   "type": "heading",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "level": 3,
+    "isToggleable": false
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Details",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000007",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Tab 2 content",
+     "styles": {}
+    }
+   ],
+   "children": []
+  }
+ ]
+}

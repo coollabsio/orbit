@@ -18,7 +18,7 @@ use crate::Database;
 
 const DATABASE_FILE: &str = "database.sqlite";
 const MANIFEST_FILE: &str = "manifest.json";
-const SUPPORTED_SCHEMA_VERSION: i64 = 26;
+const SUPPORTED_SCHEMA_VERSION: i64 = 29;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -115,6 +115,8 @@ pub enum BackupError {
     UnsupportedSchema { found: i64, maximum_supported: i64 },
     #[error("could not read the database schema version: {0}")]
     SchemaVersion(#[source] sqlx::Error),
+    #[error("backup restore could not reset collaborative documents: {0}")]
+    CollabEpochs(#[source] sqlx::Error),
     #[error("SQLite online backup failed: {0}")]
     OnlineBackup(String),
     #[error("backup was cancelled")]
@@ -245,8 +247,11 @@ impl BackupService {
         let old_attachments =
             attachment_parent.join(format!(".orbit-restore-old-attachments-{token}"));
 
-        let result = (|| {
-            copy_file_synced(&snapshot.path.join(DATABASE_FILE), &staged_database)?;
+        let staged = match copy_file_synced(&snapshot.path.join(DATABASE_FILE), &staged_database) {
+            Ok(()) => rotate_collab_epochs(&staged_database).await,
+            Err(error) => Err(error),
+        };
+        let result = staged.and_then(|()| {
             copy_directory(
                 &snapshot.path.join("attachments"),
                 &staged_attachments,
@@ -346,7 +351,7 @@ impl BackupService {
             let _ = remove_path_if_exists(&old_attachments);
             drop(staged_database_lock);
             Ok(())
-        })();
+        });
 
         let _ = remove_path_if_exists(&staged_database);
         let _ = remove_path_if_exists(&staged_attachments);
@@ -988,6 +993,42 @@ fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> BackupError {
         path: path.into(),
         source,
     }
+}
+
+/// A restored database is older than the collaborative documents open clients still hold, which
+/// they would push back on reconnect. Every document therefore gets a new epoch (clients with the
+/// old one are told to reset), and so does the generation of not yet opened pages.
+async fn rotate_collab_epochs(database: &Path) -> Result<(), BackupError> {
+    use sqlx::Connection;
+    use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode};
+
+    let options = SqliteConnectOptions::new()
+        .filename(database)
+        .create_if_missing(false)
+        .journal_mode(SqliteJournalMode::Delete);
+    let mut connection = SqliteConnection::connect_with(&options)
+        .await
+        .map_err(BackupError::CollabEpochs)?;
+    let result = async {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'page_collab_meta')",
+        )
+        .fetch_one(&mut connection)
+        .await?;
+        if exists {
+            sqlx::query("UPDATE page_collab_meta SET generation = lower(hex(randomblob(16)))")
+                .execute(&mut connection)
+                .await?;
+            sqlx::query("UPDATE page_collab_docs SET epoch = lower(hex(randomblob(16)))")
+                .execute(&mut connection)
+                .await?;
+        }
+        Ok::<(), sqlx::Error>(())
+    }
+    .await;
+    let closed = connection.close().await;
+    result.map_err(BackupError::CollabEpochs)?;
+    closed.map_err(BackupError::CollabEpochs)
 }
 
 #[cfg(test)]

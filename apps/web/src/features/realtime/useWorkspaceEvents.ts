@@ -3,6 +3,19 @@ import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/api/queryKeys'
 import { parseEvent } from './events'
 
+/** Marks a surface that merges remote updates into its own focused fields safely (e.g. the Docs page editor). */
+export const REALTIME_SAFE_ATTRIBUTE = 'data-realtime-safe'
+
+/**
+ * A focused input/textarea/contenteditable pauses refreshes so a remote edit cannot remount a draft. Surfaces marked
+ * with `data-realtime-safe` opt out: they keep local edits themselves, and they are focused almost all the time, so
+ * pausing there would stop every workspace refresh (Docs titles, tree, favorites) while someone types.
+ */
+export function focusedDraftBlocksRefresh(active: Element | null = document.activeElement): boolean {
+  if (!(active instanceof HTMLElement) || !active.matches('input, textarea, [contenteditable="true"]')) return false
+  return active.closest(`[${REALTIME_SAFE_ATTRIBUTE}]`) === null
+}
+
 export function useWorkspaceEvents(workspaceId: string) {
   const client = useQueryClient()
   const [connected, setConnected] = useState(false)
@@ -23,8 +36,7 @@ export function useWorkspaceEvents(workspaceId: string) {
     const refresh = async () => {
       // Remote edits must not remount a focused draft or race optimistic writes.
       if (disposed || pending === undefined || refreshing || Date.now() < nextRefresh || client.isMutating() > 0) return
-      const active = document.activeElement
-      if (active instanceof HTMLElement && active.matches('input, textarea, [contenteditable="true"]')) return
+      if (focusedDraftBlocksRefresh()) return
       refreshing = true
       const next = pending
       const refreshWorkspaces = pendingWorkspaces

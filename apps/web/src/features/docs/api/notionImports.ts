@@ -2,7 +2,13 @@ import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { cancelNotionImport, createNotionImport, getNotionImport, listNotionImports, startNotionImport } from '@/api/generated/sdk.gen'
-import type { NotionImport, NotionImportDestinationBody, NotionImportSelectionBody, NotionImportStatus } from '@/api/generated/types.gen'
+import type {
+  NotionImport,
+  NotionImportDestinationBody,
+  NotionImportSelectionBody,
+  NotionImportStatus,
+  NotionImportTree,
+} from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 
@@ -93,8 +99,9 @@ export function useNotionImports(workspaceId: string) {
 }
 
 /**
- * One import, polled every 2 s while a job works on it. When it reaches a final state the page queries are
- * refreshed (imported pages appear, trashed empty pages disappear) along with the imports list.
+ * One import without its scan tree (status, progress, report), polled every 2 s only while a job works on it
+ * (scanning, queued, importing). When it reaches a final state the page queries are refreshed (imported pages
+ * appear, trashed empty pages disappear) along with the imports list. The tree comes from `useNotionImportTree`.
  */
 export function useNotionImport(workspaceId: string, importId: string | undefined, pollMs = NOTION_IMPORT_POLL_MS) {
   const queryClient = useQueryClient()
@@ -123,6 +130,29 @@ export function useNotionImport(workspaceId: string, importId: string | undefine
     }
   }, [queryClient, status, workspaceId])
   return query
+}
+
+/**
+ * The scan tree of a `ready` import (up to 5,000 nodes), fetched once with `?include=tree` under its own key and
+ * never polled: a finished scan does not change.
+ */
+export function useNotionImportTree(workspaceId: string, importId: string, enabled = true) {
+  return useQuery<NotionImportTree | null>({
+    queryKey: queryKeys.notionImports.tree(workspaceId, importId),
+    enabled,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const { data } = await getNotionImport({
+        client: apiClient,
+        path: { workspace_id: workspaceId, import_id: importId },
+        query: { include: 'tree' },
+        throwOnError: true,
+      })
+      if (!data) throw new Error('Import response was empty.')
+      return data.tree
+    },
+  })
 }
 
 export function useStartNotionImport(workspaceId: string) {

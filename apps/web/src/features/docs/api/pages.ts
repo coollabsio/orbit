@@ -3,16 +3,19 @@ import { apiClient, type createApiClient } from '@/api/client'
 import {
   createPage,
   deletePage,
+  duplicatePage,
+  emptyPageTrash,
   getPage,
   listPages,
   listPageTrash,
   movePage,
+  purgePage,
   restorePage,
   searchPages,
   updatePage,
   uploadPageFile,
 } from '@/api/generated/sdk.gen'
-import type { CreatePageBody, Page, PageFile, PageSummary, PageUpdateBody } from '@/api/generated/types.gen'
+import type { CreatePageBody, Page, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import { confirmAction } from '@/components/common/confirmAction'
@@ -83,7 +86,13 @@ export async function fetchPage(client: ApiClient, workspaceId: string, pageId: 
   return required(data, 'Page response was empty.')
 }
 
-export async function savePage(client: ApiClient, workspaceId: string, pageId: string, body: PageUpdateBody): Promise<Page> {
+/**
+ * Page metadata update (title, icon, cover). The web app never sends `content`: it syncs through the page's
+ * collaborative document, and the server projects it (REST content writes stay for API clients).
+ */
+export type PageMetadataUpdate = Omit<PageUpdateBody, 'content'>
+
+export async function savePage(client: ApiClient, workspaceId: string, pageId: string, body: PageMetadataUpdate): Promise<Page> {
   const { data } = await updatePage({ client, path: { workspace_id: workspaceId, page_id: pageId }, body, throwOnError: true })
   return required(data, 'Update page response was empty.')
 }
@@ -179,7 +188,7 @@ export function useCreatePage(workspaceId: string) {
 
 export function useUpdatePage(workspaceId: string) {
   const queryClient = useQueryClient()
-  return useMutation<Page, Error, { pageId: string; body: PageUpdateBody }>({
+  return useMutation<Page, Error, { pageId: string; body: PageMetadataUpdate }>({
     mutationFn: ({ pageId, body }) => savePage(apiClient, workspaceId, pageId, body),
     onSuccess: (page) => reconcilePage(queryClient, workspaceId, page),
   })
@@ -281,6 +290,72 @@ export function useRestorePage(workspaceId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })
       // Favorites of the restored subtree come back.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.favorites(workspaceId) })
+    },
+  })
+}
+
+/**
+ * Whether the caller may delete a trashed page forever: their own private pages (the only private pages they
+ * can see), and teamspace pages for workspace owners and admins. Mirrors the server's rule.
+ */
+export function canPurgePage(page: Pick<TrashedPage, 'private'>, role: string | null | undefined): boolean {
+  return page.private || role === 'owner' || role === 'admin'
+}
+
+/** Deletes a trashed page (and the sub-pages trashed with it) forever. */
+export function usePurgePage(workspaceId: string) {
+  const queryClient = useQueryClient()
+  const trashKey = queryKeys.pages.trash(workspaceId)
+  return useMutation<void, Error, { pageId: string; version: number }>({
+    mutationFn: async ({ pageId, version }) => {
+      await purgePage({
+        client: apiClient,
+        path: { workspace_id: workspaceId, page_id: pageId },
+        query: { expected_version: version },
+        throwOnError: true,
+      })
+    },
+    onError: (error) => promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: trashKey })),
+    onSuccess: (_result, { pageId }) => {
+      queryClient.setQueryData(trashKey, (trash: TrashedPage[] | undefined) => trash?.filter((page) => page.id !== pageId))
+      void queryClient.invalidateQueries({ queryKey: trashKey })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pages.favorites(workspaceId) })
+    },
+  })
+}
+
+/** Deletes forever every trashed page the caller may purge (the server decides which). */
+export function useEmptyPageTrash(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation<PageTrashEmptied, Error, void>({
+    mutationFn: async () => {
+      const { data } = await emptyPageTrash({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      return required(data, 'Empty trash response was empty.')
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pages.favorites(workspaceId) })
+    },
+  })
+}
+
+/** Copies a page (optionally with its sub-pages) right after the original; resolves to the new root page. */
+export function useDuplicatePage(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation<Page, Error, { pageId: string; includeChildren: boolean }>({
+    mutationFn: async ({ pageId, includeChildren }) => {
+      const { data } = await duplicatePage({
+        client: apiClient,
+        path: { workspace_id: workspaceId, page_id: pageId },
+        body: { include_children: includeChildren },
+        throwOnError: true,
+      })
+      return required(data, 'Duplicate page response was empty.')
+    },
+    onSuccess: (page) => {
+      reconcilePage(queryClient, workspaceId, page)
+      // Later siblings shift and copied sub-pages are new: refetch the tree.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pages.tree(workspaceId) })
     },
   })
 }

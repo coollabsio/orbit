@@ -1,0 +1,229 @@
+{
+ "blocks": [
+  {
+   "children": [
+    {
+     "children": [],
+     "content": [
+      {
+       "styles": {},
+       "text": "Nested under the callout",
+       "type": "text"
+      }
+     ],
+     "id": "00000000-0000-4000-8000-000000000001",
+     "props": {
+      "backgroundColor": "default",
+      "textAlignment": "left",
+      "textColor": "default"
+     },
+     "type": "paragraph"
+    }
+   ],
+   "content": [
+    {
+     "styles": {
+      "bold": true
+     },
+     "text": "Lacinato kale",
+     "type": "text"
+    },
+    {
+     "styles": {},
+     "text": " is tasty",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000002",
+   "props": {
+    "backgroundColor": "gray",
+    "emoji": "⭐",
+    "textColor": "default"
+   },
+   "type": "callout"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Native icon callout",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000003",
+   "props": {
+    "backgroundColor": "default",
+    "emoji": "💡",
+    "textColor": "red"
+   },
+   "type": "callout"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Custom emoji callout",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000004",
+   "props": {
+    "backgroundColor": "default",
+    "emoji": "💡",
+    "textColor": "default"
+   },
+   "type": "callout"
+  },
+  {
+   "children": [
+    {
+     "children": [],
+     "content": [
+      {
+       "styles": {},
+       "text": "A nested list item",
+       "type": "text"
+      }
+     ],
+     "id": "00000000-0000-4000-8000-000000000005",
+     "props": {
+      "backgroundColor": "default",
+      "textAlignment": "left",
+      "textColor": "default"
+     },
+     "type": "bulletListItem"
+    }
+   ],
+   "content": [
+    {
+     "styles": {},
+     "text": "No icon, blue",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000006",
+   "props": {
+    "backgroundColor": "blue",
+    "emoji": "💡",
+    "textColor": "default"
+   },
+   "type": "callout"
+  }
+ ],
+ "y_update": "ATYBAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAwdjYWxsb3V0BwABAgYGAAEDBGJvbGQCe32EAQQNTGFjaW5hdG8ga2FsZYYBEQRib2xkBG51bGyEARIJIGlzIHRhc3R5KAABAgVlbW9qaQF3A+KtkCgAAQIPYmFja2dyb3VuZENvbG9yAXcEZ3JheSgAAQIJdGV4dENvbG9yAXcHZGVmYXVsdIcBAgMKYmxvY2tHcm91cAcAAR8DDmJsb2NrQ29udGFpbmVyBwABIAMJcGFyYWdyYXBoBwABIQYEAAEiGE5lc3RlZCB1bmRlciB0aGUgY2FsbG91dCgAASEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAASEJdGV4dENvbG9yAXcHZGVmYXVsdCgAASENdGV4dEFsaWdubWVudAF3BGxlZnQoAAEgAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxKAABAQJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMocBAQMOYmxvY2tDb250YWluZXIHAAFAAwdjYWxsb3V0BwABQQYEAAFCE05hdGl2ZSBpY29uIGNhbGxvdXQoAAFBBWVtb2ppAXcE8J+SoSgAAUEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAUEJdGV4dENvbG9yAXcDcmVkKAABQAJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwM4cBQAMOYmxvY2tDb250YWluZXIHAAFaAwdjYWxsb3V0BwABWwYEAAFcFEN1c3RvbSBlbW9qaSBjYWxsb3V0KAABWwVlbW9qaQF3BPCfkqEoAAFbD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFbCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFaAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA0hwFaAw5ibG9ja0NvbnRhaW5lcgcAAXUDB2NhbGxvdXQHAAF2BgQAAXcNTm8gaWNvbiwgYmx1ZSgAAXYFZW1vamkBdwTwn5KhKAABdg9iYWNrZ3JvdW5kQ29sb3IBdwRibHVlKAABdgl0ZXh0Q29sb3IBdwdkZWZhdWx0hwF2AwpibG9ja0dyb3VwBwABiAEDDmJsb2NrQ29udGFpbmVyBwABiQEDDmJ1bGxldExpc3RJdGVtBwABigEGBAABiwESQSBuZXN0ZWQgbGlzdCBpdGVtKAABigEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAYoBCXRleHRDb2xvcgF3B2RlZmF1bHQoAAGKAQ10ZXh0QWxpZ25tZW50AXcEbGVmdCgAAYkBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA1KAABdQJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNgA=",
+ "expected": [
+  {
+   "id": "00000000-0000-4000-8000-000000000002",
+   "type": "callout",
+   "props": {
+    "emoji": "⭐",
+    "backgroundColor": "gray",
+    "textColor": "default"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Lacinato kale",
+     "styles": {
+      "bold": true
+     }
+    },
+    {
+     "type": "text",
+     "text": " is tasty",
+     "styles": {}
+    }
+   ],
+   "children": [
+    {
+     "id": "00000000-0000-4000-8000-000000000001",
+     "type": "paragraph",
+     "props": {
+      "backgroundColor": "default",
+      "textColor": "default",
+      "textAlignment": "left"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Nested under the callout",
+       "styles": {}
+      }
+     ],
+     "children": []
+    }
+   ]
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000003",
+   "type": "callout",
+   "props": {
+    "emoji": "💡",
+    "backgroundColor": "default",
+    "textColor": "red"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Native icon callout",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000004",
+   "type": "callout",
+   "props": {
+    "emoji": "💡",
+    "backgroundColor": "default",
+    "textColor": "default"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Custom emoji callout",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000006",
+   "type": "callout",
+   "props": {
+    "emoji": "💡",
+    "backgroundColor": "blue",
+    "textColor": "default"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "No icon, blue",
+     "styles": {}
+    }
+   ],
+   "children": [
+    {
+     "id": "00000000-0000-4000-8000-000000000005",
+     "type": "bulletListItem",
+     "props": {
+      "backgroundColor": "default",
+      "textColor": "default",
+      "textAlignment": "left"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "A nested list item",
+       "styles": {}
+      }
+     ],
+     "children": []
+    }
+   ]
+  }
+ ]
+}

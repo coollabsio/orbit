@@ -1,8 +1,9 @@
-import { ChevronRight, MoreH as Ellipsis, DocumentText as FileText, Add as Plus, Star, Trash as Trash2 } from 'reicon-react'
+import { ChevronRight, Copy, MoreH as Ellipsis, DocumentText as FileText, Add as Plus, Star, Trash as Trash2 } from 'reicon-react'
 import type { PageSummary } from '@/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Emoji } from '@/components/common/Emoji'
+import { useDocPageActions } from '@/features/docs/pageActions'
 import { childrenOf, pageTitle, type DropZone } from '@/features/docs/pageTree'
 
 // data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
@@ -74,6 +75,7 @@ export function DocTreeItem({
   const children = childrenOf(pages, page.id)
   const expanded = isExpanded(page.id)
   const favorite = favorites?.isFavorite(page.id) ?? false
+  const actions = useDocPageActions()
 
   return (
     <>
@@ -164,6 +166,18 @@ export function DocTreeItem({
                 <DropdownMenuItem className={menuItemClass} onClick={() => favorites.onToggle(page.id, !favorite)}>
                   <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
                   {favorite ? 'Remove from favorites' : 'Add to favorites'}
+                </DropdownMenuItem>
+              ) : null}
+              {actions ? (
+                <DropdownMenuItem className={menuItemClass} onClick={() => actions.duplicate(page.id, false)}>
+                  <Copy className="size-[14px]" />
+                  Duplicate
+                </DropdownMenuItem>
+              ) : null}
+              {actions && children.length > 0 ? (
+                <DropdownMenuItem className={menuItemClass} onClick={() => actions.duplicate(page.id, true)}>
+                  <Copy className="size-[14px]" />
+                  Duplicate with sub-pages
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onTrash(page.id)}>

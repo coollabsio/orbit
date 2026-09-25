@@ -11,6 +11,7 @@ import {
   landingPage,
   pageTitle,
   removeSubtree,
+  revealPage,
   rootsBySpace,
   rootsOf,
   siblingsOf,
@@ -203,5 +204,27 @@ describe('page spaces', () => {
     const back = applyMove(spaced, 'g1', dropOnSpace(spaced, 'g1', 'private')!)
     expect(back.find((page) => page.id === 'g1a')).toMatchObject({ teamspace_id: null, private: true })
     expect(ids(rootsOf(back, 'private'))).toEqual(['p1', 'p2', 'g1'])
+  })
+})
+
+describe('revealPage', () => {
+  const pages = [
+    { id: 'root', parent_id: null, position: 0, teamspace_id: 't1', private: false },
+    { id: 'mid', parent_id: 'root', position: 0, teamspace_id: 't1', private: false },
+    { id: 'leaf', parent_id: 'mid', position: 0, teamspace_id: 't1', private: false },
+    { id: 'mine', parent_id: null, position: 0, teamspace_id: null, private: true },
+  ]
+
+  test('lists the closed ancestors root first and the space to open', () => {
+    expect(revealPage(pages, 'leaf', () => false)).toEqual({ space: 'teamspace:t1', expand: ['root', 'mid'] })
+    expect(revealPage(pages, 'leaf', (id) => id === 'root')).toEqual({ space: 'teamspace:t1', expand: ['mid'] })
+    expect(revealPage(pages, 'leaf', () => true)).toEqual({ space: 'teamspace:t1', expand: [] })
+  })
+
+  test('root and private pages only open their space; unknown pages give null', () => {
+    expect(revealPage(pages, 'root', () => false)).toEqual({ space: 'teamspace:t1', expand: [] })
+    expect(revealPage(pages, 'mine', () => false)).toEqual({ space: 'private', expand: [] })
+    expect(revealPage(pages, 'gone', () => false)).toBeNull()
+    expect(revealPage(pages, null, () => false)).toBeNull()
   })
 })

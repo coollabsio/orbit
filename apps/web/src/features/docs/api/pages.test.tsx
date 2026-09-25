@@ -7,6 +7,7 @@ import type { Page, PageSummary } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import {
+  canPurgePage,
   conflictCurrentPage,
   conflictCurrentVersion,
   isPageNotFound,
@@ -15,9 +16,12 @@ import {
   pageUploadErrorMessage,
   uploadPageFileRequest,
   useCreatePage,
+  useDuplicatePage,
+  useEmptyPageTrash,
   useMovePage,
   usePage,
   usePageSearch,
+  usePurgePage,
   useRestorePage,
   useTrashPage,
 } from './pages'
@@ -35,7 +39,7 @@ const summary = (id: string, parent_id: string | null, position: number, version
 const fullPage = (id: string, parent_id: string | null, position: number, version = 1): Page => ({
   ...summary(id, parent_id, position, version),
   workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
-  updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null,
+  updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
 })
 
 const problem = (status: number, code: string, extra: Record<string, unknown> = {}) =>
@@ -268,4 +272,57 @@ test('upload failures map to short messages', async () => {
     'This page is no longer available.',
   )
   expect(pageUploadErrorMessage(new Error('offline'))).toBe('Could not upload the file. Try again.')
+})
+
+test('only own private pages, or any page for owners and admins, can be deleted forever', () => {
+  expect(canPurgePage({ private: true }, 'member')).toBeTrue()
+  expect(canPurgePage({ private: false }, 'member')).toBeFalse()
+  expect(canPurgePage({ private: false }, undefined)).toBeFalse()
+  expect(canPurgePage({ private: false }, 'admin')).toBeTrue()
+  expect(canPurgePage({ private: false }, 'owner')).toBeTrue()
+})
+
+test('deleting forever sends expected_version to /permanent and drops the row from the trash cache', async () => {
+  const calls = mockFetch((call) => (call.method === 'DELETE' ? new Response(null, { status: 204 }) : new Promise<Response>(() => {})))
+  const { client, wrapper } = setupClient()
+  const trashKey = queryKeys.pages.trash('workspace-1')
+  const row = (id: string) => ({ ...summary(id, null, 0), deleted_at: '2026-09-25T10:00:00Z' })
+  client.setQueryData(trashKey, [row('a'), row('b')])
+  const view = renderHook(() => usePurgePage('workspace-1'), { wrapper })
+
+  await act(async () => {
+    await view.result.current.mutateAsync({ pageId: 'a', version: 4 })
+  })
+  expect(calls[0].path).toBe('/api/v1/workspaces/workspace-1/pages/a/permanent')
+  expect(new URLSearchParams(calls[0].search).get('expected_version')).toBe('4')
+  expect(client.getQueryData<{ id: string }[]>(trashKey)?.map((page) => page.id)).toEqual(['b'])
+})
+
+test('emptying the trash posts once and refreshes the trash', async () => {
+  const calls = mockFetch((call) => (call.method === 'POST' ? Response.json({ purged: 3 }) : new Promise<Response>(() => {})))
+  const { client, wrapper } = setupClient()
+  client.setQueryData(queryKeys.pages.trash('workspace-1'), [])
+  const view = renderHook(() => useEmptyPageTrash('workspace-1'), { wrapper })
+  let result: { purged: number } | undefined
+  await act(async () => {
+    result = await view.result.current.mutateAsync()
+  })
+  expect(result).toEqual({ purged: 3 })
+  expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/v1/workspaces/workspace-1/pages/trash/empty' })
+  expect(client.getQueryState(queryKeys.pages.trash('workspace-1'))?.isInvalidated).toBeTrue()
+})
+
+test('duplicating posts include_children, seeds the copy and refreshes the tree', async () => {
+  const calls = mockFetch((call) =>
+    call.method === 'POST' ? Response.json(fullPage('copy', null, 1), { status: 201 }) : new Promise<Response>(() => {}),
+  )
+  const { client, wrapper } = setupClient()
+  client.setQueryData(treeKey, [summary('a', null, 0)])
+  const view = renderHook(() => useDuplicatePage('workspace-1'), { wrapper })
+  await act(async () => {
+    await view.result.current.mutateAsync({ pageId: 'a', includeChildren: true })
+  })
+  expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/v1/workspaces/workspace-1/pages/a/duplicate', body: { include_children: true } })
+  expect(client.getQueryData<Page>(queryKeys.pages.detail('workspace-1', 'copy'))?.id).toBe('copy')
+  expect(client.getQueryState(treeKey)?.isInvalidated).toBeTrue()
 })

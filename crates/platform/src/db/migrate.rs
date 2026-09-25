@@ -223,6 +223,21 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0026_notion_imports.sql"),
                     false,
                 ),
+                Migration::new(
+                    27,
+                    include_str!("../../../../apps/server/migrations/0027_page_search_fts.sql"),
+                    false,
+                ),
+                Migration::new(
+                    28,
+                    include_str!("../../../../apps/server/migrations/0028_page_versions.sql"),
+                    false,
+                ),
+                Migration::new(
+                    29,
+                    include_str!("../../../../apps/server/migrations/0029_page_collab.sql"),
+                    false,
+                ),
             ],
         )
     }

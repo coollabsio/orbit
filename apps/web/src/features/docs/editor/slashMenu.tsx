@@ -1,6 +1,7 @@
-import { filterSuggestionItems } from '@blocknote/core/extensions'
+import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, type DefaultReactSuggestionItem } from '@blocknote/react'
-import { DocumentText, Link2 } from 'reicon-react'
+import { DocumentText, LampOn, Link2 } from 'reicon-react'
+import { CALLOUT_DEFAULT_BACKGROUND } from './CalloutBlock'
 import type { PageEditorInstance } from './schema'
 
 /** Group the custom page items join (the reference editor's default "Basic blocks" group). */
@@ -31,6 +32,29 @@ export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestio
       onItemClick: actions.onLinkPage,
     },
   ]
+}
+
+/** "Callout" (Basic blocks): turns the empty line into a callout, or inserts one below. */
+export function calloutSlashItem(editor: PageEditorInstance): DefaultReactSuggestionItem {
+  return {
+    title: 'Callout',
+    subtext: 'Make writing stand out',
+    aliases: ['callout', 'note', 'tip', 'warning', 'info'],
+    group: PAGE_ITEMS_GROUP,
+    icon: <LampOn className="size-[18px]" />,
+    onItemClick: () => {
+      // Turning a paragraph into a callout keeps same-named props, so the paragraph's `backgroundColor: 'default'`
+      // would win over the callout default without this.
+      insertOrUpdateBlockForSlashMenu(editor, { type: 'callout', props: { backgroundColor: CALLOUT_DEFAULT_BACKGROUND } })
+    },
+  }
+}
+
+/** Inserts `item` right after the default item with `key` (e.g. Callout after Quote), else at the group start. */
+export function insertAfterKey<T extends { group?: string; key?: string }>(items: readonly T[], key: string, item: T): T[] {
+  const index = items.findIndex((candidate) => candidate.key === key && candidate.group === item.group)
+  if (index === -1) return mergeSlashItems(items, [item], item.group)
+  return [...items.slice(0, index + 1), item, ...items.slice(index + 1)]
 }
 
 /**
@@ -64,9 +88,11 @@ export function preferTitleMatches<T extends { title: string; group?: string }>(
 
 /**
  * Slash menu items for the page editor: BlockNote's defaults (already limited to block types present in the
- * schema, so video/audio are gone while Image and File stay) plus the page items, filtered by the typed query.
+ * schema, so video/audio are gone while Image and File stay), Callout after Quote, plus the page items,
+ * filtered by the typed query.
  */
 export function getPageSlashMenuItems(editor: PageEditorInstance, actions: PageSlashActions, query: string): DefaultReactSuggestionItem[] {
-  const merged = mergeSlashItems(getDefaultReactSlashMenuItems(editor), pageSlashItems(actions))
+  const defaults = insertAfterKey(getDefaultReactSlashMenuItems(editor), 'quote', calloutSlashItem(editor))
+  const merged = mergeSlashItems(defaults, pageSlashItems(actions))
   return preferTitleMatches(filterSuggestionItems(merged, query), query)
 }

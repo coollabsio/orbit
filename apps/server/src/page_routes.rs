@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, Extension, Path, State};
+use axum::extract::{DefaultBodyLimit, Extension, Path, Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::{Deserialize, Deserializer};
@@ -11,11 +11,15 @@ use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
+use crate::collab::socket::CollabQuery;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::page_files::parse_page_file_url;
+use crate::repositories::page_versions::{
+    DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT, PageVersion, PageVersionList,
+};
 use crate::repositories::pages::{
     CreatePage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageList, PageRecord,
-    PageRepository, PageSearch, PageTrash, SpaceRequest,
+    PageRepository, PageSearch, PageTrash, PageTrashEmptied, SpaceRequest,
 };
 use crate::task_routes::{
     ApiError, ApiJson, ApiQuery, MutationQuery, RestoreBody, authenticate_session, bounded,
@@ -54,6 +58,10 @@ pub fn page_router(state: PageState) -> Router {
             get(list_page_trash),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/pages/trash/empty",
+            post(empty_page_trash),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/pages/search",
             get(search_pages),
         )
@@ -78,8 +86,32 @@ pub fn page_router(state: PageState) -> Router {
             post(restore_page),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/permanent",
+            delete(purge_page),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/duplicate",
+            post(duplicate_page),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/pages/{page_id}/favorite",
             put(add_page_favorite).delete(remove_page_favorite),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions",
+            get(list_page_versions),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/collab",
+            get(collab_socket),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}",
+            get(get_page_version),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}/restore",
+            post(restore_page_version),
         )
         .layer(DefaultBodyLimit::max(PAGE_BODY_LIMIT))
         .with_state(state)
@@ -149,12 +181,32 @@ struct MoveFavoriteBody {
     position: i64,
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct DuplicatePageBody {
+    /// Also copy the page's live sub-pages (the whole subtree, in order). Defaults to `false`.
+    #[serde(default)]
+    include_children: bool,
+}
+
 #[derive(Deserialize, IntoParams, ToSchema)]
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct PageSearchQuery {
-    /// Case-insensitive text matched against titles and body text; at most 200 characters.
+    /// Words matched against titles and body text, ignoring case and diacritics; every word must
+    /// match, the last one as a prefix. Search syntax (quotes, `*`, `:`, `-`, `NEAR`, parentheses)
+    /// is treated as plain text. At most 200 characters.
     q: String,
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct PageVersionQuery {
+    /// `next_cursor` from the previous response, for older versions.
+    cursor: Option<String>,
+    /// Versions per response, 1 to 100 (default 50).
+    limit: Option<usize>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/pages", params(("workspace_id" = String, Path)), responses((status = 200, body = PageList)))]
@@ -289,6 +341,7 @@ async fn update_page(
                 _ => Err(validation("content", &instance, request)),
             })
             .transpose()?,
+        ..PageChanges::default()
     };
     state
         .pages
@@ -398,6 +451,89 @@ async fn restore_page(
         )
         .await
         .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// Deletes a page in the trash forever, with the sub-pages trashed along with it. Your own private
+/// pages, or teamspace pages as a workspace owner or admin (members get 403).
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/permanent", params(MutationQuery, ("workspace_id" = String, Path), ("page_id" = String, Path)), responses((status = 204)))]
+async fn purge_page(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    ApiQuery(query): ApiQuery<MutationQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/permanent");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .purge_page(
+            workspace_id,
+            page_id,
+            actor_id,
+            query.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// Deletes forever every trashed page the caller may purge: their own private pages, plus teamspace
+/// pages for workspace owners and admins.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/trash/empty", params(("workspace_id" = String, Path)), responses((status = 200, body = PageTrashEmptied)))]
+async fn empty_page_trash(
+    State(state): State<PageState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<PageTrashEmptied>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/trash/empty");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .pages
+        .empty_trash(
+            workspace_id,
+            actor_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// Copies a page ("<title> (copy)", right after the original), optionally with its sub-pages.
+/// Files are shared with the copies and links inside the copied pages point at the copies.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/duplicate", params(("workspace_id" = String, Path), ("page_id" = String, Path)), request_body = DuplicatePageBody, responses((status = 201, body = PageRecord)))]
+async fn duplicate_page(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<DuplicatePageBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/duplicate");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .duplicate_page(
+            workspace_id,
+            page_id,
+            actor_id,
+            body.include_children,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
         .map_err(|error| page_problem(error, instance, request_id.as_ref()))
 }
 
@@ -516,6 +652,111 @@ async fn move_page_favorite(
         .map_err(|error| page_problem(error, instance, request_id.as_ref()))
 }
 
+/// The page's history, newest first (without content). Visible like the page itself.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions", params(PageVersionQuery, ("workspace_id" = String, Path), ("page_id" = String, Path)), responses((status = 200, body = PageVersionList)))]
+async fn list_page_versions(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    ApiQuery(query): ApiQuery<PageVersionQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<PageVersionList>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/versions");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    let limit = query.limit.unwrap_or(DEFAULT_VERSION_LIMIT);
+    if !(1..=MAX_VERSION_LIMIT).contains(&limit) {
+        return Err(validation("limit", &instance, request_id.as_ref()));
+    }
+    state
+        .pages
+        .page_versions(
+            workspace_id,
+            page_id,
+            actor_id,
+            query.cursor.as_deref(),
+            limit,
+        )
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// One version of the page, with its content.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}", params(("workspace_id" = String, Path), ("page_id" = String, Path), ("version_id" = String, Path)), responses((status = 200, body = PageVersion)))]
+async fn get_page_version(
+    State(state): State<PageState>,
+    Path((workspace, page, version)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<PageVersion>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/versions/{version}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    let version_id = parse_version_id(&version, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .page_version(workspace_id, page_id, version_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// Puts a version's title, icon and content back on the page (cover and place stay). The current
+/// state is kept as a `restore` version first. Audited `page.restored_version`.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}/restore", params(("workspace_id" = String, Path), ("page_id" = String, Path), ("version_id" = String, Path)), request_body = RestoreBody, responses((status = 200, body = PageRecord)))]
+async fn restore_page_version(
+    State(state): State<PageState>,
+    Path((workspace, page, version)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<RestoreBody>,
+) -> Result<Json<PageRecord>, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace}/pages/{page}/versions/{version}/restore");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    let version_id = parse_version_id(&version, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .restore_page_version(
+            workspace_id,
+            page_id,
+            version_id,
+            actor_id,
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// The page's real-time co-editing socket (y-sync over WebSocket, see `crate::collab::socket`).
+async fn collab_socket(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    Query(query): Query<CollabQuery>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    crate::collab::socket::upgrade(
+        &state.identity,
+        state.cookie_mode,
+        state.identity.database(),
+        &workspace,
+        &page,
+        query,
+        &headers,
+        upgrade,
+    )
+    .await
+}
+
 async fn scope(
     state: &PageState,
     headers: &HeaderMap,
@@ -542,6 +783,18 @@ fn parse_id(
     value
         .parse()
         .map_err(|_| not_found(instance.to_owned(), request_id))
+}
+
+/// An unparseable version id names no version of any page. The answer does not depend on the
+/// page, so it reveals nothing about hidden pages (valid ids are checked page first).
+fn parse_version_id(
+    value: &str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Id, ApiError> {
+    value
+        .parse()
+        .map_err(|_| version_not_found(instance.to_owned(), request_id))
 }
 
 /// An unparseable teamspace id cannot name a teamspace of this workspace.
@@ -652,6 +905,17 @@ fn not_found(instance: String, request_id: Option<&Extension<RequestId>>) -> Api
     )
 }
 
+fn version_not_found(instance: String, request_id: Option<&Extension<RequestId>>) -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "page_version_not_found",
+        "Page version not found",
+        "The requested page version was not found.",
+        instance,
+        request_id,
+    )
+}
+
 fn teamspace_not_found(instance: String, request_id: Option<&Extension<RequestId>>) -> ApiError {
     ApiError::new(
         StatusCode::NOT_FOUND,
@@ -670,11 +934,36 @@ fn page_problem(
 ) -> ApiError {
     match error {
         PageError::NotFound => not_found(instance, request_id),
+        PageError::VersionNotFound => version_not_found(instance, request_id),
+        PageError::InvalidCursor => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "Invalid cursor",
+            "The cursor does not match this collection query.",
+            instance,
+            request_id,
+        ),
         PageError::TeamspaceNotFound => teamspace_not_found(instance, request_id),
         PageError::Invalid { field } => validation(field, &instance, request_id),
         PageError::VersionConflict { current } => {
             ApiError::version_conflict(*current, instance, request_id)
         }
+        PageError::Forbidden => ApiError::new(
+            StatusCode::FORBIDDEN,
+            "workspace_action_forbidden",
+            "Workspace action forbidden",
+            "Only workspace owners and administrators may delete teamspace pages forever.",
+            instance,
+            request_id,
+        ),
+        PageError::NotTrashed => ApiError::new(
+            StatusCode::CONFLICT,
+            "page_not_trashed",
+            "Page not in the trash",
+            "Only pages in the trash can be deleted forever.",
+            instance,
+            request_id,
+        ),
         PageError::Corrupt | PageError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",

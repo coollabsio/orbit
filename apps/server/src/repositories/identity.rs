@@ -493,6 +493,23 @@ impl IdentityRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), SuspensionError> {
+        let result = self
+            .set_suspended_unchecked(actor_id, user_id, suspended, request_id, now)
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn set_suspended_unchecked(
+        &self,
+        actor_id: Id,
+        user_id: Id,
+        suspended: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), SuspensionError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let installation_admin = sqlx::query_scalar::<_, i64>(
             "SELECT installation_admin FROM users WHERE id = ? AND suspended_at IS NULL",
@@ -1117,6 +1134,23 @@ impl IdentityRepository {
     }
 
     pub async fn revoke_session_audited(
+        &self,
+        session_id: Id,
+        user_id: Id,
+        action: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<bool, IdentityError> {
+        let result = self
+            .revoke_session_audited_unchecked(session_id, user_id, action, request_id, now)
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn revoke_session_audited_unchecked(
         &self,
         session_id: Id,
         user_id: Id,

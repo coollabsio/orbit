@@ -115,17 +115,24 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::delete_page,
         crate::page_routes::restore_page,
         crate::page_routes::list_page_trash,
+        crate::page_routes::purge_page,
+        crate::page_routes::empty_page_trash,
+        crate::page_routes::duplicate_page,
         crate::page_routes::search_pages,
         crate::page_routes::list_page_favorites,
         crate::page_routes::add_page_favorite,
         crate::page_routes::remove_page_favorite,
         crate::page_routes::move_page_favorite,
+        crate::page_routes::list_page_versions,
+        crate::page_routes::get_page_version,
+        crate::page_routes::restore_page_version,
         crate::page_file_routes::upload_page_file,
         crate::page_file_routes::download_page_file,
         crate::teamspace_routes::list_teamspaces,
         crate::teamspace_routes::create_teamspace,
         crate::teamspace_routes::update_teamspace,
         crate::teamspace_routes::delete_teamspace,
+        crate::teamspace_routes::move_teamspace,
         crate::import_routes::create_notion_import,
         crate::import_routes::list_notion_imports,
         crate::import_routes::get_notion_import,
@@ -491,12 +498,18 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "move_page"
             | "delete_page"
             | "restore_page"
+            | "purge_page"
+            | "duplicate_page"
             | "search_pages"
             | "move_page_favorite"
+            | "list_page_versions"
+            | "restore_page_version"
             | "create_teamspace"
             | "update_teamspace"
             | "delete_teamspace"
+            | "move_teamspace"
             | "create_notion_import"
+            | "get_notion_import"
             | "start_notion_import"
     )
 }
@@ -686,11 +699,17 @@ fn page_operation(operation_id: &str) -> bool {
             | "delete_page"
             | "restore_page"
             | "list_page_trash"
+            | "purge_page"
+            | "empty_page_trash"
+            | "duplicate_page"
             | "search_pages"
             | "list_page_favorites"
             | "add_page_favorite"
             | "remove_page_favorite"
             | "move_page_favorite"
+            | "list_page_versions"
+            | "get_page_version"
+            | "restore_page_version"
     )
 }
 
@@ -707,8 +726,22 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     }
     if matches!(
         operation_id,
-        "update_page" | "move_page" | "delete_page" | "restore_page"
+        "update_page" | "move_page" | "delete_page" | "restore_page" | "purge_page"
     ) {
+        add_code(responses, "409", "conflict");
+    }
+    if operation_id == "purge_page" {
+        add_code(responses, "403", "workspace_action_forbidden");
+        add_code(responses, "409", "page_not_trashed");
+    }
+    if operation_id == "list_page_versions" {
+        add_code(responses, "400", "invalid_cursor");
+        add_code(responses, "422", "validation_failed");
+    }
+    if matches!(operation_id, "get_page_version" | "restore_page_version") {
+        add_code(responses, "404", "page_version_not_found");
+    }
+    if operation_id == "restore_page_version" {
         add_code(responses, "409", "conflict");
     }
 }
@@ -716,16 +749,26 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
 fn teamspace_operation(operation_id: &str) -> bool {
     matches!(
         operation_id,
-        "list_teamspaces" | "create_teamspace" | "update_teamspace" | "delete_teamspace"
+        "list_teamspaces"
+            | "create_teamspace"
+            | "update_teamspace"
+            | "delete_teamspace"
+            | "move_teamspace"
     )
 }
 
 fn teamspace_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
     add_code(responses, "404", "teamspace_not_found");
-    if matches!(operation_id, "create_teamspace" | "update_teamspace") {
+    if matches!(
+        operation_id,
+        "create_teamspace" | "update_teamspace" | "move_teamspace"
+    ) {
         add_code(responses, "422", "validation_failed");
     }
-    if matches!(operation_id, "update_teamspace" | "delete_teamspace") {
+    if matches!(
+        operation_id,
+        "update_teamspace" | "delete_teamspace" | "move_teamspace"
+    ) {
         add_code(responses, "409", "conflict");
     }
     if operation_id == "delete_teamspace" {

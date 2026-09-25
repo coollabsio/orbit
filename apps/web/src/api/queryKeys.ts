@@ -39,6 +39,9 @@ export const queryKeys = {
     trash: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'trash'] as const,
     search: (workspaceId: string, query: string) => [...workspace(workspaceId), 'pages', 'search', query] as const,
     favorites: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'favorites'] as const,
+    versions: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'versions', pageId] as const,
+    version: (workspaceId: string, pageId: string, versionId: string) =>
+      [...workspace(workspaceId), 'pages', 'versions', pageId, versionId] as const,
   },
   /**
    * Deliberately outside the workspace prefix: realtime events invalidate that whole prefix, and an import creates
@@ -48,6 +51,7 @@ export const queryKeys = {
     all: (workspaceId: string) => ['notion-imports', workspaceId] as const,
     list: (workspaceId: string) => ['notion-imports', workspaceId, 'list'] as const,
     detail: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'tree', importId] as const,
   },
   tasks: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'tasks'] as const,

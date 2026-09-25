@@ -26,7 +26,7 @@ pub use backup::{
 };
 pub use config::{
     Config, ConfigError, ConfigOverride, ConfigSources, DataConfig, EnvironmentMode, HttpConfig,
-    JobsConfig, MetricsConfig, NotionConfig, RateLimitConfig, Secret, UploadConfig,
+    JobsConfig, MetricsConfig, RateLimitConfig, Secret, UploadConfig,
 };
 pub use db::{
     Database, DatabaseConfig, DatabaseError, GuardedMigrationError, Migration, MigrationError,

@@ -57,7 +57,7 @@ const problem = (status: number, code: string) =>
     { status, headers: { 'content-type': 'application/problem+json' } },
   )
 
-type Call = { method: string; path: string; body: Record<string, unknown> | undefined }
+type Call = { method: string; path: string; search: string; body: Record<string, unknown> | undefined }
 type Handler = (call: Call) => Response | undefined
 
 function Location() {
@@ -74,7 +74,12 @@ function setup(path: string, handler: Handler) {
     const request = input as Request
     const url = new URL(request.url)
     const text = await request.text()
-    const call: Call = { method: request.method, path: url.pathname.replace('/api/v1/workspaces/workspace-1', ''), body: text ? JSON.parse(text) : undefined }
+    const call: Call = {
+      method: request.method,
+      path: url.pathname.replace('/api/v1/workspaces/workspace-1', ''),
+      search: url.search,
+      body: text ? JSON.parse(text) : undefined,
+    }
     calls.push(call)
     const response = handler(call)
     if (response) return response
@@ -172,16 +177,21 @@ test('connect → scanning: a valid token opens the import, which shows the Noti
   expect(view.queryByLabelText('Notion token')).toBeNull()
 })
 
+/** Like the server: the detail carries the scan tree only with `?include=tree`. */
+const withTree = (call: Call, tree: NonNullable<NotionImport['tree']>) => (call.search === '?include=tree' ? tree : null)
+
 test('choose: tri-state tree, filter, counts, destination and a minimal selection', async () => {
   let started: Call | undefined
-  const { view } = setup('/docs/import/import-1', (call) => {
-    if (call.path === '/imports/notion/import-1') return Response.json(item({ status: 'ready', tree: { nodes: TREE, truncated: true, incomplete: false } }))
+  const { view, calls } = setup('/docs/import/import-1', (call) => {
+    if (call.path === '/imports/notion/import-1') return Response.json(item({ status: 'ready', tree: withTree(call, { nodes: TREE, truncated: true, incomplete: false }) }))
     if (call.path === '/imports/notion/import-1/start') {
       started = call
       return Response.json(item({ status: 'queued', progress: { total: 4, done: 0, failed: 0 } }))
     }
   })
   expect(await view.findByText('8 pages selected')).toBeTruthy()
+  // The light detail (status) first, then the tree once.
+  expect(calls.filter((call) => call.path === '/imports/notion/import-1').map((call) => call.search)).toEqual(['', '?include=tree'])
   expect(view.getByText(/more than 5,000 pages/)).toBeTruthy()
   const tree = view.getByRole('tree', { name: 'Notion pages' })
   expect(within(tree).getAllByRole('treeitem').map((row) => row.textContent)).toEqual(['📘Handbook2', 'Orphan'])
@@ -232,7 +242,7 @@ test('choose: tri-state tree, filter, counts, destination and a minimal selectio
 test('choose: everything selected into Private sends { all: true } and { private: true }', async () => {
   let started: Call | undefined
   const { view } = setup('/docs/import/import-1', (call) => {
-    if (call.path === '/imports/notion/import-1') return Response.json(item({ status: 'ready', tree: { nodes: TREE, truncated: false, incomplete: false } }))
+    if (call.path === '/imports/notion/import-1') return Response.json(item({ status: 'ready', tree: withTree(call, { nodes: TREE, truncated: false, incomplete: false }) }))
     if (call.path === '/imports/notion/import-1/start') {
       started = call
       return problem(422, 'notion_import_too_large')

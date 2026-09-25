@@ -42,13 +42,14 @@ const page = (version: number, patch: PagePatch = {}): Page => ({
   icon: null,
   cover_url: null,
   cover_position: null,
-  content: (patch.content as unknown[] | undefined) ?? [],
+  content: [],
   position: 0,
   creator_id: 'user-1',
   updated_by: 'user-1',
   created_at: '2026-09-25T10:00:00Z',
   updated_at: '2026-09-25T10:00:00Z',
   deleted_at: null,
+  collab_epoch: 'epoch-1',
   version,
 })
 
@@ -99,14 +100,14 @@ describe('PageAutosaver', () => {
     clock.advance(500)
     saver.update({ title: 'Ro' })
     clock.advance(500)
-    saver.update({ content: [{ type: 'paragraph' }] })
+    saver.update({ icon: '🚀' })
     clock.advance(799)
     expect(server.calls).toHaveLength(0)
     expect(saver.state.status).toBe('pending')
 
     clock.advance(1)
     expect(server.calls).toHaveLength(1)
-    expect(server.calls[0].patch).toEqual({ title: 'Ro', content: [{ type: 'paragraph' }] })
+    expect(server.calls[0].patch).toEqual({ title: 'Ro', icon: '🚀' })
     expect(server.calls[0].version).toBe(3)
     expect(saver.state.status).toBe('saving')
 
@@ -137,7 +138,7 @@ describe('PageAutosaver', () => {
     saver.update({ title: 'one' })
     void saver.flush()
     saver.update({ title: 'two' })
-    saver.update({ content: [{ type: 'heading' }] })
+    saver.update({ cover_url: 'https://example.com/a.png' })
     clock.advance(800) // the debounce fires while the first request is still out
     expect(server.calls).toHaveLength(1)
     expect(saver.hasUnsavedChanges()).toBe(true)
@@ -146,7 +147,7 @@ describe('PageAutosaver', () => {
     await tick()
     expect(server.calls).toHaveLength(2)
     expect(server.calls[1].version).toBe(4)
-    expect(server.calls[1].patch).toEqual({ title: 'two', content: [{ type: 'heading' }] })
+    expect(server.calls[1].patch).toEqual({ title: 'two', cover_url: 'https://example.com/a.png' })
 
     server.calls[1].resolve(page(5))
     await tick()
@@ -182,7 +183,7 @@ describe('PageAutosaver', () => {
     expect(saver.hasUnsavedChanges()).toBe(true)
 
     // Further edits are kept but not sent while the user decides.
-    saver.update({ content: [{ type: 'paragraph' }] })
+    saver.update({ cover_position: '50,20' })
     clock.advance(5000)
     await saver.flush()
     expect(server.calls).toHaveLength(1)
@@ -190,7 +191,7 @@ describe('PageAutosaver', () => {
     void saver.overwrite({ title: 'mine', icon: null })
     expect(server.calls).toHaveLength(2)
     expect(server.calls[1].version).toBe(9)
-    expect(server.calls[1].patch).toEqual({ title: 'mine', icon: null, content: [{ type: 'paragraph' }] })
+    expect(server.calls[1].patch).toEqual({ title: 'mine', icon: null, cover_position: '50,20' })
     server.calls[1].resolve(page(10))
     await tick()
     expect(saver.state.status).toBe('saved')

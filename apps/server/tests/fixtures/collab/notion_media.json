@@ -1,0 +1,483 @@
+{
+ "blocks": [
+  {
+   "children": [],
+   "id": "00000000-0000-4000-8000-000000000001",
+   "props": {
+    "backgroundColor": "default",
+    "caption": "A brocolli",
+    "name": "brocolli.jpeg",
+    "showPreview": true,
+    "textAlignment": "left",
+    "url": ""
+   },
+   "type": "image"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "https://website.domain/images/image.png",
+       "type": "text"
+      }
+     ],
+     "href": "https://website.domain/images/image.png",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000002",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {
+      "italic": true
+     },
+     "text": "File not imported from Notion: report.pdf",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000003",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "doc.txt",
+       "type": "text"
+      }
+     ],
+     "href": "https://companywebsite.com/files/doc.txt",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000004",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "The spec",
+       "type": "text"
+      }
+     ],
+     "href": "https://website.domain/files/doc.pdf",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000005",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "https://www.youtube.com/watch?v=abc",
+       "type": "text"
+      }
+     ],
+     "href": "https://www.youtube.com/watch?v=abc",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000006",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "id": "00000000-0000-4000-8000-000000000007",
+   "props": {
+    "backgroundColor": "default",
+    "caption": "",
+    "name": "sample.mp3",
+    "url": ""
+   },
+   "type": "file"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "https://companywebsite.com",
+       "type": "text"
+      }
+     ],
+     "href": "https://companywebsite.com",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000008",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "Notion docs",
+       "type": "text"
+      }
+     ],
+     "href": "https://developers.notion.com",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000009",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "https://player.vimeo.com/video/226053498?h=a1599a8ee9",
+       "type": "text"
+      }
+     ],
+     "href": "https://player.vimeo.com/video/226053498?h=a1599a8ee9",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000010",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "id": "00000000-0000-4000-8000-000000000011",
+   "props": {
+    "backgroundColor": "default",
+    "caption": "",
+    "name": "page.html",
+    "url": ""
+   },
+   "type": "file"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "content": [
+      {
+       "styles": {},
+       "text": "https://github.com/example/example-repo/pull/1234",
+       "type": "text"
+      }
+     ],
+     "href": "https://github.com/example/example-repo/pull/1234",
+     "type": "link"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000012",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  }
+ ],
+ "y_update": "AXMBAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAwVpbWFnZSgAAQINdGV4dEFsaWdubWVudAF3BGxlZnQoAAECD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAECBG5hbWUBdw1icm9jb2xsaS5qcGVnKAABAgN1cmwBdwAoAAECB2NhcHRpb24BdwpBIGJyb2NvbGxpKAABAgtzaG93UHJldmlldwF4KAABAgxwcmV2aWV3V2lkdGgBfygAAQECaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDGHAQEDDmJsb2NrQ29udGFpbmVyBwABCwMJcGFyYWdyYXBoBwABDAYGAAENBGxpbmsyeyJocmVmIjoiaHR0cHM6Ly93ZWJzaXRlLmRvbWFpbi9pbWFnZXMvaW1hZ2UucG5nIn2EAQ4naHR0cHM6Ly93ZWJzaXRlLmRvbWFpbi9pbWFnZXMvaW1hZ2UucG5nhgE1BGxpbmsEbnVsbCgAAQwPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAQwJdGV4dENvbG9yAXcHZGVmYXVsdCgAAQwNdGV4dEFsaWdubWVudAF3BGxlZnQoAAELAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyhwELAw5ibG9ja0NvbnRhaW5lcgcAATsDCXBhcmFncmFwaAcAATwGBgABPQZpdGFsaWMCe32EAT4pRmlsZSBub3QgaW1wb3J0ZWQgZnJvbSBOb3Rpb246IHJlcG9ydC5wZGaGAWcGaXRhbGljBG51bGwoAAE8D2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAE8CXRleHRDb2xvcgF3B2RlZmF1bHQoAAE8DXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABOwJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwM4cBOwMOYmxvY2tDb250YWluZXIHAAFtAwlwYXJhZ3JhcGgHAAFuBgYAAW8EbGluazN7ImhyZWYiOiJodHRwczovL2NvbXBhbnl3ZWJzaXRlLmNvbS9maWxlcy9kb2MudHh0In2EAXAHZG9jLnR4dIYBdwRsaW5rBG51bGwoAAFuD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFuCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFuDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABbQJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNIcBbQMOYmxvY2tDb250YWluZXIHAAF9AwlwYXJhZ3JhcGgHAAF+BgYAAX8EbGluay97ImhyZWYiOiJodHRwczovL3dlYnNpdGUuZG9tYWluL2ZpbGVzL2RvYy5wZGYifYQBgAEIVGhlIHNwZWOGAYgBBGxpbmsEbnVsbCgAAX4PYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAX4JdGV4dENvbG9yAXcHZGVmYXVsdCgAAX4NdGV4dEFsaWdubWVudAF3BGxlZnQoAAF9AmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA1hwF9Aw5ibG9ja0NvbnRhaW5lcgcAAY4BAwlwYXJhZ3JhcGgHAAGPAQYGAAGQAQRsaW5rLnsiaHJlZiI6Imh0dHBzOi8vd3d3LnlvdXR1YmUuY29tL3dhdGNoP3Y9YWJjIn2EAZEBI2h0dHBzOi8vd3d3LnlvdXR1YmUuY29tL3dhdGNoP3Y9YWJjhgG0AQRsaW5rBG51bGwoAAGPAQ9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABjwEJdGV4dENvbG9yAXcHZGVmYXVsdCgAAY8BDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABjgECaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDaHAY4BAw5ibG9ja0NvbnRhaW5lcgcAAboBAwRmaWxlKAABuwEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAbsBBG5hbWUBdwpzYW1wbGUubXAzKAABuwEDdXJsAXcAKAABuwEHY2FwdGlvbgF3ACgAAboBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA3hwG6AQMOYmxvY2tDb250YWluZXIHAAHBAQMJcGFyYWdyYXBoBwABwgEGBgABwwEEbGluayV7ImhyZWYiOiJodHRwczovL2NvbXBhbnl3ZWJzaXRlLmNvbSJ9hAHEARpodHRwczovL2NvbXBhbnl3ZWJzaXRlLmNvbYYB3gEEbGluawRudWxsKAABwgEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAcIBCXRleHRDb2xvcgF3B2RlZmF1bHQoAAHCAQ10ZXh0QWxpZ25tZW50AXcEbGVmdCgAAcEBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA4hwHBAQMOYmxvY2tDb250YWluZXIHAAHkAQMJcGFyYWdyYXBoBwAB5QEGBgAB5gEEbGluayh7ImhyZWYiOiJodHRwczovL2RldmVsb3BlcnMubm90aW9uLmNvbSJ9hAHnAQtOb3Rpb24gZG9jc4YB8gEEbGluawRudWxsKAAB5QEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAeUBCXRleHRDb2xvcgF3B2RlZmF1bHQoAAHlAQ10ZXh0QWxpZ25tZW50AXcEbGVmdCgAAeQBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA5hwHkAQMOYmxvY2tDb250YWluZXIHAAH4AQMJcGFyYWdyYXBoBwAB+QEGBgAB+gEEbGlua0B7ImhyZWYiOiJodHRwczovL3BsYXllci52aW1lby5jb20vdmlkZW8vMjI2MDUzNDk4P2g9YTE1OTlhOGVlOSJ9hAH7ATVodHRwczovL3BsYXllci52aW1lby5jb20vdmlkZW8vMjI2MDUzNDk4P2g9YTE1OTlhOGVlOYYBsAIEbGluawRudWxsKAAB+QEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAfkBCXRleHRDb2xvcgF3B2RlZmF1bHQoAAH5AQ10ZXh0QWxpZ25tZW50AXcEbGVmdCgAAfgBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDEwhwH4AQMOYmxvY2tDb250YWluZXIHAAG2AgMEZmlsZSgAAbcCD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAG3AgRuYW1lAXcJcGFnZS5odG1sKAABtwIDdXJsAXcAKAABtwIHY2FwdGlvbgF3ACgAAbYCAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExhwG2AgMOYmxvY2tDb250YWluZXIHAAG9AgMJcGFyYWdyYXBoBwABvgIGBgABvwIEbGluazx7ImhyZWYiOiJodHRwczovL2dpdGh1Yi5jb20vZXhhbXBsZS9leGFtcGxlLXJlcG8vcHVsbC8xMjM0In2EAcACMWh0dHBzOi8vZ2l0aHViLmNvbS9leGFtcGxlL2V4YW1wbGUtcmVwby9wdWxsLzEyMzSGAfECBGxpbmsEbnVsbCgAAb4CD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAG+Agl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABvgINdGV4dEFsaWdubWVudAF3BGxlZnQoAAG9AgJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAxMgA=",
+ "expected": [
+  {
+   "id": "00000000-0000-4000-8000-000000000001",
+   "type": "image",
+   "props": {
+    "textAlignment": "left",
+    "backgroundColor": "default",
+    "name": "brocolli.jpeg",
+    "url": "",
+    "caption": "A brocolli",
+    "showPreview": true
+   },
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000002",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://website.domain/images/image.png",
+     "content": [
+      {
+       "type": "text",
+       "text": "https://website.domain/images/image.png",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000003",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "File not imported from Notion: report.pdf",
+     "styles": {
+      "italic": true
+     }
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000004",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://companywebsite.com/files/doc.txt",
+     "content": [
+      {
+       "type": "text",
+       "text": "doc.txt",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000005",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://website.domain/files/doc.pdf",
+     "content": [
+      {
+       "type": "text",
+       "text": "The spec",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000006",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://www.youtube.com/watch?v=abc",
+     "content": [
+      {
+       "type": "text",
+       "text": "https://www.youtube.com/watch?v=abc",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000007",
+   "type": "file",
+   "props": {
+    "backgroundColor": "default",
+    "name": "sample.mp3",
+    "url": "",
+    "caption": ""
+   },
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000008",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://companywebsite.com",
+     "content": [
+      {
+       "type": "text",
+       "text": "https://companywebsite.com",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000009",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://developers.notion.com",
+     "content": [
+      {
+       "type": "text",
+       "text": "Notion docs",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000010",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://player.vimeo.com/video/226053498?h=a1599a8ee9",
+     "content": [
+      {
+       "type": "text",
+       "text": "https://player.vimeo.com/video/226053498?h=a1599a8ee9",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000011",
+   "type": "file",
+   "props": {
+    "backgroundColor": "default",
+    "name": "page.html",
+    "url": "",
+    "caption": ""
+   },
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000012",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "link",
+     "href": "https://github.com/example/example-repo/pull/1234",
+     "content": [
+      {
+       "type": "text",
+       "text": "https://github.com/example/example-repo/pull/1234",
+       "styles": {}
+      }
+     ]
+    }
+   ],
+   "children": []
+  }
+ ]
+}

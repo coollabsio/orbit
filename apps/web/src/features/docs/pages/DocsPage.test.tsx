@@ -8,7 +8,9 @@ import { queryKeys } from '@/api/queryKeys'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { toSummary } from '@/features/docs/api/pages'
+import { CollabConnectContext, type CollabTarget } from '@/features/docs/collab/connection'
 import { DocsPage } from './DocsPage'
+import { fakeCollab, fragmentText, type FakeCollab } from '@/test/fakeCollab'
 import { waitForAbsence } from '@/test/waitForAbsence'
 
 beforeAll(() => {
@@ -38,7 +40,8 @@ const defaultTeamspaces = [teamspace('teamspace-1', 'General', 0)]
 
 const fullPage = (id: string, patch: Partial<Page> = {}): Page => ({
   ...summary(id, null, 0), workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [],
-  creator_id: 'user-1', updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, ...patch,
+  creator_id: 'user-1', updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
+  ...patch,
 })
 
 const problem = (status: number, code: string, extra: Record<string, unknown> = {}) =>
@@ -55,7 +58,14 @@ function Location() {
   return <output data-testid="location">{location.pathname}</output>
 }
 
-function setup(path: string, handler: Handler, role = 'owner') {
+interface SetupOptions {
+  /** What the collab server holds per page (default: an empty page). */
+  content?: (target: CollabTarget) => unknown[]
+  collab?: FakeCollab
+}
+
+function setup(path: string, handler: Handler, role = 'owner', options: SetupOptions = {}) {
+  const collab = options.collab ?? fakeCollab({ content: options.content })
   window.localStorage.clear()
   const calls: Call[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -73,22 +83,31 @@ function setup(path: string, handler: Handler, role = 'owner') {
   client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role, version: 1 }])
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[`${path}?workspace=workspace-1`]}>
-        <ConfirmationModalHost />
-        <WorkspaceProvider>
-          <Routes>
-            <Route path="docs/trash" element={<DocsPage view="trash" />} />
-            <Route path="docs/:pageId?" element={<DocsPage />} />
-          </Routes>
-        </WorkspaceProvider>
-        <Location />
-      </MemoryRouter>
+      <CollabConnectContext value={collab.connect}>
+        <MemoryRouter initialEntries={[`${path}?workspace=workspace-1`]}>
+          <ConfirmationModalHost />
+          <WorkspaceProvider>
+            <Routes>
+              <Route path="docs/trash" element={<DocsPage view="trash" />} />
+              <Route path="docs/:pageId?" element={<DocsPage />} />
+            </Routes>
+          </WorkspaceProvider>
+          <Location />
+        </MemoryRouter>
+      </CollabConnectContext>
     </QueryClientProvider>,
   )
-  return { view, calls, client }
+  return { view, calls, client, collab }
 }
 
 const location = (view: ReturnType<typeof render>) => view.getByTestId('location').textContent
+
+/** The editor mounts after the collaborative document's first sync. */
+async function editorMounted(view: ReturnType<typeof render>) {
+  await waitFor(() => {
+    if (!view.container.querySelector('.bn-editor')) throw new Error('editor not mounted yet')
+  }, { timeout: 4000 })
+}
 
 test('/docs without pages shows "Create your first page" and creating opens the new page', async () => {
   const { view, calls } = setup('/docs', (call) => {
@@ -137,12 +156,13 @@ test('title edits autosave after the debounce with expected_version, and the tre
     }
   })
   const title = (await view.findByLabelText('Page title')) as HTMLInputElement
+  await editorMounted(view)
   await userEvent.clear(title)
   await userEvent.type(title, 'Roadmap Q4')
   await waitFor(() => expect(view.getByRole('tree').textContent).toContain('Roadmap Q4'))
   expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(0)
 
-  await waitFor(() => expect(view.container.querySelector('[data-save-status="saved"]')?.textContent).toBe('Saved'), { timeout: 3000 })
+  await waitFor(() => expect(view.container.querySelector('[data-save-status="saved"]')).toBeTruthy(), { timeout: 3000 })
   const patches = calls.filter((call) => call.method === 'PATCH')
   expect(patches).toHaveLength(1)
   expect(patches[0].body).toEqual({ title: 'Roadmap Q4', expected_version: 1 })
@@ -166,6 +186,7 @@ test('a 409 shows the conflict banner; Overwrite re-sends the local page on the 
     }
   })
   const title = (await view.findByLabelText('Page title')) as HTMLInputElement
+  await editorMounted(view)
   await userEvent.clear(title)
   await userEvent.type(title, 'Mine')
   fireEvent.blur(title)
@@ -306,4 +327,322 @@ test('the header star and the page menu add and remove the page from favorites',
   await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.path === '/pages/first/favorite')).toBeTrue())
   expect((await view.findByRole('button', { name: 'Add to favorites' })).getAttribute('aria-pressed')).toBe('false')
   await waitForAbsence(() => view.queryByRole('group', { name: 'Favorites' }))
+})
+
+const trashed = (page: PageSummary, version = 3) => ({ ...page, version, deleted_at: '2026-09-25T09:00:00Z' })
+
+test('members delete their own private trash forever; teamspace pages offer only Restore', async () => {
+  let purged = false
+  const { view, calls } = setup('/docs/trash', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [] })
+    if (call.path === '/pages/trash') {
+      return Response.json({
+        items: [trashed(summary('old', null, 0, 'Old notes')), ...(purged ? [] : [trashed(privatePage('diary', 0, 'Diary'))])],
+      })
+    }
+    if (call.method === 'DELETE' && call.path === '/pages/diary/permanent') {
+      purged = true
+      return new Response(null, { status: 204 })
+    }
+  }, 'member')
+  expect(await view.findByText('Old notes')).toBeTruthy()
+  expect(view.queryByRole('button', { name: 'Delete “Old notes” forever' })).toBeNull()
+  fireEvent.click(await view.findByRole('button', { name: 'Delete “Diary” forever' }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('Delete “Diary” forever?')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete forever' }))
+  await waitFor(() => expect(calls.some((call) => call.method === 'DELETE')).toBeTrue())
+  expect(calls.find((call) => call.method === 'DELETE')).toMatchObject({ path: '/pages/diary/permanent', search: '?expected_version=3' })
+  await waitForAbsence(() => view.queryByText('Diary'))
+  // Nothing left that a member may purge: no "Empty trash".
+  await waitForAbsence(() => view.queryByRole('button', { name: 'Empty trash' }))
+})
+
+test('"Empty trash" confirms with the purgeable count and posts once', async () => {
+  let emptied = false
+  const { view, calls } = setup('/docs/trash', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [] })
+    if (call.path === '/pages/trash') {
+      return Response.json({ items: emptied ? [] : [trashed(summary('old', null, 0, 'Old notes')), trashed(privatePage('diary', 0, 'Diary'))] })
+    }
+    if (call.method === 'POST' && call.path === '/pages/trash/empty') {
+      emptied = true
+      return Response.json({ purged: 2 })
+    }
+  })
+  // Owners may purge teamspace pages too.
+  expect(await view.findByRole('button', { name: 'Delete “Old notes” forever' })).toBeTruthy()
+  fireEvent.click(view.getByRole('button', { name: 'Empty trash' }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('2 pages and the sub-pages trashed with them will be deleted forever')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Empty trash' }))
+  await waitFor(() => expect(calls.filter((call) => call.path === '/pages/trash/empty')).toHaveLength(1))
+  expect(await view.findByText('Trash is empty')).toBeTruthy()
+})
+
+test('"Duplicate with sub-pages" in the page menu copies the subtree and opens the copy', async () => {
+  const { view, calls } = setup('/docs/first', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan'), summary('child', 'first', 0, 'Child')] })
+    if (call.path === '/pages/first' && call.method === 'GET') return Response.json(fullPage('first', { title: 'Plan' }))
+    if (call.path === '/pages/first/duplicate') return Response.json(fullPage('copy', { title: 'Plan (copy)', position: 1 }), { status: 201 })
+    if (call.path === '/pages/copy') return Response.json(fullPage('copy', { title: 'Plan (copy)', position: 1 }))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  expect(await view.findByRole('menuitem', { name: 'Duplicate' })).toBeTruthy()
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Duplicate with sub-pages' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/copy'))
+  expect(calls.find((call) => call.path === '/pages/first/duplicate')?.body).toEqual({ include_children: true })
+})
+
+test('the row menu duplicates a page without sub-pages; leaf rows offer no sub-page copy', async () => {
+  const { view, calls } = setup('/docs/first', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan'), summary('leaf', null, 1, 'Leaf')] })
+    if (call.path === '/pages/first' && call.method === 'GET') return Response.json(fullPage('first', { title: 'Plan' }))
+    if (call.path === '/pages/leaf/duplicate') return Response.json(fullPage('leaf-copy', { title: 'Leaf (copy)', position: 2 }), { status: 201 })
+    if (call.path === '/pages/leaf-copy') return Response.json(fullPage('leaf-copy', { title: 'Leaf (copy)' }))
+  })
+  const tree = await view.findByRole('tree', { name: 'Pages' })
+  const row = await within(tree).findByText('Leaf')
+  fireEvent.click(within(row.closest('[data-page-id]') as HTMLElement).getByRole('button', { name: 'Page options' }))
+  expect(await view.findByRole('menuitem', { name: 'Duplicate' })).toBeTruthy()
+  expect(view.queryByRole('menuitem', { name: 'Duplicate with sub-pages' })).toBeNull()
+  await userEvent.click(view.getByRole('menuitem', { name: 'Duplicate' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/leaf-copy'))
+  expect(calls.find((call) => call.path === '/pages/leaf/duplicate')?.body).toEqual({ include_children: false })
+})
+
+test('"Version history" restores a version: metadata from the response, content live through the document', async () => {
+  const body = (text: string) => [{ id: `block-${text}`, type: 'paragraph', props: {}, content: [{ type: 'text', text, styles: {} }], children: [] }]
+  const stored = {
+    id: 'v1', page_id: 'first', kind: 'auto', title: 'Old plan', icon: null, created_at: '2026-09-24T09:30:00Z',
+    created_by: { id: 'user-1', display_name: 'Ada' },
+  }
+  const collab = fakeCollab({ content: () => body('Current text') })
+  const { view, calls } = setup('/docs/first', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan')] })
+    if (call.path === '/pages/first' && call.method === 'GET')
+      return Response.json(fullPage('first', { title: 'Plan', content: body('Current text'), version: 3 }))
+    if (call.path === '/pages/first/versions') return Response.json({ items: [stored], next_cursor: null })
+    if (call.path === '/pages/first/versions/v1') return Response.json({ ...stored, content: body('Old text') })
+    if (call.path === '/pages/first/versions/v1/restore') {
+      // The server replaces the collaborative document; every open editor gets it over the socket.
+      collab.last().provider.replace(body('Old text'))
+      return Response.json(fullPage('first', { title: 'Old plan', content: body('Old text'), version: 4 }))
+    }
+  }, 'owner', { collab })
+  const title = (await view.findByLabelText('Page title')) as HTMLInputElement
+  const editorSection = view.container.querySelector('section:last-of-type') as HTMLElement
+  await waitFor(() => expect(editorSection.textContent).toContain('Current text'), { timeout: 4000 })
+
+  fireEvent.click(within(editorSection).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  fireEvent.click(await view.findByRole('menuitem', { name: 'Version history' }))
+  const pane = await view.findByRole('complementary', { name: 'Version history' })
+  const preview = within(pane).getByRole('region', { name: 'Version preview' })
+  await waitFor(() => expect(preview.textContent).toContain('Old text'), { timeout: 4000 })
+
+  const restore = within(pane).getByRole('button', { name: 'Restore this version' })
+  await waitFor(() => expect(restore.hasAttribute('disabled')).toBeFalse())
+  fireEvent.click(restore)
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('Restore this version?')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Restore' }))
+
+  await waitFor(() => expect(title.value).toBe('Old plan'))
+  expect(calls.find((call) => call.path === '/pages/first/versions/v1/restore')?.body).toEqual({ expected_version: 3 })
+  await waitFor(() => expect(editorSection.textContent).toContain('Old text'))
+  expect(editorSection.textContent).not.toContain('Current text')
+  await waitForAbsence(() => view.queryByRole('complementary', { name: 'Version history' }))
+  // The restored page is the new base: nothing is saved back.
+  expect(calls.some((call) => call.method === 'PATCH')).toBeFalse()
+})
+
+// Real-time co-editing (the collab socket is a fake provider; see src/test/fakeCollab.ts).
+
+const text = (value: string) => [{ id: `block-${value}`, type: 'paragraph', props: {}, content: [{ type: 'text', text: value, styles: {} }], children: [] }]
+const collabStatus = (view: ReturnType<typeof render>) => view.container.querySelector('[data-collab-status]') as HTMLElement
+
+/** Types through the editor the way a user would (focus via Enter in the title, then paste). */
+async function pasteIntoEditor(view: ReturnType<typeof render>, value: string) {
+  fireEvent.keyDown(view.getByLabelText('Page title'), { key: 'Enter' })
+  const editorEl = view.container.querySelector('.bn-editor') as HTMLElement
+  const data: Record<string, string> = { 'text/plain': value }
+  await act(async () => {
+    fireEvent.paste(editorEl, { clipboardData: { types: Object.keys(data), getData: (type: string) => data[type] ?? '' } })
+  })
+}
+
+function beforeUnloadBlocked(): boolean {
+  const event = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
+const pageRoutes = (extra: Handler = () => undefined): Handler => (call) =>
+  extra(call) ??
+  (call.path === '/pages' ? Response.json({ items: [summary('first', null, 0, 'Plan'), summary('second', null, 1, 'Second')] }) : undefined) ??
+  (call.path === '/pages/first' && call.method === 'GET' ? Response.json(fullPage('first', { title: 'Plan' })) : undefined) ??
+  (call.path === '/pages/second' && call.method === 'GET' ? Response.json(fullPage('second', { title: 'Second' })) : undefined)
+
+test('content is live: the editor mounts after the first sync, shows remote edits, and typing sends no PATCH', async () => {
+  const collab = fakeCollab({ content: () => text('Shared text'), autoSync: false })
+  const { view, calls } = setup('/docs/first', pageRoutes(), 'owner', { collab })
+  await view.findByLabelText('Page title')
+  await waitFor(() => expect(collab.connections).toHaveLength(1))
+  expect(collab.last().target).toEqual({ workspaceId: 'workspace-1', pageId: 'first', epoch: 'epoch-1' })
+  // Never bound to an unsynced (empty) document.
+  expect(view.getByTestId('editor-loading')).toBeTruthy()
+  expect(view.container.querySelector('.bn-editor')).toBeNull()
+  expect(collabStatus(view).dataset.collabStatus).toBe('connecting')
+  expect(collabStatus(view).textContent).toBe('Connecting…')
+
+  act(() => collab.last().provider.connectAndSync())
+  await editorMounted(view)
+  const editorSection = view.container.querySelector('section:last-of-type') as HTMLElement
+  await waitFor(() => expect(editorSection.textContent).toContain('Shared text'))
+  expect(collabStatus(view).textContent).toBe('Live')
+
+  act(() => collab.last().provider.replace(text('Edited elsewhere')))
+  await waitFor(() => expect(editorSection.textContent).toContain('Edited elsewhere'))
+
+  await pasteIntoEditor(view, 'typed here')
+  await waitFor(() => expect(fragmentText(collab.last().fragment)).toContain('typed here'))
+  await new Promise((resolve) => setTimeout(resolve, 900))
+  expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(0)
+  expect(beforeUnloadBlocked()).toBeFalse()
+})
+
+test('offline: "Connecting…" then "Offline", beforeunload warns only with unsynced edits, reconnect is live again', async () => {
+  const { view, collab } = setup('/docs/first', pageRoutes(), 'owner', { content: () => text('Body') })
+  await editorMounted(view)
+  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  const provider = collab.last().provider
+
+  act(() => provider.drop(1006))
+  expect(collabStatus(view).textContent).toBe('Connecting…')
+  await waitFor(() => expect(collabStatus(view).textContent).toBe('Offline — changes will sync'), { timeout: 3500 })
+  // Nothing typed since long before the drop: leaving is safe.
+  expect(beforeUnloadBlocked()).toBeFalse()
+
+  await pasteIntoEditor(view, 'offline words')
+  expect(fragmentText(collab.last().fragment)).toContain('offline words')
+  expect(beforeUnloadBlocked()).toBeTrue()
+
+  act(() => provider.connectAndSync())
+  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  expect(beforeUnloadBlocked()).toBeFalse()
+})
+
+test('4404 (someone else trashed the page) makes it read-only, drops it from the tree and leaves for /docs', async () => {
+  let trashed = false
+  const { view, collab, calls } = setup(
+    '/docs/first',
+    pageRoutes((call) => (trashed && call.path === '/pages' ? Response.json({ items: [summary('second', null, 1, 'Second')] }) : undefined)),
+  )
+  await editorMounted(view)
+  trashed = true
+  const before = calls.length
+  act(() => collab.last().provider.drop(4404))
+  await waitFor(() => expect(location(view)).toBe('/docs/second'))
+  // Leaving stops observing the page: nothing refetches it (it would only 404).
+  expect(calls.slice(before).filter((call) => call.path === '/pages/first')).toHaveLength(0)
+  const tree = view.getByRole('tree', { name: 'Pages' })
+  expect(tree.textContent).not.toContain('Plan')
+  expect(collab.connections[0].provider.destroyed).toBeTrue()
+})
+
+test('refused handshakes are checked over REST: a 404 page is left like a trashed one', async () => {
+  let gone = false
+  const { view, collab } = setup(
+    '/docs/first',
+    pageRoutes((call) => {
+      if (!gone) return undefined
+      if (call.path === '/pages/first') return problem(404, 'page_not_found')
+      if (call.path === '/pages') return Response.json({ items: [summary('second', null, 1, 'Second')] })
+    }),
+  )
+  await editorMounted(view)
+  gone = true
+  const provider = collab.last().provider
+  act(() => provider.drop(1006))
+  act(() => provider.refuse())
+  act(() => provider.refuse())
+  await waitFor(() => expect(location(view)).toBe('/docs/second'))
+  expect(provider.destroyed).toBeTrue()
+})
+
+test('4409 (document reset) refetches the page and reconnects with the new epoch', async () => {
+  let reads = 0
+  const { view, collab } = setup(
+    '/docs/first',
+    pageRoutes((call) => {
+      if (call.path !== '/pages/first' || call.method !== 'GET') return undefined
+      reads += 1
+      return Response.json(fullPage('first', { title: 'Plan', collab_epoch: reads === 1 ? 'epoch-1' : 'epoch-2' }))
+    }),
+    'owner',
+    { content: (target) => text(target.epoch === 'epoch-2' ? 'After reset' : 'Before reset') },
+  )
+  await editorMounted(view)
+  const editorSection = view.container.querySelector('section:last-of-type') as HTMLElement
+  await waitFor(() => expect(editorSection.textContent).toContain('Before reset'))
+  act(() => collab.last().provider.drop(4409))
+  await waitFor(() => expect(collab.connections).toHaveLength(2))
+  expect(collab.last().target.epoch).toBe('epoch-2')
+  expect(collab.connections[0].provider.destroyed).toBeTrue()
+  await waitFor(() => expect(editorSection.textContent).toContain('After reset'))
+  expect(collabStatus(view).textContent).toBe('Live')
+  expect(location(view)).toBe('/docs/first')
+})
+
+test('4401 goes through the app-wide unauthorized flow', async () => {
+  const { view, collab } = setup('/docs/first', pageRoutes())
+  await editorMounted(view)
+  let unauthorized = 0
+  const listener = () => {
+    unauthorized += 1
+  }
+  window.addEventListener('orbit:unauthorized', listener)
+  try {
+    act(() => collab.last().provider.drop(4401))
+    await waitFor(() => expect(unauthorized).toBe(1))
+    expect(collabStatus(view).textContent).toBe('Access lost')
+  } finally {
+    window.removeEventListener('orbit:unauthorized', listener)
+  }
+})
+
+test('4413 shows a sync notice, stops editing, and "Reload page" opens a fresh document', async () => {
+  const { view, collab } = setup('/docs/first', pageRoutes(), 'owner', { content: () => text('Body') })
+  await editorMounted(view)
+  act(() => collab.last().provider.drop(4413))
+  const notice = await view.findByRole('alert')
+  expect(notice.getAttribute('data-sync-notice')).toBe('too-large')
+  expect(collabStatus(view).textContent).toBe('Not syncing')
+  await waitFor(() => expect(view.container.querySelector('.bn-editor')?.getAttribute('contenteditable')).toBe('false'))
+  fireEvent.click(within(notice).getByRole('button', { name: 'Reload page' }))
+  await waitFor(() => expect(collab.connections).toHaveLength(2))
+  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  await waitForAbsence(() => view.queryByRole('alert'))
+})
+
+test('presence: other people show in the header once each, never the current user', async () => {
+  const { view, collab } = setup(
+    '/docs/first',
+    pageRoutes((call) => (call.path === '/api/v1/auth/me' ? Response.json({ id: 'user-1', display_name: 'Test User', email: 'test@example.com' }) : undefined)),
+  )
+  await editorMounted(view)
+  const provider = collab.last().provider
+  act(() => {
+    provider.addPeer({ id: 'user-2', name: 'Ada Lovelace', color: '#e11d48' })
+    provider.addPeer({ id: 'user-2', name: 'Ada Lovelace', color: '#e11d48' })
+    provider.addPeer({ id: 'user-3', name: 'Bob', color: '#2563eb' })
+  })
+  await waitFor(() => expect(view.getByTestId('presence').querySelectorAll('[data-presence-user]')).toHaveLength(2))
+  // Our own other tab: same user id, hidden (once /me is known).
+  act(() => void provider.addPeer({ id: 'user-1', name: 'Test User', color: '#9333ea' }))
+  await waitFor(() => expect(view.getByTestId('presence').getAttribute('aria-label')).toBe('Also here: Ada Lovelace, Bob'))
+  // The local awareness state carries our name for the server (which stamps id/name/color anyway).
+  const local = provider.awareness.getLocalState() as { user: { name: string } }
+  expect(local.user.name).toBe('Test User')
 })

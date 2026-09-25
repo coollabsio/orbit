@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, mock, test } from 'bun:test'
 import { act, fireEvent, render } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { createRef } from 'react'
 import { PageEditor, type PageEditorHandle, type PageEditorProps, type PageRef } from './PageEditor'
 
@@ -175,20 +176,6 @@ describe('PageEditor', () => {
     expect(images.map((block) => block.props.url)).toEqual([FILE_URL])
   })
 
-  test('replaceContent swaps the document without reporting a local change, and skips identical content', async () => {
-    const { ref, view, props } = await renderEditor({
-      initialContent: [{ id: 'a', type: 'paragraph', content: [{ type: 'text', text: 'before', styles: {} }] }],
-    })
-    const before = ref.current!.getContent()
-    await act(async () => ref.current!.replaceContent(before))
-    expect(ref.current!.getContent()).toEqual(before)
-
-    await act(async () => ref.current!.replaceContent([{ id: 'z', type: 'heading', props: { level: 2 }, content: 'after' }]))
-    expect(await view.findByText('after')).toBeTruthy()
-    expect(view.queryByText('before')).toBeNull()
-    expect(props.onChange).not.toHaveBeenCalled()
-  })
-
   test('reports user edits through onChange with the full, sanitized document', async () => {
     const onChange = mock((content: unknown[]) => void content)
     const { ref } = await renderEditor({ onChange })
@@ -214,6 +201,28 @@ describe('PageEditor', () => {
     })
     expect(await view.findByText('second page')).toBeTruthy()
     expect(view.queryByText('first page')).toBeNull()
+  })
+
+  test('callout: renders the emoji and text; clicking the emoji opens the picker and a pick updates the block', async () => {
+    const onChange = mock((content: unknown[]) => void content)
+    const { view, ref } = await renderEditor({
+      onChange,
+      initialContent: [{ id: 'c', type: 'callout', props: { emoji: '⭐', backgroundColor: 'blue' }, content: 'Heads up' }],
+    })
+    expect(await view.findByText('Heads up')).toBeTruthy()
+    const trigger = view.getByRole('button', { name: 'Change callout icon' })
+    expect(trigger.textContent).toBe('⭐')
+    expect(trigger.closest('[data-content-type="callout"]')?.getAttribute('data-background-color')).toBe('blue')
+
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    await userEvent.click(await view.findByTitle('grinning face'))
+
+    const [callout] = ref.current!.getContent() as { type: string; props: Record<string, string> }[]
+    expect(callout.type).toBe('callout')
+    expect(callout.props).toEqual({ emoji: '😀', backgroundColor: 'blue', textColor: 'default' })
+    expect(onChange).toHaveBeenCalled()
+    expect(view.getByRole('button', { name: 'Change callout icon' }).textContent).toBe('😀')
   })
 
   test('read-only mode renders a non-editable document', async () => {

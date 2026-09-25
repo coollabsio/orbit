@@ -166,6 +166,7 @@ fn props_for(kind: &str) -> (&'static [&'static str], &'static [&'static str]) {
             &[],
         ),
         "quote" => (&["textColor", "backgroundColor"], &[]),
+        "callout" => (&["emoji", "textColor", "backgroundColor"], &[]),
         "codeBlock" => (&["language"], &[]),
         "divider" => (&[], &[]),
         "table" => (&["textColor"], &[]),
@@ -190,7 +191,8 @@ const COLORS: &[&str] = &[
     "default", "gray", "brown", "red", "orange", "yellow", "green", "blue", "purple", "pink",
 ];
 
-/// Checks every block against Orbit's editor schema (BlockNote 0.55 defaults + `page`).
+/// Checks every block against Orbit's editor schema (BlockNote 0.55 defaults + `page` +
+/// `callout`).
 fn assert_blocknote_schema(blocks: &[Value]) {
     let mut ids = HashSet::new();
     check_blocks(blocks, &mut ids);
@@ -221,9 +223,15 @@ fn check_blocks(blocks: &[Value], ids: &mut HashSet<String>) {
                 );
             }
         }
+        if kind == "callout" {
+            assert!(
+                !props["emoji"].as_str().unwrap().is_empty(),
+                "callout emoji"
+            );
+        }
         match kind {
             "paragraph" | "heading" | "bulletListItem" | "numberedListItem" | "checkListItem"
-            | "toggleListItem" | "quote" => {
+            | "toggleListItem" | "quote" | "callout" => {
                 check_inline(object["content"].as_array().expect("inline content"))
             }
             "codeBlock" => {
@@ -529,26 +537,49 @@ fn columns_are_flattened_in_order() {
 #[test]
 fn synced_blocks_are_flattened() {
     let (page, report) = convert("synced_block");
-    assert_eq!(types(&page.content), ["quote", "quote"]);
+    assert_eq!(types(&page.content), ["callout", "callout"]);
     assert_eq!(
         texts(&page.content[0]["content"]),
-        "⭐ Callout in synced block"
+        "Callout in synced block"
     );
+    assert_eq!(page.content[0]["props"]["emoji"], "⭐");
     assert_eq!(report.skipped.get("synced_block_unavailable"), Some(&1));
 }
 
 #[test]
-fn callouts_become_quotes() {
+fn callouts_become_callout_blocks() {
     let (page, report) = convert("callout");
     let c = &page.content;
-    assert_eq!(types(c), ["quote", "quote", "quote"]);
-    assert_eq!(texts(&c[0]["content"]), "⭐ Lacinato kale is tasty");
-    assert_eq!(c[0]["props"]["backgroundColor"], "gray");
+    assert_eq!(types(c), ["callout", "callout", "callout", "callout"]);
+    // Emoji icon, background color, rich text and nested children are kept.
+    assert_eq!(
+        c[0]["props"],
+        json!({"emoji": "⭐", "backgroundColor": "gray", "textColor": "default"})
+    );
+    assert_eq!(texts(&c[0]["content"]), "Lacinato kale is tasty");
+    assert_eq!(c[0]["content"][0]["styles"], json!({"bold": true}));
     assert_eq!(types(c[0]["children"].as_array().unwrap()), ["paragraph"]);
+    // A Notion text color is a text color; a native icon becomes the default emoji.
+    assert_eq!(
+        c[1]["props"],
+        json!({"emoji": "💡", "backgroundColor": "default", "textColor": "red"})
+    );
     assert_eq!(texts(&c[1]["content"]), "Native icon callout");
-    assert_eq!(c[1]["props"]["textColor"], "red");
-    assert_eq!(texts(&c[2]["content"]), ":bufo: Custom emoji callout");
-    assert_eq!(report.lossy.get("callout"), Some(&3));
+    // Custom emoji: default emoji, text unchanged.
+    assert_eq!(c[2]["props"]["emoji"], "💡");
+    assert_eq!(c[2]["props"]["backgroundColor"], "default");
+    assert_eq!(texts(&c[2]["content"]), "Custom emoji callout");
+    // No icon at all: default emoji, not counted.
+    assert_eq!(
+        c[3]["props"],
+        json!({"emoji": "💡", "backgroundColor": "blue", "textColor": "default"})
+    );
+    assert_eq!(
+        types(c[3]["children"].as_array().unwrap()),
+        ["bulletListItem"]
+    );
+    assert_eq!(report.lossy.get("callout"), None);
+    assert_eq!(report.lossy.get("callout_icon"), Some(&2));
 }
 
 #[test]

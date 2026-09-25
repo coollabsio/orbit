@@ -13,6 +13,7 @@ import {
   CommandShortcut,
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
+import type { TextRange } from '@/api/generated/types.gen'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord } from '@/features/tasks/api/models'
@@ -20,6 +21,7 @@ import { useTasks } from '@/features/tasks/api/tasks'
 import { usePageSearch } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
+import { highlightSegments } from '@/features/docs/searchHighlights'
 import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import { docsHidden } from './productNavigation'
 
@@ -32,6 +34,26 @@ interface CommandEntry {
   keywords: string
   /** Already matched by the server (page body search): skip the local title/keyword filter. */
   serverMatch?: boolean
+  /** Page hits: matched words in the title, and body text around the match. */
+  titleHighlights?: TextRange[]
+  snippet?: { text: string; highlights: TextRange[] }
+}
+
+/** Text with the server's highlight ranges in bold (plain React text nodes, no HTML). */
+function Highlighted({ text, ranges }: { text: string; ranges: TextRange[] | undefined }) {
+  return (
+    <>
+      {highlightSegments(text, ranges).map((segment, index) =>
+        segment.match ? (
+          <strong key={index} className="font-semibold text-foreground" data-highlight>
+            {segment.text}
+          </strong>
+        ) : (
+          segment.text
+        ),
+      )}
+    </>
+  )
 }
 
 export function CommandPalette({ onClose }: { onClose: () => void }) {
@@ -75,6 +97,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           to: `/docs/${page.id}`,
           keywords: page.snippet,
           serverMatch: true,
+          // Ranges index the page's own title; the "Untitled" fallback has none.
+          titleHighlights: page.title ? page.title_highlights : [],
+          snippet: page.snippet ? { text: page.snippet, highlights: page.snippet_highlights } : undefined,
         }))
       : []
     if (docsHidden) return [...nav.filter((entry) => !entry.to.startsWith('/docs')), ...tasks]
@@ -123,11 +148,24 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
               <CommandItem
                 key={entry.id}
                 value={entry.id}
-                className="h-10 gap-2.5 px-2.5 text-[13px]"
+                className={entry.snippet ? 'min-h-10 gap-2.5 px-2.5 py-1.5 text-[13px]' : 'h-10 gap-2.5 px-2.5 text-[13px]'}
                 onSelect={() => open(entry)}
               >
                 <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
-                <span className="truncate">{entry.title}</span>
+                {entry.snippet ? (
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">
+                      <Highlighted text={entry.title} ranges={entry.titleHighlights} />
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground" data-snippet>
+                      <Highlighted text={entry.snippet.text} ranges={entry.snippet.highlights} />
+                    </span>
+                  </span>
+                ) : (
+                  <span className="truncate">
+                    {entry.titleHighlights ? <Highlighted text={entry.title} ranges={entry.titleHighlights} /> : entry.title}
+                  </span>
+                )}
                 <CommandShortcut className="text-[11px] tracking-normal whitespace-nowrap text-muted-foreground/70">{entry.meta}</CommandShortcut>
               </CommandItem>
             ))}

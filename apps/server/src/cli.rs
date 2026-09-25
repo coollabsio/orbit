@@ -817,10 +817,6 @@ pub fn redacted_config(config: &Config) -> String {
         config.rate_limits.upload_per_minute,
         config.rate_limits.general_per_minute,
     );
-    output.push_str(&format!(
-        "\n\n[notion]\napi_base = \"{}\"\nrequests_per_minute = {}",
-        config.notion.api_base, config.notion.requests_per_minute
-    ));
     output.push_str("\n\n[metrics]\n");
     if let Some(listen) = config.metrics.listen {
         output.push_str(&format!("listen = \"{listen}\""));

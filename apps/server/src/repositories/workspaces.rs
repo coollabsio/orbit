@@ -17,6 +17,7 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
+use super::page_versions;
 use super::task_relations;
 use super::tasks::TaskError;
 use super::teamspaces::insert_default_teamspace;
@@ -1166,6 +1167,31 @@ impl WorkspaceRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
+        let result = self
+            .remove_member_unchecked(
+                workspace_id,
+                membership_id,
+                actor_id,
+                expected_version,
+                request_id,
+                now,
+            )
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn remove_member_unchecked(
+        &self,
+        workspace_id: Id,
+        membership_id: Id,
+        actor_id: Id,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
         let (target, current_version) =
@@ -1341,6 +1367,31 @@ impl WorkspaceRepository {
     }
 
     pub async fn set_deleted(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        deleted: bool,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        let result = self
+            .set_deleted_unchecked(
+                workspace_id,
+                actor_id,
+                deleted,
+                expected_version,
+                request_id,
+                now,
+            )
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn set_deleted_unchecked(
         &self,
         workspace_id: Id,
         actor_id: Id,
@@ -1698,6 +1749,8 @@ impl WorkspaceRepository {
         )
         .execute(&mut *transaction)
         .await?;
+        // Page history: all of the last 30 days, then one per day up to a year, newest 20 always.
+        page_versions::thin_versions(&mut transaction, now).await?;
         sqlx::query(
             "DELETE FROM projects WHERE deleted_at <= ? AND workspace_id IN \
              (SELECT id FROM workspaces WHERE deleted_at IS NULL)",

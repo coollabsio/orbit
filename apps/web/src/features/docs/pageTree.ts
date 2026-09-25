@@ -119,6 +119,20 @@ export function ancestorsOf<T extends TreePage>(pages: readonly T[], pageId: str
   return chain
 }
 
+/**
+ * What to open so `pageId` becomes visible in its space section: its space (to un-collapse) and the ancestor rows
+ * (root first) that `isOpen` reports closed. Null when the page is not in the tree. Never lists anything to close.
+ */
+export function revealPage<T extends TreePage>(
+  pages: readonly T[],
+  pageId: string | null,
+  isOpen: (id: string) => boolean,
+): { space: SpaceKey; expand: string[] } | null {
+  const page = pageId ? pages.find((item) => item.id === pageId) : undefined
+  if (!page) return null
+  return { space: spaceKey(page), expand: ancestorsOf(pages, page.id).map((item) => item.id).filter((id) => !isOpen(id)) }
+}
+
 /** First root page in tree order across all spaces, or null when there are no pages. */
 export function firstRootPage<T extends TreePage>(pages: readonly T[]): T | null {
   return childrenOf(pages, null)[0] ?? null

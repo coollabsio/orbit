@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        26
+        29
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 26
+            binary_version: 29
         }
     ));
 }
@@ -1068,6 +1068,243 @@ async fn page_files_migration_scopes_rows_and_releases_blobs() {
         .unwrap();
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM page_files")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn page_search_migration_backfills_and_tracks_pages() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 26)
+        .run(&db)
+        .await
+        .unwrap();
+    let [user, workspace, owner, teamspace, live, trashed, private]: [Id; 7] =
+        std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'First', 0, '{owner}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{owner}', '{workspace}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO teamspaces (id, workspace_id, name, created_at, updated_at)
+         VALUES ('{teamspace}', '{workspace}', 'General', 1, 1);
+         INSERT INTO pages (id, workspace_id, teamspace_id, owner_id, title, content_text, creator_id, updated_by, created_at, updated_at, deleted_at, trashed_with)
+         VALUES ('{live}', '{workspace}', '{teamspace}', NULL, 'Über plan', 'Café notes', '{user}', '{user}', 1, 1, NULL, NULL),
+                ('{trashed}', '{workspace}', '{teamspace}', NULL, 'Old', 'uber archive', '{user}', '{user}', 2, 2, 5, '{trashed}'),
+                ('{private}', '{workspace}', NULL, '{user}', 'Diary', 'secret', '{user}', '{user}', 3, 3, NULL, NULL);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    let matches = |query: &'static str| {
+        let db = &db;
+        async move {
+            let mut ids: Vec<String> = sqlx::query_scalar(
+                "SELECT page_search_rows.page_id FROM page_search \
+                 JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
+                 WHERE page_search MATCH ?",
+            )
+            .bind(query)
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+            ids.sort();
+            ids
+        }
+    };
+    // Every page is indexed (trashed ones too; queries filter them), diacritics folded.
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM page_search")
+            .await
+            .unwrap(),
+        3
+    );
+    let mut uber = vec![live.to_string(), trashed.to_string()];
+    uber.sort();
+    assert_eq!(matches("\"uber\"").await, uber);
+    assert_eq!(matches("\"cafe\"").await, [live.to_string()]);
+    assert_eq!(matches("\"pla\"*").await, [live.to_string()]);
+
+    // Triggers follow inserts, title/body updates and deletes.
+    let added = Id::new_v7();
+    db.execute(&format!(
+        "INSERT INTO pages (id, workspace_id, teamspace_id, title, content_text, creator_id, updated_by, created_at, updated_at) \
+         VALUES ('{added}', '{workspace}', '{teamspace}', 'Zebra', '', '{user}', '{user}', 4, 4)"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(matches("\"zebra\"").await, [added.to_string()]);
+    db.execute(&format!(
+        "UPDATE pages SET title = 'Giraffe', content_text = 'tall' WHERE id = '{added}'"
+    ))
+    .await
+    .unwrap();
+    assert!(matches("\"zebra\"").await.is_empty());
+    assert_eq!(matches("\"tall\"").await, [added.to_string()]);
+    db.execute(&format!("DELETE FROM pages WHERE id = '{added}'"))
+        .await
+        .unwrap();
+    assert!(matches("\"giraffe\"").await.is_empty());
+    // The workspace purge deletes every page explicitly; the index empties with it.
+    db.execute(&format!(
+        "DELETE FROM pages WHERE workspace_id = '{workspace}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM page_search")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM page_search_rows")
+            .await
+            .unwrap(),
+        0
+    );
+    db.execute("INSERT INTO page_search (page_search) VALUES ('integrity-check')")
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn page_versions_migration_scopes_rows_and_cascades() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 27)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        editor,
+        workspace,
+        other,
+        owner,
+        other_owner,
+        teamspace,
+        page,
+        doomed,
+    ]: [Id; 9] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1),
+                ('{editor}', 'editor@example.com', 'editor@example.com', 'Editor', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'First', 0, '{owner}', 1, 1),
+                ('{other}', 'Second', 0, '{other_owner}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{owner}', '{workspace}', '{user}', 'owner', 0, 1, 1),
+                ('{other_owner}', '{other}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO teamspaces (id, workspace_id, name, created_at, updated_at)
+         VALUES ('{teamspace}', '{workspace}', 'General', 1, 1);
+         INSERT INTO pages (id, workspace_id, teamspace_id, title, creator_id, updated_by, created_at, updated_at)
+         VALUES ('{page}', '{workspace}', '{teamspace}', 'Plan', '{user}', '{user}', 1, 1),
+                ('{doomed}', '{workspace}', '{teamspace}', 'Doomed', '{user}', '{user}', 1, 1);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    let insert = |id: Id, workspace_id: Id, page_id: Id, kind: &'static str, by: Id| {
+        let db = &db;
+        async move {
+            db.execute(&format!(
+                "INSERT INTO page_versions (id, workspace_id, page_id, title, icon, content_json, kind, created_by, created_at) \
+                 VALUES ('{id}', '{workspace_id}', '{page_id}', 'Plan', NULL, '[]', '{kind}', '{by}', 5)"
+            ))
+            .await
+        }
+    };
+    let [kept, by_editor, gone]: [Id; 3] = std::array::from_fn(|_| Id::new_v7());
+    insert(kept, workspace, page, "auto", user).await.unwrap();
+    insert(by_editor, workspace, page, "restore", editor)
+        .await
+        .unwrap();
+    insert(gone, workspace, doomed, "import", user)
+        .await
+        .unwrap();
+    // A version belongs to its page's workspace, has a known kind and keeps its scope.
+    assert!(
+        insert(Id::new_v7(), other, page, "auto", user)
+            .await
+            .is_err()
+    );
+    assert!(
+        insert(Id::new_v7(), workspace, page, "manual", user)
+            .await
+            .is_err()
+    );
+    assert!(
+        db.execute(&format!(
+            "UPDATE page_versions SET page_id = '{doomed}' WHERE id = '{kept}'"
+        ))
+        .await
+        .is_err()
+    );
+
+    // Versions go with their page and lose a deleted author.
+    db.execute(&format!("DELETE FROM pages WHERE id = '{doomed}'"))
+        .await
+        .unwrap();
+    db.execute(&format!("DELETE FROM users WHERE id = '{editor}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM page_versions")
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.scalar::<Option<String>>(&format!(
+            "SELECT created_by FROM page_versions WHERE id = '{by_editor}'"
+        ))
+        .await
+        .unwrap(),
+        None
+    );
+    // The workspace purge deletes pages, then teamspaces, then the workspace.
+    db.execute(&format!(
+        "DELETE FROM pages WHERE workspace_id = '{workspace}';
+         DELETE FROM teamspaces WHERE workspace_id = '{workspace}';
+         DELETE FROM workspaces WHERE id = '{workspace}';"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM page_versions")
             .await
             .unwrap(),
         0

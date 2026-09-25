@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { Link, Navigate, useNavigate, useParams } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { DocumentText as FileText, Add as Plus } from 'reicon-react'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -7,11 +7,21 @@ import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { confirmAction } from '@/components/common/confirmAction'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { isPageNotFound, isPageVersionConflict, useCreatePage, useMovePage, usePage, usePageTree, useTrashPage } from '@/features/docs/api/pages'
+import {
+  isPageNotFound,
+  isPageVersionConflict,
+  useCreatePage,
+  useDuplicatePage,
+  useMovePage,
+  usePage,
+  usePageTree,
+  useTrashPage,
+} from '@/features/docs/api/pages'
 import { canDeleteTeamspaces, useTeamspaces } from '@/features/docs/api/teamspaces'
 import { descendantsOf, dropOnSpace, landingPage, pageTitle, spaceKey, spaceLabel, type SpaceKey } from '@/features/docs/pageTree'
 import { DocEditor, type DocEditorControl } from '@/features/docs/components/DocEditor'
 import { DocTree } from '@/features/docs/components/DocTree'
+import { DocPageActionsContext, type DocPageActions } from '@/features/docs/pageActions'
 import { NotionImportPane } from './NotionImportPane'
 import { PageTrashPane } from './PageTrashPane'
 
@@ -25,21 +35,31 @@ function landsOnFirstPage() {
 export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import' }) {
   const { pageId, importId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { workspace } = useWorkspace()
   const tree = usePageTree(workspace.id)
   const teamspaces = useTeamspaces(workspace.id)
-  const page = usePage(workspace.id, view === 'page' ? pageId : undefined)
+  // The open page was trashed (here or by someone else) and we are leaving it. Navigations run as transitions, so
+  // stop observing its query right away: a realtime refresh in between would refetch it (404) for nothing.
+  // Tied to the location entry, so opening the same id again later (e.g. after a restore) loads it normally.
+  const [gone, setGone] = useState<{ id: string; key: string } | null>(null)
+  const leaving = gone !== null && gone.id === pageId && gone.key === location.key
+  const page = usePage(workspace.id, view === 'page' && !leaving ? pageId : undefined)
   const createPage = useCreatePage(workspace.id)
   const trashPage = useTrashPage(workspace.id)
   const movePage = useMovePage(workspace.id)
+  const duplicatePage = useDuplicatePage(workspace.id)
   const editorControl = useRef<DocEditorControl>(null)
   const pages = tree.data ?? []
   const activeId = view === 'page' ? (pageId ?? null) : null
   // The trash request is async: read the open page when it finishes, not when it started.
   const activeIdRef = useRef(activeId)
+  const locationKeyRef = useRef(location.key)
   useEffect(() => {
     activeIdRef.current = activeId
+    locationKeyRef.current = location.key
   })
+  const markGone = (id: string) => setGone({ id, key: locationKeyRef.current })
 
   const createFirstPage = () => {
     createPage.mutate(
@@ -76,17 +96,21 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
       const saved = await control.flush()
       if (activeIdRef.current === targetId) version = saved
     }
+    // The open page's co-editing socket closes with "page gone" once the trash commits; that is us, not news.
+    const undoExpectGone = control?.expectGone()
     trashPage.mutate(
       { pageId: targetId, version },
       {
         onSuccess: () => {
           control?.dispose()
           if (isAffected(activeIdRef.current)) {
+            markGone(activeIdRef.current!)
             navigate(target.parent_id ? `/docs/${target.parent_id}` : '/docs', { replace: true })
           }
           toast.success('Moved to trash')
         },
         onError: (error) => {
+          undoExpectGone?.()
           if (!isPageVersionConflict(error)) toast.error('Could not move the page to the trash.')
         },
       },
@@ -114,9 +138,30 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     )
   }
 
+  /** Save the open editor if the copy includes it, duplicate, then open the copy. */
+  const requestDuplicate = async (targetId: string, includeChildren: boolean) => {
+    const target = pages.find((item) => item.id === targetId)
+    if (!target) return
+    const copied = new Set([targetId, ...(includeChildren ? descendantsOf(pages, targetId).map((item) => item.id) : [])])
+    if (activeIdRef.current && copied.has(activeIdRef.current) && editorControl.current) await editorControl.current.flush()
+    duplicatePage.mutate(
+      { pageId: targetId, includeChildren },
+      {
+        onSuccess: (copy) => {
+          navigate(`/docs/${copy.id}`)
+          toast.success(`Duplicated “${pageTitle(target)}”`)
+        },
+        onError: () => toast.error('Could not duplicate the page.'),
+      },
+    )
+  }
+  const pageActions: DocPageActions = {
+    duplicate: (id, includeChildren) => void requestDuplicate(id, includeChildren),
+  }
+
   let content
   if (view === 'trash') {
-    content = <PageTrashPane workspaceId={workspace.id} />
+    content = <PageTrashPane workspaceId={workspace.id} role={workspace.role} />
   } else if (view === 'import') {
     content = <NotionImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
   } else if (!pageId) {
@@ -162,6 +207,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
         controlRef={editorControl}
         onRequestTrash={(id) => void requestTrash(id)}
         onRequestMove={(id, space) => void requestMoveToSpace(id, space)}
+        onGone={markGone}
       />
     )
   } else if (page.isError) {
@@ -200,23 +246,25 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   }
 
   return (
-    <div
-      className="group/docs flex min-h-0 min-w-0 flex-1 overflow-hidden bg-card"
-      data-view={view !== 'page' || pageId ? 'doc' : 'index'}
-    >
-      <DocTree
-        key={workspace.id}
-        workspaceId={workspace.id}
-        pages={tree.data}
-        isPending={tree.isPending}
-        isError={tree.isError}
-        onRetry={() => void tree.refetch()}
-        activeId={activeId}
-        trashActive={view === 'trash'}
-        canDeleteTeamspaces={canDeleteTeamspaces(workspace.role)}
-        onTrash={(id) => void requestTrash(id)}
-      />
-      {content}
-    </div>
+    <DocPageActionsContext.Provider value={pageActions}>
+      <div
+        className="group/docs flex min-h-0 min-w-0 flex-1 overflow-hidden bg-card"
+        data-view={view !== 'page' || pageId ? 'doc' : 'index'}
+      >
+        <DocTree
+          key={workspace.id}
+          workspaceId={workspace.id}
+          pages={tree.data}
+          isPending={tree.isPending}
+          isError={tree.isError}
+          onRetry={() => void tree.refetch()}
+          activeId={activeId}
+          trashActive={view === 'trash'}
+          canDeleteTeamspaces={canDeleteTeamspaces(workspace.role)}
+          onTrash={(id) => void requestTrash(id)}
+        />
+        {content}
+      </div>
+    </DocPageActionsContext.Provider>
   )
 }

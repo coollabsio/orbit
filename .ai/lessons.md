@@ -7,6 +7,13 @@
 - A new migration also needs `SUPPORTED_SCHEMA_VERSION` in `crates/platform/src/backup.rs` bumped (restore refuses newer snapshots); grepping the tests for the old version number does not find it (0026, 2026-09-25).
 - A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
 
+## SQLite 3.46.0 (bundled by sqlx 0.8) FTS5 integrity false positive
+- `PRAGMA integrity_check` reports "malformed inverted index for FTS5 table …" after a row of an FTS5 table is UPDATEd twice
+  (or after `'rebuild'`), although queries are right and FTS5's own `INSERT INTO t(t) VALUES('integrity-check')` passes
+  (Python's SQLite 3.46.1 also says ok). It made the weekly integrity job (which runs at App start in tests) stop the
+  server once `page_search` rows were updated. `IntegrityService::full` now confirms such findings with FTS5's own check
+  (2026-09-25). Check new virtual tables against `integrity_check` with the bundled SQLite, not the system one.
+
 ## API retry load
 - A failed `invalidateQueries` call can refetch many active queries. Do not retry it on a short fixed UI timer; use bounded backoff so an API error cannot exhaust the shared rate limit.
 
@@ -84,7 +91,7 @@
   lets both survive, and the stylesheet order decides the winner, so the probe silently disagrees with the app.
 
 ## Production CSP blocks injected `<style>` tags
-- Production CSP is `style-src 'self'` (`crates/platform/src/http/security.rs`). Libraries that inject a `<style>` tag at runtime (Tiptap/BlockNote `injectCSS`) break silently in production but work in dev. Turn the injection off (`_tiptapOptions: { injectCSS: false }`) and copy the CSS into our stylesheet. Same for `img-src`: external image URLs do not load in production.
+- Production CSP is `style-src 'self'` (`crates/platform/src/http/security.rs`). Libraries that inject a `<style>` tag at runtime (Tiptap/BlockNote `injectCSS`, sonner toasts) break silently in production but work in dev (Vite serves no CSP). Sonner: import `sonner/dist/styles.css` in `components/ui/sonner.tsx`. Verify against the Rust-served build (`include_dir!` embeds `apps/web/dist` at compile time: `bun run build`, then rebuild/run the server) and count `[data-…]` rules in `document.styleSheets`. Turn the injection off (`_tiptapOptions: { injectCSS: false }`) and copy the CSS into our stylesheet. `img-src` is `'self' data: blob: https:` since 2026-09-25: external https images (image blocks, cover URLs) load, plain http ones do not. Tradeoff: the image host sees every viewer's IP and user agent (tracking pixels work); uploaded page files stay same-origin.
 
 ## Bun + happy-dom: never let `expect(domNode)` fail inside `waitFor`
 - A failing `expect(node).toBeNull()` makes Bun format the whole happy-dom node (it links to the window) for the error. It costs ~40 ms alone and ~750 ms late in the full run, and `waitFor` repeats it on every poll, so tests time out only in the full suite (SessionsPage, 2026-09-25).
@@ -101,3 +108,9 @@
 - shadcn checkbox fills need a `dark:` twin (`dark:data-checked:bg-primary`) to beat `dark:bg-input/30`; a new state such as
   `data-indeterminate` needs `dark:data-indeterminate:bg-primary` too, or it renders as an outline in dark mode only.
 
+
+## Realtime refresh pauses while a draft is focused
+- `useWorkspaceEvents` skips query invalidation while an input/textarea/contenteditable is focused (protects form drafts).
+  Surfaces that are focused almost all the time must merge remote updates themselves and opt out with
+  `data-realtime-safe` (Docs `DocEditor`), or they never refresh while someone types — the other user's title change
+  never arrived and the next save hit a 409 (2026-09-25). Portalled dialogs/popovers stay outside the marker.

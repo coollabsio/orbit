@@ -3,24 +3,39 @@
 //! everyone else gets `NotFound`). A page's space is its root's; sub-pages always share it.
 //! Content is one opaque JSON block array per page; `content_text` is extracted for search.
 
+use std::collections::HashMap;
+
+use orbit_domain::WorkspaceRole;
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use super::page_files::{page_has_file, parse_page_file_url};
-use super::tasks::{TaskError, escape_like, record_mutation, require_access, require_access_tx};
+use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
+use super::page_versions::{PageVersionKind, SaveOrigin, snapshot_before_edit, store_version};
+use super::tasks::{TaskError, record_mutation, require_access, require_access_tx};
 use super::teamspaces::{default_teamspace, teamspace_exists};
+use super::workspaces::{WorkspaceError, require_role};
+use crate::audit::{self, AuditOutcome};
+use crate::collab::{CollabError, CollabHub};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const SEARCH_LIMIT: i64 = 20;
-const SNIPPET_CHARS: usize = 160;
-/// How much text a snippet keeps before the first match.
-const SNIPPET_LEAD_CHARS: usize = 40;
+/// At most this many words of a query are searched for.
+const SEARCH_MAX_TERMS: usize = 16;
+/// Words in a body snippet (FTS5 caps it at 64).
+const SNIPPET_TOKENS: i64 = 24;
+/// Highlight markers in FTS output; the index strips them from page text (migration 0027).
+const MARK_OPEN: char = '\u{2}';
+const MARK_CLOSE: char = '\u{3}';
+const TITLE_MAX_CHARS: usize = 500;
+const COPY_SUFFIX: &str = " (copy)";
 const PAGE_COLUMNS: &str = "id, workspace_id, parent_id, teamspace_id, title, icon, cover_url, cover_position, \
-     content_json, position, creator_id, updated_by, version, created_at, updated_at, deleted_at";
+     content_json, position, creator_id, updated_by, version, created_at, updated_at, deleted_at, \
+     COALESCE((SELECT epoch FROM page_collab_docs WHERE page_collab_docs.page_id = pages.id), \
+     (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch";
 const SUMMARY_COLUMNS: &str = "pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
      pages.title AS title, pages.icon AS icon, pages.position AS position, pages.version AS version, \
      pages.updated_at AS updated_at";
@@ -103,6 +118,11 @@ pub struct PageRecord {
     pub updated_at: TimestampMillis,
     #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub deleted_at: Option<TimestampMillis>,
+    /// Identifies the page's collaborative document. Pass it as the `epoch` query parameter of
+    /// the co-editing socket (`GET /api/v1/workspaces/{workspace_id}/pages/{page_id}/collab`); it
+    /// changes when the stored document is reset (backup restore, converter change), and a
+    /// socket opened with an older value is closed with 4409.
+    pub collab_epoch: String,
 }
 
 /// Page metadata for the tree, without content.
@@ -163,8 +183,28 @@ pub struct PageSearchResult {
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
-    /// About 160 characters of body text around the first match, or from the start.
+    /// Plain body text around the best match (about 24 words, `…` where text was cut), or the
+    /// start of the body when only the title matched.
     pub snippet: String,
+    /// Matched words in `snippet`.
+    pub snippet_highlights: Vec<TextRange>,
+    /// Matched words in `title`.
+    pub title_highlights: Vec<TextRange>,
+}
+
+/// A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`
+/// exclusive.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct TextRange {
+    pub start: u32,
+    pub end: u32,
+}
+
+/// Result of emptying the trash.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct PageTrashEmptied {
+    /// Trash entries (pages trashed directly) deleted forever, sub-pages not counted.
+    pub purged: u64,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -214,22 +254,55 @@ pub struct PageChanges {
     pub cover_url: Option<Option<String>>,
     pub cover_position: Option<Option<String>>,
     pub content: Option<Vec<Value>>,
+    /// How page history records the save (a user edit unless said otherwise).
+    pub origin: SaveOrigin,
 }
 
 #[derive(Debug, Error)]
 pub enum PageError {
     #[error("page was not found")]
     NotFound,
+    /// The page is visible, but it has no such version.
+    #[error("page version was not found")]
+    VersionNotFound,
+    #[error("page version cursor is invalid")]
+    InvalidCursor,
     #[error("teamspace was not found")]
     TeamspaceNotFound,
     #[error("page input is invalid: {field}")]
     Invalid { field: &'static str },
     #[error("stale version")]
     VersionConflict { current: Box<Value> },
+    /// Deleting teamspace pages forever needs a workspace owner or admin.
+    #[error("page action is not permitted")]
+    Forbidden,
+    /// Only pages in the trash (trashed directly) can be deleted forever.
+    #[error("page is not in the trash")]
+    NotTrashed,
     #[error("stored page data is invalid")]
     Corrupt,
     #[error("page repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
+}
+
+impl From<CollabError> for PageError {
+    fn from(error: CollabError) -> Self {
+        match error {
+            CollabError::NotFound => Self::NotFound,
+            CollabError::Unavailable(error) => Self::Unavailable(error),
+            CollabError::Overloaded | CollabError::Corrupt(_) => Self::Corrupt,
+        }
+    }
+}
+
+impl From<WorkspaceError> for PageError {
+    fn from(error: WorkspaceError) -> Self {
+        match error {
+            WorkspaceError::Unavailable(error) => Self::Unavailable(error),
+            WorkspaceError::NotFound => Self::NotFound,
+            _ => Self::Corrupt,
+        }
+    }
 }
 
 impl From<TaskError> for PageError {
@@ -243,7 +316,7 @@ impl From<TaskError> for PageError {
 
 #[derive(Clone)]
 pub struct PageRepository {
-    database: Database,
+    pub(super) database: Database,
 }
 
 impl PageRepository {
@@ -282,6 +355,10 @@ impl PageRepository {
         actor_id: Id,
     ) -> Result<PageRecord, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
+        // Edits of an open document reach `content_json` within seconds; reads see them now.
+        if let Some(hub) = CollabHub::existing(&self.database) {
+            hub.flush_page(page_id).await;
+        }
         let row = sqlx::query(&format!(
             "SELECT {PAGE_COLUMNS} FROM pages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL \
              AND {VISIBLE}"
@@ -352,6 +429,7 @@ impl PageRepository {
         .execute(&mut *tx)
         .await?;
         renumber(&mut tx, &siblings).await?;
+        let collab_epoch = collab_generation(&mut tx).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -382,6 +460,7 @@ impl PageRepository {
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            collab_epoch,
         })
     }
 
@@ -447,6 +526,15 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
+        // A content write replaces the live collaborative document too: take its room first
+        // (never while a transaction is open), after a cheap visibility check.
+        let mut collab = match &changes.content {
+            Some(_) => {
+                self.get_visible(workspace_id, page_id, actor_id).await?;
+                Some(CollabHub::of(&self.database).write(page_id).await?)
+            }
+            None => None,
+        };
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
@@ -473,6 +561,13 @@ impl PageRepository {
         let cover_position = changes
             .cover_position
             .unwrap_or_else(|| current.cover_position.clone());
+        let content_changed = changes
+            .content
+            .as_ref()
+            .is_some_and(|content| *content != current.content);
+        if changes.origin == SaveOrigin::Edit && (content_changed || title != current.title) {
+            snapshot_before_edit(&mut tx, &current, now).await?;
+        }
         let (content_json, text) = match &changes.content {
             Some(content) => (
                 Some(serde_json::to_string(content).map_err(|_| PageError::Corrupt)?),
@@ -499,6 +594,11 @@ impl PageRepository {
         .bind(expected_version as i64)
         .execute(&mut *tx)
         .await?;
+        if let (Some(collab), Some(content)) = (collab.as_mut(), &changes.content)
+            && content_changed
+        {
+            collab.replace(&mut tx, content, actor_id, now).await?;
+        }
         record_mutation(
             &mut tx,
             workspace_id,
@@ -510,8 +610,7 @@ impl PageRepository {
             now,
         )
         .await?;
-        tx.commit().await?;
-        Ok(PageRecord {
+        let updated = PageRecord {
             title,
             icon,
             cover_url,
@@ -521,7 +620,35 @@ impl PageRepository {
             updated_by: actor_id,
             updated_at: now,
             ..current
-        })
+        };
+        if changes.origin == SaveOrigin::Import {
+            store_version(&mut tx, &updated, PageVersionKind::Import, actor_id, now).await?;
+        }
+        tx.commit().await?;
+        if let Some(collab) = collab {
+            collab.commit();
+        }
+        Ok(updated)
+    }
+
+    /// Fails with `NotFound` unless the page is live and visible to a member.
+    async fn get_visible(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+    ) -> Result<(), PageError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        sqlx::query(&format!(
+            "SELECT 1 FROM pages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND {VISIBLE}"
+        ))
+        .bind(page_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        .map(|_| ())
+        .ok_or(PageError::NotFound)
     }
 
     /// Moves a page under `parent_id` (root when `None`) at index `position` among its new
@@ -608,6 +735,8 @@ impl PageRepository {
         )
         .await?;
         tx.commit().await?;
+        // A page (and its subtree) moved into someone's private space closes other editors.
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
         Ok(PageRecord {
             parent_id,
             teamspace_id: space.teamspace_id(),
@@ -674,6 +803,7 @@ impl PageRepository {
         )
         .await?;
         tx.commit().await?;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
         Ok(())
     }
 
@@ -803,7 +933,296 @@ impl PageRepository {
         Ok(PageTrash { items })
     }
 
-    /// Case-insensitive substring search over live page titles and body text.
+    /// Deletes a page in the trash forever, with the sub-pages trashed along with it. Only pages
+    /// trashed directly qualify (`NotTrashed` otherwise, and for live pages). A private page can
+    /// only be seen, and so purged, by its owner; teamspace pages need a workspace owner or admin.
+    /// Its files, favorites and search entry go with it (cascades and triggers).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn purge_page(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), PageError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let role = require_role(&mut tx, workspace_id, actor_id, false).await?;
+        let row = sqlx::query(&format!(
+            "SELECT deleted_at IS NOT NULL AND trashed_with IS id AS in_trash FROM pages \
+             WHERE id = ? AND workspace_id = ? AND {VISIBLE}"
+        ))
+        .bind(page_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(PageError::NotFound)?;
+        if !row.get::<bool, _>("in_trash") {
+            return Err(PageError::NotTrashed);
+        }
+        let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, true).await?;
+        if current.teamspace_id.is_some() && role == WorkspaceRole::Member {
+            return Err(PageError::Forbidden);
+        }
+        check_version(expected_version, current.version, &current)?;
+        let purged = purge_batch(&mut tx, page_id).await?;
+        audit::record(
+            &mut tx,
+            workspace_id,
+            Some(actor_id),
+            "page.purged",
+            AuditOutcome::Success,
+            "page",
+            Some(page_id),
+            request_id,
+            json!({"pages": purged}),
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        Ok(())
+    }
+
+    /// Deletes forever every trashed page the caller may purge: their own private pages, plus
+    /// teamspace pages for workspace owners and admins. Members' teamspace trash is left alone.
+    pub async fn empty_trash(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageTrashEmptied, PageError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let role = require_role(&mut tx, workspace_id, actor_id, false).await?;
+        let roots = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM pages WHERE workspace_id = ? AND deleted_at IS NOT NULL \
+             AND trashed_with = id AND (owner_id = ? OR (? AND teamspace_id IS NOT NULL)) \
+             ORDER BY deleted_at, id",
+        )
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(role != WorkspaceRole::Member)
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect::<Result<Vec<_>, _>>()?;
+        for root in &roots {
+            let purged = purge_batch(&mut tx, *root).await?;
+            audit::record(
+                &mut tx,
+                workspace_id,
+                Some(actor_id),
+                "page.purged",
+                AuditOutcome::Success,
+                "page",
+                Some(*root),
+                request_id,
+                json!({"pages": purged}),
+                now,
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        Ok(PageTrashEmptied {
+            purged: roots.len() as u64,
+        })
+    }
+
+    /// Copies a live page the caller can see (with `include_children`, its whole live subtree in
+    /// order) into the same space, the copy placed right after the original. The new root is
+    /// titled "<title> (copy)". Files are shared, not copied: each copy gets its own
+    /// `page_files` rows for the same blobs, and file URLs in content and covers, `page` blocks
+    /// and `/docs/<id>` links that point inside the copied pages are rewritten to the copies.
+    pub async fn duplicate_page(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        include_children: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        // Open documents first write their latest edits into `content_json`, which is copied.
+        if let Some(hub) = CollabHub::existing(&self.database) {
+            hub.flush_workspace(workspace_id).await;
+        }
+        let mut tx = self.database.immediate_transaction().await?;
+        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let source = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
+        let collab_epoch = collab_generation(&mut tx).await?;
+        let space = source.space(actor_id);
+        let mut originals = vec![source];
+        if include_children {
+            let rows = sqlx::query(&format!(
+                "WITH RECURSIVE subtree(page_id, depth) AS ( \
+                     SELECT ?, 0 \
+                     UNION ALL \
+                     SELECT pages.id, subtree.depth + 1 FROM pages \
+                     JOIN subtree ON pages.parent_id = subtree.page_id WHERE pages.deleted_at IS NULL \
+                 ) \
+                 SELECT {PAGE_COLUMNS} FROM pages JOIN subtree ON subtree.page_id = pages.id \
+                 WHERE subtree.depth > 0 ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id"
+            ))
+            .bind(page_id.to_string())
+            .fetch_all(&mut *tx)
+            .await?;
+            for row in rows {
+                originals.push(page_from_row(row)?);
+            }
+        }
+        let pages: HashMap<Id, Id> = originals
+            .iter()
+            .map(|page| (page.id, Id::new_v7()))
+            .collect();
+        let mut files = HashMap::new();
+        let mut file_rows = Vec::new();
+        for page in &originals {
+            let rows = sqlx::query(
+                "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
+                 WHERE page_id = ? AND workspace_id = ? ORDER BY created_at, id",
+            )
+            .bind(page.id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_all(&mut *tx)
+            .await?;
+            for row in rows {
+                let file_id = parse_id(row.get("id"))?;
+                let copy = (pages[&page.id], Id::new_v7());
+                files.insert((page.id, file_id), copy);
+                file_rows.push((copy, row));
+            }
+        }
+        let remap = Remap {
+            workspace_id,
+            pages: &pages,
+            files: &files,
+        };
+
+        let mut child_positions: HashMap<Id, i64> = HashMap::new();
+        let mut root = None;
+        for (index, original) in originals.iter().enumerate() {
+            let id = pages[&original.id];
+            let (parent_id, title, position) = if index == 0 {
+                (original.parent_id, copy_title(&original.title), 0)
+            } else {
+                let parent = original
+                    .parent_id
+                    .and_then(|parent| pages.get(&parent).copied());
+                let parent = parent.ok_or(PageError::Corrupt)?;
+                let next = child_positions.entry(parent).or_default();
+                *next += 1;
+                (Some(parent), original.title.clone(), *next - 1)
+            };
+            let mut content = Value::Array(original.content.clone());
+            remap.value(&mut content, None);
+            let Value::Array(content) = content else {
+                return Err(PageError::Corrupt);
+            };
+            let cover_url = original
+                .cover_url
+                .as_ref()
+                .map(|url| remap.url(url).unwrap_or_else(|| url.clone()));
+            sqlx::query(
+                "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
+                 cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
+                 version, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            )
+            .bind(id.to_string())
+            .bind(workspace_id.to_string())
+            .bind(parent_id.map(|parent| parent.to_string()))
+            .bind(space.teamspace_column())
+            .bind(space.owner_column())
+            .bind(&title)
+            .bind(&original.icon)
+            .bind(&cover_url)
+            .bind(&original.cover_position)
+            .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
+            .bind(content_text(&content))
+            .bind(position)
+            .bind(actor_id.to_string())
+            .bind(actor_id.to_string())
+            .bind(now.as_millis())
+            .bind(now.as_millis())
+            .execute(&mut *tx)
+            .await?;
+            audit::record(
+                &mut tx,
+                workspace_id,
+                Some(actor_id),
+                "page.duplicated",
+                AuditOutcome::Success,
+                "page",
+                Some(id),
+                request_id,
+                json!({"source_page_id": original.id}),
+                now,
+            )
+            .await?;
+            if index == 0 {
+                root = Some(PageRecord {
+                    id,
+                    workspace_id,
+                    parent_id,
+                    teamspace_id: space.teamspace_id(),
+                    private: space.teamspace_id().is_none(),
+                    title,
+                    icon: original.icon.clone(),
+                    cover_url,
+                    cover_position: original.cover_position.clone(),
+                    content,
+                    position,
+                    version: 0,
+                    creator_id: actor_id,
+                    updated_by: actor_id,
+                    created_at: now,
+                    updated_at: now,
+                    deleted_at: None,
+                    collab_epoch: collab_epoch.clone(),
+                });
+            }
+        }
+        for ((page, file), row) in file_rows {
+            sqlx::query(
+                "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
+                 size_bytes, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(file.to_string())
+            .bind(workspace_id.to_string())
+            .bind(page.to_string())
+            .bind(row.get::<String, _>("blob_id"))
+            .bind(row.get::<String, _>("file_name"))
+            .bind(row.get::<String, _>("mime_type"))
+            .bind(row.get::<i64, _>("size_bytes"))
+            .bind(actor_id.to_string())
+            .bind(now.as_millis())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // The copy goes right after the original among the original's siblings.
+        let mut root = root.ok_or(PageError::Corrupt)?;
+        let mut siblings =
+            sibling_ids(&mut tx, workspace_id, space, root.parent_id, root.id).await?;
+        let index = siblings
+            .iter()
+            .position(|id| *id == page_id)
+            .map_or(siblings.len(), |index| index + 1);
+        siblings.insert(index, root.id);
+        renumber(&mut tx, &siblings).await?;
+        root.position = index as i64;
+        tx.commit().await?;
+        Ok(root)
+    }
+
+    /// Full-text search (FTS5, migration 0027) over the titles and body text of live pages the
+    /// caller can see. Every word must match (the last one as a prefix); case and diacritics are
+    /// ignored. Ranked by BM25 with title matches weighted 10x body matches.
     pub async fn search_pages(
         &self,
         workspace_id: Id,
@@ -811,38 +1230,52 @@ impl PageRepository {
         query: &str,
     ) -> Result<PageSearch, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let query = query.trim();
-        if query.is_empty() {
+        let Some(expression) = fts_query(query) else {
             return Ok(PageSearch { items: Vec::new() });
-        }
-        let pattern = format!("%{}%", escape_like(&query.to_lowercase()));
+        };
         let rows = sqlx::query(&format!(
-            "SELECT id, parent_id, teamspace_id, title, icon, content_text FROM pages \
-             WHERE workspace_id = ? AND deleted_at IS NULL AND {VISIBLE} \
-             AND (LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(content_text) LIKE ? ESCAPE '\\') \
-             ORDER BY (LOWER(title) LIKE ? ESCAPE '\\') DESC, updated_at DESC, id DESC LIMIT ?",
+            "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
+             pages.title AS title, pages.icon AS icon, \
+             highlight(page_search, 0, char(2), char(3)) AS marked_title, \
+             snippet(page_search, 1, char(2), char(3), '…', ?) AS marked_snippet \
+             FROM page_search \
+             JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
+             JOIN pages ON pages.id = page_search_rows.page_id \
+             WHERE page_search MATCH ? AND pages.workspace_id = ? AND pages.deleted_at IS NULL \
+             AND {VISIBLE} \
+             ORDER BY bm25(page_search, 10.0, 1.0), pages.updated_at DESC, pages.id DESC LIMIT ?",
         ))
+        .bind(SNIPPET_TOKENS)
+        .bind(&expression)
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
-        .bind(&pattern)
-        .bind(&pattern)
-        .bind(&pattern)
         .bind(SEARCH_LIMIT)
         .fetch_all(self.database.pool())
         .await?;
         let items = rows
             .into_iter()
             .map(|row| {
-                let text: String = row.get("content_text");
                 let teamspace_id = parse_optional_id(row.get("teamspace_id"))?;
+                let title: String = row.get("title");
+                let (marked_title, title_highlights) =
+                    split_marks(&row.get::<String, _>("marked_title"));
+                let (snippet, snippet_highlights) =
+                    split_marks(&row.get::<String, _>("marked_snippet"));
                 Ok(PageSearchResult {
                     id: parse_id(row.get("id"))?,
                     parent_id: parse_optional_id(row.get("parent_id"))?,
                     teamspace_id,
                     private: teamspace_id.is_none(),
-                    title: row.get("title"),
+                    // The index copy drops the marker characters; its ranges only fit an equal title.
+                    title_highlights: if marked_title == title {
+                        title_highlights
+                    } else {
+                        Vec::new()
+                    },
+                    title,
                     icon: row.get("icon"),
-                    snippet: snippet(&text, query),
+                    snippet,
+                    snippet_highlights,
                 })
             })
             .collect::<Result<_, PageError>>()?;
@@ -1088,32 +1521,156 @@ fn collect_text<'a>(value: &'a Value, parts: &mut Vec<&'a str>) {
     }
 }
 
-fn snippet(text: &str, query: &str) -> String {
-    let chars = text.chars().collect::<Vec<_>>();
-    let folded = chars.iter().map(|&c| fold(c)).collect::<Vec<_>>();
-    let needle = query.chars().map(fold).collect::<Vec<_>>();
-    let start = if needle.is_empty() {
-        0
-    } else {
-        folded
-            .windows(needle.len())
-            .position(|window| window == needle.as_slice())
-            .map_or(0, |index| index.saturating_sub(SNIPPET_LEAD_CHARS))
-    };
-    let end = (start + SNIPPET_CHARS).min(chars.len());
-    let mut snippet = String::new();
-    if start > 0 {
-        snippet.push('…');
-    }
-    snippet.extend(&chars[start..end]);
-    if end < chars.len() {
-        snippet.push('…');
-    }
-    snippet
+/// Builds an FTS5 query from user input without exposing FTS syntax: every whitespace-separated
+/// word becomes a quoted string (so `AND`, `NEAR`, `col:`, `-`, `*`, `^` and parentheses are plain
+/// text), words without a letter or digit are dropped (the tokenizer would drop them too), the
+/// last word matches as a prefix, and all words must match. `None` when nothing is searchable.
+fn fts_query(input: &str) -> Option<String> {
+    let terms = input
+        .split_whitespace()
+        // `"` separates tokens anyway; inside the quoted string it would end it.
+        .map(|term| term.replace('"', " "))
+        .filter(|term| term.chars().any(char::is_alphanumeric))
+        .take(SEARCH_MAX_TERMS)
+        .collect::<Vec<_>>();
+    let last = terms.len().checked_sub(1)?;
+    Some(
+        terms
+            .iter()
+            .enumerate()
+            .map(|(index, term)| {
+                if index == last {
+                    format!("\"{term}\"*")
+                } else {
+                    format!("\"{term}\"")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
-fn fold(c: char) -> char {
-    c.to_lowercase().next().unwrap_or(c)
+/// Removes the highlight markers from FTS output and returns the plain text with the marked
+/// spans as UTF-16 ranges.
+fn split_marks(marked: &str) -> (String, Vec<TextRange>) {
+    let mut text = String::with_capacity(marked.len());
+    let mut ranges = Vec::new();
+    let mut offset = 0_u32;
+    let mut open = None;
+    for c in marked.chars() {
+        match c {
+            MARK_OPEN => open = Some(offset),
+            MARK_CLOSE => {
+                if let Some(start) = open.take()
+                    && offset > start
+                {
+                    ranges.push(TextRange { start, end: offset });
+                }
+            }
+            c => {
+                text.push(c);
+                offset += c.len_utf16() as u32;
+            }
+        }
+    }
+    (text, ranges)
+}
+
+/// Hard-deletes the trashed page `root_id` and the pages trashed along with it; returns how many
+/// pages went. Sub-pages trashed on their own earlier keep their own trash entry (their
+/// `parent_id` is cleared by the foreign key), like restore treats them.
+async fn purge_batch(tx: &mut Transaction<'_, Sqlite>, root_id: Id) -> Result<u64, PageError> {
+    let ids = sqlx::query_scalar::<_, String>(
+        "WITH RECURSIVE subtree(id) AS ( \
+             SELECT ? \
+             UNION ALL \
+             SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
+             WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = ? \
+         ) \
+         SELECT id FROM subtree",
+    )
+    .bind(root_id.to_string())
+    .bind(root_id.to_string())
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut purged = 0;
+    // Children first, so no row of the batch is left pointing at a deleted parent mid-way.
+    for id in ids.iter().rev() {
+        purged += sqlx::query("DELETE FROM pages WHERE id = ? AND deleted_at IS NOT NULL")
+            .bind(id)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
+    Ok(purged)
+}
+
+/// "<title> (copy)", keeping the result within the title limit; "Untitled (copy)" when empty.
+fn copy_title(title: &str) -> String {
+    let base = if title.trim().is_empty() {
+        "Untitled"
+    } else {
+        title
+    };
+    let keep = TITLE_MAX_CHARS - COPY_SUFFIX.chars().count();
+    let mut copy = base.chars().take(keep).collect::<String>();
+    copy.push_str(COPY_SUFFIX);
+    copy
+}
+
+/// Rewrites references into a duplicated set of pages to their copies.
+struct Remap<'a> {
+    workspace_id: Id,
+    /// Original page id → copy id.
+    pages: &'a HashMap<Id, Id>,
+    /// (original page id, original file id) → (copy page id, copy file id).
+    files: &'a HashMap<(Id, Id), (Id, Id)>,
+}
+
+impl Remap<'_> {
+    /// Walks block JSON: `pageId` props of `page` blocks, page-file URLs (image/file `url`
+    /// props and anything else holding one) and `/docs/<id>` link targets. Text is left alone.
+    fn value(&self, value: &mut Value, key: Option<&str>) {
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    self.value(item, None);
+                }
+            }
+            Value::Object(map) => {
+                for (key, item) in map.iter_mut() {
+                    self.value(item, Some(key));
+                }
+            }
+            Value::String(text) => match key {
+                Some("text") => {}
+                Some("pageId") => {
+                    if let Some(copy) = text.parse::<Id>().ok().and_then(|id| self.pages.get(&id)) {
+                        *text = copy.to_string();
+                    }
+                }
+                _ => {
+                    if let Some(url) = self.url(text) {
+                        *text = url;
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+
+    /// The copy's URL for a file of a copied page or a `/docs/<id>` link to a copied page.
+    fn url(&self, url: &str) -> Option<String> {
+        if let Some((workspace, page, file)) = parse_page_file_url(url) {
+            if workspace != self.workspace_id {
+                return None;
+            }
+            let (page, file) = self.files.get(&(page, file))?;
+            return Some(page_file_url(workspace, *page, *file));
+        }
+        let id = url.strip_prefix("/docs/")?.parse::<Id>().ok()?;
+        self.pages.get(&id).map(|copy| format!("/docs/{copy}"))
+    }
 }
 
 fn insert_index(position: Option<i64>, len: usize) -> usize {
@@ -1298,7 +1855,7 @@ async fn move_descendants(
     Ok(())
 }
 
-async fn page_in_tx(
+pub(super) async fn page_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     page_id: Id,
@@ -1320,7 +1877,11 @@ async fn page_in_tx(
     page_from_row(row)
 }
 
-fn check_version(expected: u64, current: u64, record: &PageRecord) -> Result<(), PageError> {
+pub(super) fn check_version(
+    expected: u64,
+    current: u64,
+    record: &PageRecord,
+) -> Result<(), PageError> {
     if expected == current {
         Ok(())
     } else {
@@ -1361,7 +1922,30 @@ fn page_from_row(row: sqlx::sqlite::SqliteRow) -> Result<PageRecord, PageError> 
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")
             .map(TimestampMillis::from_millis),
+        collab_epoch: row.get("collab_epoch"),
     })
+}
+
+/// The epoch reported for pages without a collaborative document yet.
+async fn collab_generation(tx: &mut Transaction<'_, Sqlite>) -> Result<String, PageError> {
+    Ok(
+        sqlx::query_scalar("SELECT generation FROM page_collab_meta WHERE id = 1")
+            .fetch_one(&mut **tx)
+            .await?,
+    )
+}
+
+/// A page by id in any state (live or trashed), without a visibility check.
+pub(super) async fn page_by_id_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    page_id: Id,
+) -> Result<Option<PageRecord>, PageError> {
+    sqlx::query(&format!("SELECT {PAGE_COLUMNS} FROM pages WHERE id = ?"))
+        .bind(page_id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?
+        .map(page_from_row)
+        .transpose()
 }
 
 fn summary_from_row(row: sqlx::sqlite::SqliteRow) -> Result<PageSummary, PageError> {
@@ -1379,7 +1963,7 @@ fn summary_from_row(row: sqlx::sqlite::SqliteRow) -> Result<PageSummary, PageErr
     })
 }
 
-fn parse_id(value: String) -> Result<Id, PageError> {
+pub(super) fn parse_id(value: String) -> Result<Id, PageError> {
     value.parse().map_err(|_| PageError::Corrupt)
 }
 
@@ -1395,7 +1979,7 @@ fn parse_version(value: i64) -> Result<u64, PageError> {
 mod tests {
     use serde_json::json;
 
-    use super::{content_text, snippet};
+    use super::{SEARCH_MAX_TERMS, TextRange, content_text, fts_query, split_marks};
 
     #[test]
     fn content_text_walks_blocks_in_document_order() {
@@ -1422,13 +2006,37 @@ mod tests {
     }
 
     #[test]
-    fn snippets_center_on_the_first_match() {
-        let text = format!("{} Needle {}", "a".repeat(100), "b".repeat(300));
-        let result = snippet(&text, "needle");
-        assert!(result.starts_with('…'));
-        assert!(result.ends_with('…'));
-        assert!(result.contains("Needle"));
-        assert_eq!(result.chars().count(), 160 + 2);
-        assert_eq!(snippet("short body", "title only"), "short body");
+    fn fts_queries_quote_every_word_and_prefix_the_last() {
+        assert_eq!(
+            fts_query("  launch  pla "),
+            Some("\"launch\" \"pla\"*".to_owned())
+        );
+        assert_eq!(
+            fts_query("a\"b NEAR(x y) title:foo -bar ^c"),
+            Some("\"a b\" \"NEAR(x\" \"y)\" \"title:foo\" \"-bar\" \"^c\"*".to_owned())
+        );
+        assert_eq!(fts_query("über"), Some("\"über\"*".to_owned()));
+        for blank in ["", "   ", "* - : \" ( ) %", "🙂"] {
+            assert_eq!(fts_query(blank), None, "{blank}");
+        }
+        assert_eq!(
+            fts_query(&"w ".repeat(40)).unwrap().matches('"').count(),
+            SEARCH_MAX_TERMS * 2
+        );
+    }
+
+    #[test]
+    fn marks_become_utf16_ranges() {
+        let (text, ranges) = split_marks("…a \u{2}Über\u{3} 🙂 \u{2}plan\u{3}s\u{2}\u{3}");
+        assert_eq!(text, "…a Über 🙂 plans");
+        assert_eq!(
+            ranges,
+            [
+                TextRange { start: 3, end: 7 },
+                // The emoji is two UTF-16 code units.
+                TextRange { start: 11, end: 15 },
+            ]
+        );
+        assert_eq!(split_marks("plain"), ("plain".to_owned(), Vec::new()));
     }
 }

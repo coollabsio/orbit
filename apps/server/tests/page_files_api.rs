@@ -714,3 +714,178 @@ async fn server_side_bytes_go_through_the_same_checks() {
     assert_eq!(fixture.count("SELECT COUNT(*) FROM page_files").await, 1);
     assert!(fixture.store.temporary_files().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn duplicates_share_files_and_point_at_their_own_copies() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let owner = fixture.owner_cookie.clone();
+    let parent = fixture
+        .create_page(&owner, json!({"title": "Parent"}))
+        .await;
+    let child = fixture
+        .create_page(
+            &owner,
+            json!({"parent_id": id_of(&parent), "title": "Child"}),
+        )
+        .await;
+    let outside = fixture
+        .create_page(&owner, json!({"title": "Outside"}))
+        .await;
+    let (_, cover) = fixture
+        .upload(&owner, id_of(&parent), "cover.png", PNG)
+        .await;
+    let (_, child_file) = fixture.upload(&owner, id_of(&child), "doc.svg", SVG).await;
+    let (_, outside_file) = fixture.upload(&owner, id_of(&outside), "o.png", PNG).await;
+    let url = |file: &Value| file["url"].as_str().unwrap().to_owned();
+    let page_uri = |page: &Value| format!("{}/{}", fixture.pages_uri(), id_of(page));
+    let (status, _) = fixture
+        .call(
+            &owner,
+            "PATCH",
+            &page_uri(&parent),
+            Some(json!({
+                "expected_version": 0,
+                "cover_url": url(&cover),
+                "content": [
+                    {"id": "i", "type": "image", "props": {"url": url(&cover), "name": "cover.png"}, "children": []},
+                    {"id": "f", "type": "file", "props": {"url": url(&child_file)}, "children": []},
+                    {"id": "o", "type": "image", "props": {"url": url(&outside_file)}, "children": []}
+                ]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = fixture
+        .call(
+            &owner,
+            "PATCH",
+            &page_uri(&child),
+            Some(json!({
+                "expected_version": 0,
+                "content": [{"id": "f", "type": "file", "props": {"url": url(&child_file)}, "children": []}]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let blobs = fixture.store.blobs().await.unwrap().len();
+
+    let (status, copy) = fixture
+        .call(
+            &owner,
+            "POST",
+            &format!("{}/duplicate", page_uri(&parent)),
+            Some(json!({"include_children": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{copy}");
+    // New rows for the copied pages' files, the same blobs, no new bytes.
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM page_files").await, 5);
+    assert_eq!(
+        fixture
+            .count("SELECT COUNT(DISTINCT blob_id) FROM page_files")
+            .await,
+        2
+    );
+    assert_eq!(fixture.store.blobs().await.unwrap().len(), blobs);
+    let (child_copy,): (String,) = sqlx::query_as("SELECT id FROM pages WHERE parent_id = ?")
+        .bind(id_of(&copy))
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    let copy_cover = copy["cover_url"].as_str().unwrap().to_owned();
+    assert!(
+        copy_cover.starts_with(&fixture.files_uri(id_of(&copy))),
+        "{copy_cover}"
+    );
+    assert_ne!(copy_cover, url(&cover));
+    let content = &copy["content"];
+    assert_eq!(content[0]["props"]["url"], copy_cover);
+    assert_eq!(content[0]["props"]["name"], "cover.png");
+    let copied_child_file = content[1]["props"]["url"].as_str().unwrap().to_owned();
+    assert!(copied_child_file.starts_with(&fixture.files_uri(&child_copy)));
+    // A file of a page outside the copied set keeps pointing at that page.
+    assert_eq!(content[2]["props"]["url"], url(&outside_file));
+    let (_, child_page) = fixture
+        .call(
+            &owner,
+            "GET",
+            &format!("{}/{child_copy}", fixture.pages_uri()),
+            None,
+        )
+        .await;
+    assert_eq!(child_page["content"][0]["props"]["url"], copied_child_file);
+    let response = fixture.download(&owner, &copy_cover).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_bytes(response).await, PNG);
+
+    // Deleting the copy forever keeps the originals' files; the blobs stay referenced.
+    fixture.trash(id_of(&copy)).await;
+    let (status, body) = fixture
+        .call(
+            &owner,
+            "DELETE",
+            &format!("{}/permanent?expected_version=1", page_uri(&copy)),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM page_files").await, 3);
+    let response = fixture.download(&owner, &url(&cover)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let later = TimestampMillis::now().as_millis() + 2 * DAY_MILLIS;
+    assert_eq!(
+        fixture
+            .uploads
+            .reconcile(later)
+            .await
+            .unwrap()
+            .deleted_blobs,
+        0
+    );
+}
+
+#[tokio::test]
+async fn delete_forever_releases_page_files_for_reconciliation() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let owner = fixture.owner_cookie.clone();
+    let page = fixture
+        .create_page(&owner, json!({"title": "Doomed"}))
+        .await;
+    let (_, file) = fixture.upload(&owner, id_of(&page), "only.svg", SVG).await;
+    fixture.trash(id_of(&page)).await;
+    let (status, body) = fixture
+        .call(
+            &owner,
+            "POST",
+            &format!("{}/trash/empty", fixture.pages_uri()),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["purged"], 1);
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM page_files").await, 0);
+    assert_eq!(
+        fixture
+            .download(&owner, file["url"].as_str().unwrap())
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    // The blob is quarantined for a day, then reclaimed.
+    let now = TimestampMillis::now().as_millis();
+    assert_eq!(
+        fixture.uploads.reconcile(now).await.unwrap().deleted_blobs,
+        0
+    );
+    let later = now + 2 * DAY_MILLIS;
+    assert_eq!(
+        fixture
+            .uploads
+            .reconcile(later)
+            .await
+            .unwrap()
+            .deleted_blobs,
+        1
+    );
+    assert!(fixture.store.blobs().await.unwrap().is_empty());
+}

@@ -44,6 +44,7 @@ use super::model::{BlockNode, NotionPage, normalize_id};
 pub use super::scan::{NotionImportNode, NotionImportNodeKind, NotionImportTree};
 use super::scan::{ScanControl, build_tree};
 use crate::repositories::page_files::{PageFileRepository, page_file_url};
+use crate::repositories::page_versions::SaveOrigin;
 use crate::repositories::pages::{
     CreatePage, PageChanges, PageError, PageRepository, PageSpace, SpaceRequest,
 };
@@ -336,7 +337,9 @@ pub struct NotionImport {
     /// Set once the import was started.
     #[schema(required = true)]
     pub destination: Option<NotionImportDestination>,
-    /// The scan result, once ready. Only in single-import responses; `null` in lists.
+    /// The scan result, once ready. Only in `GET …/imports/notion/{id}?include=tree`; `null`
+    /// everywhere else (the default detail, lists, create, start and cancel), so polling
+    /// stays light.
     #[schema(required = true)]
     pub tree: Option<NotionImportTree>,
     /// Conversion summary, once the import started.
@@ -552,7 +555,7 @@ impl NotionImportService {
                 .await?;
             return Err(error);
         }
-        self.get(workspace_id, user_id, id).await
+        self.get(workspace_id, user_id, id, false).await
     }
 
     /// The member's recent imports in this workspace, newest first (no trees).
@@ -582,17 +585,19 @@ impl NotionImportService {
         Ok(imports)
     }
 
-    /// One of the member's imports, with its tree. Other members (admins included) get
-    /// `NotFound`.
+    /// One of the member's imports; the scan tree only `with_tree`. Other members (admins
+    /// included) get `NotFound`.
     pub async fn get(
         &self,
         workspace_id: Id,
         user_id: Id,
         import_id: Id,
+        with_tree: bool,
     ) -> Result<NotionImport, ImportError> {
         self.require_member(workspace_id, user_id).await?;
         self.expire_stale(TimestampMillis::now()).await?;
-        self.load_view(workspace_id, user_id, import_id, true).await
+        self.load_view(workspace_id, user_id, import_id, with_tree)
+            .await
     }
 
     /// Plans the import of `selection` into `destination` and queues the import job.
@@ -742,7 +747,7 @@ impl NotionImportService {
                 .await?;
             return Err(error);
         }
-        self.get(workspace_id, user_id, import_id).await
+        self.get(workspace_id, user_id, import_id, false).await
     }
 
     /// Cancels an open import and deletes its token. A running job stops before its next page.
@@ -765,7 +770,7 @@ impl NotionImportService {
         .await?
         .rows_affected();
         if updated == 0 {
-            self.load_view(workspace_id, user_id, import_id, true)
+            self.load_view(workspace_id, user_id, import_id, false)
                 .await?;
             return Err(ImportError::StateConflict);
         }
@@ -775,7 +780,8 @@ impl NotionImportService {
         if !self.is_running_here(import_id) {
             self.trash_unfilled_pages(import_id).await?;
         }
-        self.load_view(workspace_id, user_id, import_id, true).await
+        self.load_view(workspace_id, user_id, import_id, false)
+            .await
     }
 
     /// Expires scanned imports that were not started within 24 hours and fails active imports
@@ -1384,6 +1390,7 @@ impl NotionImportService {
                         })
                         .collect(),
                 ),
+                origin: SaveOrigin::Import,
                 ..PageChanges::default()
             }
         } else {
@@ -1494,6 +1501,8 @@ impl NotionImportService {
                 cover_url: cover_url.map(Some),
                 cover_position: None,
                 content: Some(converted.content),
+                // The imported state becomes an `import` version in the page history.
+                origin: SaveOrigin::Import,
             }
         };
         let current = self
@@ -1730,11 +1739,13 @@ impl NotionImportService {
         with_tree: bool,
     ) -> Result<NotionImport, ImportError> {
         let row = sqlx::query(
-            "SELECT id, workspace_id, status, notion_workspace_name, tree_json, selection_json, \
-             target_teamspace_id, target_private, target_parent_page_id, total, done, failed, \
+            "SELECT id, workspace_id, status, notion_workspace_name, \
+             CASE WHEN ? THEN tree_json END AS tree_json, selection_json, target_teamspace_id, \
+             target_private, target_parent_page_id, total, done, failed, \
              report_json, error, created_at, updated_at FROM notion_imports \
              WHERE id = ? AND workspace_id = ? AND user_id = ?",
         )
+        .bind(with_tree)
         .bind(import_id.to_string())
         .bind(workspace_id.to_string())
         .bind(user_id.to_string())
@@ -1744,14 +1755,12 @@ impl NotionImportService {
         let invalid = |_| ImportError::Unavailable("invalid stored import".to_owned());
         let status = NotionImportStatus::parse(&row.get::<String, _>("status"))?;
         let started = row.get::<Option<String>, _>("selection_json").is_some();
-        let tree = if with_tree {
-            row.get::<Option<String>, _>("tree_json")
-                .map(|json| serde_json::from_str::<NotionImportTree>(&json))
-                .transpose()
-                .map_err(|_| ImportError::Unavailable("invalid stored tree".to_owned()))?
-        } else {
-            None
-        };
+        // `tree_json` is only read `with_tree` (see the query).
+        let tree = row
+            .get::<Option<String>, _>("tree_json")
+            .map(|json| serde_json::from_str::<NotionImportTree>(&json))
+            .transpose()
+            .map_err(|_| ImportError::Unavailable("invalid stored tree".to_owned()))?;
         let destination = if started {
             Some(NotionImportDestination {
                 teamspace_id: row

@@ -357,33 +357,26 @@ fn public_origin_must_be_an_http_origin_without_path_or_query() {
 }
 
 #[test]
-fn notion_api_origin_and_rate_are_configurable() {
-    let defaults = load_fixture("", [], None).unwrap();
-    assert_eq!(defaults.notion.api_base, "https://api.notion.com");
-    assert_eq!(defaults.notion.requests_per_minute, 180);
-
-    let cfg = load_fixture(
-        "[notion]\nrequests_per_minute = 600",
-        [("ORBIT__NOTION__API_BASE", "http://127.0.0.1:9999/")],
+fn notion_import_has_no_operator_settings() {
+    // The Notion API origin and request rate are fixed in the client (api.notion.com, 180/min):
+    // the old keys are unknown settings now, like any typo.
+    let error = load_fixture(
+        "",
+        [("ORBIT__NOTION__API_BASE", "https://api.notion.com")],
         None,
     )
-    .unwrap();
-    assert_eq!(cfg.notion.api_base, "http://127.0.0.1:9999");
-    assert_eq!(cfg.notion.requests_per_minute, 600);
-
-    for (toml, env) in [
-        ("", [("ORBIT__NOTION__API_BASE", "ftp://notion.example")]),
-        (
-            "",
-            [("ORBIT__NOTION__API_BASE", "https://notion.example/v1")],
-        ),
-        ("", [("ORBIT__NOTION__REQUESTS_PER_MINUTE", "0")]),
-        (
-            "[notion]\nrequests_per_minute = 6001",
-            [("ORBIT__NOTION__API_BASE", "https://api.notion.com")],
-        ),
-    ] {
-        let error = load_fixture(toml, env, None).unwrap_err();
-        assert!(error.to_string().contains("notion"), "{error}");
-    }
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("ORBIT__NOTION__API_BASE"),
+        "{error}"
+    );
+    let error =
+        load_fixture("", [("ORBIT__NOTION__REQUESTS_PER_MINUTE", "600")], None).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("ORBIT__NOTION__REQUESTS_PER_MINUTE"),
+        "{error}"
+    );
+    assert!(load_fixture("[notion]\nrequests_per_minute = 600", [], None).is_err());
 }

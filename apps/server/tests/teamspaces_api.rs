@@ -406,6 +406,11 @@ async fn teamspaces_are_isolated_between_workspaces() {
             ),
             None,
         ),
+        (
+            "POST",
+            format!("{}/move", fixture.teamspace_uri(id_of(&general))),
+            Some(json!({"expected_version": 0, "position": 1})),
+        ),
     ] {
         let (status, problem) = call_as(&fixture, &outsider_cookie, method, &uri, body).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}: {problem}");
@@ -425,6 +430,15 @@ async fn teamspaces_are_isolated_between_workspaces() {
     let (status, problem) = fixture
         .call(
             "POST",
+            &format!("{wrong_scope}/move"),
+            Some(json!({"expected_version": 0, "position": 0})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "teamspace_not_found");
+    let (status, problem) = fixture
+        .call(
+            "POST",
             &format!("/api/v1/workspaces/{foreign_workspace}/pages"),
             Some(json!({"teamspace_id": id_of(&general)})),
         )
@@ -432,6 +446,142 @@ async fn teamspaces_are_isolated_between_workspaces() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
     assert_eq!(problem["code"], "teamspace_not_found");
     assert_eq!(fixture.list().await[0]["name"], "General");
+}
+
+#[tokio::test]
+async fn members_reorder_teamspaces_and_the_top_one_becomes_the_default() {
+    let fixture = Fixture::new().await;
+    let general = fixture.list().await.remove(0);
+    let design = fixture.create("Design").await;
+    let ops = fixture.create("Ops").await;
+    let (_, member_cookie) =
+        add_member(&fixture, &fixture.workspace_id, "member@example.com").await;
+    let move_uri = |teamspace: &Value| format!("{}/move", fixture.teamspace_uri(id_of(teamspace)));
+
+    // A member moves Ops to the top: renumbered 0..n, Ops is the default now.
+    let (status, list) = call_as(
+        &fixture,
+        &member_cookie,
+        "POST",
+        &move_uri(&ops),
+        Some(json!({"expected_version": 0, "position": 0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let items = list["items"].as_array().unwrap();
+    assert_eq!(names(items), ["Ops", "General", "Design"]);
+    let positions: Vec<i64> = items
+        .iter()
+        .map(|item| item["position"].as_i64().unwrap())
+        .collect();
+    assert_eq!(positions, [0, 1, 2]);
+    let defaults: Vec<bool> = items
+        .iter()
+        .map(|item| item["is_default"].as_bool().unwrap())
+        .collect();
+    assert_eq!(defaults, [true, false, false]);
+    assert_eq!(
+        items[0]["version"], 1,
+        "the moved teamspace's version changes"
+    );
+    assert_eq!(
+        items[1]["version"], general["version"],
+        "the others keep theirs"
+    );
+    assert_eq!(fixture.list().await, *items);
+    let page = fixture.create_page(json!({"title": "Lands in Ops"})).await;
+    assert_eq!(
+        page["teamspace_id"], ops["id"],
+        "new root pages go to the default"
+    );
+
+    // Positions past the end clamp to the end.
+    let (status, list) = fixture
+        .call(
+            "POST",
+            &move_uri(&ops),
+            Some(json!({"expected_version": 1, "position": 99})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(
+        names(list["items"].as_array().unwrap()),
+        ["General", "Design", "Ops"]
+    );
+    assert_eq!(list["items"][0]["is_default"], true);
+
+    // A stale version is a conflict and changes nothing.
+    let (status, conflict) = fixture
+        .call(
+            "POST",
+            &move_uri(&ops),
+            Some(json!({"expected_version": 0, "position": 0})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+    assert_eq!(conflict["code"], "conflict");
+    assert_eq!(conflict["conflict"]["current_version"], 2);
+    assert_eq!(names(&fixture.list().await), ["General", "Design", "Ops"]);
+
+    let (status, problem) = fixture
+        .call(
+            "POST",
+            &move_uri(&design),
+            Some(json!({"expected_version": 0, "position": -1})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert_eq!(problem["code"], "validation_failed");
+
+    let moves: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE workspace_id = ? AND action = 'teamspace.moved' AND resource_id = ?",
+    )
+    .bind(&fixture.workspace_id)
+    .bind(id_of(&ops))
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(moves, 2);
+}
+
+#[tokio::test]
+async fn teamspace_icons_are_set_and_cleared_with_bounded_values() {
+    let fixture = Fixture::new().await;
+    let design = fixture.create("Design").await;
+    let uri = fixture.teamspace_uri(id_of(&design));
+    let (status, set) = fixture
+        .call(
+            "PATCH",
+            &uri,
+            Some(json!({"expected_version": 0, "icon": "🚀"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(set["icon"], "🚀");
+    assert_eq!(set["name"], "Design");
+    for icon in [json!(""), json!("  "), json!("x".repeat(65))] {
+        let (status, problem) = fixture
+            .call(
+                "PATCH",
+                &uri,
+                Some(json!({"expected_version": 1, "icon": icon})),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{icon}: {problem}"
+        );
+    }
+    let (status, cleared) = fixture
+        .call(
+            "PATCH",
+            &uri,
+            Some(json!({"expected_version": 1, "icon": null})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["icon"], Value::Null);
 }
 
 fn names(teamspaces: &[Value]) -> Vec<&str> {

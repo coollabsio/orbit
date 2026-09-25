@@ -2,10 +2,13 @@ import '@blocknote/shadcn/style.css'
 import './PageEditor.css'
 
 import { useEffect, useImperativeHandle, useMemo, useRef, type MouseEvent, type Ref } from 'react'
+import { withCollaboration } from '@blocknote/core/yjs'
 import { SuggestionMenuController, useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/shadcn'
+import type { Awareness } from 'y-protocols/awareness'
+import type * as Y from 'yjs'
 import { useTheme } from '@/lib/themeContext'
-import { contentEquals, internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent } from './content'
+import { internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent } from './content'
 import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { EDITOR_BLOCK_TYPES, pageEditorSchema, type PageEditorInstance } from './schema'
@@ -14,24 +17,29 @@ import { getPageSlashMenuItems } from './slashMenu'
 export type { PageRef } from './pageEditorContext'
 
 export interface PageEditorHandle {
-  /**
-   * Replaces the whole document (e.g. after a realtime refresh while there are no unsaved local edits).
-   * No-op when the content already matches. Does not call `onChange` and is not added to undo history.
-   */
-  replaceContent: (content: unknown[]) => void
   /** Current document as sanitized JSON (same shape `onChange` receives). */
   getContent: () => unknown[]
   focus: () => void
 }
 
+/** Real-time co-editing: the document lives in `fragment` (already synced with the server) instead of `initialContent`. */
+export interface PageEditorCollab {
+  provider: { awareness?: Awareness }
+  fragment: Y.XmlFragment
+  /** Local caret owner (the server stamps the session's user for everyone else). */
+  user: { name: string; color: string }
+}
+
 export interface PageEditorProps {
   /** The editor is recreated (fresh document + undo history) whenever this changes. */
   pageId: string
-  /** `Page.content` from the API. Read once per `pageId`; use the handle's `replaceContent` for later updates. */
-  initialContent: unknown[]
+  /** `Page.content` from the API, read once per `pageId`. Ignored with `collab` (the Y document is the content). */
+  initialContent?: unknown[]
+  /** Bind to a collaborative document. Fixed per editor instance: key the editor to switch documents. */
+  collab?: PageEditorCollab
   editable: boolean
-  /** Called on every user edit with the full sanitized document (debounce saving on the caller side). */
-  onChange: (content: unknown[]) => void
+  /** Called on every edit with the full sanitized document (read-only previews and tests; collab needs none). */
+  onChange?: (content: unknown[]) => void
   resolvePage: (pageId: string) => PageRef | null
   onOpenPage: (pageId: string) => void
   /** Creates a child page of `pageId`; resolves to the new page id (reject/throw to abort). */
@@ -54,6 +62,7 @@ export function PageEditor(props: PageEditorProps) {
 
 function PageEditorInner({
   initialContent,
+  collab,
   editable,
   onChange,
   resolvePage,
@@ -65,7 +74,6 @@ function PageEditorInner({
   ref,
 }: PageEditorProps) {
   const { theme } = useTheme()
-  const suppressChange = useRef(false)
   const mounted = useRef(true)
   const uploadRef = useRef(uploadFile)
   const openPageRef = useRef(onOpenPage)
@@ -74,15 +82,13 @@ function PageEditorInner({
     openPageRef.current = onOpenPage
   }, [uploadFile, onOpenPage])
 
-  const editor: PageEditorInstance = useCreateBlockNote({
+  const options = {
     schema: pageEditorSchema,
-    // `[]` (new page) becomes undefined → BlockNote starts with one empty paragraph.
-    initialContent: toEditorContent(initialContent, EDITOR_BLOCK_TYPES) as never,
     links: {
       isValidLink: isSafeLinkHref,
       // Edit mode: BlockNote calls this instead of `window.open`. In-app page links are handled by the click
       // listener below (it also covers read-only mode); everything else opens in a new tab as before.
-      onClick: (event) => {
+      onClick: (event: globalThis.MouseEvent) => {
         const anchor = linkAnchor(event.target)
         const href = anchor?.getAttribute('href')
         if (!href || !isSafeLinkHref(href)) return true
@@ -96,7 +102,21 @@ function PageEditorInner({
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
     // blocks. The same rules ship statically in PageEditor.css instead.
     _tiptapOptions: { injectCSS: false },
-  })
+  }
+  const editor: PageEditorInstance = useCreateBlockNote(
+    collab
+      ? // The server initializes every document (never an empty fragment), so there is no initialContent here;
+        // withCollaboration also swaps the undo history for Yjs' (only local edits are undone).
+        withCollaboration({
+          ...options,
+          collaboration: { provider: collab.provider, fragment: collab.fragment, user: collab.user, showCursorLabels: 'activity' },
+        })
+      : {
+          ...options,
+          // `[]` (new page) becomes undefined → BlockNote starts with one empty paragraph.
+          initialContent: toEditorContent(initialContent ?? [], EDITOR_BLOCK_TYPES) as never,
+        },
+  )
 
   useEffect(() => {
     mounted.current = true
@@ -108,19 +128,6 @@ function PageEditorInner({
   useImperativeHandle(
     ref,
     () => ({
-      replaceContent(content) {
-        const next = toEditorContent(content, EDITOR_BLOCK_TYPES) ?? [{ type: 'paragraph' }]
-        if (contentEquals(toStoredContent(editor.document), next)) return
-        suppressChange.current = true
-        try {
-          editor.transact((tr) => {
-            tr.setMeta('addToHistory', false)
-            editor.replaceBlocks(editor.document, next as never)
-          })
-        } finally {
-          suppressChange.current = false
-        }
-      },
       getContent: () => toStoredContent(editor.document),
       focus: () => editor.focus(),
     }),
@@ -172,10 +179,7 @@ function PageEditorInner({
           theme={theme}
           className={className ? `orbit-page-editor ${className}` : 'orbit-page-editor'}
           slashMenu={false}
-          onChange={(changed) => {
-            if (suppressChange.current) return
-            onChange(toStoredContent(changed.document))
-          }}
+          onChange={onChange ? (changed) => onChange(toStoredContent(changed.document)) : undefined}
         >
           <SuggestionMenuController
             triggerCharacter="/"
