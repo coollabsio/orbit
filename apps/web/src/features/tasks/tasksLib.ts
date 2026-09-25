@@ -81,15 +81,3 @@ export function buildFeed(task: Task): FeedEntry[] {
   }
   return feed
 }
-
-export type SortKey = 'manual' | 'priority' | 'created' | 'updated' | 'title'
-
-export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-  { key: 'manual', label: 'Manual' },
-  { key: 'priority', label: 'Priority' },
-  { key: 'created', label: 'Created' },
-  { key: 'updated', label: 'Last updated' },
-  { key: 'title', label: 'Title' },
-]
-
-export type TaskLayout = 'list' | 'board' | 'timeline'

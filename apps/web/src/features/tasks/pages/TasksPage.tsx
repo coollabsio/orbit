@@ -27,8 +27,8 @@ import {
 } from '@/features/tasks/api/tasks'
 import { TaskBoard } from '@/features/tasks/components/TaskBoard'
 import { TaskDetail } from '@/features/tasks/components/TaskDetail'
-import { TaskFilters } from '@/features/tasks/components/TaskFilters'
 import { TaskList } from '@/features/tasks/components/TaskList'
+import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { quickSearchTasks, resolveStatusId } from '@/features/tasks/tasksLib'
@@ -41,12 +41,12 @@ import { useSavedView, useViewPreference } from '@/features/views/api/views'
 import { createDefaultsFromFilter, type GroupContext } from '@/features/views/grouping'
 import { groupCreateFields, type GroupValues } from '@/features/views/layoutGroups'
 import { AdvancedFilterDialog } from '@/features/views/components/AdvancedFilterDialog'
+import { DisplayPopover } from '@/features/views/components/DisplayPopover'
 import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
 import { PRESET_LABEL, type FilterOptions } from '@/features/views/filterFields'
-import { legacyFilterValues, withLegacySort } from '@/features/views/legacyFilterAdapter'
 import { useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
-import { isTaskPreset, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
+import { DEFAULT_DISPLAY, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 
@@ -101,7 +101,7 @@ function WorkspaceTasksPage() {
   const preference = useViewPreference(workspace.id, source.kind === 'page' ? source.pageKey : 'all', source.kind === 'page')
   // a saved view that failed to load has no state: never run the task query with defaults in its place
   const viewUnavailable = source.kind === 'view' && !viewState.isLoading && viewState.view === undefined
-  const { filter, display } = viewState.state
+  const { display } = viewState.state
   const layout = display.layout
   const tasksQuery = useTaskQuery(workspace.id, viewState.effective, display, !viewState.isLoading && !viewUnavailable)
 
@@ -116,8 +116,6 @@ function WorkspaceTasksPage() {
       lastScope.current = scopeKey
     }
   }, [scopeKey])
-
-  const legacy = legacyFilterValues(filter, display)
 
   const detailQuery = useTask(workspace.id, taskId)
   const commentsQuery = useTaskComments(workspace.id, taskId)
@@ -312,14 +310,13 @@ function WorkspaceTasksPage() {
             <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
             <div className="flex-1" />
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
+            <TaskSearchBox value={search} onChange={setSearch} />
             <FilterButton filter={viewState.state.filter} options={filterOptions} onChange={viewState.setFilter} onOpenAdvanced={() => setAdvancedOpen(true)} />
-            <TaskFilters
-              sort={legacy.sort}
-              layout={layout}
-              search={search}
-              onSearchChange={setSearch}
-              onSortChange={(value) => viewState.setDisplay(withLegacySort(value))}
-              onLayoutChange={(value) => viewState.setDisplay({ layout: value })}
+            <DisplayPopover
+              display={display}
+              // a view resets to its saved display (normalized like useViewState's dirty base), a page to the default
+              defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
+              onChange={viewState.setDisplay}
             />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}

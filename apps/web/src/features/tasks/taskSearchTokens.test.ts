@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 
 test('task search uses shared input tokens and one wrapper focus ring', async () => {
-  const source = await Bun.file(new URL('./components/TaskFilters.tsx', import.meta.url)).text()
-  const wrapper = source.slice(source.indexOf('const SEARCH_GROUP'), source.indexOf('interface TaskFiltersProps'))
+  const source = await Bun.file(new URL('./components/TaskSearchBox.tsx', import.meta.url)).text()
+  const wrapper = source.slice(source.indexOf('const SEARCH_GROUP'), source.indexOf('export function TaskSearchBox'))
   // the InputGroup wrapper carries the shared control tokens and the single focus ring
   expect(wrapper).toContain('border border-input')
   expect(wrapper).toContain('bg-muted')
