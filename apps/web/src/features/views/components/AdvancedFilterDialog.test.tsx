@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
-import { fireEvent, render, within } from '@testing-library/react'
+import { act, fireEvent, render, within, type RenderResult } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { appendCondition, type FilterIssue } from '../filterTree'
 import { FILTER_OPTIONS } from '../testFixtures'
 import type { Condition, FilterGroup } from '../viewState'
@@ -90,3 +91,50 @@ test('opens without animation when a key press opened it', () => {
   view.rerender(<AdvancedFilterDialog open {...props} />)
   expect(popup()?.hasAttribute('data-instant')).toBe(true)
 })
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {}
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+function ClosableDialog({ filter, validate, onApply }: { filter: FilterGroup; validate: (filter: FilterGroup) => Promise<FilterIssue | null>; onApply: (filter: FilterGroup) => void }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <>
+      <output data-testid="open">{String(open)}</output>
+      <AdvancedFilterDialog open={open} onOpenChange={setOpen} filter={filter} options={FILTER_OPTIONS} onApply={onApply} validate={validate} />
+    </>
+  )
+}
+
+for (const [how, close] of [
+  ['Cancel', (view: RenderResult) => userEvent.click(view.getByRole('button', { name: 'Cancel' }))],
+  ['Escape', () => userEvent.keyboard('{Escape}')],
+] as const) {
+  test(`closing with ${how} while the server check runs never applies the filter`, async () => {
+    const check = deferred<FilterIssue | null>()
+    const applied: FilterGroup[] = []
+    const errors: unknown[][] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => errors.push(args)
+    try {
+      const view = render(<ClosableDialog filter={{ op: 'and', children: [HIGH] }} validate={() => check.promise} onApply={(next) => applied.push(next)} />)
+      await userEvent.click(view.getByRole('button', { name: 'Apply filter' }))
+      expect(view.getByRole('button', { name: 'Checking…' })).toBeTruthy()
+      expect((view.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false)
+      await close(view)
+      expect(view.getByTestId('open').textContent).toBe('false')
+      await act(async () => {
+        check.resolve(null)
+        await check.promise
+      })
+      expect(applied).toEqual([])
+      expect(errors).toEqual([])
+    } finally {
+      console.error = original
+    }
+  })
+}

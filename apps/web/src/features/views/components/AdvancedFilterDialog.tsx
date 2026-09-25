@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Add as Plus, Trash } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -90,6 +90,14 @@ function TreeEditor({ filter, options, onApply, validate, onClose }: TreeEditorP
   const [draft, setDraft] = useState<FilterGroup>(() => structuredClone(filter))
   const [issue, setIssue] = useState<FilterIssue | null>(null)
   const [checking, setChecking] = useState(false)
+  // closing the dialog (Cancel, Escape, backdrop) mid-check unmounts the editor: the pending check must then do nothing
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   const parsed = issue ? parseIssuePath(issue.path) : null
   // an issue that names no node in the tree shows above it, so Apply never fails silently
   const issueNode = parsed && parsed.length > 0 && nodeAt(draft, parsed) ? parsed : null
@@ -107,17 +115,17 @@ function TreeEditor({ filter, options, onApply, validate, onClose }: TreeEditorP
     }
     if (validate) {
       setChecking(true)
+      let serverIssue: FilterIssue | null
       try {
-        const serverIssue = await validate(draft)
-        if (serverIssue) {
-          setIssue(serverIssue)
-          return
-        }
+        serverIssue = await validate(draft)
       } catch {
-        setIssue({ path: 'filter', message: "Orbit couldn't check this filter. Try again." })
+        serverIssue = { path: 'filter', message: "Orbit couldn't check this filter. Try again." }
+      }
+      if (!mounted.current) return
+      setChecking(false)
+      if (serverIssue) {
+        setIssue(serverIssue)
         return
-      } finally {
-        setChecking(false)
       }
     }
     onApply(draft)
