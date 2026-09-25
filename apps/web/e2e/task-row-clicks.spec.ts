@@ -13,7 +13,10 @@ for (const touch of [false, true]) {
       }))
       await page.route('**/api/v1/**', async (route) => {
         const path = new URL(route.request().url()).pathname
+        // the shell's favorites sidebar lists saved views on every page
+        if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
         let body: unknown = { items: [], next_cursor: null }
+        if (path.endsWith('/views')) body = []
         if (path.endsWith('/setup/status')) body = { complete: true }
         if (path.endsWith('/auth/me')) body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
         if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]

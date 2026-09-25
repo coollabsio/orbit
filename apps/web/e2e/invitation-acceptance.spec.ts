@@ -40,7 +40,10 @@ for (const mode of ['new', 'existing', 'wrong-account']) {
         await route.fulfill({ json: { workspace_id: 'alpha', membership_id: 'membership', created: true } })
         return
       }
+      // the shell's favorites sidebar lists saved views on every page
+      if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
       let body: unknown = { items: [], next_cursor: null }
+      if (path.endsWith('/views')) body = []
       if (path.endsWith('/setup/status')) body = { complete: true }
       if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'member', version: 1 }]
       await route.fulfill({ json: body })

@@ -12,7 +12,7 @@ import { DEFAULT_DISPLAY } from './viewState'
 
 const WORKSPACE: WorkspaceRecord = { id: 'alpha', name: 'Alpha', role: 'member', version: 1 }
 
-export function LocationProbe() {
+function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }

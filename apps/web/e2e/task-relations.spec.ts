@@ -48,7 +48,10 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
       await route.fulfill({ json: { items: body.updates.map((update) => applyDuplicate(tasks, update.id, update.duplicate_of_id)), next_cursor: null } })
       return
     }
+    // the shell's favorites sidebar lists saved views on every page
+    if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
     let body: unknown = { items: [], next_cursor: null }
+    if (path.endsWith('/views')) body = []
     if (path.endsWith('/setup/status')) body = { complete: true }
     if (path.endsWith('/auth/me')) body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
     if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]

@@ -24,7 +24,10 @@ for (const mode of ['desktop', 'collapsed', 'mobile']) {
         await route.fulfill({ status: 401, json: { code: 'authentication_required' } })
         return
       }
+      // the shell's favorites sidebar lists saved views on every page
+      if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
       let body: unknown = { items: [], next_cursor: null }
+      if (path.endsWith('/views')) body = []
       if (path === '/api/v1/setup/status') body = { complete: true }
       if (path === '/api/v1/auth/me') body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
       if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]

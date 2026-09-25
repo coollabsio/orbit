@@ -59,3 +59,27 @@ test('settings pages are not duplicated in the main sidebar', () => {
   expect(view.queryByRole('link', { name: 'Members' })).toBeNull()
   expect(view.queryByRole('link', { name: 'Sessions' })).toBeNull()
 })
+
+test('the workspace section links to the views page', () => {
+  const view = render(
+    <MemoryRouter initialEntries={['/tasks']}>
+      <SidebarNav />
+      <Location />
+    </MemoryRouter>,
+  )
+  fireEvent.click(view.getByRole('link', { name: 'Views' }))
+  expect(view.getByTestId('location').textContent).toBe('/views')
+  expect(view.getByRole('link', { name: 'Views' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  expect(view.getByRole('link', { name: 'Tasks' }).classList.contains('bg-sidebar-accent')).toBe(false)
+})
+
+test('favorites render between the workspace and personal sections', () => {
+  const view = render(
+    <MemoryRouter>
+      <SidebarNav favorites={<a href="/views/v1">Pinned view</a>} />
+    </MemoryRouter>,
+  )
+  const text = view.container.textContent ?? ''
+  expect(text.indexOf('Pinned view')).toBeGreaterThan(text.indexOf('Chat'))
+  expect(text.indexOf('Pinned view')).toBeLessThan(text.indexOf('Personal'))
+})

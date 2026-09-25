@@ -12,7 +12,10 @@ for (const width of [390, 1280]) {
     ]
     await page.route('**/api/v1/**', async (route) => {
       const url = new URL(route.request().url())
+      // the shell's favorites sidebar lists saved views on every page
+      if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(url.pathname)) { await route.fulfill({ status: 204 }); return }
       let body: unknown = { items: [], next_cursor: null }
+      if (url.pathname.endsWith('/views')) body = []
       if (url.pathname === '/api/v1/setup/status') body = { complete: true }
       if (url.pathname === '/api/v1/auth/me') body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
       if (url.pathname === '/api/v1/workspaces') body = workspaces.filter((item) => !deleted || item.id !== 'alpha')
