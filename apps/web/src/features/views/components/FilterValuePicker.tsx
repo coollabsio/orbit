@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
-import { FIELD_META, isDateValue, listValue, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
+import { FIELD_META, MAX_FILTER_VALUES, isDateValue, listValue, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
 import type { Condition, DateValue } from '../viewState'
 
 export interface FilterValuePickerProps {
@@ -42,11 +42,16 @@ export function ValueGlyph({ glyph, size = 14 }: { glyph: Glyph; size?: number }
   }
 }
 
+const VALUES_FULL_TITLE = `Up to ${MAX_FILTER_VALUES} values per filter`
+
 function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
   const selected = listValue(condition)
   const meta = FIELD_META[condition.field]
-  const toggle = (value: string) =>
-    onChange({ ...condition, value: selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value] })
+  const full = selected.length >= MAX_FILTER_VALUES
+  const toggle = (value: string) => {
+    if (selected.includes(value)) onChange({ ...condition, value: selected.filter((item) => item !== value) })
+    else if (!full) onChange({ ...condition, value: [...selected, value] })
+  }
   // chosen values the list lacks (a member picked by ID, a deleted label) come first, so they can be unchecked
   const rows = [...unlistedOptions(condition, options), ...valueOptions(condition.field, options)]
   return (
@@ -57,8 +62,19 @@ function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
         <CommandGroup>
           {rows.map((option) => {
             const checked = selected.includes(option.value)
+            const capped = full && !checked
             return (
-              <CommandItem key={option.value} value={option.value} keywords={[option.label]} aria-checked={checked} onSelect={() => toggle(option.value)}>
+              <CommandItem
+                key={option.value}
+                value={option.value}
+                keywords={[option.label]}
+                aria-checked={checked}
+                disabled={capped}
+                title={capped ? VALUES_FULL_TITLE : undefined}
+                // keep hover on a capped row so its title explains why
+                className="data-[disabled=true]:pointer-events-auto"
+                onSelect={() => toggle(option.value)}
+              >
                 <span
                   aria-hidden="true"
                   data-checked={checked || undefined}

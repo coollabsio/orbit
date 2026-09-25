@@ -77,3 +77,23 @@ test('an unknown selected value shows as a checked row that can be cleared', asy
   expect(read(view).value).toEqual(['label-bug'])
   expect(view.queryAllByRole('option', { name: 'Unknown label' }).length).toBe(0)
 })
+
+test('a condition stops at 100 values: other rows are disabled until one is cleared', async () => {
+  // 99 values the list lacks plus Bug: the server allows at most 100 per condition
+  const gone = Array.from({ length: 99 }, (_, index) => `label-gone-${index}`)
+  const view = render(<Harness initial={{ field: 'label', operator: 'includes_any', value: [...gone, 'label-bug'] }} />)
+  const ui = view.getByRole('option', { name: 'UI' })
+  expect(ui.getAttribute('aria-disabled')).toBe('true')
+  expect(ui.getAttribute('title')).toBe('Up to 100 values per filter')
+  await userEvent.click(ui)
+  expect(read(view).value).toHaveLength(100)
+  expect((read(view).value as string[]).includes('label-ui')).toBeFalse()
+
+  // a selected row stays enabled, and clearing it frees a slot
+  const bug = view.getByRole('option', { name: 'Bug' })
+  expect(bug.getAttribute('aria-disabled')).toBe('false')
+  await userEvent.click(bug)
+  expect(view.getByRole('option', { name: 'UI' }).getAttribute('aria-disabled')).toBe('false')
+  await userEvent.click(view.getByRole('option', { name: 'UI' }))
+  expect((read(view).value as string[]).includes('label-ui')).toBeTrue()
+})

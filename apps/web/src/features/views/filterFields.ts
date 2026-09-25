@@ -58,6 +58,9 @@ export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assigne
 /** User conditions per tree: the server allows 50 on the effective tree, and a scope adds up to 3 preset conditions + 1 project condition. */
 export const MAX_FILTER_CONDITIONS = 46
 
+/** Values per condition, as the server allows. */
+export const MAX_FILTER_VALUES = 100
+
 /** Chip text for the non-removable preset scope. */
 export const PRESET_LABEL: Record<TaskPreset, string> = {
   mine: 'My tasks',

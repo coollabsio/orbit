@@ -15,10 +15,14 @@ function readIds(storageKey: string): string[] {
  */
 export function useCollapsedGroups(storageKey: string): [string[], (id: string) => void] {
   const [collapsed, setCollapsed] = useState<string[]>(() => readIds(storageKey))
-  const toggle = (id: string) => setCollapsed((prev) => {
-    const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    window.localStorage.setItem(storageKey, JSON.stringify(next))
-    return next
-  })
+  const toggle = (id: string) => {
+    const next = collapsed.includes(id) ? collapsed.filter((item) => item !== id) : [...collapsed, id]
+    setCollapsed(next)
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(next))
+    } catch {
+      // storage full or blocked: the group still toggles for this visit
+    }
+  }
   return [collapsed, toggle]
 }
