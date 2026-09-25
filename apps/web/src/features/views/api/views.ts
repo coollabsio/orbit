@@ -178,10 +178,14 @@ export function useSetFavorite(workspaceId: string) {
       await Promise.all([queryClient.cancelQueries({ queryKey: listKey, exact: true }), queryClient.cancelQueries({ queryKey: viewKey })])
       const previous = queryClient.getQueryData<SavedView[]>(listKey)
       const previousView = queryClient.getQueryData<SavedView>(viewKey)
+      // like the server, a new favorite goes last (max + 1), so it does not jump in the sidebar when the list refetches
+      const positions = (previous ?? []).filter((view) => view.is_favorite && view.id !== viewId).map((view) => view.favorite_position ?? 0)
+      const position = favorite ? (positions.length > 0 ? Math.max(...positions) + 1 : 0) : null
+      const patch = { is_favorite: favorite, favorite_position: position }
       queryClient.setQueryData<SavedView[]>(listKey, (views) =>
-        views?.map((view) => view.id === viewId ? { ...view, is_favorite: favorite } : view))
+        views?.map((view) => view.id === viewId ? { ...view, ...patch } : view))
       // the open view's header star reads the detail query
-      queryClient.setQueryData<SavedView>(viewKey, (view) => view && { ...view, is_favorite: favorite })
+      queryClient.setQueryData<SavedView>(viewKey, (view) => view && { ...view, ...patch })
       return { previous, previousView }
     },
     onError: (_error, { viewId }, snapshot) => {

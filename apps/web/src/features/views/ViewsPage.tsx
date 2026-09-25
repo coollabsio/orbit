@@ -14,6 +14,7 @@ import { PRESS_MOTION } from './components/motion'
 import { SaveViewDialog } from './components/SaveViewDialog'
 import { ViewActionsMenu } from './components/ViewActionsMenu'
 import { ViewIcon } from './components/ViewIcon'
+import { rebaseViewSessionEdit } from './useViewState'
 import { viewPath } from './viewActions'
 import { defaultViewState } from './viewState'
 
@@ -90,8 +91,12 @@ export function ViewsPage() {
         workspaceId={workspace.id}
         state={dialog?.view.state ?? defaultViewState()}
         view={dialog?.view}
-        // a duplicate or a visibility change can land on the other tab; follow it there
-        onSaved={(saved) => setTab(saved.visibility === 'workspace' ? 'workspace' : 'mine')}
+        onSaved={(saved) => {
+          // our own rename moved the version: unsaved edits on the view now build on it (as on the view's page)
+          if (dialog?.mode === 'edit') rebaseViewSessionEdit(workspace.id, saved.id, dialog.view.version, saved.version)
+          // a duplicate or a visibility change can land on the other tab; follow it there
+          setTab(saved.visibility === 'workspace' ? 'workspace' : 'mine')
+        }}
       />
     </section>
   )

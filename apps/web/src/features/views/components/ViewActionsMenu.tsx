@@ -56,7 +56,7 @@ export function ViewActionsMenu({ workspaceId, view, onEdit, onDuplicate, onDele
         <DropdownMenuContent align={align} className="w-auto min-w-44">
           {view.can_edit ? <DropdownMenuItem onClick={onEdit}><Edit />Edit view</DropdownMenuItem> : null}
           <DropdownMenuItem onClick={onDuplicate}><Copy />Duplicate</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => void copyViewLink(view.id)}><Link2 />Copy link</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void copyViewLink(workspaceId, view.id)}><Link2 />Copy link</DropdownMenuItem>
           {view.can_edit ? (
             <>
               <DropdownMenuSeparator />

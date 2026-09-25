@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { queryTasks } from '@/api/generated/sdk.gen'
@@ -51,11 +52,13 @@ export function useTaskQuery(
   filter: FilterGroup,
   display: DisplayOptions,
   enabled = true,
-): { tasks: TaskRecord[]; isLoading: boolean; error: unknown } {
+): { tasks: TaskRecord[]; isLoading: boolean; error: unknown; retry: () => void } {
   const query = useQuery({
     ...taskQueryOptions(workspaceId, taskQueryBody(filter, display)),
     enabled,
     placeholderData: keepPreviousData,
   })
-  return { tasks: query.data?.items ?? NO_TASKS, isLoading: query.isPending, error: query.error }
+  const { refetch } = query
+  const retry = useCallback(() => { void refetch() }, [refetch])
+  return { tasks: query.data?.items ?? NO_TASKS, isLoading: query.isPending, error: query.error, retry }
 }

@@ -142,6 +142,23 @@ test('favoriting flips the star at once and uses PUT or DELETE', async () => {
   ])
 })
 
+test('starring a view puts it after the existing favorites at once', async () => {
+  serve(() => new Response(null, { status: 204 }))
+  const client = testClient()
+  client.setQueryData(queryKeys.views('workspace-1'), [
+    savedView({ id: 'view-1' }),
+    savedView({ id: 'view-2', is_favorite: true, favorite_position: 0 }),
+    savedView({ id: 'view-3', is_favorite: true, favorite_position: 4 }),
+  ])
+  client.setQueryData(queryKeys.view('workspace-1', 'view-1'), savedView({ id: 'view-1' }))
+  const view = renderHook(() => useSetFavorite('workspace-1'), { wrapper: withClient(client) })
+
+  act(() => view.result.current.mutate({ viewId: 'view-1', favorite: true }))
+
+  await waitFor(() => expect(client.getQueryData<SavedView[]>(queryKeys.views('workspace-1'))?.[0]).toMatchObject({ is_favorite: true, favorite_position: 5 }))
+  expect(client.getQueryData<SavedView>(queryKeys.view('workspace-1', 'view-1'))).toMatchObject({ is_favorite: true, favorite_position: 5 })
+})
+
 test('a failed favorite toggle restores the star', async () => {
   serve(() => problem(500, 'internal_error'))
   const client = testClient()

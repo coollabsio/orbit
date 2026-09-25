@@ -41,7 +41,8 @@ test('the row menu copies a link and hides edit actions from non-editors', async
   expect(view.queryByRole('menuitem', { name: 'Edit view' })).toBeNull()
   expect(view.queryByRole('menuitem', { name: 'Delete view' })).toBeNull()
   await userEvent.click(view.getByRole('menuitem', { name: 'Copy link' }))
-  await waitFor(() => expect(copied).toBe('http://localhost/views/view-shared'))
+  // the workspace goes along, so the link opens in the right workspace
+  await waitFor(() => expect(copied).toBe('http://localhost/views/view-shared?workspace=alpha'))
 })
 
 test('deleting a view asks for confirmation first', async () => {

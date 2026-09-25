@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 import { queryKeys } from '@/api/queryKeys'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
 import { DEFAULT_DISPLAY, PRESET_FILTERS } from '@/features/views/viewState'
+import { ViewsPage } from '@/features/views/ViewsPage'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { TasksPage } from './TasksPage'
 
@@ -74,7 +75,7 @@ function GoTo({ to }: { to: string }) {
   return <button type="button" onClick={() => navigate(to)}>Go to {to}</button>
 }
 
-function renderAt(url: string, goTo?: string) {
+function renderAt(url: string, goTo?: string | string[]) {
   // retries stay on (the hooks set them), but run at once
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 }, mutations: { retry: false } } })
   client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', version: 1 }])
@@ -85,11 +86,12 @@ function renderAt(url: string, goTo?: string) {
           <Routes>
             <Route path="tasks" element={<TasksPage />} />
             <Route path="tasks/:taskId" element={<TasksPage />} />
+            <Route path="views" element={<ViewsPage />} />
             <Route path="views/:viewId" element={<TasksPage />} />
             <Route path="views/:viewId/:taskId" element={<TasksPage />} />
           </Routes>
           <Location />
-          {goTo ? <GoTo to={goTo} /> : null}
+          {[goTo ?? []].flat().map((to) => <GoTo key={to} to={to} />)}
         </WorkspaceProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -128,6 +130,40 @@ test('a page whose preference cannot be loaded shows an error instead of loading
   expect(await page.findByText('Tasks unavailable')).toBeTruthy()
   expect(page.getByText('The server could not load the settings for this page.')).toBeTruthy()
   expect(taskQueries(requests)).toHaveLength(0)
+})
+
+test('a failed task query shows in the list area, keeps the filter and display controls, and can retry', async () => {
+  let down = true
+  const label = { field: 'label', operator: 'includes_any', value: ['label-gone'] }
+  const requests = serve(({ method, path, body }) => {
+    if (method === 'GET' && path.endsWith('/view-preferences/all')) {
+      return Response.json({ page_key: 'all', state: { filter: { op: 'and', children: [label] }, display: DEFAULT_DISPLAY }, state_error: null, updated_at: '2026-09-01T12:00:00Z' })
+    }
+    // the server rejects the stored filter, and is down once more for the retry below
+    const filtered = (body as { filter?: { children: unknown[] } } | undefined)?.filter?.children.length
+    if (path.endsWith('/tasks/query') && (filtered || down)) return problem(422, 'invalid_filter')
+    return undefined
+  })
+  const page = renderAt('/tasks?workspace=workspace-1')
+
+  expect(await page.findByText('Tasks unavailable')).toBeTruthy()
+  // the header, filter bar, Display options and Advanced filter stay usable
+  expect(page.getByText('All tasks')).toBeTruthy()
+  fireEvent.click(page.getByRole('button', { name: 'Display options' }))
+  expect(await page.findByRole('switch', { name: 'Show empty groups' })).toBeTruthy()
+  await userEvent.keyboard('{Escape}')
+  fireEvent.click(page.getByRole('button', { name: 'Filter tasks' }))
+  expect(await page.findByRole('option', { name: 'Advanced filter' })).toBeTruthy()
+  await userEvent.keyboard('{Escape}')
+
+  // fixing the filter from the filter bar runs a new query, which still fails once: Retry recovers
+  await userEvent.click(within(page.getByRole('toolbar', { name: 'Filters' })).getByRole('button', { name: 'Remove label filter' }))
+  await waitFor(() => expect(taskQueries(requests).at(-1)?.body).toMatchObject({ filter: { op: 'and', children: [] } }))
+  expect(await page.findByText('Tasks unavailable')).toBeTruthy()
+  down = false
+  await userEvent.click(page.getByRole('button', { name: 'Retry' }))
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  expect(page.queryByText('Tasks unavailable')).toBeNull()
 })
 
 test('a saved view loads its tasks with the view filter and titles the page', async () => {
@@ -356,6 +392,40 @@ test('renaming a view with unsaved edits does not make the next save conflict', 
   await userEvent.click(page.getByRole('button', { name: 'Save changes' }))
   expect(await page.findByRole('heading', { name: 'Hot bugs triage' })).toBeTruthy()
 
+  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0))
+  expect(viewPatches(requests).map(({ body }) => (body as { expected_version: number }).expected_version)).toEqual([1, 2])
+  expect(page.queryAllByRole('alertdialog')).toHaveLength(0)
+})
+
+test('renaming a view from the Views page keeps its unsaved edits saveable without a conflict', async () => {
+  let record = viewRecord('view-1', 'Hot bugs')
+  const requests = serve(({ method, path, body }) => {
+    if (method === 'GET' && path.endsWith('/views')) return Response.json([record])
+    if (!path.endsWith('/views/view-1')) return undefined
+    if (method === 'GET') return Response.json(record)
+    const { expected_version: expected, ...fields } = body as { expected_version: number }
+    if (expected !== record.version) return problem(409, 'conflict')
+    record = { ...record, ...fields, version: record.version + 1 }
+    return Response.json(record)
+  })
+  const page = renderAt('/views/view-1?workspace=workspace-1', ['/views', '/views/view-1'])
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  await toggleEmptyGroups(page)
+
+  fireEvent.click(page.getByRole('button', { name: 'Go to /views' }))
+  fireEvent.click(await page.findByRole('button', { name: 'Hot bugs options' }))
+  await userEvent.click(await page.findByRole('menuitem', { name: 'Edit view' }))
+  const name = await page.findByRole('textbox', { name: 'Name' })
+  await userEvent.clear(name)
+  await userEvent.type(name, 'Hot bugs triage')
+  await userEvent.click(page.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(viewPatches(requests)).toHaveLength(1))
+  await waitFor(() => expect(page.queryByRole('dialog')).toBeNull())
+
+  fireEvent.click(page.getByRole('button', { name: 'Go to /views/view-1' }))
+  expect(await page.findByRole('heading', { name: 'Hot bugs triage' })).toBeTruthy()
   await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
 
   await waitFor(() => expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0))

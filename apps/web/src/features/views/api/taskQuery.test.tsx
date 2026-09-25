@@ -75,7 +75,7 @@ test('a disabled task query stays loading without a request', async () => {
   globalThis.fetch = (async () => { calls += 1; return Response.json({ items: [], next_cursor: null }) }) as unknown as typeof fetch
   const view = renderHook(() => useTaskQuery('workspace-1', emptyFilter(), DEFAULT_DISPLAY, false), { wrapper: withClient(testClient()) })
   await new Promise((resolve) => setTimeout(resolve, 20))
-  expect(view.result.current).toEqual({ tasks: [], isLoading: true, error: null })
+  expect(view.result.current).toMatchObject({ tasks: [], isLoading: true, error: null })
   expect(calls).toBe(0)
 })
 

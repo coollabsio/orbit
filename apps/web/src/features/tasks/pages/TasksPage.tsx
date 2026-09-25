@@ -272,8 +272,9 @@ function WorkspaceTasksPage() {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load the settings for this page." />
   }
   // `viewState.isLoading` too: after a page or view switch the disabled task query still shows the previous
-  // page's tasks as placeholder data, which must not render under the new page's title and placeholder display
-  if (viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isLoading || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
+  // page's tasks as placeholder data, which must not render under the new page's title and placeholder display.
+  // On a list, the task query loads and fails inside the list area, so the filter stays reachable to fix it.
+  if (viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || (taskId && (tasksQuery.isLoading || detailQuery.isPending || activityQuery.isPending))) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
   if (detailQuery.isError) {
@@ -282,7 +283,7 @@ function WorkspaceTasksPage() {
   if (taskId && (commentsQuery.isError || activityQuery.isError || attachmentsQuery.isError || commentAttachments.isError)) {
     return <TaskBoundary title="Task unavailable" description="The server could not load this task." />
   }
-  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || tasksQuery.error) {
+  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || (taskId && tasksQuery.error)) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace." />
   }
 
@@ -388,7 +389,13 @@ function WorkspaceTasksPage() {
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
           <div className={`min-h-0 flex-1 ${layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-            {layout === 'timeline'
+            {tasksQuery.error || tasksQuery.isLoading ? (
+              <div className="flex h-full flex-col p-2 *:flex-1">
+                {tasksQuery.error
+                  ? <EmptyState icon={SquareCheck} title="Tasks unavailable" description="The server could not load tasks for this view. Change the filter or try again." action={<Button type="button" variant="outline" onClick={tasksQuery.retry}>Retry</Button>} />
+                  : <EmptyState icon={SquareCheck} title="Loading tasks" description="Loading persisted workspace tasks." />}
+              </div>
+            ) : layout === 'timeline'
               ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
               : layout === 'board'
                 ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
