@@ -1,6 +1,5 @@
-import { useEffect, useState, type DragEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronRight, Copy, Danger, Flag, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
-import { toast } from 'sonner'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,14 +17,14 @@ import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { LabelRecord } from '@/api/generated/types.gen'
-import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks, useUpdateTask } from '@/features/tasks/api/tasks'
+import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
-import { GroupIcon } from '@/features/views/components/GroupIcon'
+import { CHEVRON, GroupIcon } from '@/features/views/components/GroupIcon'
 import { groupTasks, type GroupContext, type TaskGroup } from '@/features/views/grouping'
-import { acceptsDrop, canDrag, listSections, placementUpdates, planDrop, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
-import { reportMoveError } from '@/features/views/moveErrors'
+import { canDrag, listSections, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
 import { useCollapsedGroups } from '@/features/views/useCollapsedGroups'
+import { useGroupDrop } from '@/features/views/useGroupDrop'
 import type { DisplayOptions } from '@/features/views/viewState'
 import { TaskRow } from './TaskRow'
 import { pickerTitle } from '@/features/tasks/relationsLib'
@@ -54,8 +53,6 @@ const SUB_HEADER =
 /** Header buttons: hover only under a fine pointer; a press scales to 0.97 instead of the default 1px nudge. */
 const PRESS = 'duration-150 ease-out active:not-aria-[haspopup]:translate-y-0 active:scale-[0.97] motion-reduce:active:scale-100'
 const TOGGLE = `size-5 rounded-md border-0 text-muted-foreground/70 transition-[color,background-color,scale] hover-fine:hover:bg-accent hover-fine:hover:text-foreground dark:hover-fine:hover:bg-accent ${PRESS}`
-/** 150ms rotation, strong ease-out; content never animates its height. Reduced motion: no rotation. */
-const CHEVRON = 'size-3 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none'
 /** Revealed on hover only where hover is real (fine pointer); touch always shows it. */
 const ADD =
   `size-6 rounded-md border-0 text-muted-foreground/70 transition-[opacity,background-color,color,scale] hover-fine:opacity-0 hover-fine:group-hover/hdr:opacity-100 hover-fine:hover:bg-accent hover-fine:hover:text-foreground focus-visible:opacity-100 dark:hover-fine:hover:bg-accent ${PRESS}`
@@ -75,100 +72,6 @@ export interface TaskListProps {
   onAdd: (values: GroupValues) => void
 }
 
-type ListDrag = { taskId: string; from: GroupValues }
-/** `index` = insertion slot among the zone's other rows; null when the order is not manual. */
-type ListDrop = { zone: string; index: number | null }
-/**
- * Where a drop lands: the innermost group section on screen. A collapsed group with sub-groups is one zone
- * with the group's values only. `rowsShown` is false when the zone's rows are not on screen (collapsed).
- */
-type DropZone = { id: string; values: GroupValues; tasks: Task[]; rowsShown: boolean }
-
-/** Slot among the zone's rows (not counting the dragged one) at the pointer, by row midpoints. */
-function indexAt(zone: HTMLElement, clientY: number) {
-  const rows = Array.from(zone.querySelectorAll<HTMLElement>('[data-task-row]:not([data-dragging])'))
-  const below = rows.findIndex((row) => {
-    const rect = row.getBoundingClientRect()
-    return clientY < rect.top + rect.height / 2
-  })
-  return below === -1 ? rows.length : below
-}
-
-/**
- * Drag and drop between group zones: the drag state, the props for each zone, and the drop → write mapping.
- * Kept free of list markup so the board can share it. Errors go through `reportMoveError`.
- */
-function useGroupDrop({ tasks, manual, groupContext, onDuplicate }: {
-  tasks: Task[]
-  manual: boolean
-  groupContext: GroupContext
-  /** A drop on the Duplicate status: the caller asks for the canonical task. */
-  onDuplicate: (task: Task) => void
-}) {
-  const { workspace } = useWorkspace()
-  const updateTask = useUpdateTask(workspace.id)
-  const moveTasks = useBulkTasks(workspace.id)
-  const [drag, setDrag] = useState<ListDrag | null>(null)
-  const [drop, setDrop] = useState<ListDrop | null>(null)
-
-  const startDrag = (taskId: string, from: GroupValues) => setDrag({ taskId, from })
-  const endDrag = () => {
-    setDrag(null)
-    setDrop(null)
-  }
-
-  const dropInto = (current: ListDrag, zone: DropZone, index: number | null) => {
-    const task = tasks.find((item) => item.id === current.taskId)
-    if (!task) return
-    if (zoneIdOf(current.from) === zone.id) {
-      if (index === null) return
-      const updates = placementUpdates(task, zone.tasks, index)
-      if (updates.length > 0) moveTasks.mutate(updates, { onError: reportMoveError })
-      return
-    }
-    const plan = planDrop(task, current.from, zone.values, groupContext)
-    if (plan.kind === 'duplicate') onDuplicate(task)
-    else if (plan.kind === 'error') toast.error(plan.message)
-    else if (plan.kind === 'update') {
-      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, plan.patch), { onError: reportMoveError })
-      else updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...plan.patch } }, { onError: reportMoveError })
-    }
-  }
-
-  const zoneProps = (zone: DropZone) => {
-    const indexFor = (element: HTMLElement, clientY: number) => {
-      if (!manual) return null
-      // no rows to aim at: the task goes to the zone's end
-      if (!zone.rowsShown) return zone.tasks.filter((task) => task.id !== drag?.taskId).length
-      return indexAt(element, clientY)
-    }
-    return {
-      'data-drop-over': drop?.zone === zone.id || undefined,
-      onDragOver: (event: DragEvent<HTMLElement>) => {
-        if (!drag || !acceptsDrop(drag.from, zone.values)) return
-        // same zone without manual order: nothing would change, so no drop target
-        if (!manual && zoneIdOf(drag.from) === zone.id) return
-        event.preventDefault()
-        event.stopPropagation()
-        event.dataTransfer.dropEffect = 'move'
-        const index = indexFor(event.currentTarget, event.clientY)
-        if (drop?.zone !== zone.id || drop.index !== index) setDrop({ zone: zone.id, index })
-      },
-      onDragLeave: (event: DragEvent<HTMLElement>) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null) && drop?.zone === zone.id) setDrop(null)
-      },
-      onDrop: (event: DragEvent<HTMLElement>) => {
-        event.preventDefault()
-        event.stopPropagation()
-        if (drag) dropInto(drag, zone, indexFor(event.currentTarget, event.clientY))
-        endDrag()
-      },
-    }
-  }
-
-  return { drag, drop, startDrag, endDrag, zoneProps }
-}
-
 /** Grouped task list: collapsible group and sub-group headers; rows move between groups by drag and drop. */
 export function TaskList({ tasks, users, labels, statuses, projects, display, groupContext, collapseScope, onOpen, onAdd }: TaskListProps) {
   const { workspace } = useWorkspace()
@@ -181,6 +84,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     tasks,
     manual: display.order_by === 'manual',
     groupContext,
+    itemSelector: '[data-task-row]',
     onDuplicate: (task) => setDuplicatePicker([task]),
   })
 
@@ -274,12 +178,12 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
         const values = valuesOf(group)
         const zone = zoneIdOf(values)
         if (group.field === 'none') {
-          return <section key={zone} className={ZONE} {...zoneProps({ id: zone, values, tasks: group.tasks, rowsShown: true })}>{renderRows(zone, values, group.tasks)}</section>
+          return <section key={zone} className={ZONE} {...zoneProps({ id: zone, values, tasks: group.tasks, itemsShown: true })}>{renderRows(zone, values, group.tasks)}</section>
         }
         const isCollapsed = collapsed.includes(zone)
         if (!subGroups) {
           return (
-            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps({ id: zone, values, tasks: group.tasks, rowsShown: !isCollapsed })}>
+            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps({ id: zone, values, tasks: group.tasks, itemsShown: !isCollapsed })}>
               {renderHeader(group, zone, values, 'group')}
               {isCollapsed ? null : renderRows(zone, values, group.tasks)}
             </section>
@@ -289,7 +193,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           // the sub-groups are hidden, so the collapsed group itself takes drops: only the group field changes
           // (a hidden sub-group value must never be written) and the task goes to the group's end
           return (
-            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps({ id: zone, values, tasks: group.tasks, rowsShown: false })}>
+            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps({ id: zone, values, tasks: group.tasks, itemsShown: false })}>
               {renderHeader(group, zone, values, 'group')}
             </section>
           )
@@ -302,7 +206,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
               const subZone = zoneIdOf(subValues)
               const subCollapsed = collapsed.includes(subZone)
               return (
-                <section key={sub.key} className={cn('group/sub', ZONE)} {...zoneProps({ id: subZone, values: subValues, tasks: sub.tasks, rowsShown: !subCollapsed })}>
+                <section key={sub.key} className={cn('group/sub', ZONE)} {...zoneProps({ id: subZone, values: subValues, tasks: sub.tasks, itemsShown: !subCollapsed })}>
                   {renderHeader(sub, subZone, subValues, 'sub')}
                   {subCollapsed ? null : renderRows(subZone, subValues, sub.tasks)}
                 </section>

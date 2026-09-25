@@ -1,7 +1,6 @@
 import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from '@/features/tasks/api/models'
-import type { BulkItem } from '@/api/generated/types.gen'
 import { relativeTime } from '@/lib/format'
-import { PRIORITY_ORDER, defaultStatusOf, sortStatuses, statusKeyOf } from './taskMeta'
+import { defaultStatusOf, sortStatuses, statusKeyOf } from './taskMeta'
 
 /** Local quick search (never saved): title, description or identifier contains the text. */
 export function quickSearchTasks(tasks: Task[], search: string): Task[] {
@@ -92,53 +91,5 @@ export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'updated', label: 'Last updated' },
   { key: 'title', label: 'Title' },
 ]
-
-/** Order inside a group/column. Manual = the position set by drag and drop. */
-export function sortTasks(tasks: Task[], sort: SortKey): Task[] {
-  const list = [...tasks]
-  switch (sort) {
-    case 'priority':
-      return list.sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority) || a.position - b.position)
-    case 'created':
-      return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    case 'updated':
-      return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    case 'title':
-      return list.sort((a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled'))
-    default:
-      return list.sort((a, b) => a.position - b.position)
-  }
-}
-
-export function boardDropUpdates(
-  task: Task,
-  destination: Task[],
-  statusId: string,
-  index: number,
-): BulkItem[] {
-  const current = [...destination]
-  const currentIndex = current.findIndex((item) => item.id === task.id)
-  const ordered = current.filter((item) => item.id !== task.id)
-  ordered.splice(Math.max(0, Math.min(index, ordered.length)), 0, task)
-  const existingPositions = current.map((item) => item.position)
-  const positions = currentIndex === -1
-    ? [...existingPositions, (existingPositions.at(-1) ?? -1) + 1]
-    : existingPositions
-  const positionsAreOrdered = positions.every((position, itemIndex) =>
-    Number.isInteger(position) && (itemIndex === 0 || position > positions[itemIndex - 1]!))
-  const slots = positionsAreOrdered ? positions : ordered.map((_, itemIndex) => itemIndex)
-
-  return ordered.flatMap((item, itemIndex) => {
-    const position = slots[itemIndex]!
-    const statusChanged = item.id === task.id && task.statusId !== statusId
-    if (current[itemIndex]?.id === item.id && item.position === position && !statusChanged) return []
-    return [{
-      id: item.id,
-      expected_version: item.version,
-      position,
-      ...(statusChanged ? { status_id: statusId } : {}),
-    }]
-  })
-}
 
 export type TaskLayout = 'list' | 'board' | 'timeline'

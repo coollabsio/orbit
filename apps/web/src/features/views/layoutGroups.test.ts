@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from './grouping'
 import {
-  ALL_TASKS_KEY, acceptsDrop, canDrag, groupCreateFields, listSections, placementUpdates, planDrop, valuesOf, zoneIdOf,
+  ALL_TASKS_KEY, acceptsDrop, boardGrid, canDrag, cellTasks, groupCreateFields, listSections, placementUpdates, planDrop, valuesOf, zoneIdOf,
 } from './layoutGroups'
 import { DEFAULT_DISPLAY, type DisplayOptions } from './viewState'
 
@@ -156,4 +156,21 @@ test('group values become new-task fields; "no value" groups clear the field', (
   ])).toEqual({ projectId: null, statusKey: 'started:doing', body: { priority: 'high' } })
   expect(groupCreateFields([{ field: 'assignee', value: null }, { field: 'label', value: 'bug' }, { field: 'project', value: 'p2' }]))
     .toEqual({ projectId: 'p2', statusKey: null, body: { assignee_ids: [], label_ids: ['bug'] } })
+})
+
+describe('boardGrid', () => {
+  test('no grouping falls back to status columns, and empty status columns always show', () => {
+    const { columns, lanes } = boardGrid([task('a')], display({ layout: 'board', group_by: 'none' }), ctx)
+    expect(columns.map((column) => column.value)).toEqual(expect.arrayContaining(['unstarted:todo', 'started:doing', 'duplicate:duplicate']))
+    expect(lanes).toBeNull()
+  })
+
+  test('lanes follow the sub-group, and a cell keeps the column order', () => {
+    const tasks = [task('late', { priority: 'urgent' }), task('calm'), task('hot', { priority: 'urgent' })]
+    const { columns, lanes } = boardGrid(tasks, display({ layout: 'board', sub_group_by: 'priority' }), ctx)
+    const todo = columns.find((column) => column.value === 'unstarted:todo')!
+    const urgent = lanes!.find((lane) => lane.value === 'urgent')!
+    expect(cellTasks(todo, urgent).map((item) => item.id)).toEqual(['late', 'hot'])
+    expect(cellTasks(todo, null).map((item) => item.id)).toEqual(['late', 'calm', 'hot'])
+  })
 })

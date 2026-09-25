@@ -340,7 +340,7 @@ function WorkspaceTasksPage() {
             {layout === 'timeline'
               ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} grouped={!projectFilter} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
               : layout === 'board'
-                ? <TaskBoard tasks={visibleTasks} users={users} labels={labelsQuery.data} statuses={statusesQuery.data} groups={groups} sort={legacy.sort} activeTaskId={null} onOpen={openTask} />
+                ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
                 : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => void startNewTask(values)} />}
           </div>
         </section>

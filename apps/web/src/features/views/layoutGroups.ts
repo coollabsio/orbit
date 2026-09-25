@@ -54,6 +54,26 @@ export function listSections(tasks: Task[], display: DisplayOptions, ctx: GroupC
   }))
 }
 
+export type BoardGrid = { columns: TaskGroup[]; lanes: TaskGroup[] | null }
+
+/**
+ * Board columns (`group_by`, 'none' → status) and swim lanes (`sub_group_by`). Status columns always show,
+ * empty or not: an empty status column is the only way to drag a card into that status.
+ */
+export function boardGrid(tasks: Task[], display: DisplayOptions, ctx: GroupContext): BoardGrid {
+  const groupBy: GroupField = display.group_by === 'none' ? 'status' : display.group_by
+  const columns = groupTasks(tasks, groupBy, { ...ctx, showEmpty: display.show_empty_groups || groupBy === 'status' })
+  const sub = subGroupOf({ ...display, group_by: groupBy })
+  return { columns, lanes: sub ? groupTasks(tasks, sub, { ...ctx, showEmpty: display.show_empty_groups }) : null }
+}
+
+/** Cards of one column inside one lane, in the column's (server) order. */
+export function cellTasks(column: TaskGroup, lane: TaskGroup | null): Task[] {
+  if (!lane) return column.tasks
+  const inLane = new Set(lane.tasks.map((task) => task.id))
+  return column.tasks.filter((task) => inLane.has(task.id))
+}
+
 /** Group fields a drop may rewrite. Project is excluded: a drop never moves a task to another project (spec §4). */
 function movableFields(display: DisplayOptions): GroupField[] {
   const fields: GroupField[] = []

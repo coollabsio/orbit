@@ -6,6 +6,12 @@ import type { GroupContext, TaskGroup } from '../grouping'
 
 const DOT = 'size-2 shrink-0 rounded-full'
 
+/**
+ * The collapse chevron of group headers and swim lanes (rotate it 90° when open): 150ms rotation with a
+ * strong ease-out; the content never animates its height. Reduced motion: no rotation.
+ */
+export const CHEVRON = 'size-3 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none'
+
 /** The glyph in front of a group name: status icon, priority bars, avatar, or a project/label colour dot. */
 export function GroupIcon({ group, context }: { group: Pick<TaskGroup, 'field' | 'value'>; context: GroupContext }) {
   switch (group.field) {
