@@ -21,11 +21,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
+use crate::export_routes::ExportState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
 use crate::metrics::Metrics;
 use crate::notion::client::NotionClientConfig;
 use crate::notion::import::{NotionImportService, NotionImportSettings};
+use crate::page_comment_routes::PageCommentState;
 use crate::page_file_routes::PageFileState;
 use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
@@ -256,10 +258,17 @@ impl App {
                 ),
                 tasks: TaskState::new(Arc::clone(&identity), cookie_mode),
                 pages: PageState::new(Arc::clone(&identity), cookie_mode),
+                page_comments: PageCommentState::new(Arc::clone(&identity), cookie_mode),
                 page_files: PageFileState::new(
                     Arc::clone(&identity),
                     attachment_state.uploads.clone(),
                     cookie_mode,
+                ),
+                exports: ExportState::new(
+                    Arc::clone(&identity),
+                    attachment_state.uploads.clone(),
+                    cookie_mode,
+                    config.http.public_origin.clone(),
                 ),
                 teamspaces: TeamspaceState::new(Arc::clone(&identity), cookie_mode),
                 attachments: attachment_state.clone(),

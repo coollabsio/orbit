@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, Check, Copy, MoreH as Ellipsis, History, Lock, Star, Trash as Trash2, People as Users } from 'reicon-react'
+import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
@@ -10,11 +10,15 @@ import type { Page, PageSummary, PageVersionSummary, Teamspace } from '@/api/gen
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -36,6 +40,8 @@ import {
   useCreatePage,
 } from '@/features/docs/api/pages'
 import { usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
+import { usePageVisit, useSetPageLock } from '@/features/docs/api/pageOptions'
+import { lastEditedLabel, useLastEdited } from '@/features/docs/lastEdited'
 import { useRestorePageVersion } from '@/features/docs/api/pageVersions'
 import { useCurrentUser } from '@/features/auth/api'
 import { PageAutosaver, type AutosaveState, type PagePatch } from '@/features/docs/autosave'
@@ -45,8 +51,16 @@ import { PresenceAvatars } from '@/features/docs/collab/PresenceAvatars'
 import { collabStatusLabel, type CollabProblem, type CollabSession, type CollabState } from '@/features/docs/collab/session'
 import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { useDocPageActions } from '@/features/docs/pageActions'
+import { downloadPageMarkdown, printPage } from '@/features/docs/pageExport'
 import { PRIVATE_SPACE, ancestorsOf, pageTitle, removeSubtree, spaceKey, spaceLabel, teamspaceSpace, type SpaceKey } from '@/features/docs/pageTree'
 import { dayLabel, timeOfDay } from '@/lib/format'
+import { threadCounts, usePageThreads } from '@/features/docs/comments/api'
+import { CommentsPanel, type CommentsFilter } from '@/features/docs/comments/CommentsPanel'
+import { mentionableMembers } from '@/features/docs/comments/mentionable'
+import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
+import { useBlockDeepLink } from '@/features/docs/useBlockDeepLink'
+import { useMembers } from '@/features/workspaces/api'
+import { Comment as CommentIcon } from 'reicon-react'
 // Type-only imports: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import type { PageRef } from '@/features/docs/editor/pageEditorContext'
@@ -142,6 +156,11 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [addIconOpen, setAddIconOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [fullWidth, setFullWidth] = useState(page.full_width)
+  const setPageLock = useSetPageLock(workspaceId)
+  /** Locked pages are read-only here (the server refuses edits too, see `POST .../lock`). */
+  const locked = page.locked_at !== null
+  usePageVisit(workspaceId, page.id)
   const restoreVersion = useRestorePageVersion(workspaceId, page.id)
   const pickResolver = useRef<((pageId: string | null) => void) | null>(null)
   /** Last server state the local copy is known to be based on. */
@@ -149,6 +168,35 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const titleRef = useRef(title)
   const me = useCurrentUser()
   const selfId = me.data?.id ?? null
+  // Comments: header button + badge, the panel (Open / Resolved) and inbox deep links (`?thread=<id>`).
+  const threadsQuery = usePageThreads(workspaceId, page.id)
+  const counts = threadCounts(threadsQuery.data)
+  const membersQuery = useMembers(workspaceId)
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [commentsFilter, setCommentsFilter] = useState<CommentsFilter>('open')
+  const [commentsList, setCommentsList] = useState<HTMLDivElement | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const threadParam = searchParams.get('thread')
+  // Inbox page mentions link to the mentioned block (`?block=<id>`).
+  useBlockDeepLink(page.id)
+  const [showThreadId, setShowThreadId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!threadParam) return
+    setShowThreadId(threadParam)
+    setCommentsOpen(true)
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        next.delete('thread')
+        return next
+      },
+      { replace: true },
+    )
+  }, [threadParam, setSearchParams])
+  const linkedThread = showThreadId ? threadsQuery.data?.find((thread) => thread.id === showThreadId) : undefined
+  useEffect(() => {
+    if (linkedThread) setCommentsFilter(linkedThread.resolved ? 'resolved' : 'open')
+  }, [linkedThread])
   // Only the local awareness entry: the server stamps every peer's name and color from their session.
   const collabUser = useMemo(
     () => ({ name: me.data?.display_name ?? 'Me', color: collabColor(me.data?.id ?? '') }),
@@ -197,6 +245,20 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     },
     [saver],
   )
+
+  // Full width follows the server unless a toggle of ours is still being saved.
+  useEffect(() => {
+    if (!saver.hasUnsavedChanges()) setFullWidth(page.full_width)
+  }, [page.full_width, saver])
+
+  // Locked meanwhile (by anyone): unsaved title/icon/cover edits can never be saved, so take the server's state.
+  useEffect(() => {
+    if (!locked || !saver.hasUnsavedChanges()) return
+    saver.discard(page.version)
+    applyServerPage(page)
+    // Runs when the lock arrives, not on every page refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked, saver])
 
   // Remote metadata updates (realtime refetch, move, another tab): apply them unless there are local edits to protect.
   useEffect(() => {
@@ -289,6 +351,12 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     sessionRef.current = collab.session
   }, [collab.session])
   const people = useCollaborators(collab.connection?.provider.awareness ?? null, selfId)
+  const lastEdited = useLastEdited(
+    page,
+    collab.connection,
+    collab.state.ready,
+    me.data ? { id: me.data.id, name: me.data.display_name } : null,
+  )
 
   // Flush on unmount (route change, page switch) and when the tab is hidden or closed.
   useEffect(() => {
@@ -363,6 +431,23 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     }))
     saver.update(patch)
     void saver.flush()
+  }
+
+  const toggleFullWidth = () => {
+    const next = !fullWidth
+    setFullWidth(next)
+    saver.update({ full_width: next })
+    void saver.flush()
+  }
+
+  const toggleLock = (next: boolean) => {
+    setPageLock.mutate(
+      { pageId, locked: next },
+      {
+        onSuccess: () => toast.success(next ? 'Page locked. Nobody can edit it until it is unlocked.' : 'Page unlocked.'),
+        onError: () => toast.error(next ? 'Could not lock the page.' : 'Could not unlock the page.'),
+      },
+    )
   }
 
   const reloadFromServer = async () => {
@@ -551,6 +636,13 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             </span>
           </nav>
           <span className="flex-1" />
+          <span
+            className="min-w-0 truncate text-xs whitespace-nowrap text-muted-foreground/70 max-[1099px]:hidden"
+            data-last-edited=""
+            title={new Date(lastEdited.edit.at).toLocaleString()}
+          >
+            {lastEditedLabel(lastEdited.edit, selfId, lastEdited.now)}
+          </span>
           <PresenceAvatars people={people} />
           <span
             className={cn(
@@ -573,6 +665,24 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               </Button>
             ) : null}
           </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={cn('gap-1 px-1.5 text-muted-foreground/70', commentsOpen && 'bg-muted text-foreground')}
+            aria-label={counts.open > 0 ? `Comments (${counts.open} open)` : 'Comments'}
+            aria-pressed={commentsOpen}
+            title="Comments"
+            data-comments-toggle=""
+            onClick={() => setCommentsOpen((open) => !open)}
+          >
+            <CommentIcon className="size-4" />
+            {counts.open > 0 ? (
+              <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
+                {counts.open}
+              </span>
+            ) : null}
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -617,6 +727,14 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
                 {favoriteLabel}
               </DropdownMenuItem>
+              <DropdownMenuCheckboxItem className={menuItemClass} checked={fullWidth} onCheckedChange={toggleFullWidth}>
+                <ArrowSwapHorizontal className="size-[14px]" />
+                Full width
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuItem className={menuItemClass} disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
+                {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
+                {locked ? 'Unlock page' : 'Lock page'}
+              </DropdownMenuItem>
               <DropdownMenuItem className={menuItemClass} onClick={() => setHistoryOpen(true)}>
                 <History className="size-[14px]" />
                 Version history
@@ -633,6 +751,31 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                   Duplicate with sub-pages
                 </DropdownMenuItem>
               ) : null}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className={menuItemClass}>
+                  <Download className="size-[14px]" />
+                  Export
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="min-w-44">
+                  <DropdownMenuItem
+                    className={menuItemClass}
+                    onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: false })}
+                  >
+                    Markdown
+                  </DropdownMenuItem>
+                  {hasChildren ? (
+                    <DropdownMenuItem
+                      className={menuItemClass}
+                      onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: true })}
+                    >
+                      Markdown with sub-pages
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem className={menuItemClass} onClick={() => printPage(displayTitle)}>
+                    PDF
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
               <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onRequestTrash(pageId)}>
                 <Trash2 className="size-[14px]" />
                 Move to trash
@@ -680,7 +823,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             </Button>
           </div>
         ) : null}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+        <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
           {cover.url ? (
             <CoverBanner
               key={`${cover.url}:${cover.position ?? ''}`}
@@ -688,9 +832,21 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               position={cover.position}
               onChange={changeCover}
               onUpload={uploadCover}
+              readOnly={locked}
             />
           ) : null}
-          <div className="mx-auto max-w-[760px]">
+          <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')} data-full-width={fullWidth || undefined}>
+            {locked ? (
+              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" data-lock-badge="">
+                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+                  <Lock className="size-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{page.locked_by ? `Locked by ${page.locked_by.id === selfId ? 'you' : page.locked_by.display_name}` : 'Locked'}</span>
+                </span>
+                <Button type="button" variant="ghost" size="xs" disabled={setPageLock.isPending} onClick={() => toggleLock(false)}>
+                  Unlock
+                </Button>
+              </div>
+            ) : null}
             {icon ? (
               <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={cover.url ? 'true' : undefined}>
                 <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
@@ -699,7 +855,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                       <Button
                         type="button"
                         variant="ghost"
-                        className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] dark:hover:bg-foreground/[0.02]"
+                        className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
+                        disabled={locked}
                         aria-label="Change icon"
                       />
                     }
@@ -721,8 +878,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 </Popover>
               </div>
             ) : null}
-            {!icon || !cover.url ? (
-              <div className="flex gap-2 pt-1.5 pb-2.5">
+            {!locked && (!icon || !cover.url) ? (
+              <div className="flex gap-2 pt-1.5 pb-2.5" data-print-hide="">
                 {!icon ? (
                   <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
                     <PopoverTrigger
@@ -753,8 +910,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 ) : null}
               </div>
             ) : null}
-            {!cover.url && coverPanelOpen ? (
-              <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3">
+            {!locked && !cover.url && coverPanelOpen ? (
+              <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3" data-print-hide="">
                 <CoverSourcePanel
                   onUpload={uploadCover}
                   onPicked={(url) => {
@@ -767,6 +924,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             <Input
               className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
               value={title}
+              readOnly={locked}
               maxLength={500}
               placeholder="Untitled"
               aria-label="Page title"
@@ -788,12 +946,39 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                     ref={editorRef}
                     pageId={pageId}
                     collab={{ provider: collab.connection.provider, fragment: collab.connection.fragment, user: collabUser }}
-                    editable={!lost && syncStatus !== 'error'}
+                    editable={!lost && syncStatus !== 'error' && !locked}
                     resolvePage={resolvePage}
                     onOpenPage={onOpenPage}
                     onCreateSubpage={onCreateSubpage}
                     onPickPage={onPickPage}
                     uploadFile={uploadFile}
+                    comments={{
+                      workspaceId,
+                      pageId,
+                      userId: selfId,
+                      members: membersQuery.data ?? null,
+                      mentionable: mentionableMembers(membersQuery.data ?? [], byId.get(pageId) ?? page, selfId),
+                      panel: commentsOpen && commentsList ? { container: commentsList, filter: commentsFilter } : null,
+                      showThreadId,
+                      onThreadShown: () => setShowThreadId(null),
+                      onError: (action) =>
+                        toast.error(
+                          action === 'create'
+                            ? 'Could not add the comment.'
+                            : action === 'reply'
+                              ? 'Could not send the reply.'
+                              : action === 'edit'
+                                ? 'Could not save the comment.'
+                                : action === 'delete'
+                                  ? 'Could not delete the comment.'
+                                  : 'Could not update the thread.',
+                        ),
+                    }}
+                    mentions={{
+                      members: membersQuery.data ?? null,
+                      candidates: pageMentionCandidates(membersQuery.data ?? [], byId.get(pageId) ?? page, selfId),
+                      privatePage: (byId.get(pageId) ?? page).teamspace_id === null,
+                    }}
                     className="-mx-[54px] min-h-40 max-[899px]:mx-0"
                   />
                 </Suspense>
@@ -803,6 +988,18 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               )}
             </div>
           </div>
+        </div>
+        {commentsOpen ? (
+          <CommentsPanel
+            filter={commentsFilter}
+            onFilterChange={setCommentsFilter}
+            openCount={counts.open}
+            resolvedCount={counts.resolved}
+            loading={threadsQuery.isPending}
+            listRef={setCommentsList}
+            onClose={() => setCommentsOpen(false)}
+          />
+        ) : null}
         </div>
         {linkOpen ? (
           <PageLinkDialog pages={pages} excludeId={pageId} onPick={(picked) => closeLinkDialog(picked.id)} onClose={() => closeLinkDialog(null)} />

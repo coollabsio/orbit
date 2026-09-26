@@ -124,7 +124,7 @@ test('reordering inside the Duplicate column is a plain position update, never t
   expect(updates.every((update) => !('status_id' in update) && !('duplicate_of_id' in update))).toBe(true)
 })
 
-test('a blocked card shows the blocked icon beside its identifier', () => {
+test('a blocked card shows the blocked flag in its properties', () => {
   const view = renderBoard([{ ...task('late', 'todo', 0), blocked: true }], [])
   expect(view.getByRole('img', { name: 'Blocked' })).toBeTruthy()
 })

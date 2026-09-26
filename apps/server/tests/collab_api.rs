@@ -30,7 +30,7 @@ use yrs::types::text::YChange;
 use yrs::updates::decoder::{Decode, DecoderV1};
 use yrs::updates::encoder::Encode;
 use yrs::{
-    Any, ClientID, Doc, ReadTxn, Text, Transact, TransactionMut, Update, XmlFragment, XmlOut,
+    Any, ClientID, Doc, ReadTxn, Text, Transact, TransactionMut, Update, Xml, XmlFragment, XmlOut,
     XmlTextRef,
 };
 
@@ -1203,6 +1203,50 @@ async fn duplicates_copy_what_was_just_typed() {
 }
 
 #[tokio::test]
+async fn exports_include_what_was_just_typed() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(
+        &root,
+        CollabConfig {
+            project_idle: Duration::from_secs(30),
+            project_max_delay: Duration::from_secs(30),
+            ..fast_config()
+        },
+    )
+    .await;
+    let users = setup(&server).await;
+    let page = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "Live"}),
+        "draft",
+    )
+    .await;
+    let id = page["id"].as_str().unwrap();
+    let mut a = Client::open(&server, &users, &users.owner, id).await;
+    a.type_text(5, " final").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let response = server
+        .http
+        .get(format!(
+            "{}/api/v1/workspaces/{}/pages/{id}/export?format=markdown",
+            server.base, users.workspace
+        ))
+        .header("cookie", format!("{COOKIE}={}", users.owner))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let bytes = response.bytes().await.unwrap();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut archive.by_name("Live.md").unwrap(), &mut text).unwrap();
+    assert!(text.ends_with("# Live\n\ndraft final\n"), "{text}");
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn limits_close_with_4413_4429_and_1013() {
     let root = TempDir::new().unwrap();
     let server = Server::start(
@@ -1324,5 +1368,303 @@ async fn converter_changes_reset_the_document_under_a_new_epoch() {
     assert_ne!(fresh["collab_epoch"], old_epoch);
     let b = Client::open(&server, &users, &users.owner, &id).await;
     assert_eq!(b.text(), "kept text");
+    server.stop().await;
+}
+
+/// The content element (paragraph) of the `index`th top-level block.
+fn block_element(txn: &mut TransactionMut, index: u32) -> yrs::XmlElementRef {
+    let fragment = txn.get_xml_fragment(FRAGMENT).expect("fragment");
+    let Some(XmlOut::Element(group)) = fragment.get(txn, 0) else {
+        panic!("no block group")
+    };
+    let Some(XmlOut::Element(container)) = group.get(txn, index) else {
+        panic!("no block")
+    };
+    let Some(XmlOut::Element(paragraph)) = container.get(txn, 0) else {
+        panic!("no paragraph")
+    };
+    paragraph
+}
+
+impl Client {
+    /// Appends a mention of `user` to the `block`th block (what picking a member in "@" does).
+    async fn mention(&mut self, block: u32, user: Id, name: &str) {
+        let (user, name) = (user.to_string(), name.to_owned());
+        self.edit(|_, txn| {
+            let paragraph = block_element(txn, block);
+            let mention = paragraph.push_back(txn, yrs::XmlElementPrelim::empty("mention"));
+            mention.insert_attribute(txn, "userId", user);
+            mention.insert_attribute(txn, "name", name);
+        })
+        .await;
+    }
+
+    /// Removes every mention of `user` from the `block`th block.
+    async fn unmention(&mut self, block: u32, user: Id) {
+        let user = user.to_string();
+        self.edit(|_, txn| {
+            let paragraph = block_element(txn, block);
+            let indexes: Vec<u32> = paragraph
+                .children(txn)
+                .enumerate()
+                .filter_map(|(index, child)| match child {
+                    XmlOut::Element(element)
+                        if element.tag().as_ref() == "mention"
+                            && element
+                                .get_attribute(txn, "userId")
+                                .map(|id| id.to_string(txn))
+                                == Some(user.clone()) =>
+                    {
+                        Some(index as u32)
+                    }
+                    _ => None,
+                })
+                .collect();
+            for index in indexes.into_iter().rev() {
+                paragraph.remove_range(txn, index, 1);
+            }
+        })
+        .await;
+    }
+}
+
+async fn page_mentions(server: &Server, page: &str, recipient: Id) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications WHERE kind = 'page_mentioned' AND page_id = ? \
+         AND recipient_user_id = ?",
+    )
+    .bind(page)
+    .bind(recipient.to_string())
+    .fetch_one(server.database.pool())
+    .await
+    .unwrap()
+}
+
+async fn mention_count(server: &Server, users: &Users, page: &str) -> usize {
+    let stored = get_page(server, users, &users.owner, page).await;
+    let mut count = 0;
+    for block in stored["content"].as_array().unwrap() {
+        count += block["content"].as_array().map_or(0, |items| {
+            items
+                .iter()
+                .filter(|item| item["type"] == "mention")
+                .count()
+        });
+    }
+    count
+}
+
+#[tokio::test]
+async fn mentions_in_the_body_notify_members_who_can_see_the_page_once() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let (outsider, _) = add_user(&server, None, "out@example.com", "Otto Outsider").await;
+    let (suspended, _) = add_user(
+        &server,
+        Some(&users.workspace),
+        "sus@example.com",
+        "Sam Suspended",
+    )
+    .await;
+    sqlx::query("UPDATE users SET suspended_at = 1 WHERE id = ?")
+        .bind(suspended.to_string())
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    let page = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "[mention-test]"}),
+        "Hello",
+    )
+    .await;
+    let id = page["id"].as_str().unwrap();
+    let mut owner = Client::open(&server, &users, &users.owner, id).await;
+    owner.mention(0, users.member_id, "Mia Member").await;
+    owner.mention(0, users.owner_id, "Olivia Owner").await;
+    owner.mention(0, outsider, "Otto Outsider").await;
+    owner.mention(0, suspended, "Sam Suspended").await;
+    wait_until("mentions projected", || async {
+        mention_count(&server, &users, id).await == 4
+    })
+    .await;
+    wait_until("notification", || async {
+        page_mentions(&server, id, users.member_id).await == 1
+    })
+    .await;
+    for nobody in [users.owner_id, outsider, suspended] {
+        assert_eq!(page_mentions(&server, id, nobody).await, 0, "{nobody}");
+    }
+    // content_text has "@Mia Member": search finds the page by the mentioned name.
+    let (_, search) = server
+        .api(
+            &users.owner,
+            "GET",
+            &format!("/api/v1/workspaces/{}/pages/search?q=Mia", users.workspace),
+            None,
+        )
+        .await;
+    assert_eq!(search["items"][0]["id"], id, "{search}");
+
+    // The member's inbox: "Olivia mentioned you" linking to the page and the block.
+    let (status, inbox) = server
+        .api(
+            &users.member,
+            "GET",
+            &format!("/api/v1/workspaces/{}/notifications", users.workspace),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{inbox}");
+    let item = &inbox["items"][0];
+    assert_eq!(item["kind"], "page_mentioned");
+    assert_eq!(item["page_id"], id);
+    assert_eq!(item["page_block_id"], "b1");
+    assert_eq!(item["actor_user_id"], users.owner_id.to_string());
+    assert!(item["page_thread_id"].is_null());
+
+    // Editing around the mention adds nothing new.
+    owner.type_text(0, "Well, ").await;
+    wait_until("text projected", || async {
+        get_page(&server, &users, &users.owner, id).await["content"][0]["content"][0]["text"]
+            == "Well, Hello"
+    })
+    .await;
+    // Removing and re-adding within 10 minutes: deduplicated.
+    owner.unmention(0, users.member_id).await;
+    wait_until("mention removed", || async {
+        mention_count(&server, &users, id).await == 3
+    })
+    .await;
+    owner.mention(0, users.member_id, "Mia Member").await;
+    wait_until("mention re-added", || async {
+        mention_count(&server, &users, id).await == 4
+    })
+    .await;
+    assert_eq!(page_mentions(&server, id, users.member_id).await, 1);
+
+    // After the window a new mention notifies again.
+    sqlx::query("UPDATE notifications SET created_at = created_at - 660000 WHERE page_id = ?")
+        .bind(id)
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    owner.unmention(0, users.member_id).await;
+    wait_until("mention removed again", || async {
+        mention_count(&server, &users, id).await == 3
+    })
+    .await;
+    owner.mention(0, users.member_id, "Mia Member").await;
+    wait_until("second notification", || async {
+        page_mentions(&server, id, users.member_id).await == 2
+    })
+    .await;
+    // The member mentioning the owner notifies the owner (the editor is the actor).
+    let mut member = Client::open(&server, &users, &users.member, id).await;
+    member.unmention(0, users.owner_id).await;
+    wait_until("owner mention removed", || async {
+        mention_count(&server, &users, id).await == 3
+    })
+    .await;
+    member.mention(0, users.owner_id, "Olivia Owner").await;
+    wait_until("owner notified", || async {
+        page_mentions(&server, id, users.owner_id).await == 1
+    })
+    .await;
+    let actor: String = sqlx::query_scalar(
+        "SELECT actor_user_id FROM notifications WHERE page_id = ? AND recipient_user_id = ?",
+    )
+    .bind(id)
+    .bind(users.owner_id.to_string())
+    .fetch_one(server.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(actor, users.member_id.to_string());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn rest_content_writes_notify_new_mentions_but_never_on_private_pages() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let mention = |user: Id, name: &str| json!({"type": "mention", "props": {"userId": user.to_string(), "name": name}});
+    let patch = |id: String, version: Value, content: Value| {
+        (
+            format!("/api/v1/workspaces/{}/pages/{id}", users.workspace),
+            json!({"expected_version": version, "content": content}),
+        )
+    };
+
+    // A private page: mentioning the member notifies nobody (they cannot see it).
+    let private = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "Secret", "private": true}),
+        "private",
+    )
+    .await;
+    let private_id = private["id"].as_str().unwrap().to_owned();
+    let (path, body) = patch(
+        private_id.clone(),
+        private["version"].clone(),
+        json!([{"id": "p1", "type": "paragraph", "content": [mention(users.member_id, "Mia Member")]}]),
+    );
+    let (status, written) = server.api(&users.owner, "PATCH", &path, Some(body)).await;
+    assert_eq!(status, 200, "{written}");
+    assert_eq!(
+        page_mentions(&server, &private_id, users.member_id).await,
+        0
+    );
+
+    // A teamspace page written through the API by the member: the owner is notified once,
+    // the member mentioning themselves is not.
+    let page = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "Shared"}),
+        "shared",
+    )
+    .await;
+    let id = page["id"].as_str().unwrap().to_owned();
+    let content = json!([
+        {"id": "a", "type": "paragraph", "content": [{"type": "text", "text": "Hi ", "styles": {}}, mention(users.owner_id, "Olivia Owner")]},
+        {"id": "b", "type": "paragraph", "content": [mention(users.member_id, "Mia Member")]}
+    ]);
+    let (path, body) = patch(id.clone(), page["version"].clone(), content);
+    let (status, written) = server.api(&users.member, "PATCH", &path, Some(body)).await;
+    assert_eq!(status, 200, "{written}");
+    assert_eq!(page_mentions(&server, &id, users.owner_id).await, 1);
+    assert_eq!(page_mentions(&server, &id, users.member_id).await, 0);
+    let block: Option<String> = sqlx::query_scalar(
+        "SELECT page_block_id FROM notifications WHERE page_id = ? AND kind = 'page_mentioned'",
+    )
+    .bind(&id)
+    .fetch_one(server.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(block.as_deref(), Some("a"));
+    // Moving the mention to another block is no new mention.
+    let moved = json!([
+        {"id": "b", "type": "paragraph", "content": [mention(users.member_id, "Mia Member"), mention(users.owner_id, "Olivia Owner")]}
+    ]);
+    let (path, body) = patch(id.clone(), written["version"].clone(), moved);
+    let (status, written) = server.api(&users.member, "PATCH", &path, Some(body)).await;
+    assert_eq!(status, 200, "{written}");
+    assert_eq!(page_mentions(&server, &id, users.owner_id).await, 1);
+    // A mention of a user id that is no member of the workspace is ignored.
+    let (stranger, _) = add_user(&server, None, "x@example.com", "X").await;
+    let (path, body) = patch(
+        id.clone(),
+        written["version"].clone(),
+        json!([{"id": "c", "type": "paragraph", "content": [mention(stranger, "X")]}]),
+    );
+    let (status, _) = server.api(&users.member, "PATCH", &path, Some(body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(page_mentions(&server, &id, stranger).await, 0);
     server.stop().await;
 }

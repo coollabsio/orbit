@@ -19,6 +19,7 @@ import { useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import { useTasks } from '@/features/tasks/api/tasks'
 import { usePageSearch } from '@/features/docs/api/pages'
+import { useRecentPages } from '@/features/docs/api/pageOptions'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
 import { highlightSegments } from '@/features/docs/searchHighlights'
@@ -64,7 +65,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const taskQuery = useTasks(workspace.id, { search: query || undefined, limit: 25 })
   const debouncedQuery = useDebouncedValue(query, 250)
   const pageQuery = usePageSearch(workspace.id, debouncedQuery)
-  const teamspaces = useTeamspaces(workspace.id, debouncedQuery.trim().length > 0)
+  const recentQuery = useRecentPages(workspace.id, !docsHidden)
+  const recentCount = recentQuery.data?.length ?? 0
+  const teamspaces = useTeamspaces(workspace.id, debouncedQuery.trim().length > 0 || recentCount > 0)
 
   const entries = useMemo<CommandEntry[]>(() => {
     const nav: CommandEntry[] = [
@@ -106,13 +109,29 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     return [...nav, ...pages, ...tasks]
   }, [projects.data, taskQuery.data, pageQuery.data, teamspaces.data, query, debouncedQuery])
 
+  /** Recently opened pages, shown while the query is empty. */
+  const recent = useMemo<CommandEntry[]>(
+    () =>
+      query.trim() || docsHidden
+        ? []
+        : (recentQuery.data ?? []).map((page) => ({
+            id: `recent_${page.id}`,
+            icon: FileText,
+            title: pageTitle(page),
+            meta: `Page · ${spaceLabel(spaceKey(page), teamspaces.data)}`,
+            to: `/docs/${page.id}`,
+            keywords: '',
+          })),
+    [query, recentQuery.data, teamspaces.data],
+  )
+
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return entries.slice(0, 9)
+    if (!q) return entries.slice(0, recentCount > 0 ? 5 : 9)
     return entries
       .filter((e) => e.serverMatch || `${e.title} ${e.meta} ${e.keywords}`.toLowerCase().includes(q))
       .slice(0, 12)
-  }, [entries, query])
+  }, [entries, query, recentCount])
 
   const open = (entry: CommandEntry | undefined) => {
     if (!entry) return
@@ -143,7 +162,18 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         </div>
         <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border">
           <CommandEmpty className="p-6 text-[13px] text-muted-foreground">No results for “{query}”</CommandEmpty>
-          <CommandGroup className="p-0">
+          {recent.length > 0 ? (
+            <CommandGroup heading="Recent" className="p-0" data-recent-pages="">
+              {recent.map((entry) => (
+                <CommandItem key={entry.id} value={entry.id} className="h-10 gap-2.5 px-2.5 text-[13px]" onSelect={() => open(entry)}>
+                  <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
+                  <span className="truncate">{entry.title}</span>
+                  <CommandShortcut className="text-[11px] tracking-normal whitespace-nowrap text-muted-foreground/70">{entry.meta}</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
+          <CommandGroup heading={recent.length > 0 ? 'Go to' : undefined} className="p-0">
             {results.map((entry) => (
               <CommandItem
                 key={entry.id}

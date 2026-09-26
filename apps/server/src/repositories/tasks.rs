@@ -138,11 +138,25 @@ pub struct NotificationRecord {
     pub recipient_user_id: Id,
     #[schema(value_type = String)]
     pub actor_user_id: Id,
+    /// `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or
+    /// `page_mentioned` (an @mention in a page body).
     pub kind: String,
-    #[schema(value_type = String)]
-    pub task_id: Id,
+    /// Set for task notifications.
+    #[schema(value_type = Option<String>)]
+    pub task_id: Option<Id>,
+    /// The task comment of a `comment_mentioned` notification.
     #[schema(value_type = Option<String>)]
     pub comment_id: Option<Id>,
+    /// Page, thread and comment of a `page_comment_mentioned` notification; the page of a
+    /// `page_mentioned` one.
+    #[schema(value_type = Option<String>)]
+    pub page_id: Option<Id>,
+    #[schema(value_type = Option<String>)]
+    pub page_thread_id: Option<Id>,
+    #[schema(value_type = Option<String>)]
+    pub page_comment_id: Option<Id>,
+    /// The block with the mention of a `page_mentioned` notification (a deep link anchor).
+    pub page_block_id: Option<String>,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub read_at: Option<TimestampMillis>,
     #[schema(value_type = String, format = DateTime)]
@@ -2043,13 +2057,20 @@ impl TaskRepository {
         let fingerprint = format!("notifications:{actor_id}:{}", unread_only);
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, read_at, created_at \
-             FROM notifications WHERE workspace_id = ",
+            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
+             page_thread_id, page_comment_id, page_block_id, read_at, created_at FROM notifications WHERE workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
             .push(" AND recipient_user_id = ")
-            .push_bind(actor_id.to_string());
+            .push_bind(actor_id.to_string())
+            // Page-comment mentions stay hidden while the page is trashed or out of the
+            // recipient's reach (moved into someone else's private space).
+            .push(
+                " AND (page_id IS NULL OR EXISTS (SELECT 1 FROM pages WHERE pages.id = notifications.page_id \
+                 AND pages.deleted_at IS NULL \
+                 AND (pages.teamspace_id IS NOT NULL OR pages.owner_id = notifications.recipient_user_id)))",
+            );
         if unread_only {
             query.push(" AND read_at IS NULL");
         }
@@ -2102,8 +2123,8 @@ impl TaskRepository {
         .execute(&mut *tx)
         .await?;
         let row = sqlx::query(
-            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, read_at, created_at \
-             FROM notifications WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
+            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
+             page_thread_id, page_comment_id, page_block_id, read_at, created_at FROM notifications WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
         )
         .bind(notification_id.to_string())
         .bind(workspace_id.to_string())
@@ -3173,6 +3194,10 @@ fn task_record_from_row(
     })
 }
 
+fn optional_id(value: Option<String>) -> Result<Option<Id>, TaskError> {
+    value.map(parse_id).transpose()
+}
+
 fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRecord, TaskError> {
     Ok(NotificationRecord {
         id: parse_id(row.get("id"))?,
@@ -3180,11 +3205,12 @@ fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRec
         recipient_user_id: parse_id(row.get("recipient_user_id"))?,
         actor_user_id: parse_id(row.get("actor_user_id"))?,
         kind: row.get("kind"),
-        task_id: parse_id(row.get("task_id"))?,
-        comment_id: row
-            .get::<Option<String>, _>("comment_id")
-            .map(parse_id)
-            .transpose()?,
+        task_id: optional_id(row.get("task_id"))?,
+        comment_id: optional_id(row.get("comment_id"))?,
+        page_id: optional_id(row.get("page_id"))?,
+        page_thread_id: optional_id(row.get("page_thread_id"))?,
+        page_comment_id: optional_id(row.get("page_comment_id"))?,
+        page_block_id: row.get("page_block_id"),
         read_at: row
             .get::<Option<i64>, _>("read_at")
             .map(TimestampMillis::from_millis),

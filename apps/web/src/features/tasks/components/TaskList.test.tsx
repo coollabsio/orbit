@@ -207,7 +207,7 @@ function viewWithDuplicate(tasks: Task[]) {
   return render(<TaskList tasks={tasks} users={[]} labels={[]} statuses={statuses} groups={statusGroups(statuses, 'project-1')} sort="manual" onOpen={() => {}} onAdd={() => {}} />, { wrapper })
 }
 
-test('a blocked task shows the blocked icon beside its identifier', () => {
+test('a blocked task shows the blocked flag in its properties', () => {
   const view = viewFor([{ ...task(1), blocked: true }, task(2)])
   expect(view.getAllByRole('img', { name: 'Blocked' })).toHaveLength(1)
 })

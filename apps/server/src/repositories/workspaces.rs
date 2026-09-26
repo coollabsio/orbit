@@ -50,6 +50,9 @@ pub struct MemberRecord {
     pub version: u64,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    /// Set while the user's account is suspended (they cannot sign in or be notified).
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub suspended_at: Option<TimestampMillis>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -396,7 +399,8 @@ impl WorkspaceRepository {
         self.get(workspace_id, actor_id).await?;
         let rows = sqlx::query(
             "SELECT memberships.id, memberships.user_id, memberships.role, memberships.version, \
-             memberships.created_at, users.email, users.display_name FROM memberships \
+             memberships.created_at, users.email, users.display_name, users.suspended_at \
+             FROM memberships \
              JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = ? \
              AND (? IS NULL OR memberships.id > ?) ORDER BY memberships.id LIMIT ?",
         )
@@ -2051,6 +2055,9 @@ fn member_from_row(row: sqlx::sqlite::SqliteRow) -> Result<MemberRecord, Workspa
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         created_at: TimestampMillis::from_millis(row.get("created_at")),
+        suspended_at: row
+            .get::<Option<i64>, _>("suspended_at")
+            .map(TimestampMillis::from_millis),
     })
 }
 

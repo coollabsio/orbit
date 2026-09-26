@@ -245,3 +245,36 @@ fn replacing_a_document_keeps_one_consistent_tree() {
         json!([{"type": "text", "text": "Replaced", "styles": {}}])
     );
 }
+
+/// Comment threads anchor to text with BlockNote's `comment` mark (`comment--<hash>` attributes,
+/// written only by editors with comments). The server reads such documents like BlockNote (the
+/// marks never reach the JSON) and keeps them through a repair (`marks/comment_marks.json`, written
+/// by `collabParity.test.ts`).
+#[test]
+fn comment_marks_are_invisible_to_the_projection_and_survive_repair() {
+    let golden: Value = serde_json::from_slice(
+        &std::fs::read(fixtures().join("marks/comment_marks.json")).unwrap(),
+    )
+    .unwrap();
+    let doc = doc_from(&unbase64(golden["y_update"].as_str().unwrap()));
+    let comment_keys = |doc: &yrs::Doc| {
+        let dumped = dump(doc).to_string();
+        dumped.matches("\"comment--").count()
+    };
+    let before = comment_keys(&doc);
+    assert!(before >= 4, "{}", dump(&doc));
+    assert_eq!(Value::Array(doc_to_blocks(&doc)), golden["expected"]);
+    {
+        let mut txn = doc.transact_mut();
+        let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+        assert!(!orbit_server::collab::sanitize::repair_document(
+            &mut txn, &fragment
+        ));
+    }
+    assert_eq!(comment_keys(&doc), before);
+    // The same blocks built by the server (no marks) project identically.
+    let blocks = golden["blocks"].as_array().unwrap().clone();
+    let rust_doc = doc_from(&blocks_to_update(&blocks, Some(2)));
+    assert_eq!(Value::Array(doc_to_blocks(&rust_doc)), golden["expected"]);
+    assert_eq!(comment_keys(&rust_doc), 0);
+}

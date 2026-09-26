@@ -1,4 +1,3 @@
-import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -84,11 +83,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
         />
       </div>
       <PriorityPicker task={task} />
-      {/* the blocked mark lives inside the fixed id column so titles stay aligned; on phones only the mark shows */}
-      <span className={cn('inline-flex w-[72px] shrink-0 items-center gap-1 text-xs whitespace-nowrap text-muted-foreground/70 tabular-nums max-[480px]:w-auto', !task.blocked && 'max-[480px]:hidden')}>
-        <span className="whitespace-nowrap max-[480px]:hidden">{task.identifier}</span>
-        {task.blocked ? <BlockedIndicator /> : null}
-      </span>
+      <span className="w-[72px] shrink-0 text-xs whitespace-nowrap text-muted-foreground/70 tabular-nums max-[480px]:hidden">{task.identifier}</span>
       <div onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -116,6 +111,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
         </DropdownMenu>
       </div>
       <span className="min-w-0 flex-1 truncate text-[13px] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
+      {task.blocked ? <BlockedIndicator pill /> : null}
       {task.labels.length > 0 ? (
         <span className="flex shrink-0 gap-1 max-[1099px]:hidden">
           {task.labels.map((labelId) => {
@@ -124,7 +120,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, selected, dr
           })}
         </span>
       ) : null}
-      <div onClick={(e) => e.stopPropagation()}>
+      <div className="flex" onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={

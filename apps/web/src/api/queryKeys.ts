@@ -39,7 +39,9 @@ export const queryKeys = {
     trash: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'trash'] as const,
     search: (workspaceId: string, query: string) => [...workspace(workspaceId), 'pages', 'search', query] as const,
     favorites: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'favorites'] as const,
+    recent: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'recent'] as const,
     versions: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'versions', pageId] as const,
+    threads: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'threads', pageId] as const,
     version: (workspaceId: string, pageId: string, versionId: string) =>
       [...workspace(workspaceId), 'pages', 'versions', pageId, versionId] as const,
   },

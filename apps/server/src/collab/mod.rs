@@ -15,7 +15,7 @@ mod hub;
 pub mod sanitize;
 pub mod socket;
 
-pub use hub::{CollabConfig, CollabError, CollabHub, CollabWrite};
+pub use hub::{CollabConfig, CollabError, CollabHub, CollabLock, CollabWrite};
 
 /// WebSocket close codes of the collaboration socket.
 pub mod close {
@@ -30,6 +30,10 @@ pub mod close {
     /// The stored document was reset (backup restore, converter change) or the client's `epoch`
     /// is stale: drop the local document, fetch the page again and reconnect.
     pub const RESET: u16 = 4409;
+    /// The page was locked or unlocked (`POST .../lock`): fetch the page again (its lock state)
+    /// and reconnect with a fresh document. While a page is locked the server ignores content
+    /// updates, so anything typed against the old document is dropped.
+    pub const LOCK_CHANGED: u16 = 4423;
     /// A frame or the document would exceed the size limits.
     pub const TOO_LARGE: u16 = 4413;
     /// Unsupported protocol version (`v` query parameter).

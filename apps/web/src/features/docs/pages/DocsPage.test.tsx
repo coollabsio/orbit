@@ -10,6 +10,7 @@ import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { toSummary } from '@/features/docs/api/pages'
 import { CollabConnectContext, type CollabTarget } from '@/features/docs/collab/connection'
 import { DocsPage } from './DocsPage'
+import { PRINT_CLASS } from '@/features/docs/pageExport'
 import { fakeCollab, fragmentText, type FakeCollab } from '@/test/fakeCollab'
 import { waitForAbsence } from '@/test/waitForAbsence'
 
@@ -41,6 +42,7 @@ const defaultTeamspaces = [teamspace('teamspace-1', 'General', 0)]
 const fullPage = (id: string, patch: Partial<Page> = {}): Page => ({
   ...summary(id, null, 0), workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [],
   creator_id: 'user-1', updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
+  full_width: false, locked_at: null, locked_by: null, updated_by_user: { id: 'user-1', display_name: 'Ada' },
   ...patch,
 })
 
@@ -103,6 +105,15 @@ function setup(path: string, handler: Handler, role = 'owner', options: SetupOpt
 const location = (view: ReturnType<typeof render>) => view.getByTestId('location').textContent
 
 /** The editor mounts after the collaborative document's first sync. */
+/**
+ * Empties the title through its real onChange. `userEvent.clear` selects and then deletes; a re-render while the editor and
+ * comment threads finish loading can drop that selection under happy-dom, so the delete was lost and typing appended to
+ * the old title ("DraftRoadmap Q4") in about 1 of 3 full-file runs.
+ */
+function clearTitle(title: HTMLInputElement) {
+  fireEvent.change(title, { target: { value: '' } })
+}
+
 async function editorMounted(view: ReturnType<typeof render>) {
   await waitFor(() => {
     if (!view.container.querySelector('.bn-editor')) throw new Error('editor not mounted yet')
@@ -157,7 +168,7 @@ test('title edits autosave after the debounce with expected_version, and the tre
   })
   const title = (await view.findByLabelText('Page title')) as HTMLInputElement
   await editorMounted(view)
-  await userEvent.clear(title)
+  clearTitle(title)
   await userEvent.type(title, 'Roadmap Q4')
   await waitFor(() => expect(view.getByRole('tree').textContent).toContain('Roadmap Q4'))
   expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(0)
@@ -187,7 +198,7 @@ test('a 409 shows the conflict banner; Overwrite re-sends the local page on the 
   })
   const title = (await view.findByLabelText('Page title')) as HTMLInputElement
   await editorMounted(view)
-  await userEvent.clear(title)
+  clearTitle(title)
   await userEvent.type(title, 'Mine')
   fireEvent.blur(title)
 
@@ -217,7 +228,7 @@ test('a 409 then Reload page discards local edits and shows the server page', as
   })
   const title = (await view.findByLabelText('Page title')) as HTMLInputElement
   expect(title.value).toBe('Draft')
-  await userEvent.clear(title)
+  clearTitle(title)
   await userEvent.type(title, 'Mine')
   fireEvent.blur(title)
   await view.findByRole('alert')
@@ -645,4 +656,71 @@ test('presence: other people show in the header once each, never the current use
   // The local awareness state carries our name for the server (which stamps id/name/color anyway).
   const local = provider.awareness.getLocalState() as { user: { name: string } }
   expect(local.user.name).toBe('Test User')
+})
+
+test('the page menu exports Markdown (with sub-pages only when there are some) and prints PDF with the print class', async () => {
+  const { view, calls } = setup('/docs/first', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan'), summary('child', 'first', 0, 'Child')] })
+    if (call.path === '/pages/first' && call.method === 'GET') return Response.json(fullPage('first', { title: 'Plan' }))
+    if (call.path === '/pages/child' && call.method === 'GET') return Response.json(fullPage('child', { title: 'Child', parent_id: 'first' }))
+    if (call.path.endsWith('/export')) {
+      return new Response(new Uint8Array([80, 75, 5, 6]), {
+        headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="Plan.zip"; filename*=UTF-8''Plan.zip` },
+      })
+    }
+  })
+  const downloads: string[] = []
+  const originalClick = HTMLAnchorElement.prototype.click
+  const { createObjectURL, revokeObjectURL } = URL
+  const originalPrint = window.print
+  HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+    downloads.push(this.download)
+  }
+  URL.createObjectURL = () => 'blob:export'
+  URL.revokeObjectURL = () => {}
+  const printed: Array<{ printing: boolean; title: string }> = []
+  window.print = () => {
+    printed.push({ printing: document.documentElement.classList.contains(PRINT_CLASS), title: document.title })
+  }
+  try {
+    await view.findByLabelText('Page title')
+    const openExport = async () => {
+      fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+      fireEvent.click(await view.findByRole('menuitem', { name: 'Export' }))
+      await view.findByRole('menuitem', { name: 'PDF' })
+    }
+    await openExport()
+    expect(view.getByRole('menuitem', { name: 'Markdown' })).toBeTruthy()
+    await userEvent.click(view.getByRole('menuitem', { name: 'Markdown with sub-pages' }))
+    await waitFor(() => expect(downloads).toEqual(['Plan.zip']))
+    expect(calls.find((call) => call.path === '/pages/first/export')?.search).toBe('?format=markdown&children=true')
+
+    await openExport()
+    await userEvent.click(view.getByRole('menuitem', { name: 'PDF' }))
+    expect(printed).toEqual([{ printing: true, title: 'Plan' }])
+    window.dispatchEvent(new Event('afterprint'))
+    expect(document.documentElement.classList.contains(PRINT_CLASS)).toBe(false)
+    // The print stylesheet keeps only this subtree: the title and the editor are inside it.
+    const printRoot = view.container.querySelector('[data-print-root]') as HTMLElement
+    expect(within(printRoot).getByLabelText('Page title')).toBeTruthy()
+
+  } finally {
+    HTMLAnchorElement.prototype.click = originalClick
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
+    window.print = originalPrint
+  }
+})
+
+test('a page without sub-pages offers Markdown and PDF export only', async () => {
+  const { view } = setup('/docs/solo', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [summary('solo', null, 0, 'Solo')] })
+    if (call.path === '/pages/solo' && call.method === 'GET') return Response.json(fullPage('solo', { title: 'Solo' }))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  fireEvent.click(await view.findByRole('menuitem', { name: 'Export' }))
+  expect(await view.findByRole('menuitem', { name: 'PDF' })).toBeTruthy()
+  expect(view.getByRole('menuitem', { name: 'Markdown' })).toBeTruthy()
+  expect(view.queryByRole('menuitem', { name: 'Markdown with sub-pages' })).toBeNull()
 })

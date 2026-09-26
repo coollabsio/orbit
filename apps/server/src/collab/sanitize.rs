@@ -2,6 +2,8 @@
 //! only block types of the editor schema, links to http(s), mailto and `/docs/<page id>`, and
 //! image/file URLs that are page files or absolute http(s) URLs. Applied to JSON before it becomes a
 //! collaborative document, and to the document itself (a member can send raw Yjs updates).
+//! Mentions keep only `userId` (a UUID, lowercased) and `name` (a string of at most
+//! [`MENTION_NAME_MAX_CHARS`] characters); a mention without a valid `userId` becomes its `@name` text.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,6 +16,12 @@ use super::blocknote::schema;
 
 /// Blocks whose `props.url` is a page file or an external URL.
 const FILE_BLOCKS: [&str; 2] = ["image", "file"];
+
+/// The `mention` inline content (`{ userId, name }`).
+const MENTION: &str = "mention";
+
+/// A mention's stored name is a display snapshot; longer names are cut.
+pub const MENTION_NAME_MAX_CHARS: usize = 100;
 
 /// Characters browsers strip from URLs before they parse the scheme.
 fn is_url_noise(c: char) -> bool {
@@ -33,7 +41,9 @@ fn strip_noise(value: &str) -> String {
     value.chars().filter(|c| !is_url_noise(*c)).collect()
 }
 
-fn is_uuid(value: &str, lowercase_only: bool) -> bool {
+/// A UUID in the canonical dashed form (any hex case unless `lowercase_only`).
+#[must_use]
+pub fn is_uuid(value: &str, lowercase_only: bool) -> bool {
     let bytes = value.as_bytes();
     bytes.len() == 36
         && bytes.iter().enumerate().all(|(index, byte)| match index {
@@ -165,7 +175,58 @@ pub fn sanitize_blocks(blocks: &[Value]) -> Vec<Value> {
     let Value::Array(linked) = sanitize_links(&Value::Array(known)) else {
         return Vec::new();
     };
-    linked.into_iter().map(sanitize_file_block).collect()
+    let Value::Array(mentioned) = sanitize_mentions(&Value::Array(linked)) else {
+        return Vec::new();
+    };
+    mentioned.into_iter().map(sanitize_file_block).collect()
+}
+
+fn mention_name(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .chars()
+        .take(MENTION_NAME_MAX_CHARS)
+        .collect()
+}
+
+/// Mentions keep `userId` (lowercased UUID) and `name` only; one without a valid `userId`
+/// becomes plain `@name` text (or nothing without a name).
+fn sanitize_mentions(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                if item.get("type").and_then(Value::as_str) == Some(MENTION) && item.is_object() {
+                    let props = item.get("props");
+                    let name = mention_name(props.and_then(|props| props.get("name")));
+                    match props
+                        .and_then(|props| props.get("userId"))
+                        .and_then(Value::as_str)
+                        .filter(|id| is_uuid(id, false))
+                    {
+                        Some(user_id) => out.push(serde_json::json!({
+                            "type": MENTION,
+                            "props": { "userId": user_id.to_ascii_lowercase(), "name": name },
+                        })),
+                        None if !name.is_empty() => out.push(serde_json::json!({
+                            "type": "text", "text": format!("@{name}"), "styles": {},
+                        })),
+                        None => {}
+                    }
+                    continue;
+                }
+                out.push(sanitize_mentions(item));
+            }
+            Value::Array(out)
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, child)| (key.clone(), sanitize_mentions(child)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 fn keep_known_blocks(blocks: &[Value]) -> Vec<Value> {
@@ -259,7 +320,7 @@ pub fn repair_document(txn: &mut TransactionMut, fragment: &yrs::XmlFragmentRef)
     for child in fragment.children(txn) {
         collect(txn, child, &mut elements, &mut texts);
     }
-    let mut changed = false;
+    let mut changed = repair_mentions(txn, &elements);
     for element in elements {
         let tag = element.tag().to_string();
         if !FILE_BLOCKS.contains(&tag.as_str()) {
@@ -315,6 +376,69 @@ pub fn repair_document(txn: &mut TransactionMut, fragment: &yrs::XmlFragmentRef)
             attrs.insert(Arc::from("link"), value);
             text.format(txn, index, length, attrs);
             changed = true;
+        }
+    }
+    changed
+}
+
+/// Mentions in a live document: unknown attributes go, a non-string or too long `name` is fixed,
+/// and a mention without a valid `userId` is removed.
+fn repair_mentions(txn: &mut TransactionMut, elements: &[XmlElementRef]) -> bool {
+    let mut changed = false;
+    for element in elements {
+        let mut removals: Vec<u32> = Vec::new();
+        for (index, child) in element.children(txn).enumerate() {
+            let XmlOut::Element(child) = child else {
+                continue;
+            };
+            if child.tag().as_ref() != MENTION {
+                continue;
+            }
+            let valid = matches!(child.get_attribute(txn, "userId"),
+                Some(Out::Any(Any::String(id))) if is_uuid(&id, false));
+            if !valid {
+                removals.push(u32::try_from(index).unwrap_or(u32::MAX));
+            }
+        }
+        for index in removals.into_iter().rev() {
+            element.remove_range(txn, index, 1);
+            changed = true;
+        }
+        let mentions: Vec<XmlElementRef> = element
+            .children(txn)
+            .filter_map(|child| match child {
+                XmlOut::Element(child) if child.tag().as_ref() == MENTION => Some(child),
+                _ => None,
+            })
+            .collect();
+        for child in mentions {
+            let unknown: Vec<String> = child
+                .attributes(txn)
+                .map(|(name, _)| name.to_owned())
+                .filter(|name| name != "userId" && name != "name")
+                .collect();
+            for name in unknown {
+                child.remove_attribute(txn, &name);
+                changed = true;
+            }
+            let name = match child.get_attribute(txn, "name") {
+                None | Some(Out::Any(Any::Undefined)) => None,
+                Some(Out::Any(Any::String(name)))
+                    if name.chars().count() <= MENTION_NAME_MAX_CHARS =>
+                {
+                    None
+                }
+                Some(Out::Any(Any::String(name))) => Some(
+                    name.chars()
+                        .take(MENTION_NAME_MAX_CHARS)
+                        .collect::<String>(),
+                ),
+                Some(_) => Some(String::new()),
+            };
+            if let Some(name) = name {
+                child.insert_attribute(txn, "name", Any::from(name));
+                changed = true;
+            }
         }
     }
     changed
@@ -459,5 +583,100 @@ mod tests {
         );
         assert_eq!(sanitized[0]["children"].as_array().unwrap().len(), 1);
         assert_eq!(sanitized[0]["children"][0]["props"]["url"], "");
+    }
+    #[test]
+    fn mentions_keep_a_uuid_user_and_a_name_only() {
+        let user = "0199A0B0-0000-7000-8000-0000000000A1";
+        let long = "n".repeat(150);
+        let blocks = [json!({"type": "paragraph", "content": [
+            {"type": "mention", "props": {"userId": user, "name": "Ann", "extra": 1}, "content": "x"},
+            {"type": "mention", "props": {"userId": "not-a-uuid", "name": "Bob"}},
+            {"type": "mention", "props": {"userId": 7}},
+            {"type": "mention", "props": {"userId": user.to_lowercase(), "name": long}},
+            {"type": "mention"}
+        ]})];
+        let sanitized = sanitize_blocks(&blocks);
+        let content = sanitized[0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 3);
+        assert_eq!(
+            content[0],
+            json!({"type": "mention", "props": {"userId": user.to_lowercase(), "name": "Ann"}})
+        );
+        assert_eq!(
+            content[1],
+            json!({"type": "text", "text": "@Bob", "styles": {}})
+        );
+        assert_eq!(
+            content[2]["props"]["name"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            MENTION_NAME_MAX_CHARS
+        );
+    }
+
+    #[test]
+    fn live_mentions_are_repaired_in_place() {
+        use yrs::{Transact, WriteTxn, XmlElementPrelim};
+
+        use crate::collab::blocknote::{FRAGMENT, doc_to_blocks, new_doc, write_blocks};
+
+        let user = "0199a0b0-0000-7000-8000-0000000000a1";
+        let doc = new_doc(None);
+        {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            write_blocks(
+                &mut txn,
+                &fragment,
+                &[json!({"id": "p", "type": "paragraph", "content": [
+                    {"type": "text", "text": "a ", "styles": {}},
+                    {"type": "mention", "props": {"userId": user, "name": "Ann"}},
+                    {"type": "text", "text": " b", "styles": {}}
+                ]})],
+            );
+        }
+        {
+            // A raw update: a mention without a user, and one with a foreign attribute.
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            let Some(XmlOut::Element(group)) = fragment.get(&txn, 0) else {
+                panic!("no block group");
+            };
+            let Some(XmlOut::Element(container)) = group.get(&txn, 0) else {
+                panic!("no container");
+            };
+            let Some(XmlOut::Element(paragraph)) = container.get(&txn, 0) else {
+                panic!("no paragraph");
+            };
+            let bad = paragraph.push_back(&mut txn, XmlElementPrelim::empty("mention"));
+            bad.insert_attribute(&mut txn, "userId", "javascript:alert(1)");
+            let Some(XmlOut::Element(good)) = paragraph.get(&txn, 1) else {
+                panic!("no mention");
+            };
+            good.insert_attribute(&mut txn, "onclick", "x");
+            good.insert_attribute(&mut txn, "name", Any::from(3));
+        }
+        let repaired = {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            repair_document(&mut txn, &fragment)
+        };
+        assert!(repaired);
+        assert_eq!(
+            doc_to_blocks(&doc)[0]["content"],
+            json!([
+                {"type": "text", "text": "a ", "styles": {}},
+                {"type": "mention", "props": {"userId": user, "name": ""}},
+                {"type": "text", "text": " b", "styles": {}}
+            ])
+        );
+        let again = {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            repair_document(&mut txn, &fragment)
+        };
+        assert!(!again);
     }
 }

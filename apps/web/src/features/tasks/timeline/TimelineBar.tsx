@@ -50,8 +50,8 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
   const label = (
     <>
       <TaskStatusIcon status={status} size={13} />
-      {task.blocked ? <BlockedIndicator /> : null}
       <span className="truncate">{task.title || 'Untitled'}</span>
+      {task.blocked ? <BlockedIndicator /> : null}
     </>
   )
   const common = {

@@ -11,8 +11,10 @@ use orbit_platform::{
 
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
+use crate::export_routes::{ExportState, export_router};
 use crate::import_routes::{ImportState, import_router};
 use crate::integration_routes::{IntegrationState, integration_router};
+use crate::page_comment_routes::{PageCommentState, page_comment_router};
 use crate::page_file_routes::{PageFileState, page_file_router};
 use crate::page_routes::{PageState, page_router};
 use crate::static_assets::StaticAssets;
@@ -26,6 +28,8 @@ pub struct ApiRoutes {
     pub tasks: TaskState,
     pub pages: PageState,
     pub page_files: PageFileState,
+    pub page_comments: PageCommentState,
+    pub exports: ExportState,
     pub teamspaces: TeamspaceState,
     pub attachments: AttachmentState,
     pub integrations: IntegrationState,
@@ -49,6 +53,8 @@ pub fn production_router(
         .merge(task_router(api.tasks))
         .merge(page_router(api.pages))
         .merge(page_file_router(api.page_files))
+        .merge(page_comment_router(api.page_comments))
+        .merge(export_router(api.exports))
         .merge(teamspace_router(api.teamspaces))
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))

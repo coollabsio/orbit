@@ -238,6 +238,21 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0029_page_collab.sql"),
                     false,
                 ),
+                Migration::new(
+                    30,
+                    include_str!("../../../../apps/server/migrations/0030_page_comments.sql"),
+                    false,
+                ),
+                Migration::new(
+                    31,
+                    include_str!("../../../../apps/server/migrations/0031_page_options.sql"),
+                    false,
+                ),
+                Migration::new(
+                    32,
+                    include_str!("../../../../apps/server/migrations/0032_page_mentions.sql"),
+                    false,
+                ),
             ],
         )
     }

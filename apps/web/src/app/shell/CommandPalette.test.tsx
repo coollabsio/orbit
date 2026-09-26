@@ -18,6 +18,7 @@ function Location() {
 }
 
 let pageSearches: string[] = []
+let recentPages: unknown[] = []
 
 function setup(onClose = () => {}) {
   pageSearches = []
@@ -29,6 +30,7 @@ function setup(onClose = () => {}) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input instanceof Request ? input.url : input)
     if (url.includes('/projects')) return Response.json({ items: [], next_cursor: null })
+    if (url.includes('/pages/recent')) return recentPages.length ? Response.json({ items: recentPages }) : new Response('not found', { status: 404 })
     if (url.includes('/pages/search')) {
       pageSearches.push(new URL(url).searchParams.get('q') ?? '')
       return Response.json({
@@ -174,4 +176,35 @@ test('page hits show the snippet with the matched words in bold, as text', async
   // Markup in page text stays text.
   expect(diary.querySelector('[data-snippet]')!.textContent).toBe('My <b>onboard</b> notes')
   expect(diary.querySelector('b')).toBeNull()
+})
+
+test('an empty query lists recently opened pages first; typing hides them', async () => {
+  recentPages = [
+    { id: 'page-roadmap', parent_id: null, teamspace_id: 'teamspace-1', private: false, title: 'Roadmap', icon: null, visited_at: '2026-09-25T10:00:00Z' },
+    { id: 'page-notes', parent_id: null, teamspace_id: null, private: true, title: '', icon: null, visited_at: '2026-09-25T09:00:00Z' },
+  ]
+  try {
+    const view = setup()
+    const input = await view.findByPlaceholderText('Search tasks, pages and navigation…')
+    const roadmap = await view.findByRole('option', { name: /Roadmap/ })
+    const group = roadmap.closest('[data-recent-pages]')!
+    expect(group.textContent).toContain('Recent')
+    expect([...group.querySelectorAll('[role=option]')].map((option) => option.textContent)).toEqual([
+      expect.stringContaining('Roadmap'),
+      expect.stringContaining('Untitled'),
+    ])
+    await waitFor(() => expect(roadmap.textContent).toContain('Page · General'))
+    expect(view.getByRole('option', { name: /Untitled/ }).textContent).toContain('Page · Private')
+    // Navigation stays below, shortened.
+    expect(view.getByRole('option', { name: /Go to Tasks/ })).toBeTruthy()
+
+    await userEvent.type(input, 'settings')
+    await view.findByRole('option', { name: /Go to Settings/ })
+    expect(view.container.ownerDocument.querySelector('[data-recent-pages]')).toBeNull()
+    await userEvent.type(input, '{Backspace}'.repeat('settings'.length))
+    fireEvent.click(await view.findByRole('option', { name: /Roadmap/ }))
+    expect(view.getByTestId('location').textContent).toBe('/docs/page-roadmap')
+  } finally {
+    recentPages = []
+  }
 })

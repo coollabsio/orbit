@@ -855,3 +855,44 @@ fn properties_table_is_standalone_and_optional() {
     assert_eq!(page_icon(&plain_page), None);
     assert_eq!(page_cover(&plain_page), None);
 }
+
+#[test]
+fn user_mentions_with_a_member_email_become_orbit_mentions() {
+    let (page, mut blocks) = load("mentions");
+    let raw: Value = json!({
+        "object": "block", "id": "b0000000-0000-4000-8000-0000000000e1", "type": "paragraph",
+        "has_children": false, "archived": false, "in_trash": false,
+        "paragraph": {"rich_text": [
+            {"type": "text", "text": {"content": "Ask ", "link": null}, "plain_text": "Ask "},
+            {"type": "mention", "plain_text": "@Ada",
+             "mention": {"type": "user", "user": {"object": "user", "id": "u1", "name": "Ada",
+                         "person": {"email": "Ada@Example.com"}}}},
+            {"type": "mention", "plain_text": "@Grace",
+             "mention": {"type": "user", "user": {"object": "user", "id": "u2", "name": "Grace",
+                         "person": {"email": "grace@elsewhere.test"}}}},
+            {"type": "mention", "plain_text": "@Bot",
+             "mention": {"type": "user", "user": {"object": "user", "id": "u3", "name": "Bot"}}}
+        ]}
+    });
+    blocks.clear();
+    blocks.push(serde_json::from_value(raw).unwrap());
+    let mut resolver = resolver();
+    resolver.members.insert(
+        "ada@example.com".to_owned(),
+        (
+            "01900000-0000-7000-8000-0000000000aa".to_owned(),
+            "Ada Orbit".to_owned(),
+        ),
+    );
+    let mut ctx = ConvertContext::new(&resolver);
+    let converted = convert_page(&page, &blocks, &mut ctx);
+    assert_eq!(
+        converted.content[0]["content"],
+        json!([
+            {"type": "text", "text": "Ask ", "styles": {}},
+            {"type": "mention", "props": {"userId": "01900000-0000-7000-8000-0000000000aa", "name": "Ada Orbit"}},
+            {"type": "text", "text": "@Grace", "styles": {}},
+            {"type": "text", "text": "@Bot", "styles": {}}
+        ])
+    );
+}

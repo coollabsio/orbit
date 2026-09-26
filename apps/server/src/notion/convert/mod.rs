@@ -45,6 +45,11 @@ pub trait Resolver {
     fn user_name(&self, _user_id: &str) -> Option<String> {
         None
     }
+    /// The Orbit member `(user id, display name)` with this email (lowercase), for user
+    /// mentions that carry one; `None` keeps the mention as `@Name` text.
+    fn member_by_email(&self, _email: &str) -> Option<(String, String)> {
+        None
+    }
 }
 
 /// An uploaded file: the URL the editor loads and the display name.
@@ -61,6 +66,8 @@ pub struct MapResolver {
     pub files: HashMap<String, ResolvedFile>,
     pub titles: HashMap<String, String>,
     pub users: HashMap<String, String>,
+    /// Orbit members by lowercase email: `(user id, display name)`.
+    pub members: HashMap<String, (String, String)>,
 }
 
 impl Resolver for MapResolver {
@@ -78,6 +85,10 @@ impl Resolver for MapResolver {
 
     fn user_name(&self, user_id: &str) -> Option<String> {
         self.users.get(user_id).cloned()
+    }
+
+    fn member_by_email(&self, email: &str) -> Option<(String, String)> {
+        self.members.get(email).cloned()
     }
 }
 

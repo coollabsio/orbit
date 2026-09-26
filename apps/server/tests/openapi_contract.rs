@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 89);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 99);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 119);
+    assert_eq!(operation_count, 131);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -69,6 +69,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/pages/favorites/{page_id}/move",
         "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files",
         "/api/v1/workspaces/{workspace_id}/pages/{page_id}/files/{file_id}",
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/export",
         "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions",
         "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}",
         "/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}/restore",
@@ -912,4 +913,89 @@ fn page_purge_duplicate_and_search_highlights_are_documented() {
         schemas["TextRange"]["required"],
         serde_json::json!(["start", "end"])
     );
+}
+
+#[test]
+fn page_comment_routes_are_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let base = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads";
+    let list = operation(&document, base, "get");
+    assert_eq!(list["operationId"], "list_page_threads");
+    let create = operation(&document, base, "post");
+    assert_eq!(create["operationId"], "create_page_thread");
+    assert!(create["responses"]["201"].is_object());
+    assert!(create["responses"]["422"].is_object());
+    let update = operation(
+        &document,
+        &format!("{base}/{{thread_id}}/comments/{{comment_id}}"),
+        "patch",
+    );
+    assert_eq!(update["operationId"], "update_page_comment");
+    assert!(update["responses"]["403"].is_object());
+    for (path, method, id) in [
+        (
+            format!("{base}/{{thread_id}}"),
+            "delete",
+            "delete_page_thread",
+        ),
+        (
+            format!("{base}/{{thread_id}}/comments"),
+            "post",
+            "create_page_comment",
+        ),
+        (
+            format!("{base}/{{thread_id}}/comments/{{comment_id}}"),
+            "delete",
+            "delete_page_comment",
+        ),
+        (
+            format!("{base}/{{thread_id}}/resolve"),
+            "post",
+            "resolve_page_thread",
+        ),
+        (
+            format!("{base}/{{thread_id}}/reopen"),
+            "post",
+            "reopen_page_thread",
+        ),
+    ] {
+        let found = operation(&document, &path, method);
+        assert_eq!(found["operationId"], id);
+        assert!(found["responses"]["404"].is_object(), "{id}");
+    }
+    let notification = &document["components"]["schemas"]["NotificationRecord"]["properties"];
+    for field in ["page_id", "page_thread_id", "page_comment_id"] {
+        assert!(notification[field].is_object(), "{field}");
+    }
+}
+
+#[test]
+fn page_export_route_is_documented() {
+    let document: serde_json::Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let export = operation(
+        &document,
+        "/api/v1/workspaces/{workspace_id}/pages/{page_id}/export",
+        "get",
+    );
+    assert_eq!(export["operationId"], "export_page");
+    assert_eq!(parameter_names(export, "query"), vec!["format", "children"]);
+    assert_eq!(
+        export["responses"]["200"]["content"]["application/zip"]["schema"]["$ref"],
+        "#/components/schemas/PageExportArchive"
+    );
+    for (status, code) in [
+        ("400", "invalid_request"),
+        ("404", "page_not_found"),
+        ("413", "export_too_many_pages"),
+        ("413", "export_too_large"),
+        ("401", "authentication_required"),
+    ] {
+        assert!(
+            export["responses"][status]["description"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "{status} {code}"
+        );
+    }
 }

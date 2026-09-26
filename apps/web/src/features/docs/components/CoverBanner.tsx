@@ -22,8 +22,11 @@ export function CoverBanner({
   position,
   onChange,
   onUpload,
+  readOnly = false,
 }: {
   url: string
+  /** No reposition / change / remove controls (locked page). */
+  readOnly?: boolean
   position: string | null
   /** Uploads a new cover image to the page; resolves to its URL. */
   onUpload?: (file: File) => Promise<string>
@@ -108,7 +111,7 @@ export function CoverBanner({
         style={{ objectPosition: coverObjectPosition(pos) }}
       />
 
-      <div
+      {readOnly ? null : <div
         className="absolute top-2 right-2 z-[5] hidden gap-1 group-hover/cover:flex data-[open]:flex"
         data-cover-actions=""
         data-open={repositioning || sourceOpen || undefined}
@@ -154,7 +157,7 @@ export function CoverBanner({
             </Button>
           </>
         )}
-      </div>
+      </div>}
 
       {sourceOpen && !repositioning ? (
         <div

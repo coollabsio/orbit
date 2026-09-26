@@ -56,6 +56,10 @@ pub(crate) fn link(href: impl Into<String>, content: Vec<Value>) -> Value {
 pub(crate) fn rich_text_to_inline(items: &[Value], ctx: &mut ConvertContext<'_>) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     for item in items {
+        if let Some(mention) = member_mention(item, ctx) {
+            out.push(mention);
+            continue;
+        }
         let Some((content, href)) = convert_item(item, ctx) else {
             continue;
         };
@@ -75,6 +79,20 @@ pub(crate) fn rich_text_to_inline(items: &[Value], ctx: &mut ConvertContext<'_>)
         }
     }
     out
+}
+
+/// A Notion user mention whose email belongs to an Orbit member → an Orbit `mention`.
+fn member_mention(item: &Value, ctx: &ConvertContext<'_>) -> Option<Value> {
+    if str_at(item, &["type"]) != Some("mention")
+        || str_at(item, &["mention", "type"]) != Some("user")
+    {
+        return None;
+    }
+    let email = str_at(item, &["mention", "user", "person", "email"])?
+        .trim()
+        .to_lowercase();
+    let (user_id, name) = ctx.resolver.member_by_email(&email)?;
+    Some(json!({"type": "mention", "props": {"userId": user_id, "name": name}}))
 }
 
 /// One rich text item → (styled text item, optional link target).

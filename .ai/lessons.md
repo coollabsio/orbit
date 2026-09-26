@@ -114,3 +114,14 @@
   Surfaces that are focused almost all the time must merge remote updates themselves and opt out with
   `data-realtime-safe` (Docs `DocEditor`), or they never refresh while someone types — the other user's title change
   never arrived and the next save hit a 409 (2026-09-25). Portalled dialogs/popovers stay outside the marker.
+
+## Print CSS: cascade layers and BlockNote's `.dark`
+- Unlayered `!important` loses to layered `!important` (important order reverses layer priority). Tailwind `…!` utilities
+  and the base `max-md:text-[16px]!` input rule beat any plain `@media print { … !important }` override; the page title
+  printed at 16px because A4 print width is under `md`. Put such overrides in `@layer base` with a more specific
+  selector (docs export, 2026-09-25).
+- BlockNote puts the scheme class (`dark`) on its own containers, so `.dark { --foreground … }` re-applies there: a
+  light-theme override on `<html>` alone left white editor text on white paper. Override `html.x, html.x .dark`.
+
+## Opening detail views without flicker
+- Do not show a "Loading…" boundary between a list and a detail view, and do not let detail sections arrive one by one (a late query that toggles read-only/editable remounts the fields). Put the detail queries in shared `queryOptions` factories, prefetch them all on open and navigate when they resolve (short cap, e.g. 300ms); on a direct URL load render a blank canvas until every detail query settles (`features/tasks/api/tasks.ts` `prefetchTaskDetail`, 2026-09-26).

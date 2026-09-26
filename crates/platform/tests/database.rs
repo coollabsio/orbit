@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        29
+        32
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 29
+            binary_version: 32
         }
     ));
 }
@@ -1315,6 +1315,229 @@ async fn page_versions_migration_scopes_rows_and_cascades() {
             .unwrap(),
         0
     );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn page_options_migration_adds_lock_width_and_scoped_visits() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 30)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        other_user,
+        first,
+        second,
+        first_owner,
+        second_owner,
+        page,
+        other,
+        foreign,
+    ]: [Id; 9] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1),
+                ('{other_user}', 'other@example.com', 'other@example.com', 'Other', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, deleted_at)
+         VALUES ('{first}', 'First', 0, '{first_owner}', 1, 1, NULL),
+                ('{second}', 'Second', 0, '{second_owner}', 1, 1, NULL);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{first_owner}', '{first}', '{user}', 'owner', 0, 1, 1),
+                ('{second_owner}', '{second}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO pages (id, workspace_id, parent_id, owner_id, creator_id, updated_by, created_at, updated_at)
+         VALUES ('{page}', '{first}', NULL, '{user}', '{user}', '{user}', 1, 1),
+                ('{other}', '{first}', NULL, '{user}', '{user}', '{user}', 1, 1),
+                ('{foreign}', '{second}', NULL, '{user}', '{user}', '{user}', 1, 1);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    // Existing pages are unlocked and not full width.
+    assert_eq!(
+        db.scalar::<i64>(
+            "SELECT COUNT(*) FROM pages WHERE full_width = 0 AND locked_at IS NULL AND locked_by IS NULL"
+        )
+        .await
+        .unwrap(),
+        3
+    );
+    db.execute(&format!(
+        "UPDATE pages SET full_width = 1, locked_at = 5, locked_by = '{other_user}' WHERE id = '{other}'"
+    ))
+    .await
+    .unwrap();
+    let visit = |workspace: Id, page: Id, at: i64| {
+        format!(
+            "INSERT INTO page_visits (workspace_id, user_id, page_id, visited_at) \
+             VALUES ('{workspace}', '{user}', '{page}', {at})"
+        )
+    };
+    db.execute(&visit(first, page, 1)).await.unwrap();
+    db.execute(&visit(first, other, 2)).await.unwrap();
+    db.execute(&visit(second, foreign, 3)).await.unwrap();
+    for (sql, message) in [
+        (
+            visit(second, page, 4),
+            "visited page must belong to the workspace",
+        ),
+        (visit(first, page, 4), "UNIQUE constraint failed"),
+        (
+            format!("UPDATE page_visits SET page_id = '{foreign}' WHERE page_id = '{other}'"),
+            "page visit identity is immutable",
+        ),
+        (
+            format!("UPDATE pages SET full_width = 2 WHERE id = '{page}'"),
+            "CHECK constraint failed",
+        ),
+        (
+            format!("UPDATE pages SET locked_by = '{user}' WHERE id = '{page}'"),
+            "CHECK constraint failed",
+        ),
+        (
+            format!("UPDATE pages SET locked_at = 1, locked_by = 'nobody' WHERE id = '{page}'"),
+            "FOREIGN KEY constraint failed",
+        ),
+    ] {
+        let error = db.execute(&sql).await.unwrap_err().to_string();
+        assert!(error.contains(message), "{sql}: {error}");
+    }
+
+    // A deleted locker leaves the page locked by nobody in particular.
+    db.execute(&format!("DELETE FROM users WHERE id = '{other_user}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>(&format!(
+            "SELECT COUNT(*) FROM pages WHERE id = '{other}' AND locked_at = 5 AND locked_by IS NULL"
+        ))
+        .await
+        .unwrap(),
+        1
+    );
+    // A hard-deleted page takes its visits along; so does a deleted workspace.
+    db.execute(&format!("DELETE FROM pages WHERE id = '{page}'"))
+        .await
+        .unwrap();
+    db.execute(&format!("DELETE FROM workspaces WHERE id = '{second}'"))
+        .await
+        .unwrap();
+    let remaining: Vec<(String,)> = sqlx::query_as("SELECT page_id FROM page_visits")
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(remaining, [(other.to_string(),)]);
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn page_mentions_migration_keeps_notifications_and_adds_the_kind() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 31)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        other_user,
+        workspace,
+        owner,
+        member,
+        page,
+        private,
+        thread,
+        comment,
+        note,
+    ]: [Id; 10] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1),
+                ('{other_user}', 'other@example.com', 'other@example.com', 'Other', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, deleted_at)
+         VALUES ('{workspace}', 'First', 0, '{owner}', 1, 1, NULL);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{owner}', '{workspace}', '{user}', 'owner', 0, 1, 1),
+                ('{member}', '{workspace}', '{other_user}', 'member', 0, 1, 1);
+         INSERT INTO pages (id, workspace_id, parent_id, owner_id, creator_id, updated_by, created_at, updated_at)
+         VALUES ('{page}', '{workspace}', NULL, '{user}', '{user}', '{user}', 1, 1),
+                ('{private}', '{workspace}', NULL, '{user}', '{user}', '{user}', 1, 1);
+         INSERT INTO page_threads (id, workspace_id, page_id, created_by, created_at, updated_at)
+         VALUES ('{thread}', '{workspace}', '{page}', '{user}', 1, 1);
+         INSERT INTO page_comments (id, workspace_id, page_id, thread_id, author_id, created_at, updated_at)
+         VALUES ('{comment}', '{workspace}', '{page}', '{thread}', '{user}', 1, 1);
+         INSERT INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, kind, page_id,
+                                    page_thread_id, page_comment_id, dedupe_key, read_at, created_at)
+         VALUES ('{note}', '{workspace}', '{user}', '{other_user}', 'page_comment_mentioned', '{page}',
+                 '{thread}', '{comment}', 'kept', 7, 5);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    assert_eq!(
+        db.scalar::<String>(&format!(
+            "SELECT kind || ':' || dedupe_key || ':' || read_at || ':' || created_at \
+             || ':' || COALESCE(page_block_id, '-') FROM notifications WHERE id = '{note}'"
+        ))
+        .await
+        .unwrap(),
+        "page_comment_mentioned:kept:7:5:-"
+    );
+    let insert = |id: &str, recipient: Id, page: Id, extra: &str, block: &str| {
+        format!(
+            "INSERT INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, kind, \
+             page_id, page_thread_id, page_block_id, dedupe_key, created_at) VALUES ('{id}', \
+             '{workspace}', '{recipient}', '{other_user}', 'page_mentioned', '{page}', {extra}, \
+             {block}, '{id}', 9)"
+        )
+    };
+    db.execute(&insert("ok", user, page, "NULL", "'b1'"))
+        .await
+        .unwrap();
+    for (sql, message) in [
+        // The page is its owner's private page: nobody else may be notified about it.
+        (
+            insert("private", other_user, private, "NULL", "NULL"),
+            "notification must belong to the workspace task or a page the recipient can see",
+        ),
+        (
+            insert("thread", user, page, &format!("'{thread}'"), "NULL"),
+            "CHECK constraint failed",
+        ),
+        (
+            insert("long", user, page, "NULL", &format!("'{}'", "x".repeat(65))),
+            "CHECK constraint failed",
+        ),
+    ] {
+        let error = db.execute(&sql).await.unwrap_err().to_string();
+        assert!(error.contains(message), "{sql}: {error}");
+    }
     assert_eq!(
         db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
         "ok"

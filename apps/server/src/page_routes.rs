@@ -19,7 +19,8 @@ use crate::repositories::page_versions::{
 };
 use crate::repositories::pages::{
     CreatePage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageList, PageRecord,
-    PageRepository, PageSearch, PageTrash, PageTrashEmptied, SpaceRequest,
+    PageRepository, PageSearch, PageTrash, PageTrashEmptied, RECENT_DEFAULT_LIMIT,
+    RECENT_MAX_LIMIT, RecentPageList, SpaceRequest,
 };
 use crate::task_routes::{
     ApiError, ApiJson, ApiQuery, MutationQuery, RestoreBody, authenticate_session, bounded,
@@ -72,6 +73,18 @@ pub fn page_router(state: PageState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/pages/favorites/{page_id}/move",
             post(move_page_favorite),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/recent",
+            get(list_recent_pages),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/lock",
+            post(set_page_lock),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/visit",
+            post(record_page_visit),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/pages/{page_id}",
@@ -154,6 +167,24 @@ struct PageUpdateBody {
     /// The whole BlockNote block array.
     #[schema(value_type = Option<Vec<serde_json::Value>>)]
     content: Option<Value>,
+    /// Absent: unchanged. The editor column uses the whole pane width. Allowed on locked pages;
+    /// not an edit (`updated_by` / `updated_at` stay).
+    full_width: Option<bool>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct PageLockBody {
+    /// `true` locks the page, `false` unlocks it.
+    locked: bool,
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct RecentPagesQuery {
+    /// Pages to return, 1 to 50 (default 10).
+    limit: Option<usize>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -341,6 +372,7 @@ async fn update_page(
                 _ => Err(validation("content", &instance, request)),
             })
             .transpose()?,
+        full_width: body.full_width,
         ..PageChanges::default()
     };
     state
@@ -647,6 +679,82 @@ async fn move_page_favorite(
     state
         .pages
         .move_favorite(workspace_id, page_id, actor_id, position)
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// Locks or unlocks the page (any member who can see it; audited `page.locked` / `page.unlocked`).
+/// While locked, title, icon, cover and content writes answer 423 `page_locked` and co-editing
+/// ignores content updates; moving, trashing, duplicating and `full_width` stay allowed. Setting
+/// the current state again changes nothing.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/lock", params(("workspace_id" = String, Path), ("page_id" = String, Path)), request_body = PageLockBody, responses((status = 200, body = PageRecord)))]
+async fn set_page_lock(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<PageLockBody>,
+) -> Result<Json<PageRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/lock");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .set_lock(
+            workspace_id,
+            page_id,
+            actor_id,
+            body.locked,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// Records that the caller opened the page (for their recent pages). Clients send it once when a
+/// page is opened, not on background reads.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/visit", params(("workspace_id" = String, Path), ("page_id" = String, Path)), responses((status = 204)))]
+async fn record_page_visit(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/visit");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .record_visit(workspace_id, page_id, actor_id, TimestampMillis::now())
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// The caller's recently opened pages, newest first: live pages they can see now only.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/pages/recent", params(RecentPagesQuery, ("workspace_id" = String, Path)), responses((status = 200, body = RecentPageList)))]
+async fn list_recent_pages(
+    State(state): State<PageState>,
+    Path(workspace): Path<String>,
+    ApiQuery(query): ApiQuery<RecentPagesQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<RecentPageList>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/recent");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let limit = query.limit.unwrap_or(RECENT_DEFAULT_LIMIT);
+    if !(1..=RECENT_MAX_LIMIT).contains(&limit) {
+        return Err(validation("limit", &instance, request_id.as_ref()));
+    }
+    state
+        .pages
+        .recent_pages(workspace_id, actor_id, limit)
         .await
         .map(Json)
         .map_err(|error| page_problem(error, instance, request_id.as_ref()))
@@ -961,6 +1069,14 @@ fn page_problem(
             "page_not_trashed",
             "Page not in the trash",
             "Only pages in the trash can be deleted forever.",
+            instance,
+            request_id,
+        ),
+        PageError::Locked => ApiError::new(
+            StatusCode::LOCKED,
+            "page_locked",
+            "Page locked",
+            "The page is locked. Unlock it to change its title, icon, cover or content.",
             instance,
             request_id,
         ),

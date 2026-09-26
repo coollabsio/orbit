@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,12 +18,15 @@ import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import {
+  prefetchTaskDetail,
   useCommentAttachments,
   useCreateTask,
   useTask,
   useTaskActivity,
   useTaskAttachments,
   useTaskComments,
+  useTaskGithubLinks,
+  useTaskRelations,
   useTasks,
 } from '@/features/tasks/api/tasks'
 import { TaskBoard } from '@/features/tasks/components/TaskBoard'
@@ -41,6 +45,7 @@ import { useTaskPreferences } from '@/features/tasks/taskPreferences'
 
 const LAYOUT_KEY = 'orbit:task_layout'
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
+const OPEN_WAIT_MS = 300
 
 const OPTION =
   `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[active]:bg-accent data-[active]:font-medium`
@@ -62,6 +67,7 @@ function WorkspaceTasksPage() {
   const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
   const createTask = useCreateTask(workspace.id)
+  const queryClient = useQueryClient()
   const [showNewProject, setShowNewProject] = useState(false)
 
   const urlLayout = searchParams.get('layout')
@@ -114,6 +120,12 @@ function WorkspaceTasksPage() {
   const activityQuery = useTaskActivity(workspace.id, taskId)
   const attachmentsQuery = useTaskAttachments(workspace.id, taskId)
   const commentAttachments = useCommentAttachments(workspace.id, taskId, commentsQuery.data ?? [])
+  // TaskDetail reads these from the same cache; waiting here keeps the first paint stable
+  // (GitHub links decide whether the title and description are editable)
+  const githubLinksQuery = useTaskGithubLinks(workspace.id, taskId)
+  const relationsQuery = useTaskRelations(workspace.id, taskId)
+  const detailPending = detailQuery.isPending || activityQuery.isPending || commentsQuery.isPending || attachmentsQuery.isPending
+    || commentAttachments.isPending || githubLinksQuery.isPending || relationsQuery.isPending
 
   const records = useMemo(() => tasksQuery.data?.pages.flatMap((page) => page.items) ?? [], [tasksQuery.data])
   const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
@@ -152,7 +164,15 @@ function WorkspaceTasksPage() {
     if (taskId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
     else setSearchParams(next, { replace: true })
   }
-  const openTask = (id: string) => navigate(`/tasks/${id}${detailSearchSuffix}`)
+  // keep the current view on screen until the task can render complete (at most OPEN_WAIT_MS)
+  const opening = useRef<string | null>(null)
+  const openTask = (id: string) => {
+    opening.current = id
+    const wait = new Promise((resolve) => setTimeout(resolve, OPEN_WAIT_MS))
+    void Promise.race([prefetchTaskDetail(queryClient, workspace.id, id), wait]).then(() => {
+      if (opening.current === id) navigate(`/tasks/${id}${detailSearchSuffix}`)
+    })
+  }
   const closeTask = () => navigate(redirect ?? `/tasks${closeSearchSuffix}`)
 
   useEffect(() => {
@@ -222,7 +242,10 @@ function WorkspaceTasksPage() {
     search: searchFilter,
   })
 
-  if (projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending || (taskId && (detailQuery.isPending || activityQuery.isPending))) {
+  const pending = projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || tasksQuery.isPending
+  // a task opens straight from a blank canvas: a loading message in between reads as a flicker
+  if (taskId && (pending || detailPending)) return <div className="flex-1 bg-background" />
+  if (pending) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
   if (detailQuery.isError) {

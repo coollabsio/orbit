@@ -106,6 +106,31 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   cover), `page` block `pageId`s and `/docs/<id>` links that point inside the copied pages are rewritten to the copies;
   links elsewhere stay. Any member who can see the page; each copy is audited `page.duplicated`. The open editor is flushed
   first; on success the copy opens with a toast. (`features/docs/pageActions.ts` context from DocsPage.)
+- Export (page header "…" → Export: "Markdown", "Markdown with sub-pages" only when the page has children, "PDF"):
+  `GET /pages/{page_id}/export?format=markdown&children=false|true` → `application/zip` (`Content-Disposition` with an
+  ASCII `filename` and an RFC 5987 `filename*`, `no-store`). Access = the page's (another member's private page, trashed or
+  unknown → 404 `page_not_found`); with children only the live sub-pages the caller can see (a trashed sub-page drops its
+  subtree). Open documents are flushed first. Limits: 500 pages (413 `export_too_many_pages`) and 200 MiB uncompressed
+  (413 `export_too_large`); the archive is written to an anonymous temp file on a blocking thread and streamed.
+  Layout (Notion-like): `<Title>.md`; sub-pages in the folder `<Title>/` next to it; a page's files (only those its
+  content or cover references) in `<Title>/assets/`. Names: separators/reserved characters → `-`, control characters,
+  leading/trailing dots and Windows device names handled, 80-character stems, "Untitled" when empty, unique per folder
+  ignoring case (" (2)"), `assets` reserved in sub-page folders. Each `.md` has front matter (`title`, `icon`,
+  `exported_at`), `# Title`, the cover as an image, then the body. Links: `page` blocks and `/docs/<id>` links to exported
+  pages → relative `.md` paths, page files of exported pages → relative asset paths (all percent-encoded); other visible
+  pages and files → absolute URLs on the configured public origin; pages the caller cannot see → "*Missing page*" (no
+  title leak); external links unchanged. Converter (`apps/server/src/export/markdown.rs`, BlockNote JSON → GFM,
+  deterministic): headings 1-6 (toggle headings too), paragraphs, bulleted/numbered (with `start`)/check lists and toggle
+  lists with nesting, quotes, code fences with language (longer fences when the code has backticks), dividers, GFM tables
+  (first row as header, `\|` escaped, colspans padded, newlines `<br>`), images `![name](path)` + italic caption, files
+  as links, callouts as `> 💡 text` blockquotes with their children, bold/italic/strike/code/`<u>` underline, links, hard
+  breaks (`\`), Markdown punctuation escaped; colors and alignment dropped. Goldens: `apps/server/tests/fixtures/export/`
+  (`UPDATE_EXPORT_GOLDENS=1`). Web: `features/docs/pageExport.ts` (SDK blob download with progress/success/error toasts;
+  413 shows the server's message). PDF = `printPage`: adds `orbit-print-doc` to `<html>` and the page title as document
+  title, calls `window.print()`, restores on `afterprint`; `@media print` rules in `src/index.css` keep only
+  `[data-print-root]` (DocEditor's content; `[data-print-hide]` drops the add icon/cover row), full width, light theme
+  (also over BlockNote's own `.dark` containers), images fitted, page breaks avoided inside images/code/tables/headings.
+  Static CSS (production CSP). Smoke: `target/orbit-smoke/export.mjs`.
 - Editor: BlockNote 0.55 (rich text, markdown shortcuts, nested blocks, drag handles, undo, slash menu), lazy-loaded in its own
   chunk. Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
   Slash items "Sub-page" (creates a child page, inserts the link, opens it) and "Link a page" (picker over the tree).
@@ -241,12 +266,91 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   broadcast it after commit (open editors switch live); pages never opened only get `content_json`. `Page.collab_epoch`
   changes on converter/schema changes (stored document rebuilt from JSON) and on backup restore (all epochs and the
   generation of never-opened pages rotate), so clients holding newer state reset instead of re-pushing it.
+- Page options (migration 0031: `pages.full_width`, `locked_at`, `locked_by` → users SET NULL; `page_visits`):
+  `Page` carries `full_width`, `locked_at`, `locked_by { id, display_name }` and `updated_by_user { id, display_name }`.
+  Full width: PATCH `full_width` with `expected_version` (any member who can see the page; a layout change, not an edit:
+  `updated_by`/`updated_at` stay; allowed while locked); page "…" → "Full width" (checkbox item, saved through the
+  autosaver) makes the editor column use the pane width.
+  Lock: `POST /pages/{id}/lock { locked }` → `Page` (any member who can see the page; setting the current state is a no-op;
+  a change bumps the version, audited `page.locked` / `page.unlocked`); page "…" → "Lock page" / "Unlock page". While
+  locked, PATCH title/icon/cover/content, version restore and Notion import fills answer 423 `page_locked` (checked before
+  the version); moving, trashing, duplicating (the copy is unlocked), favorites and full width stay allowed. Co-editing:
+  the room holds `locked` (loaded from the page; flipped by `CollabHub::lock_change` holding the room lock across the
+  transaction); while locked, client Update/SyncStep2 messages are ignored (not applied, broadcast or stored), SyncStep1
+  and awareness still work; lock and unlock close every socket with **4423**, which the web treats like 4409 (refetch the
+  page, fresh Y.Doc, reconnect), so refused edits never resurface. Web: locked pages render read-only (editor
+  `editable=false`, title read-only, icon picker disabled, no Add icon/cover or cover controls) with a "🔒 Locked by
+  <name|you>" pill + Unlock above the title; unsaved title/icon/cover edits are dropped when the lock arrives.
+  Header "Edited <just now | n minutes/hours/days ago | on Mon d> by <name | you>" (`lastEdited.ts`, hidden below
+  1100 px): the server's `updated_by_user`/`updated_at`, overridden by live edits seen on the Y doc (local typing → you;
+  remote updates → the awareness user of the writing client id), re-evaluated every 30 s.
+  Recent pages: `POST /pages/{id}/visit` (204; sent once after 1.5 s on a page, so background refetches never count;
+  upsert, newest 50 kept per member and workspace) and `GET /pages/recent?limit=1..50` (default 10) → `{ items: RecentPage }`
+  with live pages the caller can see now only (a page moved into someone else's private space or trashed drops out).
+  Private to the member, not audited. Shown as a "Recent" group (6) at the top of the command palette while the query is
+  empty; not in the docs sidebar (Favorites + spaces already fill it; the palette is one keystroke away).
+  E2E: `target/orbit-smoke/options.mjs`.
+- Comments + @mentions (migration 0030: `page_threads`, `page_comments`, `page_comment_mentions`; `notifications`
+  rebuilt with optional `task_id` and `page_id`/`page_thread_id`/`page_comment_id`, kind `page_comment_mentioned`):
+  server `repositories/page_comments.rs` + `page_comment_routes.rs`; web `features/docs/comments/` (`threadStore.ts`,
+  `api.ts`, `mentions.ts`, `CommentEditor.tsx`, `CommentComposer.tsx`, `ThreadCard.tsx`, `ThreadList.tsx`,
+  `CommentsPanel.tsx`). REST under `/pages/{page_id}/threads`: GET (open and
+  resolved threads with comments oldest first) / POST `{ body, quote }` → 201 `PageThread`; `DELETE /threads/{id}` (thread
+  creator); `POST /threads/{id}/comments { body }` → 201 `PageComment`; `PATCH|DELETE /threads/{id}/comments/{cid}` (author
+  only, else 403 `page_comment_forbidden`; delete keeps a placeholder, the last live comment takes the thread with it);
+  `POST /threads/{id}/resolve|reopen` (anyone who sees the page; `resolved_by`/`resolved_at`). Access = the page's (hidden,
+  trashed or foreign pages answer 404 `page_not_found`, like an unknown id). Bodies are comment-editor BlockNote blocks,
+  cleaned server-side (paragraphs; text with bold/italic/underline/strike/code, safe links, `mention { userId, name }`;
+  ≤ 10 000 chars); `body_text` for plain text. Mentions come from the body and count only for members who can see the page
+  (every member for teamspace pages, only the owner for private pages); newly mentioned ones (never the author, once per
+  comment) get an Inbox notification. The Inbox lists "You were mentioned in a comment … on “<page>”" and opens
+  `/docs/<page>?thread=<id>` (Comments panel open, thread selected); entries hide while the page is trashed or out of the
+  recipient's reach, and go when the comment is deleted. Every change is audited (`page.thread_created|resolved|reopened|
+  deleted`, `page.comment_created|updated|deleted`), so other viewers refresh through workspace events.
+  Anchors: BlockNote's `comment` mark (`threadId`, `orphan`) inside the collaborative document (y-prosemirror key
+  `comment--<hash>`), set by the author's editor; the JSON projection never contains it (Rust converter ignores it; golden
+  `tests/fixtures/collab/marks/comment_marks.json`). Every collaborative editor loads `CommentsExtension` (without the
+  mark y-prosemirror would drop the anchored text) and mounts only after the threads query settled (an empty store would
+  flip every anchor to orphan). Resolved/deleted threads keep their mark as `orphan` (no highlight; reopen restores it).
+  UI (Orbit components on BlockNote's comment data flow; BlockNote's stock thread/composer/sidebar are not used): select
+  text → "Comment" in the formatting toolbar → floating composer: a textarea-style field (2–8 lines, "Add a comment… Use @
+  to mention", "@" button opening the member picker), Cancel + primary "Comment" (disabled while empty); Enter is a new
+  line, Cmd/Ctrl+Enter sends (also replies and edits), Esc cancels. Thread card (floating next to a clicked highlight, or
+  in the panel): quoted anchor text on top (amber left border, 2 lines), Resolve/Reopen icon button, comment rows (avatar,
+  name, relative time, "edited", kebab with Edit/Delete on own comments), "Resolved by X · time" on resolved threads
+  (dimmed, no reply field), a one-line "Reply…" field that expands on focus. Header comment button with an open-count
+  badge toggles the "Comments" panel (segmented Open / Resolved tabs with counts, empty states; cards in document order,
+  anchorless threads last and labelled "Text removed"; clicking a card scrolls to and highlights its anchor; while the
+  panel is open, threads show there instead of floating cards). Anchors: amber wash + underline, stronger when selected
+  (light and dark). Comment placeholders are static CSS (CSP). No reactions. REST content writes, version restores and
+  converter rebuilds replace the document without marks (their threads show as "Text removed" in the panel). E2E:
+  `target/orbit-smoke/comments.mjs`; visual check `target/orbit-smoke/comments-ui.mjs` (dark + light screenshots).
+- @mentions in the page body (migration 0032: `notifications` rebuilt with kind `page_mentioned` and optional
+  `page_block_id`): inline content `mention { userId, name }` (`name` = snapshot for export/fallback) in
+  `pageEditorSchema` (`editor/MentionInline.tsx`, `PageMentionChip.tsx`, `mentionItems.tsx`, `MentionMenu.tsx`,
+  `pageMentions.ts`). Typing "@" at a word start (not inside "a@b", never in code blocks) opens BlockNote's suggestion menu
+  (next to "/"): members who can see the page (teamspace page: every active member, yourself last; private page: only you,
+  under the hint "Only you can see this private page"), filtered by name/handle/email (≤ 10), avatar initials, keyboard
+  navigable; picking inserts a non-editable chip "@Name" (primary text on a subtle primary wash) plus a space. Chips show the
+  member's current name, the stored one while members load, "Unknown user" once the member is gone. Works in co-editing:
+  the Rust converter (`collab/blocknote.rs`) writes/reads mentions as y-prosemirror atom elements (`inline` section of
+  `blocknote-schema.json`; parity golden `tests/fixtures/collab/editor_mentions.json`); `sanitize.rs` keeps only a UUID
+  `userId` (lowercased) and a ≤ 100-char `name` (invalid ones become `@name` text in JSON and are removed from live
+  documents). `content_text` has "@Name" (search finds mentions); Markdown export writes "@<current name>".
+  Notifications (`repositories/page_mentions.rs`): the collab projection and REST content edits (not imports, restores or
+  duplicates) diff the mentioned user sets before/after; a user newly mentioned on the page gets `page_mentioned` ("<editor>
+  mentioned you in “<page>”", actor = editor, `page_block_id` = first block with the mention) unless they are the editor,
+  cannot see the page (private page of someone else, non-member, suspended) or already got one for this page in the last
+  10 minutes. Moving or re-projecting a mention never notifies. Each batch is audited `page.mentioned` (workspace events
+  refresh the Inbox). The Inbox opens `/docs/<page>?block=<id>`; the page scrolls to and flashes that block, then drops the
+  parameter. Notion import: user mentions whose `person.email` matches an active member become `mention`s, others stay
+  "@Name" text. `MemberRecord.suspended_at` lets the picker skip suspended members. E2E `target/orbit-smoke/mention.mjs`.
 - Links: the editor accepts http(s), mailto and exact in-app page links `/docs/<uuid>` (what the import writes between
   imported pages); clicking one navigates in the app (Cmd/Ctrl/Shift-click opens a new tab). `javascript:`, `data:` and
   other relative paths are dropped.
 
 Not supported yet: video and audio blocks, offline storage of co-edited content (IndexedDB; edits live only in the open
-tab while disconnected), presence dots in the page tree, teamspace membership or per-page sharing, comments, templates, export and ZIP import. The production CSP allows external https images (`img-src 'self' data: blob: https:`), so external image
+tab while disconnected), presence dots in the page tree, teamspace membership or per-page sharing, comment reactions, templates, export and ZIP import. The production CSP allows external https images (`img-src 'self' data: blob: https:`), so external image
 blocks and cover URLs load; the image host then sees the viewer's IP. Plain http images stay blocked.
 
 ## Mail
@@ -298,7 +402,8 @@ This feature is mock-backed.
 
 ## Notifications, profile, and settings
 
-- Inbox can mark individual/all notifications read and links to resources.
+- Inbox can mark individual/all notifications read and links to resources (tasks; docs comment mentions open the page
+  with the thread; page body mentions open the page at the mentioned block).
 - Inbox and Profile remain mock-backed.
 - Profile edits the current mock user's name, email, and title.
 - Workspace Settings: General, Members, Sessions.

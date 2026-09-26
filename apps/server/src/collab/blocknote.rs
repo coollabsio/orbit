@@ -6,6 +6,8 @@
 //! `XmlText` per run of text nodes with marks as formatting attributes (boolean styles `{}`,
 //! string styles `{stringValue}`, `link {href}`), hard breaks are `hardBreak` elements, tables are
 //! `table > tableRow > tableHeader|tableCell{attrs} > tableParagraph`, code blocks hold plain text.
+//! Custom inline content without content (`mention {userId, name}`) is an element between the
+//! text runs, its props as attributes.
 //!
 //! Schema facts (attribute order and defaults, style kinds) come from `blocknote-schema.json`,
 //! generated from the real editor schema by the web test `collabParity.test.ts`, never by hand.
@@ -51,6 +53,9 @@ static CONVERTER_VERSION: LazyLock<i64> = LazyLock::new(|| {
 #[derive(Debug, Deserialize)]
 pub struct SchemaTable {
     pub blocks: HashMap<String, BlockTable>,
+    /// Custom inline content types (`mention`), by type.
+    #[serde(default)]
+    pub inline: HashMap<String, InlineTable>,
     pub cell: CellTable,
     pub styles: HashMap<String, String>,
 }
@@ -58,6 +63,13 @@ pub struct SchemaTable {
 #[derive(Debug, Deserialize)]
 pub struct BlockTable {
     /// `inline`, `none`, `table` or `plain`.
+    pub content: String,
+    pub attrs: Vec<AttrTable>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InlineTable {
+    /// `none` (an atom such as a mention); other kinds are not used by the editor.
     pub content: String,
     pub attrs: Vec<AttrTable>,
 }
@@ -246,10 +258,35 @@ fn write_container(txn: &mut TransactionMut, parent: &XmlElementRef, block: &Val
     }
 }
 
-/// A ProseMirror inline node: text with marks, or a hard break.
+/// A ProseMirror inline node: text with marks, a hard break, or custom inline content (an atom
+/// element with its attributes, e.g. a mention).
 enum Run {
     Text(String, yrs::types::Attrs),
     Break,
+    Inline(String, Vec<(String, Any)>),
+}
+
+/// A custom inline content item (`{ type: "mention", props }`) as an element run; `None` for other
+/// items. PM fills unspecified attrs with their defaults, y-prosemirror skips null ones.
+fn inline_node_run(object: &Map<String, Value>) -> Option<Run> {
+    let inline_type = object.get("type").and_then(Value::as_str)?;
+    let table = SCHEMA.inline.get(inline_type)?;
+    if table.content != "none" {
+        return None;
+    }
+    let props = object.get("props").and_then(Value::as_object);
+    let attrs = table
+        .attrs
+        .iter()
+        .filter_map(|attr| {
+            let value = props
+                .and_then(|props| props.get(&attr.name))
+                .cloned()
+                .unwrap_or_else(|| attr.missing.value.clone());
+            (!value.is_null()).then(|| (attr.name.clone(), any(&value)))
+        })
+        .collect();
+    Some(Run::Inline(inline_type.to_owned(), attrs))
 }
 
 fn marks_of(styles: Option<&Value>, link: Option<&str>, plain: bool) -> yrs::types::Attrs {
@@ -332,10 +369,15 @@ fn inline_runs(content: Option<&Value>, plain: bool) -> Vec<Run> {
                             _ => {}
                         }
                     }
-                    Value::Object(object) => {
+                    Value::Object(object) if object.contains_key("text") || plain => {
                         let text = object.get("text").and_then(Value::as_str).unwrap_or("");
                         let marks = marks_of(object.get("styles"), None, plain);
                         push_text(&mut runs, text, marks, plain);
+                    }
+                    Value::Object(object) => {
+                        if let Some(run) = inline_node_run(object) {
+                            runs.push(run);
+                        }
                     }
                     _ => {}
                 }
@@ -355,6 +397,13 @@ fn write_runs(txn: &mut TransactionMut, parent: &XmlElementRef, runs: &[Run]) {
             Run::Break => {
                 current = None;
                 parent.push_back(txn, XmlElementPrelim::empty("hardBreak"));
+            }
+            Run::Inline(inline_type, attrs) => {
+                current = None;
+                let element = parent.push_back(txn, XmlElementPrelim::empty(inline_type.as_str()));
+                for (name, value) in attrs {
+                    element.insert_attribute(txn, name.as_str(), value.clone());
+                }
             }
             Run::Text(text, attrs) => {
                 let node =
@@ -678,13 +727,44 @@ fn last_run(node: &mut Value) -> Option<&mut Value> {
     }
 }
 
+/// Port of `nodeToCustomInlineContent` for atoms: `{ type, props }` (props from the attributes,
+/// PM defaults for missing ones; `content` is undefined and therefore absent).
+fn inline_node<T: ReadTxn>(txn: &T, element: &XmlElementRef, table: &InlineTable) -> Value {
+    let mut props = Map::new();
+    for attr_table in table.attrs.iter().filter(|attr| attr.prop) {
+        match attr(txn, element, &attr_table.name) {
+            Some(value) => {
+                props.insert(attr_table.name.clone(), value);
+            }
+            None if !attr_table.missing.undefined => {
+                props.insert(attr_table.name.clone(), attr_table.missing.value.clone());
+            }
+            None => {}
+        }
+    }
+    json!({ "type": element.tag().as_ref(), "props": Value::Object(props) })
+}
+
 /// Port of `contentNodeToInlineContent`: merges runs with equal styles, groups link runs, and
-/// turns hard breaks into `\n` on the previous run.
+/// turns hard breaks into `\n` on the previous run. Custom inline content (mentions) ends the
+/// current run and is its own item.
 fn inline_content<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Value> {
     let mut content: Vec<Value> = Vec::new();
     let mut current: Option<Value> = None;
     for child in element.children(txn) {
         match child {
+            XmlOut::Element(element)
+                if SCHEMA
+                    .inline
+                    .get(element.tag().as_ref())
+                    .is_some_and(|table| table.content == "none") =>
+            {
+                if let Some(node) = current.take() {
+                    content.push(node);
+                }
+                let table = &SCHEMA.inline[element.tag().as_ref()];
+                content.push(inline_node(txn, &element, table));
+            }
             XmlOut::Element(element) if element.tag().as_ref() == "hardBreak" => {
                 match current.as_mut().and_then(last_run) {
                     Some(run) => append_text(run, "\n"),

@@ -14,12 +14,13 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
+use super::page_mentions::notify_new_mentions;
 use super::page_versions::{PageVersionKind, SaveOrigin, snapshot_before_edit, store_version};
 use super::tasks::{TaskError, record_mutation, require_access, require_access_tx};
 use super::teamspaces::{default_teamspace, teamspace_exists};
 use super::workspaces::{WorkspaceError, require_role};
 use crate::audit::{self, AuditOutcome};
-use crate::collab::{CollabError, CollabHub};
+use crate::collab::{CollabError, CollabHub, CollabLock};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const SEARCH_LIMIT: i64 = 20;
@@ -31,11 +32,18 @@ const SNIPPET_TOKENS: i64 = 24;
 const MARK_OPEN: char = '\u{2}';
 const MARK_CLOSE: char = '\u{3}';
 const TITLE_MAX_CHARS: usize = 500;
+/// Visits kept per member and workspace (the recent list shows at most `RECENT_MAX_LIMIT`).
+const VISITS_KEPT: i64 = 50;
+pub const RECENT_DEFAULT_LIMIT: usize = 10;
+pub const RECENT_MAX_LIMIT: usize = 50;
 const COPY_SUFFIX: &str = " (copy)";
 const PAGE_COLUMNS: &str = "id, workspace_id, parent_id, teamspace_id, title, icon, cover_url, cover_position, \
      content_json, position, creator_id, updated_by, version, created_at, updated_at, deleted_at, \
      COALESCE((SELECT epoch FROM page_collab_docs WHERE page_collab_docs.page_id = pages.id), \
-     (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch";
+     (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch, \
+     full_width, locked_at, locked_by, \
+     (SELECT display_name FROM users WHERE users.id = pages.updated_by) AS updated_by_name, \
+     (SELECT display_name FROM users WHERE users.id = pages.locked_by) AS locked_by_name";
 const SUMMARY_COLUMNS: &str = "pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
      pages.title AS title, pages.icon AS icon, pages.position AS position, pages.version AS version, \
      pages.updated_at AS updated_at";
@@ -123,6 +131,52 @@ pub struct PageRecord {
     /// changes when the stored document is reset (backup restore, converter change), and a
     /// socket opened with an older value is closed with 4409.
     pub collab_epoch: String,
+    /// The editor column uses the whole pane width.
+    pub full_width: bool,
+    /// Set while the page is locked: title, icon, cover and content writes answer 423
+    /// `page_locked` (REST, version restore, imports) and the co-editing socket ignores content
+    /// updates. Moving, trashing, duplicating and `full_width` stay allowed.
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
+    pub locked_at: Option<TimestampMillis>,
+    /// Who locked the page (`null` when unlocked, or when that user no longer exists).
+    #[schema(required = true)]
+    pub locked_by: Option<PageUser>,
+    /// The last editor (`updated_by`) with their display name.
+    pub updated_by_user: PageUser,
+}
+
+/// A user named on a page (last editor, locker).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct PageUser {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub display_name: String,
+}
+
+/// A page the caller opened recently.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct RecentPage {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = Option<String>, required = true)]
+    pub parent_id: Option<Id>,
+    /// `null` for a page in the caller's private space.
+    #[schema(value_type = Option<String>, required = true)]
+    pub teamspace_id: Option<Id>,
+    /// True when the page is in the caller's private space.
+    pub private: bool,
+    pub title: String,
+    #[schema(required = true)]
+    pub icon: Option<String>,
+    /// When the caller last opened the page.
+    #[schema(value_type = String, format = DateTime)]
+    pub visited_at: TimestampMillis,
+}
+
+/// The caller's recently opened pages in this workspace, most recent first.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct RecentPageList {
+    pub items: Vec<RecentPage>,
 }
 
 /// Page metadata for the tree, without content.
@@ -254,6 +308,8 @@ pub struct PageChanges {
     pub cover_url: Option<Option<String>>,
     pub cover_position: Option<Option<String>>,
     pub content: Option<Vec<Value>>,
+    /// A layout setting, not an edit: allowed on locked pages, leaves `updated_by` alone.
+    pub full_width: Option<bool>,
     /// How page history records the save (a user edit unless said otherwise).
     pub origin: SaveOrigin,
 }
@@ -279,6 +335,9 @@ pub enum PageError {
     /// Only pages in the trash (trashed directly) can be deleted forever.
     #[error("page is not in the trash")]
     NotTrashed,
+    /// The page is locked: its title, icon, cover and content cannot change.
+    #[error("page is locked")]
+    Locked,
     #[error("stored page data is invalid")]
     Corrupt,
     #[error("page repository is unavailable")]
@@ -430,6 +489,7 @@ impl PageRepository {
         .await?;
         renumber(&mut tx, &siblings).await?;
         let collab_epoch = collab_generation(&mut tx).await?;
+        let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -461,6 +521,10 @@ impl PageRepository {
             updated_at: now,
             deleted_at: None,
             collab_epoch,
+            full_width: false,
+            locked_at: None,
+            locked_by: None,
+            updated_by_user,
         })
     }
 
@@ -538,6 +602,14 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
+        let edit = changes.title.is_some()
+            || changes.icon.is_some()
+            || changes.cover_url.is_some()
+            || changes.cover_position.is_some()
+            || changes.content.is_some();
+        if edit && current.locked_at.is_some() {
+            return Err(PageError::Locked);
+        }
         check_version(expected_version, current.version, &current)?;
         if let Some(Some(url)) = &changes.cover_url
             && url.starts_with('/')
@@ -561,6 +633,7 @@ impl PageRepository {
         let cover_position = changes
             .cover_position
             .unwrap_or_else(|| current.cover_position.clone());
+        let full_width = changes.full_width.unwrap_or(current.full_width);
         let content_changed = changes
             .content
             .as_ref()
@@ -575,10 +648,16 @@ impl PageRepository {
             ),
             None => (None, None),
         };
+        // A layout-only change (full width) is not an edit: the last editor and time stay.
+        let (updated_by, updated_at) = if edit {
+            (actor_id, now)
+        } else {
+            (current.updated_by, current.updated_at)
+        };
         sqlx::query(
             "UPDATE pages SET title = ?, icon = ?, cover_url = ?, cover_position = ?, \
              content_json = COALESCE(?, content_json), content_text = COALESCE(?, content_text), \
-             updated_by = ?, updated_at = ?, version = version + 1 \
+             full_width = ?, updated_by = ?, updated_at = ?, version = version + 1 \
              WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
         )
         .bind(&title)
@@ -587,8 +666,9 @@ impl PageRepository {
         .bind(&cover_position)
         .bind(content_json)
         .bind(text)
-        .bind(actor_id.to_string())
-        .bind(now.as_millis())
+        .bind(full_width)
+        .bind(updated_by.to_string())
+        .bind(updated_at.as_millis())
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
         .bind(expected_version as i64)
@@ -598,6 +678,21 @@ impl PageRepository {
             && content_changed
         {
             collab.replace(&mut tx, content, actor_id, now).await?;
+        }
+        if changes.origin == SaveOrigin::Edit
+            && content_changed
+            && let Some(content) = &changes.content
+        {
+            notify_new_mentions(
+                &mut tx,
+                page_id,
+                &current.content,
+                content,
+                Some(actor_id),
+                request_id,
+                now,
+            )
+            .await?;
         }
         record_mutation(
             &mut tx,
@@ -610,6 +705,11 @@ impl PageRepository {
             now,
         )
         .await?;
+        let updated_by_user = if edit {
+            user_in_tx(&mut tx, actor_id).await?
+        } else {
+            current.updated_by_user.clone()
+        };
         let updated = PageRecord {
             title,
             icon,
@@ -617,8 +717,10 @@ impl PageRepository {
             cover_position,
             content: changes.content.unwrap_or(current.content),
             version: current.version + 1,
-            updated_by: actor_id,
-            updated_at: now,
+            full_width,
+            updated_by,
+            updated_by_user,
+            updated_at,
             ..current
         };
         if changes.origin == SaveOrigin::Import {
@@ -734,6 +836,7 @@ impl PageRepository {
             now,
         )
         .await?;
+        let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         tx.commit().await?;
         // A page (and its subtree) moved into someone's private space closes other editors.
         CollabHub::revalidate_database(&self.database, Some(workspace_id));
@@ -744,6 +847,7 @@ impl PageRepository {
             position: index as i64,
             version: current.version + 1,
             updated_by: actor_id,
+            updated_by_user,
             updated_at: now,
             ..current
         })
@@ -881,12 +985,14 @@ impl PageRepository {
             now,
         )
         .await?;
+        let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         tx.commit().await?;
         Ok(PageRecord {
             parent_id,
             position: index as i64,
             version: current.version + 1,
             updated_by: actor_id,
+            updated_by_user,
             updated_at: now,
             deleted_at: None,
             ..current
@@ -1055,6 +1161,7 @@ impl PageRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let source = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         let collab_epoch = collab_generation(&mut tx).await?;
+        let actor = user_in_tx(&mut tx, actor_id).await?;
         let space = source.space(actor_id);
         let mut originals = vec![source];
         if include_children {
@@ -1130,8 +1237,8 @@ impl PageRepository {
             sqlx::query(
                 "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
                  cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
-                 version, created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                 version, created_at, updated_at, full_width) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -1149,6 +1256,7 @@ impl PageRepository {
             .bind(actor_id.to_string())
             .bind(now.as_millis())
             .bind(now.as_millis())
+            .bind(original.full_width)
             .execute(&mut *tx)
             .await?;
             audit::record(
@@ -1184,6 +1292,11 @@ impl PageRepository {
                     updated_at: now,
                     deleted_at: None,
                     collab_epoch: collab_epoch.clone(),
+                    // A copy keeps the layout but is never locked.
+                    full_width: original.full_width,
+                    locked_at: None,
+                    locked_by: None,
+                    updated_by_user: actor.clone(),
                 });
             }
         }
@@ -1405,6 +1518,153 @@ impl PageRepository {
     }
 }
 
+/// Page lock: any member who can see the page may lock or unlock it (audited `page.locked` /
+/// `page.unlocked`). The lock is enforced on every content path (see `PageRecord::locked_at`).
+impl PageRepository {
+    /// Locks (`locked`) or unlocks the page. Setting the state the page already has changes
+    /// nothing (same version, no audit). A change bumps the version and closes the page's
+    /// co-editing sockets with 4423 so every editor reloads the lock state.
+    pub async fn set_lock(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        locked: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        self.get_visible(workspace_id, page_id, actor_id).await?;
+        // The room is held across the transaction, so no update lands between commit and flag.
+        let room: CollabLock = CollabHub::of(&self.database).lock_change(page_id).await?;
+        let mut tx = self.database.immediate_transaction().await?;
+        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
+        if current.locked_at.is_some() == locked {
+            tx.rollback().await?;
+            return Ok(current);
+        }
+        let (locked_at, locked_by) = if locked {
+            (Some(now), Some(user_in_tx(&mut tx, actor_id).await?))
+        } else {
+            (None, None)
+        };
+        sqlx::query(
+            "UPDATE pages SET locked_at = ?, locked_by = ?, version = version + 1 \
+             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+        )
+        .bind(locked_at.map(TimestampMillis::as_millis))
+        .bind(locked_by.as_ref().map(|user| user.id.to_string()))
+        .bind(page_id.to_string())
+        .bind(workspace_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        record_mutation(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            if locked {
+                "page.locked"
+            } else {
+                "page.unlocked"
+            },
+            "page",
+            page_id,
+            request_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        room.commit(locked);
+        Ok(PageRecord {
+            version: current.version + 1,
+            locked_at,
+            locked_by,
+            ..current
+        })
+    }
+}
+
+/// Recent pages: when each member last opened a page (`POST .../visit`, sent by the web app when
+/// a page is opened, not by background reads). Private to the member, not audited, no realtime
+/// event. Only live pages the member can see now are listed, so a visited page that later moved
+/// into someone else's private space never shows up.
+impl PageRepository {
+    pub async fn record_visit(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<(), PageError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
+        sqlx::query(
+            "INSERT INTO page_visits (workspace_id, user_id, page_id, visited_at) VALUES (?, ?, ?, ?) \
+             ON CONFLICT (user_id, page_id) DO UPDATE SET visited_at = MAX(visited_at, excluded.visited_at)",
+        )
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(page_id.to_string())
+        .bind(now.as_millis())
+        .execute(&mut *tx)
+        .await?;
+        // Keep the newest few per member and workspace.
+        sqlx::query(
+            "DELETE FROM page_visits WHERE workspace_id = ?1 AND user_id = ?2 AND page_id NOT IN ( \
+                 SELECT page_id FROM page_visits WHERE workspace_id = ?1 AND user_id = ?2 \
+                 ORDER BY visited_at DESC, page_id LIMIT ?3)",
+        )
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(VISITS_KEPT)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The caller's most recently opened live, visible pages, newest first.
+    pub async fn recent_pages(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        limit: usize,
+    ) -> Result<RecentPageList, PageError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let rows = sqlx::query(&format!(
+            "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
+             pages.title AS title, pages.icon AS icon, page_visits.visited_at AS visited_at \
+             FROM page_visits JOIN pages ON pages.id = page_visits.page_id \
+             WHERE page_visits.workspace_id = ? AND page_visits.user_id = ? \
+             AND pages.workspace_id = page_visits.workspace_id AND pages.deleted_at IS NULL AND {VISIBLE} \
+             ORDER BY page_visits.visited_at DESC, pages.id LIMIT ?"
+        ))
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(self.database.pool())
+        .await?;
+        let items = rows
+            .into_iter()
+            .map(|row| {
+                let teamspace_id = parse_optional_id(row.get("teamspace_id"))?;
+                Ok(RecentPage {
+                    id: parse_id(row.get("id"))?,
+                    parent_id: parse_optional_id(row.get("parent_id"))?,
+                    teamspace_id,
+                    private: teamspace_id.is_none(),
+                    title: row.get("title"),
+                    icon: row.get("icon"),
+                    visited_at: TimestampMillis::from_millis(row.get("visited_at")),
+                })
+            })
+            .collect::<Result<_, PageError>>()?;
+        Ok(RecentPageList { items })
+    }
+}
+
 fn favorite_list(ids: Vec<Id>) -> PageFavoriteList {
     PageFavoriteList {
         items: ids
@@ -1481,7 +1741,8 @@ async fn renumber_favorites(
     Ok(())
 }
 
-/// Collects every string under a `"text"` key, in document order, joined with spaces.
+/// Collects every string under a `"text"` key, in document order, joined with spaces; a mention
+/// contributes `@<name>` (so search finds who a page mentions).
 #[must_use]
 pub fn content_text(content: &[Value]) -> String {
     let mut parts = Vec::new();
@@ -1491,11 +1752,21 @@ pub fn content_text(content: &[Value]) -> String {
     parts.join(" ")
 }
 
-fn collect_text<'a>(value: &'a Value, parts: &mut Vec<&'a str>) {
+fn collect_text<'a>(value: &'a Value, parts: &mut Vec<std::borrow::Cow<'a, str>>) {
     match value {
         Value::Array(items) => {
             for item in items {
                 collect_text(item, parts);
+            }
+        }
+        Value::Object(map) if map.get("type").and_then(Value::as_str) == Some("mention") => {
+            if let Some(name) = map
+                .get("props")
+                .and_then(|props| props.get("name"))
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+            {
+                parts.push(format!("@{name}").into());
             }
         }
         Value::Object(map) => {
@@ -1503,7 +1774,7 @@ fn collect_text<'a>(value: &'a Value, parts: &mut Vec<&'a str>) {
             if let Some(Value::String(text)) = map.get("text")
                 && !text.is_empty()
             {
-                parts.push(text);
+                parts.push(text.as_str().into());
             }
             if let Some(content) = map.get("content") {
                 collect_text(content, parts);
@@ -1923,6 +2194,39 @@ fn page_from_row(row: sqlx::sqlite::SqliteRow) -> Result<PageRecord, PageError> 
             .get::<Option<i64>, _>("deleted_at")
             .map(TimestampMillis::from_millis),
         collab_epoch: row.get("collab_epoch"),
+        full_width: row.get("full_width"),
+        locked_at: row
+            .get::<Option<i64>, _>("locked_at")
+            .map(TimestampMillis::from_millis),
+        locked_by: match (
+            parse_optional_id(row.get("locked_by"))?,
+            row.get::<Option<String>, _>("locked_by_name"),
+        ) {
+            (Some(id), Some(display_name)) => Some(PageUser { id, display_name }),
+            _ => None,
+        },
+        updated_by_user: PageUser {
+            id: parse_id(row.get("updated_by"))?,
+            display_name: row
+                .get::<Option<String>, _>("updated_by_name")
+                .unwrap_or_default(),
+        },
+    })
+}
+
+/// The user's id and display name.
+pub(super) async fn user_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    user_id: Id,
+) -> Result<PageUser, PageError> {
+    let display_name: String = sqlx::query_scalar("SELECT display_name FROM users WHERE id = ?")
+        .bind(user_id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(PageError::Corrupt)?;
+    Ok(PageUser {
+        id: user_id,
+        display_name,
     })
 }
 
@@ -2003,6 +2307,12 @@ mod tests {
             json!({"type": "paragraph", "content": [{"type": "text", "text": ""}]}),
         ];
         assert_eq!(content_text(&content), "Launch plan docs cell");
+        let mentioned = vec![json!({"type": "paragraph", "content": [
+            {"type": "text", "text": "Ask", "styles": {}},
+            {"type": "mention", "props": {"userId": "0199a0b0-0000-7000-8000-0000000000a1", "name": "Ann Lee"}},
+            {"type": "mention", "props": {"userId": "0199a0b0-0000-7000-8000-0000000000a2", "name": ""}}
+        ]})];
+        assert_eq!(content_text(&mentioned), "Ask @Ann Lee");
     }
 
     #[test]

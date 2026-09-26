@@ -236,3 +236,155 @@
     animation-name: relation-enter-fade;
   }
 }
+
+/*
+ * Page print / "Save as PDF" (Docs page menu → Export → PDF; `printPage` in features/docs/pageExport.ts).
+ * While <html> has .orbit-print-doc only the open page's content ([data-print-root] in DocEditor) prints: the app
+ * sidebar, docs tree, page header, menus and toasts are hidden; the content is full width, light-themed whatever the
+ * app theme, with images fitted to the page. A static stylesheet on purpose: the production CSP blocks injected
+ * <style> tags.
+ */
+@media print {
+  @page {
+    margin: 16mm 14mm;
+  }
+
+  /* `.dark` also sits on BlockNote's containers, which would bring the dark values back locally. */
+  html.orbit-print-doc,
+  html.orbit-print-doc .dark {
+    color-scheme: light;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.525 0.223 3.958);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+  }
+
+  html.orbit-print-doc,
+  html.orbit-print-doc body,
+  html.orbit-print-doc #root {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: var(--foreground) !important;
+  }
+
+  /* Everything that neither contains nor sits inside the page content goes. */
+  html.orbit-print-doc body :not(:has([data-print-root])):not([data-print-root]):not([data-print-root] *) {
+    display: none !important;
+  }
+
+  /* The content's ancestors (app shell, docs layout, page section) become plain blocks that flow over pages. */
+  html.orbit-print-doc body :has([data-print-root]) {
+    display: block !important;
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  html.orbit-print-doc [data-print-root] {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  html.orbit-print-doc [data-print-root] [data-print-hide],
+  html.orbit-print-doc [data-print-root] .bn-side-menu,
+  html.orbit-print-doc [data-print-root] .collaboration-cursor__caret,
+  html.orbit-print-doc [data-print-root] .collaboration-cursor__label,
+  html.orbit-print-doc [data-print-root] .bn-collaboration-cursor__base {
+    display: none !important;
+  }
+
+  /* Full width: drop the reading-width column and the editor's side-menu gutter. */
+  html.orbit-print-doc [data-print-root] .mx-auto {
+    max-width: none !important;
+    padding-inline: 0 !important;
+  }
+  html.orbit-print-doc [data-print-root] .orbit-page-editor {
+    margin-inline: 0 !important;
+  }
+  html.orbit-print-doc [data-print-root] .orbit-page-editor .bn-editor {
+    padding-inline: 0 !important;
+  }
+
+  /* BlockNote's light highlight colors, also when the editor runs in dark mode; callouts at full tint. */
+  html.orbit-print-doc .bn-root[data-color-scheme] {
+    --bn-colors-editor-text: var(--foreground);
+    --bn-colors-highlights-gray-text: #9b9a97;
+    --bn-colors-highlights-gray-background: #ebeced;
+    --bn-colors-highlights-brown-text: #64473a;
+    --bn-colors-highlights-brown-background: #e9e5e3;
+    --bn-colors-highlights-red-text: #e03e3e;
+    --bn-colors-highlights-red-background: #fbe4e4;
+    --bn-colors-highlights-orange-text: #d9730d;
+    --bn-colors-highlights-orange-background: #f6e9d9;
+    --bn-colors-highlights-yellow-text: #dfab01;
+    --bn-colors-highlights-yellow-background: #fbf3db;
+    --bn-colors-highlights-green-text: #4d6461;
+    --bn-colors-highlights-green-background: #ddedea;
+    --bn-colors-highlights-blue-text: #0b6e99;
+    --bn-colors-highlights-blue-background: #ddebf1;
+    --bn-colors-highlights-purple-text: #6940a5;
+    --bn-colors-highlights-purple-background: #eae4f2;
+    --bn-colors-highlights-pink-text: #ad1a72;
+    --bn-colors-highlights-pink-background: #f4dfeb;
+  }
+  html.orbit-print-doc [data-print-root] .orbit-page-editor .bn-block {
+    --orbit-callout-strength: 100% !important;
+  }
+  html.orbit-print-doc [data-print-root] {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Images fit the page; blocks that read badly when cut stay together; headings stay with what follows. */
+  html.orbit-print-doc [data-print-root] img,
+  html.orbit-print-doc [data-print-root] .bn-visual-media-wrapper {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  html.orbit-print-doc [data-print-root] :is(img, pre, tr, blockquote, .bn-file-block-content-wrapper) {
+    break-inside: avoid;
+  }
+  html.orbit-print-doc [data-print-root] :is(h1, h2, h3, h4, h5, h6, [data-content-type='heading']) {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+}
+
+/*
+ * The page title keeps its size in print: print widths fall under the small-screen input rules, which are
+ * `!important` inside cascade layers (base, utilities) and so beat any unlayered `!important`. An important rule in
+ * the base layer with a more specific selector wins over both.
+ */
+@layer base {
+  @media print {
+    html.orbit-print-doc [data-print-root] input[aria-label='Page title'] {
+      font-size: 30px !important;
+      line-height: 1.25 !important;
+    }
+  }
+}

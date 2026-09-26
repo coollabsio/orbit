@@ -1,5 +1,5 @@
 import { confirmAction } from '@/components/common/confirmAction'
-import { keepPreviousData, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, queryOptions, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
 import type { createApiClient } from '@/api/client'
@@ -113,82 +113,122 @@ export function useTasks(workspaceId: string, filters: TaskFilters = {}, exhaust
   })
 }
 
-export function useTask(workspaceId: string, taskId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.tasks.detail(workspaceId, taskId ?? ''),
-    enabled: Boolean(taskId),
+// shared by the hooks and prefetchTaskDetail, so a prefetch fills exactly the cache the task view reads
+function taskDetailQueries(workspaceId: string, taskId: string | undefined) {
+  const id = taskId ?? ''
+  const enabled = Boolean(taskId)
+  return {
+    task: queryOptions({
+      queryKey: queryKeys.tasks.detail(workspaceId, id),
+      enabled,
+      queryFn: async () => {
+        const { data } = await getTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, throwOnError: true })
+        return required(data, 'Task response was empty.')
+      },
+    }),
+    githubLinks: queryOptions({
+      queryKey: [...queryKeys.tasks.detail(workspaceId, id), 'github-links'],
+      enabled,
+      queryFn: async () => {
+        const { data } = await listGithubLinks({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, throwOnError: true })
+        return required(data, 'GitHub links response was empty.')
+      },
+    }),
+    comments: queryOptions({
+      queryKey: queryKeys.comments(workspaceId, id),
+      enabled,
+      queryFn: async () => {
+        const page = await fetchAllPages(async (cursor) => {
+          const { data } = await listComments({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, query: { limit: 100, cursor }, throwOnError: true })
+          return required(data, 'Comments response was empty.')
+        })
+        return page.items
+      },
+    }),
+    activity: queryOptions({
+      queryKey: queryKeys.taskActivity(workspaceId, id),
+      enabled,
+      queryFn: async () => {
+        const page = await fetchAllPages(async (cursor) => {
+          const { data } = await listTaskActivity({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, query: { limit: 100, cursor }, throwOnError: true })
+          return required(data, 'Task activity response was empty.')
+        })
+        return page.items
+      },
+    }),
+    attachments: queryOptions({
+      queryKey: queryKeys.attachments(workspaceId, id),
+      enabled,
+      queryFn: async () => {
+        const page = await fetchAllPages(async (cursor) => {
+          const { data } = await listTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, query: { limit: 100, cursor }, throwOnError: true })
+          return required(data, 'Attachments response was empty.')
+        })
+        return page.items
+      },
+    }),
+    relations: queryOptions({
+      queryKey: queryKeys.taskRelations(workspaceId, id),
+      enabled,
+      queryFn: async (): Promise<TaskRelationRecord[]> => {
+        const { data } = await listTaskRelations({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, throwOnError: true })
+        return required(data, 'Task relations response was empty.')
+      },
+    }),
+  }
+}
+
+function commentAttachmentsQuery(workspaceId: string, taskId: string, commentId: string) {
+  return queryOptions({
+    queryKey: queryKeys.commentAttachments(workspaceId, taskId, commentId),
     queryFn: async () => {
-      const { data } = await getTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, throwOnError: true })
-      return required(data, 'Task response was empty.')
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Comment attachments response was empty.')
+      })
+      return page.items
     },
   })
+}
+
+/** Loads everything the task view shows, so it can open fully rendered. Never throws: the view reports errors itself. */
+export async function prefetchTaskDetail(queryClient: QueryClient, workspaceId: string, taskId: string) {
+  const queries = taskDetailQueries(workspaceId, taskId)
+  await Promise.all([
+    queryClient.prefetchQuery(queries.task),
+    queryClient.prefetchQuery(queries.githubLinks),
+    queryClient.prefetchQuery(queries.activity),
+    queryClient.prefetchQuery(queries.attachments),
+    queryClient.prefetchQuery(queries.relations),
+    queryClient.fetchQuery(queries.comments)
+      .then((comments) => Promise.all(comments.map((comment) => queryClient.prefetchQuery(commentAttachmentsQuery(workspaceId, taskId, comment.id)))))
+      .catch(() => undefined),
+  ])
+}
+
+export function useTask(workspaceId: string, taskId: string | undefined) {
+  return useQuery(taskDetailQueries(workspaceId, taskId).task)
 }
 
 export function useTaskGithubLinks(workspaceId: string, taskId: string | undefined) {
-  return useQuery({
-    queryKey: [...queryKeys.tasks.detail(workspaceId, taskId ?? ''), 'github-links'],
-    enabled: Boolean(taskId),
-    queryFn: async () => {
-      const { data } = await listGithubLinks({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, throwOnError: true })
-      return required(data, 'GitHub links response was empty.')
-    },
-  })
+  return useQuery(taskDetailQueries(workspaceId, taskId).githubLinks)
 }
 
 export function useTaskComments(workspaceId: string, taskId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.comments(workspaceId, taskId ?? ''),
-    enabled: Boolean(taskId),
-    queryFn: async () => {
-      const page = await fetchAllPages(async (cursor) => {
-        const { data } = await listComments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100, cursor }, throwOnError: true })
-        return required(data, 'Comments response was empty.')
-      })
-      return page.items
-    },
-  })
+  return useQuery(taskDetailQueries(workspaceId, taskId).comments)
 }
 
 export function useTaskActivity(workspaceId: string, taskId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.taskActivity(workspaceId, taskId ?? ''),
-    enabled: Boolean(taskId),
-    queryFn: async () => {
-      const page = await fetchAllPages(async (cursor) => {
-        const { data } = await listTaskActivity({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100, cursor }, throwOnError: true })
-        return required(data, 'Task activity response was empty.')
-      })
-      return page.items
-    },
-  })
+  return useQuery(taskDetailQueries(workspaceId, taskId).activity)
 }
 
 export function useTaskAttachments(workspaceId: string, taskId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.attachments(workspaceId, taskId ?? ''),
-    enabled: Boolean(taskId),
-    queryFn: async () => {
-      const page = await fetchAllPages(async (cursor) => {
-        const { data } = await listTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, query: { limit: 100, cursor }, throwOnError: true })
-        return required(data, 'Attachments response was empty.')
-      })
-      return page.items
-    },
-  })
+  return useQuery(taskDetailQueries(workspaceId, taskId).attachments)
 }
 
 export function useCommentAttachments(workspaceId: string, taskId: string | undefined, comments: CommentRecord[]) {
   const results = useQueries({
-    queries: taskId ? comments.map((comment) => ({
-      queryKey: queryKeys.commentAttachments(workspaceId, taskId, comment.id),
-      queryFn: async () => {
-        const page = await fetchAllPages(async (cursor) => {
-          const { data } = await listCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: comment.id }, query: { limit: 100, cursor }, throwOnError: true })
-          return required(data, 'Comment attachments response was empty.')
-        })
-        return page.items
-      },
-    })) : [],
+    queries: taskId ? comments.map((comment) => commentAttachmentsQuery(workspaceId, taskId, comment.id)) : [],
   })
   return {
     data: results.flatMap((result) => result.data ?? []),
@@ -355,14 +395,7 @@ export async function bulkTaskDuplicateUpdates(client: ApiClient, workspaceId: s
 }
 
 export function useTaskRelations(workspaceId: string, taskId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.taskRelations(workspaceId, taskId ?? ''),
-    enabled: Boolean(taskId),
-    queryFn: async (): Promise<TaskRelationRecord[]> => {
-      const { data } = await listTaskRelations({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId! }, throwOnError: true })
-      return required(data, 'Task relations response was empty.')
-    },
-  })
+  return useQuery(taskDetailQueries(workspaceId, taskId).relations)
 }
 
 export function useAddTaskRelation(workspaceId: string, taskId: string) {

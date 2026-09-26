@@ -140,6 +140,7 @@ describe('CollabSession', () => {
     [4403, 'forbidden', 'lost', 'Access lost'],
     [4401, 'session', 'lost', 'Access lost'],
     [4409, 'reset', 'reset', 'Connecting…'],
+    [4423, 'reset', 'reset', 'Connecting…'],
     [4413, 'too-large', 'error', 'Not syncing'],
     [4426, 'protocol', 'error', 'Not syncing'],
     [4400, 'protocol', 'error', 'Not syncing'],

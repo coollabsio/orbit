@@ -1197,6 +1197,21 @@ impl NotionImportService {
 
         // Pass 2: fill each page.
         let mut resolver = MapResolver::default();
+        // User mentions that carry an email of an active member become Orbit mentions.
+        let members = sqlx::query(
+            "SELECT users.id, users.display_name, users.normalized_email FROM memberships \
+             JOIN users ON users.id = memberships.user_id \
+             WHERE memberships.workspace_id = ? AND users.suspended_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_all(self.database().pool())
+        .await?;
+        for member in members {
+            resolver.members.insert(
+                member.get::<String, _>("normalized_email").to_lowercase(),
+                (member.get("id"), member.get("display_name")),
+            );
+        }
         for item in &items {
             resolver
                 .titles
@@ -1501,6 +1516,7 @@ impl NotionImportService {
                 cover_url: cover_url.map(Some),
                 cover_position: None,
                 content: Some(converted.content),
+                full_width: None,
                 // The imported state becomes an `import` version in the page history.
                 origin: SaveOrigin::Import,
             }
@@ -1889,6 +1905,7 @@ fn page_failure(error: PageError) -> Failure {
         PageError::VersionConflict { .. } => {
             Failure::Page("The page was edited during the import.".to_owned())
         }
+        PageError::Locked => Failure::Page("The page was locked during the import.".to_owned()),
         other => Failure::Page(format!("The page could not be saved: {other}.")),
     }
 }

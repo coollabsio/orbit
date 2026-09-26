@@ -144,6 +144,8 @@ pub(crate) struct RoomState {
     /// The page has a stored collaborative document (`page_collab_docs` row).
     initialized: bool,
     closed: bool,
+    /// The page is locked: content updates from clients are ignored (see [`CollabLock`]).
+    locked: bool,
     pub(crate) awareness: Awareness,
     /// Deltas captured by the document observer during the current transaction(s).
     captured: Arc<StdMutex<Vec<Vec<u8>>>>,
@@ -175,6 +177,7 @@ impl RoomState {
             loaded: false,
             initialized: false,
             closed: false,
+            locked: false,
             awareness,
             captured,
             epoch: String::new(),
@@ -423,13 +426,16 @@ impl CollabHub {
     /// Reads the stored document (snapshot + log) into the room.
     async fn load(&self, room: &Room, state: &mut RoomState) -> Result<(), CollabError> {
         let pool = &self.inner.pool;
-        let page = sqlx::query("SELECT workspace_id FROM pages WHERE id = ?")
-            .bind(room.page_id.to_string())
-            .fetch_optional(pool)
-            .await?
-            .ok_or(CollabError::NotFound)?;
+        let page = sqlx::query(
+            "SELECT workspace_id, locked_at IS NOT NULL AS locked FROM pages WHERE id = ?",
+        )
+        .bind(room.page_id.to_string())
+        .fetch_optional(pool)
+        .await?
+        .ok_or(CollabError::NotFound)?;
         let workspace_id = parse_id(page.get("workspace_id"))?;
         let _ = room.workspace_id.set(workspace_id);
+        state.locked = page.get("locked");
         let row = sqlx::query(
             "SELECT snapshot, snapshot_seq, epoch, converter_version, projected_seq \
              FROM page_collab_docs WHERE page_id = ?",
@@ -997,6 +1003,13 @@ impl CollabHub {
                         .replies
                         .push(Message::Sync(SyncMessage::SyncStep2(update)).encode_v1());
                 }
+                Message::Sync(SyncMessage::SyncStep2(_) | SyncMessage::Update(_))
+                    if state.locked =>
+                {
+                    // A locked page takes no content changes. They are dropped, not applied; the
+                    // lock and the unlock both close every socket with 4423, so clients start over
+                    // from the server's document and refused edits never come back.
+                }
                 Message::Sync(SyncMessage::SyncStep2(update) | SyncMessage::Update(update)) => {
                     if state.state_bytes + update.len() > self.inner.config.max_doc_bytes {
                         handled.close = Some((close::TOO_LARGE, "document too large"));
@@ -1082,6 +1095,16 @@ impl CollabHub {
             state: Some(state),
             staged: None,
             touched: false,
+        })
+    }
+
+    /// Holds the page's room for a lock change (taken before the caller's transaction, like
+    /// [`Self::write`]), so no client update slips in between the commit and the flag.
+    pub async fn lock_change(&self, page_id: Id) -> Result<CollabLock, CollabError> {
+        let (room, state) = self.room(page_id, false).await?;
+        Ok(CollabLock {
+            room,
+            state: Some(state),
         })
     }
 
@@ -1275,6 +1298,48 @@ impl Drop for CollabWrite {
             });
             self.hub.forget(&self.room);
         } else if state.connections == 0 {
+            self.room.idle_since_ms.store(0, Ordering::Relaxed);
+        }
+    }
+}
+
+/// A page lock change in progress, holding the room (see [`CollabHub::lock_change`]). Dropping it
+/// without [`Self::commit`] changes nothing.
+pub struct CollabLock {
+    room: Arc<Room>,
+    state: Option<OwnedMutexGuard<RoomState>>,
+}
+
+impl CollabLock {
+    /// The lock change committed: from now on the room ignores (`locked`) or accepts content
+    /// updates, and every connection is closed with 4423 so its client reloads the page (lock
+    /// state) and resyncs a fresh document.
+    pub fn commit(mut self, locked: bool) {
+        let Some(mut state) = self.state.take() else {
+            return;
+        };
+        if state.locked != locked {
+            state.locked = locked;
+            let _ = self.room.tx.send(Outbound::Close {
+                code: close::LOCK_CHANGED,
+                reason: if locked {
+                    "page locked"
+                } else {
+                    "page unlocked"
+                },
+            });
+        }
+        if state.connections == 0 {
+            self.room.idle_since_ms.store(0, Ordering::Relaxed);
+        }
+    }
+}
+
+impl Drop for CollabLock {
+    fn drop(&mut self) {
+        if let Some(state) = self.state.take()
+            && state.connections == 0
+        {
             self.room.idle_since_ms.store(0, Ordering::Relaxed);
         }
     }

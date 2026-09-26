@@ -16,7 +16,10 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BlockNoteEditor } from '@blocknote/core'
-import { blocksToYXmlFragment, yDocToBlocks } from '@blocknote/core/yjs'
+import { CommentsExtension, DefaultThreadStoreAuth, ThreadStore } from '@blocknote/core/comments'
+import { _blocksToProsemirrorNode, blocksToYXmlFragment, yDocToBlocks } from '@blocknote/core/yjs'
+import { Transform } from '@tiptap/pm/transform'
+import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
 import * as Y from 'yjs'
 import { toEditorContent } from './content'
 import { EDITOR_BLOCK_TYPES, pageEditorSchema } from './schema'
@@ -25,6 +28,8 @@ const SERVER = join(import.meta.dir, '../../../../../server')
 const SCHEMA_FILE = join(SERVER, 'src/collab/blocknote-schema.json')
 const NOTION_GOLDENS = join(SERVER, 'tests/fixtures/notion/expected')
 const COLLAB_GOLDENS = join(SERVER, 'tests/fixtures/collab')
+/** Documents with editor-only marks (comments): the server must read them and keep the marks, never write them. */
+const MARK_GOLDENS = join(COLLAB_GOLDENS, 'marks')
 const FRAGMENT = 'prosemirror'
 const UPDATE = process.env.UPDATE_COLLAB_GOLDENS === '1'
 
@@ -59,8 +64,26 @@ function schemaTable() {
   const styles: Record<string, string> = {}
   const styleSchema = instance.schema.styleSchema as Record<string, { propSchema: string }>
   for (const name of Object.keys(styleSchema).sort()) styles[name] = styleSchema[name].propSchema
+  // Custom inline content (mentions): PM attr order and defaults; `text` and `link` are built in.
+  const inline: Record<string, unknown> = {}
+  const inlineSchema = instance.schema.inlineContentSchema as Record<string, string | { content: string; propSchema: Json }>
+  for (const type of Object.keys(inlineSchema).sort()) {
+    const spec = inlineSchema[type]
+    const node = pm.nodes[type]
+    if (typeof spec === 'string' || !node) continue
+    const created = node.create()
+    inline[type] = {
+      content: spec.content,
+      attrs: Object.keys(node.spec.attrs ?? {}).map((name) => ({
+        name,
+        prop: name in spec.propSchema,
+        missing: created.attrs[name] === undefined ? { undefined: true } : { value: created.attrs[name] },
+      })),
+    }
+  }
   return {
     blocks,
+    inline,
     cell: { attrs: Object.keys(pm.nodes.tableCell.spec.attrs ?? {}), defaults: cell.attrs },
     styles,
     container_attrs: Object.keys(pm.nodes.blockContainer.spec.attrs ?? {}),
@@ -139,6 +162,52 @@ const EDITOR_EXERCISE: Json[] = [
   { id: 'ex-last', type: 'paragraph', props: { textAlignment: 'right', textColor: 'gray' }, content: 'The end' },
 ]
 
+const MENTION_ANN = '0199a0b0-0000-7000-8000-0000000000a1'
+const MENTION_BOB = '0199a0b0-0000-7000-8000-0000000000b2'
+const mention = (userId: string, name: string) => ({ type: 'mention', props: { userId, name } })
+
+/** @mentions next to text, styles, links, hard breaks, each other, in lists, callouts and table cells. */
+const EDITOR_MENTIONS: Json[] = [
+  {
+    id: 'mn-p1',
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Hi ', styles: {} },
+      mention(MENTION_ANN, 'Ann Lee'),
+      { type: 'text', text: ' and ', styles: {} },
+      mention(MENTION_BOB, 'Bob Stone'),
+      { type: 'text', text: ', see ', styles: { bold: true } },
+      { type: 'link', href: 'https://example.com', content: [{ type: 'text', text: 'this', styles: {} }] },
+      mention(MENTION_ANN, 'Ann Lee'),
+    ],
+  },
+  { id: 'mn-p2', type: 'paragraph', content: [mention(MENTION_BOB, 'Bob Stone'), mention(MENTION_ANN, 'Ann Lee')] },
+  {
+    id: 'mn-p3',
+    type: 'paragraph',
+    content: [mention(MENTION_ANN, 'Ann Lee'), { type: 'text', text: '\nnext line', styles: {} }],
+  },
+  { id: 'mn-empty-name', type: 'paragraph', content: [mention(MENTION_BOB, '')] },
+  { id: 'mn-h', type: 'heading', props: { level: 2 }, content: [{ type: 'text', text: 'Owner: ', styles: {} }, mention(MENTION_BOB, 'Bob Stone')] },
+  {
+    id: 'mn-list',
+    type: 'checkListItem',
+    content: [mention(MENTION_ANN, 'Ann Lee'), { type: 'text', text: ' reviews', styles: { italic: true } }],
+    children: [{ id: 'mn-list-c', type: 'bulletListItem', content: [{ type: 'text', text: 'ask ', styles: {} }, mention(MENTION_BOB, 'Bob Stone')] }],
+  },
+  { id: 'mn-callout', type: 'callout', props: { emoji: '📣' }, content: [mention(MENTION_ANN, 'Ann Lee')] },
+  {
+    id: 'mn-table',
+    type: 'table',
+    content: {
+      type: 'tableContent',
+      columnWidths: [null, null],
+      rows: [{ cells: [[mention(MENTION_ANN, 'Ann Lee')], [{ type: 'text', text: 'with ', styles: {} }, mention(MENTION_BOB, 'Bob Stone')]] }],
+    },
+  },
+  { id: 'mn-code', type: 'codeBlock', content: '@not a mention' },
+]
+
 function base64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64')
 }
@@ -166,6 +235,7 @@ function sources(): { name: string; blocks: Json[] }[] {
       return { name: `notion_${file.replace(/\.json$/, '')}`, blocks: (toEditorContent(golden.content, EDITOR_BLOCK_TYPES) ?? []) as Json[] }
     })
   out.push({ name: 'editor_exercise', blocks: EDITOR_EXERCISE })
+  out.push({ name: 'editor_mentions', blocks: EDITOR_MENTIONS })
   return out
 }
 
@@ -220,4 +290,124 @@ describe('collaborative converter parity (server Rust port vs BlockNote + y-pros
       }
     })
   }
+})
+
+/** A thread store that holds nothing: the parity test only needs the comment mark in the schema. */
+class EmptyThreadStore extends ThreadStore {
+  constructor() {
+    super(new DefaultThreadStoreAuth('user', 'comment'))
+  }
+  addThreadToDocument = undefined
+  createThread = async (): Promise<never> => Promise.reject(new Error('unused'))
+  addComment = async (): Promise<never> => Promise.reject(new Error('unused'))
+  updateComment = async () => {}
+  deleteComment = async () => {}
+  deleteThread = async () => {}
+  resolveThread = async () => {}
+  unresolveThread = async () => {}
+  addReaction = async () => {}
+  deleteReaction = async () => {}
+  getThread = (): never => {
+    throw new Error('unused')
+  }
+  getThreads = () => new Map()
+  subscribe = () => () => {}
+}
+
+function commentEditor() {
+  return BlockNoteEditor.create({
+    schema: pageEditorSchema,
+    extensions: [CommentsExtension({ threadStore: new EmptyThreadStore(), resolveUsers: async () => [] })],
+    _tiptapOptions: { injectCSS: false },
+  })
+}
+
+const COMMENT_BLOCKS: Json[] = [
+  { id: 'cm-p', type: 'paragraph', content: 'Commented text with a second overlapping thread' },
+  {
+    id: 'cm-h',
+    type: 'heading',
+    props: { level: 2 },
+    content: [
+      { type: 'text', text: 'Bold head', styles: { bold: true } },
+      { type: 'text', text: ' and tail', styles: {} },
+    ],
+  },
+  { id: 'cm-b', type: 'bulletListItem', content: 'Resolved thread (orphan mark)' },
+]
+
+/** Where a block's inline text starts in the PM document (`blockGroup > blockContainer > node`). */
+function textStart(doc: import('@tiptap/pm/model').Node, blockId: string): number {
+  let found = -1
+  doc.descendants((node, pos) => {
+    if (found >= 0) return false
+    if (node.type.name === 'blockContainer' && node.attrs.id === blockId) {
+      found = pos + 2
+      return false
+    }
+    return true
+  })
+  if (found < 0) throw new Error(`no block ${blockId}`)
+  return found
+}
+
+describe('comment marks in the collaborative document', () => {
+  test('are invisible in the JSON projection and stored as hashed y-prosemirror attributes', () => {
+    const editorWithComments = commentEditor()
+    const node = _blocksToProsemirrorNode(editorWithComments, COMMENT_BLOCKS as never)
+    const mark = (threadId: string, orphan = false) => node.type.schema.marks.comment.create({ threadId, orphan })
+    const paragraph = textStart(node, 'cm-p')
+    const heading = textStart(node, 'cm-h')
+    const bullet = textStart(node, 'cm-b')
+    const marked = new Transform(node)
+      .addMark(paragraph, paragraph + 14, mark('0199a0b0-0000-7000-8000-0000000000c1'))
+      .addMark(paragraph + 10, paragraph + 30, mark('0199a0b0-0000-7000-8000-0000000000c2'))
+      .addMark(heading + 5, heading + 13, mark('0199a0b0-0000-7000-8000-0000000000c3'))
+      .addMark(bullet, bullet + 8, mark('0199a0b0-0000-7000-8000-0000000000c4', true)).doc
+    const doc = new Y.Doc()
+    doc.clientID = 1
+    prosemirrorToYXmlFragment(marked, doc.getXmlFragment(FRAGMENT))
+    const golden = {
+      blocks: COMMENT_BLOCKS,
+      y_update: base64(Y.encodeStateAsUpdate(doc)),
+      expected: yDocToBlocks(editorWithComments, doc, FRAGMENT) as unknown as Json[],
+    }
+    const path = join(MARK_GOLDENS, 'comment_marks.json')
+    if (UPDATE) {
+      mkdirSync(MARK_GOLDENS, { recursive: true })
+      writeJson(path, golden)
+    }
+    // Comment marks never reach the blocks: the projection equals the unmarked document's.
+    expect(JSON.parse(JSON.stringify(golden.expected))).toEqual(JSON.parse(JSON.stringify(goldenFor(COMMENT_BLOCKS).expected)))
+    // Overlapping marks are allowed, so y-prosemirror keys them `comment--<hash>`.
+    const keys = new Set<string>()
+    const visit = (item: Y.XmlElement | Y.XmlText | Y.XmlFragment) => {
+      if (item instanceof Y.XmlText) {
+        for (const op of item.toDelta() as { attributes?: Record<string, unknown> }[]) Object.keys(op.attributes ?? {}).forEach((key) => keys.add(key))
+        return
+      }
+      for (const child of item.toArray()) visit(child as Y.XmlElement)
+    }
+    visit(doc.getXmlFragment(FRAGMENT))
+    expect([...keys].filter((key) => key.startsWith('comment--')).length).toBeGreaterThanOrEqual(3)
+
+    const stored = JSON.parse(readFileSync(path, 'utf8')) as { blocks: Json[]; y_update: string; expected: Json[] }
+    expect(stored.expected).toEqual(JSON.parse(JSON.stringify(golden.expected)))
+    // The stored update still holds the marks an editor with comments reads back (thread anchors).
+    const storedDoc = new Y.Doc()
+    Y.applyUpdate(storedDoc, fromBase64(stored.y_update))
+    const pm = yXmlFragmentToProseMirrorRootNode(storedDoc.getXmlFragment(FRAGMENT), commentEditor().pmSchema)
+    const threads = new Set<string>()
+    pm.descendants((child) => {
+      for (const found of child.marks) if (found.type.name === 'comment') threads.add(`${found.attrs.threadId}:${found.attrs.orphan}`)
+      return true
+    })
+    expect([...threads].sort()).toEqual([
+      '0199a0b0-0000-7000-8000-0000000000c1:false',
+      '0199a0b0-0000-7000-8000-0000000000c2:false',
+      '0199a0b0-0000-7000-8000-0000000000c3:false',
+      '0199a0b0-0000-7000-8000-0000000000c4:true',
+    ])
+    expect(pm.textContent).toBe(marked.textContent)
+  })
 })

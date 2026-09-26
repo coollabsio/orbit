@@ -21,8 +21,8 @@ afterEach(() => {
   unregister?.()
 })
 
-const HOUR = 60 * 60 * 1000
-const recent = new Date(Date.now() - HOUR).toISOString()
+// "Now" is always in the "Today" group; an hour ago falls on yesterday between 00:00 and 01:00.
+const recent = new Date().toISOString()
 const older = '2026-03-02T09:15:00Z'
 
 const version = (id: string, created_at: string, patch: Partial<PageVersionSummary> = {}): PageVersionSummary => ({

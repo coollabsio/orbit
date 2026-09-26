@@ -23,9 +23,10 @@ use serde_json::{Value, json};
 use sqlx::{Row, Sqlite, Transaction};
 use utoipa::ToSchema;
 
+use super::page_mentions::notify_new_mentions;
 use super::pages::{
     PageError, PageRecord, PageRepository, VISIBLE, check_version, content_text, page_by_id_in_tx,
-    page_in_tx, parse_id,
+    page_in_tx, parse_id, user_in_tx,
 };
 use super::tasks::{record_mutation, require_access, require_access_tx};
 use crate::audit::{self, AuditOutcome};
@@ -239,6 +240,9 @@ impl PageRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         let version = version_in_tx(&mut tx, workspace_id, page_id, version_id).await?;
+        if current.locked_at.is_some() {
+            return Err(PageError::Locked);
+        }
         check_version(expected_version, current.version, &current)?;
         store_version(
             &mut tx,
@@ -276,6 +280,7 @@ impl PageRepository {
             now,
         )
         .await?;
+        let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         tx.commit().await?;
         collab.commit();
         Ok(PageRecord {
@@ -284,6 +289,7 @@ impl PageRepository {
             content: version.content,
             version: current.version + 1,
             updated_by: actor_id,
+            updated_by_user,
             updated_at: now,
             ..current
         })
@@ -377,6 +383,17 @@ pub(crate) async fn project_collab_content(
     .bind(now.as_millis())
     .bind(page_id.to_string())
     .execute(&mut **tx)
+    .await?;
+    // Members the editor just mentioned hear about it (never for re-projected or moved mentions).
+    notify_new_mentions(
+        tx,
+        page_id,
+        &current.content,
+        content,
+        editor,
+        request_id,
+        now,
+    )
     .await?;
     if audit && let Some(editor) = editor {
         record_mutation(

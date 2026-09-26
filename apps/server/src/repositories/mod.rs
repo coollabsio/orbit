@@ -1,7 +1,10 @@
 pub mod api_tokens;
 pub mod attachments;
 pub mod identity;
+pub mod page_comments;
+pub mod page_export;
 pub mod page_files;
+pub mod page_mentions;
 pub mod page_versions;
 pub mod pages;
 pub mod task_relations;

@@ -42,6 +42,7 @@ const page = (patch: Partial<Page> = {}): Page => ({
   id: 'page-1', workspace_id: 'workspace-1', parent_id: null, teamspace_id: 'teamspace-1', private: false, title: 'Plan',
   icon: null, cover_url: null, cover_position: null, content: [], position: 0, version: 4, creator_id: 'user-1',
   updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', updated_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
+  full_width: false, locked_at: null, locked_by: null, updated_by_user: { id: 'user-1', display_name: 'Ada' },
   ...patch,
 })
 

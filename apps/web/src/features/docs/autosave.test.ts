@@ -50,6 +50,10 @@ const page = (version: number, patch: PagePatch = {}): Page => ({
   updated_at: '2026-09-25T10:00:00Z',
   deleted_at: null,
   collab_epoch: 'epoch-1',
+  full_width: false,
+  locked_at: null,
+  locked_by: null,
+  updated_by_user: { id: 'user-1', display_name: 'Ada' },
   version,
 })
 

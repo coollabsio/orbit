@@ -126,8 +126,20 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::list_page_versions,
         crate::page_routes::get_page_version,
         crate::page_routes::restore_page_version,
+        crate::page_routes::set_page_lock,
+        crate::page_routes::record_page_visit,
+        crate::page_routes::list_recent_pages,
         crate::page_file_routes::upload_page_file,
         crate::page_file_routes::download_page_file,
+        crate::page_comment_routes::list_page_threads,
+        crate::page_comment_routes::create_page_thread,
+        crate::page_comment_routes::delete_page_thread,
+        crate::page_comment_routes::create_page_comment,
+        crate::page_comment_routes::update_page_comment,
+        crate::page_comment_routes::delete_page_comment,
+        crate::page_comment_routes::resolve_page_thread,
+        crate::page_comment_routes::reopen_page_thread,
+        crate::export_routes::export_page,
         crate::teamspace_routes::list_teamspaces,
         crate::teamspace_routes::create_teamspace,
         crate::teamspace_routes::update_teamspace,
@@ -400,8 +412,14 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "validation_failed");
         }
         "download_page_file" => add_code(&mut responses, "404", "page_file_not_found"),
+        "export_page" => {
+            add_code(&mut responses, "404", "page_not_found");
+            add_code(&mut responses, "413", "export_too_many_pages");
+            add_code(&mut responses, "413", "export_too_large");
+        }
         id if notion_import_operation(id) => notion_import_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
+        id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         _ => {}
@@ -500,10 +518,13 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "restore_page"
             | "purge_page"
             | "duplicate_page"
+            | "export_page"
             | "search_pages"
             | "move_page_favorite"
             | "list_page_versions"
             | "restore_page_version"
+            | "set_page_lock"
+            | "list_recent_pages"
             | "create_teamspace"
             | "update_teamspace"
             | "delete_teamspace"
@@ -710,6 +731,9 @@ fn page_operation(operation_id: &str) -> bool {
             | "list_page_versions"
             | "get_page_version"
             | "restore_page_version"
+            | "set_page_lock"
+            | "record_page_visit"
+            | "list_recent_pages"
     )
 }
 
@@ -743,6 +767,48 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     }
     if operation_id == "restore_page_version" {
         add_code(responses, "409", "conflict");
+    }
+    if matches!(operation_id, "update_page" | "restore_page_version") {
+        add_code(responses, "423", "page_locked");
+    }
+    if operation_id == "list_recent_pages" {
+        add_code(responses, "422", "validation_failed");
+    }
+}
+
+fn page_comment_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "list_page_threads"
+            | "create_page_thread"
+            | "delete_page_thread"
+            | "create_page_comment"
+            | "update_page_comment"
+            | "delete_page_comment"
+            | "resolve_page_thread"
+            | "reopen_page_thread"
+    )
+}
+
+fn page_comment_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "page_not_found");
+    if operation_id != "list_page_threads" && operation_id != "create_page_thread" {
+        add_code(responses, "404", "page_comment_not_found");
+    }
+    if matches!(
+        operation_id,
+        "create_page_thread" | "create_page_comment" | "update_page_comment"
+    ) {
+        add_code(responses, "422", "validation_failed");
+    }
+    if matches!(
+        operation_id,
+        "delete_page_thread" | "update_page_comment" | "delete_page_comment"
+    ) {
+        add_code(responses, "403", "page_comment_forbidden");
     }
 }
 

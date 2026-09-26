@@ -132,18 +132,16 @@ export function TaskBoard({ tasks, users, labels, statuses, groups, sort, active
                     >
                       {/* id … assignees · priority (priority changes in place) */}
                       <div className="flex min-h-5 items-center justify-between text-[11px] text-muted-foreground/70">
-                        <span className="flex items-center gap-1">
-                          {task.identifier}
-                          {task.blocked ? <BlockedIndicator /> : null}
-                        </span>
+                        <span>{task.identifier}</span>
                         <span className="flex items-center gap-1">
                           {assignees.length > 0 ? <UserAvatarStack users={assignees} size={18} /> : null}
                           <PriorityPicker task={task} align="right" />
                         </span>
                       </div>
                       <h3 className="mt-[5px] mb-[9px] text-[13px] leading-[18px] font-medium text-foreground">{task.title || 'Untitled'}</h3>
-                      {task.labels.length > 0 ? (
+                      {task.blocked || task.labels.length > 0 ? (
                         <div className="mb-[9px] flex flex-wrap gap-1">
+                          {task.blocked ? <BlockedIndicator pill /> : null}
                           {task.labels.map((labelId) => {
                             const label = labels.find((item) => item.id === labelId)
                             return label ? <LabelPill key={label.id} label={label} /> : null

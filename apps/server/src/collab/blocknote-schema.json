@@ -357,6 +357,27 @@
    ]
   }
  },
+ "inline": {
+  "mention": {
+   "content": "none",
+   "attrs": [
+    {
+     "name": "userId",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "name",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    }
+   ]
+  }
+ },
  "cell": {
   "attrs": [
    "textColor",

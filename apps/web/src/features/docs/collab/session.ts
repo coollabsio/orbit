@@ -28,7 +28,8 @@ export interface CollabConnection {
  * - `connecting`: before the first sync (the editor is not mounted yet), or shortly after a drop
  * - `live`: connected and synced
  * - `offline`: disconnected for a while (or the browser is offline); y-websocket keeps retrying, edits stay local
- * - `reset`: the server's document was reset (4409); the owner refetches the page and opens a new session
+ * - `reset`: the server's document was reset (4409) or the page was locked/unlocked (4423); the owner refetches the page
+ *   and opens a new session with a fresh document (edits the server refused while locked are dropped)
  * - `lost`: no access any more (4403/4404) or the session ended (4401)
  * - `error`: the server refused the document for good (4413 too large, 4400/4426 protocol)
  */
@@ -70,6 +71,8 @@ export const CLOSE = {
   FORBIDDEN: 4403,
   GONE: 4404,
   RESET: 4409,
+  /** The page was locked or unlocked: refetch it (lock state) and reconnect with a fresh document. */
+  LOCK_CHANGED: 4423,
   TOO_LARGE: 4413,
   PROTOCOL: 4426,
   RATE_LIMITED: 4429,
@@ -95,6 +98,7 @@ export function problemOfClose(code: number): CollabProblem | null {
     case CLOSE.GONE:
       return 'gone'
     case CLOSE.RESET:
+    case CLOSE.LOCK_CHANGED:
       return 'reset'
     case CLOSE.TOO_LARGE:
       return 'too-large'

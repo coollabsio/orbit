@@ -1,6 +1,7 @@
-import { BlockNoteSchema, defaultBlockSpecs, type BlockNoteEditor } from '@blocknote/core'
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, type BlockNoteEditor } from '@blocknote/core'
 import { createReactBlockSpec } from '@blocknote/react'
 import { CALLOUT_DEFAULT_BACKGROUND, CALLOUT_DEFAULT_EMOJI, CalloutExternalView, CalloutView } from './CalloutBlock'
+import { pageMentionSpec } from './MentionInline'
 import { PageBlockExternalView, PageBlockView } from './PageBlockCard'
 
 /** Media blocks without page-file support: video and audio stay out (images and files upload as page files). */
@@ -55,6 +56,8 @@ export const pageEditorSchema = BlockNoteSchema.create({
     page: pageBlockSpec(),
     callout: calloutBlockSpec(),
   },
+  // `mention`: an @mention of a member ({ userId, name }); the server notifies newly mentioned members.
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: pageMentionSpec },
 })
 
 export type PageEditorSchema = typeof pageEditorSchema

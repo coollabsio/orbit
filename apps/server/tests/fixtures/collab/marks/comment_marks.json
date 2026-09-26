@@ -1,0 +1,98 @@
+{
+ "blocks": [
+  {
+   "id": "cm-p",
+   "type": "paragraph",
+   "content": "Commented text with a second overlapping thread"
+  },
+  {
+   "id": "cm-h",
+   "type": "heading",
+   "props": {
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Bold head",
+     "styles": {
+      "bold": true
+     }
+    },
+    {
+     "type": "text",
+     "text": " and tail",
+     "styles": {}
+    }
+   ]
+  },
+  {
+   "id": "cm-b",
+   "type": "bulletListItem",
+   "content": "Resolved thread (orphan mark)"
+  }
+ ],
+ "y_update": "ATQBAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAwlwYXJhZ3JhcGgHAAECBgYAAQMRY29tbWVudC0tSEdhYkdnNUtCeyJvcnBoYW4iOmZhbHNlLCJ0aHJlYWRJZCI6IjAxOTlhMGIwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDBjMSJ9hAEECkNvbW1lbnRlZCCGAQ4RY29tbWVudC0tSEdhYkdnNUsEbnVsbIYBDxFjb21tZW50LS1IR2FiR2c1S0J7Im9ycGhhbiI6ZmFsc2UsInRocmVhZElkIjoiMDE5OWEwYjAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMGMxIn2GARARY29tbWVudC0tSzBzVXZHNjBCeyJvcnBoYW4iOmZhbHNlLCJ0aHJlYWRJZCI6IjAxOTlhMGIwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDBjMiJ9hAERBHRleHSGARURY29tbWVudC0tSEdhYkdnNUsEbnVsbIYBFhFjb21tZW50LS1LMHNVdkc2MARudWxshgEXEWNvbW1lbnQtLUswc1V2RzYwQnsib3JwaGFuIjpmYWxzZSwidGhyZWFkSWQiOiIwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYzIifYQBGBAgd2l0aCBhIHNlY29uZCBvhgEoEWNvbW1lbnQtLUswc1V2RzYwBG51bGyEASkRdmVybGFwcGluZyB0aHJlYWQoAAECD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAECCXRleHRDb2xvcgF3B2RlZmF1bHQoAAECDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABAQJpZAF3BGNtLXCHAQEDDmJsb2NrQ29udGFpbmVyBwABPwMHaGVhZGluZwcAAUAGBgABQQRib2xkAnt9hAFCBUJvbGQghgFHBGJvbGQEbnVsbIYBSARib2xkAnt9hgFJEWNvbW1lbnQtLUdVS3dpZUFFQnsib3JwaGFuIjpmYWxzZSwidGhyZWFkSWQiOiIwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYzMifYQBSgRoZWFkhgFOBGJvbGQEbnVsbIYBTxFjb21tZW50LS1HVUt3aWVBRQRudWxshgFQEWNvbW1lbnQtLUdVS3dpZUFFQnsib3JwaGFuIjpmYWxzZSwidGhyZWFkSWQiOiIwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYzMifYQBUQQgYW5khgFVEWNvbW1lbnQtLUdVS3dpZUFFBG51bGyEAVYFIHRhaWwoAAFAD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFACXRleHRDb2xvcgF3B2RlZmF1bHQoAAFADXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABQAVsZXZlbAF9AigAAUAMaXNUb2dnbGVhYmxlAXkoAAE/AmlkAXcEY20taIcBPwMOYmxvY2tDb250YWluZXIHAAFiAw5idWxsZXRMaXN0SXRlbQcAAWMGBgABZBFjb21tZW50LS1HYThLaDhsdkF7Im9ycGhhbiI6dHJ1ZSwidGhyZWFkSWQiOiIwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYzQifYQBZQhSZXNvbHZlZIYBbRFjb21tZW50LS1HYThLaDhsdgRudWxshAFuFSB0aHJlYWQgKG9ycGhhbiBtYXJrKSgAAWMPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAWMJdGV4dENvbG9yAXcHZGVmYXVsdCgAAWMNdGV4dEFsaWdubWVudAF3BGxlZnQoAAFiAmlkAXcEY20tYgA=",
+ "expected": [
+  {
+   "id": "cm-p",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Commented text with a second overlapping thread",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "cm-h",
+   "type": "heading",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "level": 2,
+    "isToggleable": false
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Bold head",
+     "styles": {
+      "bold": true
+     }
+    },
+    {
+     "type": "text",
+     "text": " and tail",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "cm-b",
+   "type": "bulletListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Resolved thread (orphan mark)",
+     "styles": {}
+    }
+   ],
+   "children": []
+  }
+ ]
+}
