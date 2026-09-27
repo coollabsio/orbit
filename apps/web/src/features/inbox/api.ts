@@ -60,9 +60,8 @@ export function useMarkAllNotificationsRead(workspaceId: string) {
       })
       return required(data, 'Read-all response was empty.')
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) })
-    },
+    // Stay pending until the unread count refreshes, so the button does not re-enable for a moment.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),
   })
 }
 

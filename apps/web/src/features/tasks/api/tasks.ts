@@ -255,9 +255,12 @@ async function promptForConflict(error: Error, refresh: () => void) {
 }
 
 /** Cache patch for an optimistic update. `duplicate_of_id` is not a task field; the server response reconciles it. */
+/** Fields where `null` clears the value, so the optimistic patch must apply it. */
+const CLEARABLE_FIELDS = new Set(['due_at', 'due_start_at', 'source_url'])
+
 export function optimisticTaskPatch(body: Omit<TaskUpdateBody, 'expected_version'>): Partial<TaskRecord> {
   const { duplicate_of_id: _duplicateOf, ...fields } = body
-  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value != null)) as Partial<TaskRecord>
+  return Object.fromEntries(Object.entries(fields).filter(([key, value]) => value != null || CLEARABLE_FIELDS.has(key))) as Partial<TaskRecord>
 }
 
 export function useCreateTask(workspaceId: string) {

@@ -40,7 +40,8 @@ test('sign out all sequences requests and reports and retries every partial fail
     revoked.push(id)
     active += 1
     maxActive = Math.max(maxActive, active)
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    // Slow enough for the delayed "Revoking…" status to appear.
+    await new Promise((resolve) => setTimeout(resolve, 350))
     active -= 1
     const attempt = (attempts.get(id) ?? 0) + 1
     attempts.set(id, attempt)

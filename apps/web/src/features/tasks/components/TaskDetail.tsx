@@ -339,7 +339,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                 </a>
               ) : null}
               <Popover open={sourceOpen} onOpenChange={setSourceOpen}>
-                <PopoverTrigger render={<Button type="button" variant="ghost" className={`${SIDE_PROP} h-7 text-muted-foreground`} disabled={updateTask.isPending}>{task.sourceUrl ? 'Edit source' : 'Add source'}</Button>} />
+                <PopoverTrigger render={<Button type="button" variant="ghost" className={`${SIDE_PROP} h-7 text-muted-foreground`}>{task.sourceUrl ? 'Edit source' : 'Add source'}</Button>} />
                 <PopoverContent align="start" className="w-72 gap-2 p-3">
                   <form onSubmit={(event) => {
                     event.preventDefault()
@@ -364,7 +364,6 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                       variant="ghost"
                       className="-ml-2 inline-flex h-auto min-h-8 items-center gap-2 rounded-md border-0 px-2 py-1.5 text-[13px] font-normal text-foreground transition-colors hover:bg-accent aria-expanded:bg-accent dark:hover:bg-accent"
                       aria-label="Due date"
-                      disabled={updateTask.isPending}
                     >
                       <Calendar className="size-3.5" aria-hidden="true" />
                       <span>{dueDateLabel(task.dueAt, task.dueStartAt)}</span>

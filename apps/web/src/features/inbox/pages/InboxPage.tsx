@@ -10,6 +10,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useMembers } from '@/features/workspaces/api'
 import { isMention, notificationCopy, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
 import { usePageTree } from '@/features/docs/api/pages'
+import { useSlowPending } from '@/lib/useDebouncedValue'
 
 type InboxTab = 'all' | 'unread' | 'mentions'
 
@@ -25,6 +26,7 @@ export function InboxPage() {
   const pageTree = usePageTree(workspace.id, hasPageMentions)
   const markRead = useMarkNotificationRead(workspace.id)
   const markAll = useMarkAllNotificationsRead(workspace.id)
+  const marking = useSlowPending(markAll.isPending)
   const items = (allQuery.data ?? []).filter((notification) => {
     if (tab === 'unread') return !notification.read_at
     if (tab === 'mentions') return isMention(notification)
@@ -55,7 +57,7 @@ export function InboxPage() {
             disabled={unreadCount === 0 || markAll.isPending}
             onClick={() => markAll.mutate()}
           >
-            {markAll.isPending ? 'Marking…' : 'Mark all read'}
+            {marking ? 'Marking…' : 'Mark all read'}
           </Button>
         </div>
         <Tabs className="shrink-0 gap-0" value={tab} onValueChange={(value) => setTab(value as InboxTab)}>

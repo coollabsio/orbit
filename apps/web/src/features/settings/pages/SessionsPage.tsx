@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/button'
 import { relativeTime } from '@/lib/format'
 import { SessionRevocationError, useRevokeSessions, useSessions } from '@/features/settings/api/sessions'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { useSlowPending } from '@/lib/useDebouncedValue'
 
 /** Account view: the current user's signed-in devices. */
 export function SessionsPage() {
   const sessionsQuery = useSessions()
   const revokeSessions = useRevokeSessions()
+  const revoking = useSlowPending(revokeSessions.isPending)
   const sessions = sessionsQuery.data ?? []
   const others = sessions.filter((s) => !s.current)
   const failure = revokeSessions.error instanceof SessionRevocationError ? revokeSessions.error : null
@@ -59,7 +61,7 @@ export function SessionsPage() {
           )
         })}
         {revokeSessions.isError ? <div className="flex items-center gap-3 px-4 py-3" role="alert">{failure ? `${failure.failedIds.length} of ${failure.total} sessions could not be revoked.` : 'Session revocation failed.'} <Button variant="ghost" onClick={() => revokeSessions.mutate(failure?.failedIds ?? revokeSessions.variables ?? [])}>{failure ? 'Retry failed sessions' : 'Retry'}</Button></div> : null}
-        {revokeSessions.isPending ? <div className="flex items-center gap-3 px-4 py-3" role="status">Revoking {revokeSessions.variables?.length ?? 1} session{revokeSessions.variables?.length === 1 ? '' : 's'}…</div> : null}
+        {revoking ? <div className="flex items-center gap-3 px-4 py-3" role="status">Revoking {revokeSessions.variables?.length ?? 1} session{revokeSessions.variables?.length === 1 ? '' : 's'}…</div> : null}
       </div>
     </SettingsCard>
   )

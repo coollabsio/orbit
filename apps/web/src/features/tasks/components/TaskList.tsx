@@ -30,6 +30,7 @@ import { TaskRow } from './TaskRow'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { TaskPickerDialog } from './TaskPickerDialog'
+import { useSlowPending } from '@/lib/useDebouncedValue'
 
 const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
 const OPTION =
@@ -272,6 +273,7 @@ function BulkBar({
 }) {
   const { workspace } = useWorkspace()
   const bulkTasks = useBulkTasks(workspace.id)
+  const bulkSlow = useSlowPending(bulkTasks.isPending)
   const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
 
   // Esc clears the selection, unless it belongs to a field, an open menu or a dialog
@@ -394,7 +396,7 @@ function BulkBar({
           <Copy aria-hidden className={BULK_ICON} />
           <span className={BULK_LABEL}>Duplicate</span>
         </Button>
-        {bulkTasks.isPending ? (
+        {bulkSlow ? (
           <span role="status" className="flex shrink-0 items-center gap-1.5 px-2 text-xs whitespace-nowrap text-muted-foreground">
             <Loader aria-hidden className="size-3.5 animate-spin" />
             Updating…

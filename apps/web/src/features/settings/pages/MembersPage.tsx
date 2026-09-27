@@ -16,6 +16,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { User } from '@/features/workspaces/models'
 import { INVITABLE_ROLES, canManageMember, canTransferOwnership } from '@/features/settings/memberPermissions'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { useSlowPending } from '@/lib/useDebouncedValue'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
@@ -63,6 +64,7 @@ export function MembersPage() {
   const changeRole = useChangeMemberRole(workspace.id)
   const removeMember = useRemoveMember(workspace.id)
   const transferOwnership = useTransferOwnership(workspace.id)
+  const memberSaving = useSlowPending(changeRole.isPending || removeMember.isPending || transferOwnership.isPending)
   const users = membersQuery.data ?? EMPTY_USERS
   const pendingInvitations = invitations.data?.items.filter((invitation) => invitation.status === 'pending') ?? []
 
@@ -318,7 +320,7 @@ export function MembersPage() {
         {changeRole.isError ? <p role="alert" className="text-destructive">Role change failed. <Button variant="ghost" onClick={() => changeRole.variables && changeRole.mutate(changeRole.variables)}>Retry</Button></p> : null}
         {removeMember.isError ? <p role="alert" className="text-destructive">Member removal failed. <Button variant="ghost" onClick={() => removeMember.variables && removeMember.mutate(removeMember.variables)}>Retry</Button></p> : null}
         {transferOwnership.isError ? <p role="alert" className="text-destructive">Ownership transfer failed. <Button variant="ghost" onClick={() => transferOwnership.variables && transferOwnership.mutate(transferOwnership.variables)}>Retry</Button></p> : null}
-        {changeRole.isPending || removeMember.isPending || transferOwnership.isPending ? <p role="status">Saving member change…</p> : null}
+        {memberSaving ? <p role="status">Saving member change…</p> : null}
       </SettingsCard>
 
       {canManage ? (

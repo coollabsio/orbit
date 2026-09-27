@@ -57,7 +57,7 @@ test('task due date uses the custom picker and can clear the saved value', async
   await waitFor(() => expect(requestBody).toEqual({ expected_version: 1, due_start_at: null, due_at: null }))
 })
 
-test('This week saves a Monday through Sunday due-date range', async () => {
+for (const [label, weeksAhead] of [['This week', 0], ['Next week', 1]] as const) test(`${label} saves a Monday through Sunday due-date range`, async () => {
   let requestBody: Record<string, unknown> | undefined
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     requestBody = await (input as Request).json()
@@ -77,7 +77,7 @@ test('This week saves a Monday through Sunday due-date range', async () => {
   const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={() => {}} />, { wrapper: Wrapper })
 
   fireEvent.click(view.getByRole('button', { name: 'Due date' }))
-  fireEvent.click(view.getByRole('button', { name: 'This week' }))
+  fireEvent.click(view.getByRole('button', { name: label }))
   fireEvent.click(view.getByRole('button', { name: 'Done' }))
 
   await waitFor(() => expect(requestBody).toBeDefined())
@@ -86,6 +86,10 @@ test('This week saves a Monday through Sunday due-date range', async () => {
   expect(start.getDay()).toBe(1)
   expect(end.getDay()).toBe(0)
   expect(Math.round((end.getTime() - start.getTime()) / 86_400_000)).toBe(6)
+  const thisMonday = new Date()
+  thisMonday.setHours(0, 0, 0, 0)
+  thisMonday.setDate(thisMonday.getDate() - (thisMonday.getDay() + 6) % 7 + weeksAhead * 7)
+  expect(start.getTime()).toBe(thisMonday.getTime())
 })
 
 test('task source appears in properties and saves a separate URL', async () => {

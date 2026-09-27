@@ -27,11 +27,11 @@ function startOfLocalDay(day: Date) {
   return next
 }
 
-function currentWeek(): DateRange & { from: Date; to: Date } {
+function weekFromNow(weeksAhead: number): DateRange & { from: Date; to: Date } {
   const today = new Date()
   const mondayOffset = (today.getDay() + 6) % 7
   const from = startOfLocalDay(today)
-  from.setDate(from.getDate() - mondayOffset)
+  from.setDate(from.getDate() - mondayOffset + weeksAhead * 7)
   const to = new Date(from)
   to.setDate(to.getDate() + 6)
   return { from, to }
@@ -46,7 +46,7 @@ interface DatePickerProps {
   onDone: (value: { start: string | null; end: string }) => void
 }
 
-/** Calendar + time picker that supports one date, a date range, and a current-week shortcut. */
+/** Calendar + time picker that supports one date, a date range, and this/next-week shortcuts. */
 export function DatePicker({ startValue, value, onClear, onDone }: DatePickerProps) {
   const initialEnd = value ? new Date(value) : undefined
   const [range, setRange] = useState<DateRange | undefined>(() => initialEnd
@@ -56,8 +56,8 @@ export function DatePicker({ startValue, value, onClear, onDone }: DatePickerPro
   const [time, setTime] = useState(() => initialEnd ? timeOf(initialEnd) : '09:00')
   const timeOptions = HALF_HOURS.includes(time) ? HALF_HOURS : [...HALF_HOURS, time].sort()
 
-  const selectThisWeek = () => {
-    const week = currentWeek()
+  const selectWeek = (weeksAhead: number) => {
+    const week = weekFromNow(weeksAhead)
     setRange(week)
     setMonth(week.from)
   }
@@ -72,7 +72,10 @@ export function DatePicker({ startValue, value, onClear, onDone }: DatePickerPro
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <Button type="button" variant="secondary" className="w-full" onClick={selectThisWeek}>This week</Button>
+      <div className="grid grid-cols-2 gap-2">
+        <Button type="button" variant="secondary" onClick={() => selectWeek(0)}>This week</Button>
+        <Button type="button" variant="secondary" onClick={() => selectWeek(1)}>Next week</Button>
+      </div>
       <Calendar mode="range" selected={range} onSelect={setRange} month={month} onMonthChange={setMonth} />
       <div className="flex items-center gap-2">
         <Clock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />

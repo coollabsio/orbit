@@ -9,3 +9,8 @@ export function useDebouncedValue<T>(value: T, delay: number): T {
   }, [value, delay])
   return debounced
 }
+
+/** `pending`, but only once it has lasted a short time, so fast saves do not flash a loading state. */
+export function useSlowPending(pending: boolean): boolean {
+  return useDebouncedValue(pending, 300) && pending
+}

@@ -52,6 +52,11 @@ test('the optimistic patch never writes duplicate_of_id into cached task records
   expect(optimisticTaskPatch({ duplicate_of_id: 'target', priority: 'high' })).toEqual({ priority: 'high' })
 })
 
+test('the optimistic patch applies cleared due dates and source at once', () => {
+  expect(optimisticTaskPatch({ due_start_at: null, due_at: null, source_url: null, title: null }))
+    .toEqual({ due_start_at: null, due_at: null, source_url: null })
+})
+
 test('duplicate calls go through the task PATCH and the atomic bulk endpoint', async () => {
   const requests: Array<{ method: string; path: string; body: unknown }> = []
   const client = createApiClient({

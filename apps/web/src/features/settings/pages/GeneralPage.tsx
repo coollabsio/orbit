@@ -11,6 +11,7 @@ import { useTheme, type Theme } from '@/lib/themeContext'
 import { useRenameWorkspace } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { useSlowPending } from '@/lib/useDebouncedValue'
 
 const THEME_OPTIONS = [
   { value: 'light', label: 'Light' },
@@ -26,6 +27,7 @@ export function GeneralPage() {
   const { theme, setTheme } = useTheme()
   const { workspace } = useWorkspace()
   const renameWorkspace = useRenameWorkspace(workspace.id)
+  const renameSlow = useSlowPending(renameWorkspace.isPending)
   const backup = useMutation({
     mutationFn: async () => {
       const { data } = await createBackup({ client: apiClient, throwOnError: true })
@@ -50,10 +52,10 @@ export function GeneralPage() {
     <>
       <SettingsCard title="Workspace" description="Rename this workspace.">
         <form ref={formRef} className={GRID} onSubmit={(event) => { event.preventDefault(); saveWorkspace() }}>
-          <Field className={FIELD}><FieldLabel className={FIELD_LABEL} htmlFor="workspace-name">Name</FieldLabel><Input id="workspace-name" required disabled={renameWorkspace.isPending} value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></Field>
+          <Field className={FIELD}><FieldLabel className={FIELD_LABEL} htmlFor="workspace-name">Name</FieldLabel><Input id="workspace-name" required disabled={renameSlow} value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></Field>
         </form>
         {renameWorkspace.isError ? <p role="alert" className="text-destructive">Workspace rename failed. <Button variant="ghost" onClick={saveWorkspace}>Retry</Button></p> : null}
-        {renameWorkspace.isPending ? <p role="status">Saving workspace…</p> : null}
+        {renameSlow ? <p role="status">Saving workspace…</p> : null}
       </SettingsCard>
 
       <SettingsCard title="Appearance" description="Theme for this browser.">

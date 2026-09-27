@@ -4,6 +4,7 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjectTrash, useRestoreProject } from '@/features/tasks/api/projects'
 import { useRestoreTask, useTaskTrash } from '@/features/tasks/api/tasks'
+import { useSlowPending } from '@/lib/useDebouncedValue'
 
 const ROW = 'flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b border-border px-3 py-1.5'
 
@@ -13,6 +14,7 @@ export function TaskTrashPage() {
   const restore = useRestoreTask(workspace.id)
   const projects = useProjectTrash(workspace.id)
   const restoreProject = useRestoreProject(workspace.id)
+  const restoring = useSlowPending(restore.isPending || restoreProject.isPending)
   if (trash.isPending || projects.isPending) return <EmptyState icon={Trash2} title="Loading trash" description="Loading deleted projects and tasks." />
   if (trash.isError || projects.isError) return <div><EmptyState icon={Trash2} title="Trash unavailable" description="The server could not load deleted records." /><Button variant="outline" onClick={() => { void trash.refetch(); void projects.refetch() }}>Retry</Button></div>
   return (
@@ -24,7 +26,7 @@ export function TaskTrashPage() {
       {trash.data.length === 0 && projects.data.length === 0 ? <EmptyState icon={Trash2} title="Trash is empty" description="Deleted projects and tasks appear here until restored." /> : null}
       {restore.isError ? <p role="alert" className="text-destructive">Task restore failed. <Button variant="ghost" onClick={() => restore.variables && restore.mutate(restore.variables)}>Retry</Button></p> : null}
       {restoreProject.isError ? <p role="alert" className="text-destructive">Project restore failed. <Button variant="ghost" onClick={() => restoreProject.variables && restoreProject.mutate(restoreProject.variables)}>Retry</Button></p> : null}
-      {restore.isPending || restoreProject.isPending ? <p role="status">Restoring deleted record…</p> : null}
+      {restoring ? <p role="status">Restoring deleted record…</p> : null}
     </div></section></div>
   )
 }

@@ -20,6 +20,7 @@ import { useTasks } from '@/features/tasks/api/tasks'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
+import { useSlowPending } from '@/lib/useDebouncedValue'
 
 const PROJECT_COLORS = [
   '#8b5cf6', '#6366f1', '#0ea5e9', '#06b6d4', '#10b981', '#22c55e', '#84cc16', '#eab308', '#f59e0b', '#f97316', '#ef4444',
@@ -50,6 +51,7 @@ export function ProjectSettingsPage() {
   const updateStatus = useUpdateStatus(workspace.id, projectId ?? '')
   const deleteStatus = useDeleteStatus(workspace.id, projectId ?? '')
   const reorderStatuses = useReorderStatuses(workspace.id, projectId ?? '')
+  const statusesSaving = useSlowPending(createStatus.isPending || updateStatus.isPending || deleteStatus.isPending || reorderStatuses.isPending)
   const deleteProject = useDeleteProject(workspace.id)
   const project = projectsQuery.data?.find((p) => p.id === projectId)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -245,7 +247,7 @@ export function ProjectSettingsPage() {
                 {updateStatus.isError ? <p role="alert" className="text-destructive">Status update failed. <Button variant="ghost" onClick={() => updateStatus.variables && updateStatus.mutate(updateStatus.variables)}>Retry</Button></p> : null}
                 {deleteStatus.isError ? <p role="alert" className="text-destructive">Status deletion failed. <Button variant="ghost" onClick={() => deleteStatus.variables && deleteStatus.mutate(deleteStatus.variables)}>Retry</Button></p> : null}
                 {reorderStatuses.isError ? <p role="alert" className="text-destructive">Status reorder failed. <Button variant="ghost" onClick={() => reorderStatuses.variables && reorderStatuses.mutate(reorderStatuses.variables)}>Retry</Button></p> : null}
-                {createStatus.isPending || updateStatus.isPending || deleteStatus.isPending || reorderStatuses.isPending ? <p role="status">Saving statuses…</p> : null}
+                {statusesSaving ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
 
               <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
