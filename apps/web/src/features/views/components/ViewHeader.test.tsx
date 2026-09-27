@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { fireEvent, waitFor, within } from '@testing-library/react'
+import { fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders, savedView, stubFetch } from '../testUtils'
 import type { ViewStateController } from '../useViewState'
@@ -36,67 +36,21 @@ function fakeController(overrides: Partial<ViewStateController> = {}) {
   return { controller, calls }
 }
 
-function renderHeader(controller: ViewStateController, handlers: Partial<{ onSaveAsNew: () => void; onDeleted: () => void }> = {}) {
+function renderHeader(controller: ViewStateController, handlers: Partial<{ onDeleted: () => void }> = {}) {
   return renderWithProviders(
     <div>
-      <ViewHeader
-        workspaceId="alpha"
-        controller={controller}
-        onSaveAsNew={handlers.onSaveAsNew ?? (() => {})}
-        onEdit={() => {}}
-        onDuplicate={() => {}}
-        onDeleted={handlers.onDeleted ?? (() => {})}
-      />
+      <ViewHeader workspaceId="alpha" controller={controller} onEdit={() => {}} onDuplicate={() => {}} onDeleted={handlers.onDeleted ?? (() => {})} />
     </div>,
   )
 }
 
-test('a clean view shows its name and favorite star, with no save controls', async () => {
+test('the header shows the name and favorite star; unsaved edits are never handled here', async () => {
   const requests = stubFetch((request) => (request.method === 'GET' ? Response.json([]) : new Response(null, { status: 204 })))
-  const { view } = renderHeader(fakeController().controller)
+  const { view } = renderHeader(fakeController({ dirty: true }).controller)
   expect(view.getByRole('heading', { name: 'Launch' })).toBeTruthy()
   expect(view.queryByRole('group', { name: 'Unsaved view changes' })).toBeNull()
   await userEvent.click(view.getByRole('button', { name: 'Add to favorites' }))
   await waitFor(() => expect(requests.some((request) => request.method === 'PUT' && request.path.endsWith('/views/view-1/favorite'))).toBe(true))
-})
-
-test('editors get Discard and Save, and Ctrl+S saves', async () => {
-  const { controller, calls } = fakeController({ dirty: true })
-  const { view } = renderHeader(controller)
-  const bar = view.getByRole('group', { name: 'Unsaved view changes' })
-  expect(bar.classList.contains('animate-view-bar-enter')).toBe(true)
-  await userEvent.click(within(bar).getByRole('button', { name: 'Discard' }))
-  fireEvent.keyDown(document, { key: 's', ctrlKey: true })
-  await waitFor(() => expect(calls).toEqual(['discard', 'save']))
-})
-
-test('a crowded header shrinks the view name, never the unsaved controls', () => {
-  const { view } = renderHeader(fakeController({ dirty: true }).controller)
-  const bar = view.getByRole('group', { name: 'Unsaved view changes' })
-  // the timeline toolbar leaves little room: without these the label wraps onto two lines
-  expect(bar.classList.contains('shrink-0')).toBe(true)
-  expect(within(bar).getByText('Unsaved changes').classList.contains('whitespace-nowrap')).toBe(true)
-})
-
-test('non-editors get Save as new view, and Cmd+S opens it', async () => {
-  let asNew = 0
-  const { controller } = fakeController({ dirty: true, canEdit: false })
-  const { view } = renderHeader(controller, { onSaveAsNew: () => { asNew += 1 } })
-  expect(view.queryByRole('button', { name: 'Save' })).toBeNull()
-  await userEvent.click(view.getByRole('button', { name: 'Save as new view' }))
-  fireEvent.keyDown(document, { key: 's', metaKey: true })
-  expect(asNew).toBe(2)
-})
-
-test('a version conflict offers Overwrite and Reload', async () => {
-  const { controller, calls } = fakeController({ dirty: true, conflict: true })
-  const { view } = renderHeader(controller)
-  expect(await view.findByRole('alertdialog')).toBeTruthy()
-  expect(view.getByText('This view changed since you opened it')).toBeTruthy()
-  await userEvent.click(view.getByRole('button', { name: 'Overwrite' }))
-  await waitFor(() => expect(calls).toContain('overwrite'))
-  await userEvent.click(view.getByRole('button', { name: 'Reload' }))
-  await waitFor(() => expect(calls).toContain('discard'))
 })
 
 test('deleting from the view menu asks first, then leaves the page', async () => {
@@ -118,41 +72,7 @@ test('explains unreadable settings and missing views', () => {
       <ViewNotFound />
     </>,
   )
-  expect(view.getByText("This view has settings Orbit can't read. Save to reset them.")).toBeTruthy()
+  expect(view.getByText("This view has settings Orbit can't read. Update the view to reset them.")).toBeTruthy()
   expect(view.getByText('View not found')).toBeTruthy()
   expect(view.getByRole('link', { name: 'Go to views' }).getAttribute('href')).toBe('/views')
-})
-
-test('a held or repeated Cmd+S saves once while the save is in flight', async () => {
-  let release: (() => void) | undefined
-  let saves = 0
-  const { controller } = fakeController({
-    dirty: true,
-    save: () => {
-      saves += 1
-      return new Promise<void>((resolve) => { release = resolve })
-    },
-  })
-  renderHeader(controller)
-  fireEvent.keyDown(document, { key: 's', metaKey: true })
-  fireEvent.keyDown(document, { key: 's', metaKey: true, repeat: true })
-  fireEvent.keyDown(document, { key: 's', metaKey: true })
-  expect(saves).toBe(1)
-
-  release?.()
-  await waitFor(() => {
-    fireEvent.keyDown(document, { key: 's', metaKey: true })
-    expect(saves).toBe(2)
-  })
-})
-
-test('Cmd+S opens Save as new view without animation; the button animates', async () => {
-  const opened: Array<{ instant?: boolean } | undefined> = []
-  const { controller } = fakeController({ dirty: true, canEdit: false })
-  const { view } = renderWithProviders(
-    <ViewHeader workspaceId="alpha" controller={controller} onSaveAsNew={(options) => opened.push(options)} onEdit={() => {}} onDuplicate={() => {}} onDeleted={() => {}} />,
-  )
-  fireEvent.keyDown(document, { key: 's', ctrlKey: true })
-  await userEvent.click(view.getByRole('button', { name: 'Save as new view' }))
-  expect(opened.map((options) => options?.instant ?? false)).toEqual([true, false])
 })

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import { Add as Plus, Filter, Hierarchy, Lock, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -179,10 +179,12 @@ export interface FilterBarProps {
   /** Non-removable chip for the page's preset scope, e.g. "Overdue". */
   presetLabel?: string | null
   onOpenAdvanced?: () => void
+  /** Right-aligned controls for the row (e.g. Save view); they show the row even without a filter. */
+  actions?: ReactNode
 }
 
-/** The chip row under the header. Renders nothing when there is no scope and no filter. */
-export function FilterBar({ filter, options, onChange, presetLabel = null, onOpenAdvanced }: FilterBarProps) {
+/** The chip row under the header. Renders nothing when there is no scope, no filter, and no action. */
+export function FilterBar({ filter, options, onChange, presetLabel = null, onOpenAdvanced, actions }: FilterBarProps) {
   const [live, setLive] = useState(false)
   const [adding, setAdding] = useState(false)
   // the same cap as FilterButton: a 47th condition could push a scoped page past the server's 50
@@ -192,7 +194,7 @@ export function FilterBar({ filter, options, onChange, presetLabel = null, onOpe
     const frame = requestAnimationFrame(() => setLive(true))
     return () => cancelAnimationFrame(frame)
   }, [])
-  if (!presetLabel && filter.children.length === 0) return null
+  if (!presetLabel && filter.children.length === 0 && !actions) return null
   const flat = isFlatFilter(filter)
   const replaceAt = (index: number, next: Condition) => onChange({ ...filter, children: filter.children.map((child, i) => (i === index ? next : child)) })
   const removeAt = (index: number) => onChange({ ...filter, children: filter.children.filter((_, i) => i !== index) })
@@ -235,6 +237,7 @@ export function FilterBar({ filter, options, onChange, presetLabel = null, onOpe
           </Button>
         }
       />
+      {actions ? <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div> : null}
     </div>
   )
 }

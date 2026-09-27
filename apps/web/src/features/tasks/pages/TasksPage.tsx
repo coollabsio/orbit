@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
+import { toast } from 'sonner'
 import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { ApiProblem } from '@/api/problem'
@@ -46,11 +47,12 @@ import { DisplayPopover } from '@/features/views/components/DisplayPopover'
 import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
 import { PRESS_MOTION } from '@/features/views/components/motion'
 import { SaveViewDialog, type SaveViewMode } from '@/features/views/components/SaveViewDialog'
+import { ViewChanges } from '@/features/views/components/ViewChanges'
 import { ViewHeader, ViewNotFound, ViewStateBanner } from '@/features/views/components/ViewHeader'
 import { PRESET_LABEL, type FilterOptions } from '@/features/views/filterFields'
 import { rebaseViewSessionEdit, useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
-import { DEFAULT_DISPLAY, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
+import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 
@@ -261,6 +263,15 @@ function WorkspaceTasksPage() {
   }, [wantsNew, stateLoading, projects.length, statusesQuery.data.length])
 
   const activeProject = projects.find((project) => project.id === projectFilter)
+  // the user's own conditions (a preset page's chip is not one): only then can they be cleared or saved as a view.
+  // A changed display alone is not offered as a view: the page already remembers it.
+  const filtered = countConditions(viewState.state.filter) > 0
+  // the user's conditions go; a page's preset chip stays. A page saves at once, so the toast offers the way back.
+  const clearFilters = () => {
+    const previous = viewState.state.filter
+    viewState.setFilter(emptyFilter())
+    toast('Filters cleared', { action: { label: 'Undo', onClick: () => viewState.setFilter(previous) } })
+  }
   const viewTitle = preset ? PRESET_TITLE[preset] : 'All tasks'
 
   if (viewUnavailable) {
@@ -301,7 +312,6 @@ function WorkspaceTasksPage() {
               <ViewHeader
                 workspaceId={workspace.id}
                 controller={viewState}
-                onSaveAsNew={(options) => openSaveDialog('save_as_new', options?.instant)}
                 onEdit={() => openSaveDialog('edit')}
                 onDuplicate={() => openSaveDialog('duplicate')}
                 onDeleted={() => navigate('/views')}
@@ -343,12 +353,6 @@ function WorkspaceTasksPage() {
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
               onChange={viewState.setDisplay}
             />
-            {source.kind === 'page' ? (
-              <Button type="button" variant="ghost" aria-label="Save view" className={cn('max-[899px]:w-8 max-[899px]:px-0', PRESS_MOTION)} onClick={() => openSaveDialog('create')}>
-                <Bookmark className="size-4" />
-                <span className="max-[899px]:hidden">Save view</span>
-              </Button>
-            ) : null}
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
           </div>
@@ -360,6 +364,22 @@ function WorkspaceTasksPage() {
             onChange={viewState.setFilter}
             presetLabel={presetLabel}
             onOpenAdvanced={() => setAdvancedOpen(true)}
+            // saving sits beside the filter it saves, and only once the page differs from how it opens
+            // the row's right end always holds what can be done with the current filter:
+            // a page offers Clear all · Save view; a saved view with edits offers Reset · Save as new view · Update view
+            actions={source.kind === 'view' ? (
+              viewState.dirty ? <ViewChanges controller={viewState} onSaveAsNew={(options) => openSaveDialog('save_as_new', options?.instant)} /> : undefined
+            ) : filtered ? (
+              <>
+                <Button type="button" variant="ghost" size="sm" className={cn('animate-view-bar-enter text-muted-foreground', PRESS_MOTION)} onClick={clearFilters}>
+                  Clear all
+                </Button>
+                <Button type="button" variant="outline" size="sm" className={cn('animate-view-bar-enter', PRESS_MOTION)} onClick={() => openSaveDialog('create')}>
+                  <Bookmark className="size-3.5" />
+                  Save view
+                </Button>
+              </>
+            ) : undefined}
           />
           <AdvancedFilterDialog
             open={advancedOpen}

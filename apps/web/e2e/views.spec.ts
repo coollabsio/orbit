@@ -159,7 +159,7 @@ async function mockApi(page: Page, person: Person, store: Store) {
   })
 }
 
-test('build filters, save a workspace view, reload, and favorite it into the sidebar', async ({ page }) => {
+test('build filters, save a workspace view, reload, and favorite it', async ({ page }) => {
   const store = newStore()
   await mockApi(page, OWNER, store)
   await page.goto('/tasks')
@@ -189,9 +189,9 @@ test('build filters, save a workspace view, reload, and favorite it into the sid
   await expect(page.getByRole('group', { name: 'Unsaved view changes' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Add to favorites' }).click()
-  const sidebar = page.locator('aside')
-  await expect(sidebar.getByText('Favorites')).toBeVisible()
-  await expect(sidebar.getByRole('link', { name: 'High priority' })).toBeVisible()
+  // favorites head the Views page (under Tasks)
+  await page.locator('aside').getByRole('link', { name: 'Task views' }).click()
+  await expect(page.getByRole('list', { name: 'Favorites' }).getByRole('link', { name: 'High priority' })).toBeVisible()
 })
 
 test('a member sees the workspace view and can only save edits as a new view', async ({ browser }) => {
@@ -202,14 +202,13 @@ test('a member sees the workspace view and can only save edits as a new view', a
   await mockApi(member, MEMBER, store)
 
   await member.goto('/views')
-  await expect(member.getByText('Save a filter from any task page to create a view')).toBeVisible()
-  await member.getByRole('tab', { name: 'Workspace views' }).click()
+  await expect(member.getByRole('list', { name: 'Workspace views' })).toBeVisible()
   await member.getByRole('link', { name: 'High priority' }).click()
   await expect(member).toHaveURL(/\/views\/view-1$/)
 
   await member.getByRole('button', { name: 'Remove priority filter' }).click()
   await expect(member.getByRole('button', { name: 'Save as new view' })).toBeVisible()
-  await expect(member.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0)
+  await expect(member.getByRole('button', { name: 'Update view' })).toHaveCount(0)
   await member.getByRole('button', { name: 'View options' }).click()
   await expect(member.getByRole('menuitem', { name: 'Duplicate' })).toBeVisible()
   await expect(member.getByRole('menuitem', { name: 'Edit view' })).toHaveCount(0)

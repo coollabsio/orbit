@@ -275,8 +275,60 @@ const viewRecord = (id: string, name: string, version = 1) => ({
   can_edit: true, created_at: '2026-09-01T12:00:00Z', updated_at: '2026-09-01T12:00:00Z',
 })
 
+/** A stored page preference: the page opens with this state instead of the defaults. */
+const storedPreference = (pageKey: string, state: unknown) => Response.json({ page_key: pageKey, state, state_error: null, updated_at: '2026-09-01T12:00:00Z' })
+
+test('Save view shows only once the page has a filter or a changed display', async () => {
+  serve()
+  const plain = renderAt('/tasks?workspace=workspace-1&view=overdue')
+  expect(await plain.findByText('Ship release')).toBeTruthy()
+  // the preset alone is how the page opens: nothing to save yet
+  expect(plain.queryAllByRole('button', { name: 'Save view' })).toHaveLength(0)
+  plain.unmount()
+
+  serve(({ method, path }) => method === 'GET' && path.endsWith('/view-preferences/all')
+    ? storedPreference('all', { filter: { op: 'and', children: [{ field: 'priority', operator: 'is', value: ['urgent'] }] }, display: DEFAULT_DISPLAY })
+    : undefined)
+  const filtered = renderAt('/tasks?workspace=workspace-1')
+  expect(await filtered.findByText('Ship release')).toBeTruthy()
+  // it sits at the end of the filter row, beside what it saves
+  expect(within(filtered.getByRole('toolbar', { name: 'Filters' })).getAllByRole('button', { name: 'Save view' })).toHaveLength(1)
+  filtered.unmount()
+
+  // a changed display alone is a page preference, not a view: no filter row, no Save view
+  serve(({ method, path }) => method === 'GET' && path.endsWith('/view-preferences/all')
+    ? storedPreference('all', { filter: { op: 'and', children: [] }, display: { ...DEFAULT_DISPLAY, layout: 'board' } })
+    : undefined)
+  const arranged = renderAt('/tasks?workspace=workspace-1')
+  expect(await arranged.findByText('Ship release')).toBeTruthy()
+  expect(arranged.queryAllByRole('toolbar', { name: 'Filters' })).toHaveLength(0)
+  expect(arranged.queryAllByRole('button', { name: 'Save view' })).toHaveLength(0)
+})
+
+test('Clear all removes the user filters, keeps the preset, and saves the empty filter', async () => {
+  // a changed display must not keep Save view around once the filters are gone
+  const requests = serve(({ method, path }) => method === 'GET' && path.endsWith('/view-preferences/preset:overdue')
+    ? storedPreference('preset:overdue', { filter: { op: 'and', children: [{ field: 'priority', operator: 'is', value: ['urgent'] }] }, display: { ...DEFAULT_DISPLAY, group_by: 'priority' } })
+    : undefined)
+  const page = renderAt('/tasks?workspace=workspace-1&view=overdue')
+  expect(await page.findByText('Ship release')).toBeTruthy()
+  const toolbar = page.getByRole('toolbar', { name: 'Filters' })
+
+  await userEvent.click(within(toolbar).getByRole('button', { name: 'Clear all' }))
+  // nothing is left to clear or to save; the preset chip stays
+  expect(within(toolbar).queryAllByRole('button', { name: 'Clear all' })).toHaveLength(0)
+  expect(within(toolbar).queryAllByRole('button', { name: 'Save view' })).toHaveLength(0)
+  expect(within(toolbar).getByText('Overdue')).toBeTruthy()
+  await waitFor(() => expect(preferencePuts(requests).at(-1)?.body).toMatchObject({ state: { filter: { op: 'and', children: [] } } }))
+})
+
 test('Save view on a preset project page stores the preset and project as conditions', async () => {
-  const requests = serve(({ method, path }) => method === 'POST' && path.endsWith('/views') ? Response.json(viewRecord('view-new', 'Late launch'), { status: 201 }) : undefined)
+  const display = { ...DEFAULT_DISPLAY, group_by: 'priority' }
+  const requests = serve(({ method, path }) => {
+    if (method === 'POST' && path.endsWith('/views')) return Response.json(viewRecord('view-new', 'Late launch'), { status: 201 })
+    if (method === 'GET' && path.includes('/view-preferences/')) return storedPreference('project:project-1', { filter: { op: 'and', children: [{ field: 'priority', operator: 'is', value: ['high'] }] }, display })
+    return undefined
+  })
   const page = renderAt('/tasks?workspace=workspace-1&view=overdue&project=project-1')
   expect(await page.findByText('Ship release')).toBeTruthy()
 
@@ -292,8 +344,8 @@ test('Save view on a preset project page stores the preset and project as condit
     name: 'Late launch',
     visibility: 'personal',
     state: {
-      filter: { op: 'and', children: [...PRESET_FILTERS.overdue.children, { field: 'project', operator: 'is', value: ['project-1'] }] },
-      display: DEFAULT_DISPLAY,
+      filter: { op: 'and', children: [...PRESET_FILTERS.overdue.children, { field: 'project', operator: 'is', value: ['project-1'] }, { field: 'priority', operator: 'is', value: ['high'] }] },
+      display,
     },
   })
 })
@@ -330,7 +382,9 @@ async function openConflictingView(versions: Array<ReturnType<typeof viewRecord>
   expect(await page.findByText('Ship release')).toBeTruthy()
 
   await toggleEmptyGroups(page)
-  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
+  // a saved view's edits are handled at the end of the filter row, where Save view sits on a page
+  expect(page.getByRole('toolbar', { name: 'Filters' }).contains(page.getByRole('group', { name: 'Unsaved view changes' }))).toBe(true)
+  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Update view' }))
 
   expect(await page.findByRole('alertdialog')).toBeTruthy()
   // the edits survive the conflict (behind the modal, so hidden from the accessibility tree)
@@ -392,7 +446,7 @@ test('renaming a view with unsaved edits does not make the next save conflict', 
   await userEvent.click(page.getByRole('button', { name: 'Save changes' }))
   expect(await page.findByRole('heading', { name: 'Hot bugs triage' })).toBeTruthy()
 
-  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
+  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Update view' }))
 
   await waitFor(() => expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0))
   expect(viewPatches(requests).map(({ body }) => (body as { expected_version: number }).expected_version)).toEqual([1, 2])
@@ -426,7 +480,7 @@ test('renaming a view from the Views page keeps its unsaved edits saveable witho
 
   fireEvent.click(page.getByRole('button', { name: 'Go to /views/view-1' }))
   expect(await page.findByRole('heading', { name: 'Hot bugs triage' })).toBeTruthy()
-  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Save' }))
+  await userEvent.click(within(page.getByRole('group', { name: 'Unsaved view changes' })).getByRole('button', { name: 'Update view' }))
 
   await waitFor(() => expect(page.queryAllByRole('group', { name: 'Unsaved view changes', hidden: true })).toHaveLength(0))
   expect(viewPatches(requests).map(({ body }) => (body as { expected_version: number }).expected_version)).toEqual([1, 2])
