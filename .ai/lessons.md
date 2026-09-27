@@ -17,6 +17,10 @@
 - When the user asks for a "1:1 copy" of a reference UI, port the reference CSS values verbatim (surface ladder, paddings, font sizes, grid columns) into our tokens/utilities instead of approximating. Read `resources/css/app.css` + `utilities.css` + the blade of the exact page first.
 - Before restyling to match a reference, restudy the actual screenshot section by section (shell, second nav, content, controls) instead of extrapolating a single pattern to everything.
 
+## Orbit is multi-app
+- Features that belong to one app (task views, task presets) nest under that app in the sidebar and headers; never add them as top-level Workspace items next to Tasks/Docs/Mail/Chat (user, 2026-09-25).
+- Contextual actions (e.g. "Save view") appear only when they can do something; do not show them on an unchanged page.
+
 ## Reference discipline
 - **When the user names a screen by the reference's name, build that exact screen at the reference's mount point — not a lookalike inside an existing page.** "Server settings" in the chat reference is its own route whose sidebar replaces the channel sidebar, opened from the server dropdown; I first put its tabs into the app-wide Settings page and had to redo it (2026-08-29). Also copy data semantics, not just markup: the member list groups by primary role and names take the highest role's color.
 - **Check the reference's component tree, not just its classes.** the chat reference's `ChatArea` renders the member list as `rightPanel` *inside* the chat column under a full-width header (`header` + `flex min-h-0 flex-1` row). I ported the member list as a sibling pane, so the header stopped short of the right edge; the user had to point it out (2026-08-29). When porting a screen, first grep where each panel is mounted (`grep -n "<MemberList\|rightPanel"`) before styling.
