@@ -810,6 +810,19 @@ impl TaskRepository {
         let description = description.unwrap_or_else(|| current.description.clone());
         sqlx::query("UPDATE task_statuses SET name = ?, description = ?, color = ?, category = ?, position = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND project_id = ? AND version = ?")
             .bind(&name).bind(&description).bind(&color).bind(&category).bind(position).bind(now.as_millis()).bind(status_id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        // The completed_at triggers (0033) only see status_id changes: a category change moves
+        // every task in the status into or out of done here, as of now.
+        let done = |category: &str| category == "completed" || category == "cancelled";
+        if done(&current.category) != done(&category) {
+            sqlx::query(
+                "UPDATE tasks SET completed_at = ? WHERE workspace_id = ? AND status_id = ?",
+            )
+            .bind(done(&category).then_some(now.as_millis()))
+            .bind(workspace_id.to_string())
+            .bind(status_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
         record_mutation(
             &mut tx,
             workspace_id,
@@ -2419,7 +2432,8 @@ fn task_sort_column(sort: &TaskSort, order: &SortOrder) -> &'static str {
         (TaskSort::Priority, _) => {
             "CASE tasks.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
         }
-        (TaskSort::Title, _) => "tasks.title",
+        // Case-insensitive, so "apple" sorts next to "Apple" and not after "Zebra".
+        (TaskSort::Title, _) => "tasks.title COLLATE NOCASE",
         (TaskSort::CreatedAt, _) => "tasks.created_at",
         (TaskSort::UpdatedAt, _) => "tasks.updated_at",
         // The literals are due_date_sentinel's values.

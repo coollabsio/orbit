@@ -482,6 +482,20 @@ impl ViewRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         load_caller(&mut *tx, workspace_id, actor_id).await?;
+        // Only live projects of this workspace get a row, so made-up ids cannot pile up rows.
+        if let Some(project_id) = page_key.strip_prefix("project:") {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM projects \
+                 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)",
+            )
+            .bind(project_id)
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if !exists {
+                return Err(TaskError::NotFound);
+            }
+        }
         sqlx::query(
             "INSERT INTO view_preferences (workspace_id, user_id, page_key, state_json, updated_at) \
              VALUES (?, ?, ?, ?, ?) \

@@ -776,6 +776,46 @@ async fn task_lists_filter_sort_and_reject_cursor_query_mismatches() {
 }
 
 #[tokio::test]
+async fn title_sort_ignores_case_across_pages() {
+    let fixture = Fixture::new().await;
+    for title in ["Zebra", "apple", "Banana"] {
+        fixture.create_task(title).await;
+    }
+    let mut titles = Vec::new();
+    let mut cursor = String::new();
+    loop {
+        let page = response_json(
+            fixture
+                .app
+                .clone()
+                .oneshot(cookie_request(
+                    "GET",
+                    &format!(
+                        "/api/v1/workspaces/{}/tasks?sort=title&order=asc&limit=1{cursor}",
+                        fixture.workspace_id
+                    ),
+                    &fixture.owner_cookie,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        titles.extend(
+            page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|task| task["title"].clone()),
+        );
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = format!("&cursor={next}"),
+            None => break,
+        }
+    }
+    assert_eq!(titles, [json!("apple"), json!("Banana"), json!("Zebra")]);
+}
+
+#[tokio::test]
 async fn descending_title_cursors_handle_prefixes() {
     let fixture = Fixture::new().await;
     fixture.create_task("A").await;
@@ -3764,6 +3804,35 @@ async fn completed_at_is_set_and_cleared_by_status_changes() {
     assert_eq!(status, StatusCode::CREATED);
     let (completed_at, updated_at) = task_timestamps(&fixture, id_of(&born_done)).await;
     assert_eq!(completed_at, Some(updated_at));
+}
+
+#[tokio::test]
+async fn completed_at_follows_status_category_edits() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Shipped").await;
+    let id = id_of(&task).to_owned();
+    async fn edit_category(fixture: &Fixture, category: &str, version: i64) -> (StatusCode, Value) {
+        let uri = format!(
+            "/api/v1/workspaces/{}/projects/{}/statuses/{}",
+            fixture.workspace_id, fixture.project_id, fixture.status_id
+        );
+        let body = json!({"name": "Shipped", "color": "#123456", "category": category,
+                          "position": 0, "expected_version": version});
+        call(fixture, "PATCH", &uri, Some(body)).await
+    }
+
+    let (status, body) = edit_category(&fixture, "completed", 0).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(task_timestamps(&fixture, &id).await.0.is_some());
+
+    // done -> done keeps the time; done -> open clears it
+    let completed_at = task_timestamps(&fixture, &id).await.0;
+    let (status, _) = edit_category(&fixture, "cancelled", 1).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(task_timestamps(&fixture, &id).await.0, completed_at);
+    let (status, _) = edit_category(&fixture, "started", 2).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(task_timestamps(&fixture, &id).await.0, None);
 }
 
 async fn task_timestamps(fixture: &Fixture, task_id: &str) -> (Option<i64>, i64) {

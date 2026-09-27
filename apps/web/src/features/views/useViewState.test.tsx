@@ -90,7 +90,7 @@ test('a stored preference wins and scoped pages send the preset and project with
   expect(localStorage.getItem('orbit:task_layout')).toBe('board')
 })
 
-test('the first visit moves legacy localStorage preferences to the server, then deletes them', async () => {
+test('the first visit moves legacy localStorage preferences to the server, then deletes the workspace ones', async () => {
   localStorage.setItem('orbit:task_preferences:workspace-1', JSON.stringify({
     sort: 'created', statusFilter: 'unstarted:todo', assigneeFilter: null, unassignedFilter: true,
     labelFilter: null, priorityFilter: 'high', searchFilter: 'release',
@@ -113,11 +113,12 @@ test('the first visit moves legacy localStorage preferences to the server, then 
   })
   await waitFor(() => expect(puts(requests)).toHaveLength(1), { timeout: 2000 })
   expect(puts(requests)[0]?.body).toEqual({ state: view.result.current.state })
-  expect(localStorage.getItem('orbit:task_layout')).toBe('timeline')
+  expect(localStorage.getItem('orbit:task_preferences:workspace-1')).not.toBeNull()
 
   finishPut?.()
-  await waitFor(() => expect(localStorage.getItem('orbit:task_layout')).toBeNull())
-  expect(localStorage.getItem('orbit:task_preferences:workspace-1')).toBeNull()
+  await waitFor(() => expect(localStorage.getItem('orbit:task_preferences:workspace-1')).toBeNull())
+  // the layout key is global: other workspaces still migrate it
+  expect(localStorage.getItem('orbit:task_layout')).toBe('timeline')
 })
 
 test('a failed autosave keeps the local state', async () => {

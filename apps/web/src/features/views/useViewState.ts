@@ -67,9 +67,9 @@ function readLegacyState(workspaceId: string): { found: boolean; state: ViewStat
   return { found: true, state: legacyPreferencesToViewState(preferences, layout) }
 }
 
+// the layout key was global, not per workspace: keep it so every workspace can still migrate it
 function removeLegacyState(workspaceId: string) {
   localStorage.removeItem(legacyPreferencesKey(workspaceId))
-  localStorage.removeItem(LEGACY_LAYOUT_KEY)
 }
 
 /**

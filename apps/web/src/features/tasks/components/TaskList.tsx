@@ -100,7 +100,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
 
   const selectedTasks = tasks.filter((t) => selected.includes(t.id))
 
-  if (tasks.length === 0) {
+  // with "Show empty groups" the empty group headers stay, so a task can still be added to a group
+  if (tasks.length === 0 && sections.every((section) => section.group.field === 'none')) {
     return (
       <EmptyState
         icon={SquareCheck}

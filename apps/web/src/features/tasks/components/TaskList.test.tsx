@@ -287,6 +287,16 @@ test('show_empty_groups adds headers for statuses without tasks', () => {
   expect(within(zoneOf(shown, 'Doing')).getByText('0')).toBeTruthy()
 })
 
+test('show_empty_groups keeps the group headers when no task matches', () => {
+  const empty = renderList([], { statuses: [status, doingStatus] })
+  expect(empty.getAllByText('No tasks found')).toHaveLength(1)
+  empty.unmount()
+
+  const shown = renderList([], { statuses: [status, doingStatus], display: { show_empty_groups: true } })
+  expect(shown.queryAllByText('No tasks found')).toHaveLength(0)
+  expect(shown.getAllByRole('button', { name: 'New task in Doing' })).toHaveLength(1)
+})
+
 test('rows render only the properties chosen in the display options', () => {
   const dated = { ...task(1), dueAt: '2026-09-30T09:00:00.000Z' }
   const minimal = renderList([dated], { display: { properties: ['id'] } })

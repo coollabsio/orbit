@@ -34,10 +34,6 @@ const SEGMENT_BUTTON = cn(SEGMENT, 'border-l border-border outline-none transiti
 /** Title of the add controls once the tree is at the cap. */
 const FULL_TITLE = `Filters can have at most ${MAX_FILTER_CONDITIONS} conditions`
 
-function replaceLastChild(filter: FilterGroup, condition: Condition): FilterGroup {
-  return { ...filter, children: [...filter.children.slice(0, -1), condition] }
-}
-
 interface AddFilterPopoverProps {
   filter: FilterGroup
   options: FilterOptions
@@ -52,11 +48,12 @@ interface AddFilterPopoverProps {
 /** Field list → value picker in one popover. A new condition joins the tree once it is complete. */
 function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onOpenChange, instant, trigger }: AddFilterPopoverProps) {
   const [draft, setDraft] = useState<Condition | null>(null)
-  const [added, setAdded] = useState(false)
+  // the tree before the draft joined it; undoing the draft restores it exactly (appendCondition may wrap the root)
+  const [base, setBase] = useState<FilterGroup | null>(null)
   const close = () => {
     onOpenChange(false)
     setDraft(null)
-    setAdded(false)
+    setBase(null)
   }
   const pickField = (field: FilterField) => {
     const operator = FIELD_META[field].defaultOperator
@@ -65,11 +62,11 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
   const change = (next: Condition) => {
     setDraft(next)
     if (isCompleteCondition(next)) {
-      onChange(added ? replaceLastChild(filter, next) : appendCondition(filter, next))
-      setAdded(true)
-    } else if (added) {
-      onChange({ ...filter, children: filter.children.slice(0, -1) })
-      setAdded(false)
+      onChange(appendCondition(base ?? filter, next))
+      setBase(base ?? filter)
+    } else if (base) {
+      onChange(base)
+      setBase(null)
     }
   }
   return (

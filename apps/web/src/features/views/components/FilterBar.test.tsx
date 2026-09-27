@@ -125,3 +125,14 @@ test('an OR root with a single child takes the new condition without another lev
   await userEvent.type(await view.findByRole('textbox', { name: 'Title or description contains' }), 'login{Enter}')
   expect(readFilter(view)).toEqual({ op: 'and', children: [...single.children, { field: 'text', operator: 'contains', value: 'login' }] })
 })
+
+test('unticking a just-added value restores an OR root exactly', async () => {
+  const nested: FilterGroup = { op: 'or', children: [{ field: 'priority', operator: 'is', value: ['high'] }, { field: 'priority', operator: 'is', value: ['urgent'] }] }
+  const view = render(<Harness initial={nested} />)
+  fireEvent.click(view.getByRole('button', { name: 'Filter tasks' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Label' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Bug' }))
+  expect(readFilter(view)).toEqual({ op: 'and', children: [nested, { field: 'label', operator: 'includes_any', value: ['label-bug'] }] })
+  await userEvent.click(await view.findByRole('option', { name: 'Bug' }))
+  expect(readFilter(view)).toEqual(nested)
+})

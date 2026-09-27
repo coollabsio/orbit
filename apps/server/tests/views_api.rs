@@ -1355,6 +1355,18 @@ async fn view_preference_page_keys_are_validated() {
     .await;
     assert_eq!(status, StatusCode::OK, "{encoded}");
     assert_eq!(encoded["page_key"], format!("project:{project_id}"));
+
+    // a well-formed id that is not a project of this workspace gets no row
+    let unknown = format!("project:{}", Id::new_v7());
+    let (status, problem) =
+        preference(&fixture, "PUT", &cookie, &unknown, Some(view_state())).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM view_preferences WHERE page_key = ?")
+        .bind(&unknown)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
 }
 
 #[tokio::test]

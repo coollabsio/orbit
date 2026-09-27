@@ -45,9 +45,12 @@ export function defaultStatusOf(statuses: TaskStatusDef[], projectId: string): T
   return own.find((s) => s.category === 'unstarted') ?? own[0]
 }
 
-/** Same-named statuses of different projects share a key, so cross-project views can merge them. */
+/**
+ * Same-named statuses of different projects share a key, so cross-project views can merge them.
+ * ASCII-only lowercase, like SQLite `lower()` in the server's status filter: "Überprüfung" keeps its "Ü".
+ */
 export function statusKeyOf(status: TaskStatusDef): string {
-  return `${status.category}:${status.name.trim().toLowerCase()}`
+  return `${status.category}:${status.name.trim().replace(/[A-Z]+/g, (letters) => letters.toLowerCase())}`
 }
 
 export const PRIORITY_LABEL: Record<TaskPriority, string> = {
