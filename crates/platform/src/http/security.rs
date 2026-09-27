@@ -212,7 +212,7 @@ pub(crate) fn add_security_headers(
         .map(|hash| format!("script-src 'self' '{hash}'; "))
         .unwrap_or_else(|| "script-src 'self'; ".to_owned());
     let policy = format!(
-        "default-src 'self'; {script_source}style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; {script_source}style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
     headers.insert(
         CONTENT_SECURITY_POLICY,

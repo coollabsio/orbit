@@ -2,7 +2,7 @@ import { NavLink } from 'react-router'
 import { Home2 as Home, Message as MessageSquare, Messages2 as MessagesSquare, DocumentText as FileText, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { mobileDockPaths } from './productNavigation'
+import { docsHidden, mobileDockPaths } from './productNavigation'
 
 const DOCK_LINKS = [
   { to: '/', label: 'Home', icon: Home },
@@ -12,7 +12,7 @@ const DOCK_LINKS = [
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/dm', label: 'DMs', icon: MessagesSquare },
   { to: '/settings', label: 'Settings', icon: Settings },
-]
+].filter((link) => !(docsHidden && link.to === '/docs'))
 
 const itemClass =
   'relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-muted-foreground'

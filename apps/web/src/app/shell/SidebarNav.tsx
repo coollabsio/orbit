@@ -5,14 +5,15 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Separator } from '@/components/ui/separator'
+import { docsHidden } from './productNavigation'
 
 const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
   { to: '/', label: 'Home', icon: Home, enabled: false },
-  { to: '/docs', label: 'Docs', icon: FileText, enabled: false },
+  { to: '/docs', label: 'Docs', icon: FileText, enabled: true },
   { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
-]
+].filter((link) => !(docsHidden && link.to === '/docs'))
 
 function sidebarItemClass(active: boolean, collapsed: boolean) {
   return cn(

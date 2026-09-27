@@ -1,0 +1,274 @@
+{
+  "content": [
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {
+            "bold": true
+          },
+          "text": "Bold ",
+          "type": "text"
+        },
+        {
+          "styles": {
+            "italic": true
+          },
+          "text": "italic ",
+          "type": "text"
+        },
+        {
+          "styles": {
+            "underline": true
+          },
+          "text": "underline ",
+          "type": "text"
+        },
+        {
+          "styles": {
+            "strike": true
+          },
+          "text": "strike ",
+          "type": "text"
+        },
+        {
+          "styles": {
+            "code": true
+          },
+          "text": "code",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": " plain ",
+          "type": "text"
+        },
+        {
+          "styles": {
+            "bold": true,
+            "code": true,
+            "italic": true,
+            "strike": true,
+            "textColor": "red",
+            "underline": true
+          },
+          "text": "all",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {
+            "textColor": "red"
+          },
+          "text": "red text",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": " ",
+          "type": "text"
+        },
+        {
+          "styles": {
+            "backgroundColor": "yellow"
+          },
+          "text": "yellow background",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": " ",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": "default color",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": " ",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": "unknown color",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000002",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "This is an ",
+          "type": "text"
+        },
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "inline link",
+              "type": "text"
+            }
+          ],
+          "href": "https://developers.notion.com/",
+          "type": "link"
+        },
+        {
+          "styles": {},
+          "text": " and a ",
+          "type": "text"
+        },
+        {
+          "content": [
+            {
+              "styles": {
+                "bold": true
+              },
+              "text": "bold ",
+              "type": "text"
+            },
+            {
+              "styles": {},
+              "text": "split link",
+              "type": "text"
+            }
+          ],
+          "href": "https://example.com/a",
+          "type": "link"
+        },
+        {
+          "styles": {},
+          "text": ", an internal ",
+          "type": "text"
+        },
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "mapped link",
+              "type": "text"
+            }
+          ],
+          "href": "/docs/01900000-0000-7000-8000-000000000001",
+          "type": "link"
+        },
+        {
+          "styles": {},
+          "text": ", an ",
+          "type": "text"
+        },
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "unmapped link",
+              "type": "text"
+            }
+          ],
+          "href": "https://www.notion.so/acme/Other-9f9e9d9c111142228333444455556666",
+          "type": "link"
+        },
+        {
+          "styles": {},
+          "text": ", a ",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": "bad link",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": " and ",
+          "type": "text"
+        },
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "mail",
+              "type": "text"
+            }
+          ],
+          "href": "mailto:ada@example.com",
+          "type": "link"
+        },
+        {
+          "styles": {},
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000003",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Energy: ",
+          "type": "text"
+        },
+        {
+          "styles": {
+            "code": true
+          },
+          "text": "E = mc^2",
+          "type": "text"
+        },
+        {
+          "styles": {},
+          "text": " and line\nbreak",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000004",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    }
+  ],
+  "cover": null,
+  "icon": null,
+  "report": {
+    "lossy": {
+      "unsafe_link": 1
+    },
+    "missing_files": 0,
+    "skipped": {},
+    "truncated_blocks": 0,
+    "unresolved_page_links": 1
+  },
+  "title": "Rich text"
+}

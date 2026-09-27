@@ -1,6 +1,5 @@
 import type { AppState } from './types'
 import { roles, users } from '@/mock/seed/users'
-import { docs } from '@/mock/seed/docs'
 import { mailFolders, mailThreads } from '@/mock/seed/mail'
 import { channels, chatCategories, chatMessages, directMessages } from '@/mock/seed/chat'
 import { notifications } from '@/mock/seed/notifications'
@@ -12,7 +11,6 @@ export function seedState(): AppState {
     currentUserId: 'u_shadow',
     users,
     roles,
-    docs,
     mailFolders,
     mailThreads,
     chatCategories,

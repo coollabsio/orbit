@@ -52,6 +52,7 @@ export function memberFromRecord(member: MemberRecord): User {
     title: '',
     roleIds: [],
     version: member.version,
+    suspended: Boolean(member.suspended_at),
   }
 }
 

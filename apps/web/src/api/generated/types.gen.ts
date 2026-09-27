@@ -187,6 +187,54 @@ export type CreateApiTokenBody = {
     service_account?: boolean;
 };
 
+export type CreateNotionImportBody = {
+    /**
+     * A Notion personal access token (recommended) or internal connection token. Validated
+     * with Notion, stored encrypted, and deleted when the import ends.
+     */
+    token: string;
+};
+
+export type CreatePageBody = {
+    icon?: string | null;
+    /**
+     * With a parent the page joins the parent's space; contradicting `teamspace_id` or
+     * `private` values fail validation.
+     */
+    parent_id?: string | null;
+    /**
+     * Index among the new siblings; omitted appends the page last.
+     */
+    position?: number | null;
+    /**
+     * Root pages only: `true` creates the page in the caller's private space.
+     */
+    private?: boolean | null;
+    /**
+     * Root pages only: the target teamspace. Omitted (and not `private`) uses the default
+     * teamspace.
+     */
+    teamspace_id?: string | null;
+    /**
+     * Defaults to an empty title; clients show "Untitled".
+     */
+    title?: string;
+};
+
+export type CreatePageThreadBody = {
+    /**
+     * The first comment: BlockNote blocks of the comment editor (paragraphs with `text`, `link`
+     * and `mention` inline content, mention props `{ userId, name }`).
+     */
+    body: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * The selected text the thread is about (trimmed, at most 1000 characters are kept).
+     */
+    quote?: string;
+};
+
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
     description?: string;
@@ -199,6 +247,14 @@ export type CreateTaskBody = {
     source_url?: string | null;
     status_id: string;
     title: string;
+};
+
+export type CreateTeamspaceBody = {
+    icon?: string | null;
+    /**
+     * 1 to 100 characters after trimming.
+     */
+    name: string;
 };
 
 export type CreateWorkspaceBody = {
@@ -228,6 +284,13 @@ export type DisplayOptions = {
     show_completed: ShowCompleted;
     show_empty_groups: boolean;
     sub_group_by: GroupBy;
+};
+
+export type DuplicatePageBody = {
+    /**
+     * Also copy the page's live sub-pages (the whole subtree, in order). Defaults to `false`.
+     */
+    include_children?: boolean;
 };
 
 export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text';
@@ -365,8 +428,50 @@ export type MemberRecord = {
     email: string;
     id: string;
     role: string;
+    /**
+     * Set while the user's account is suspended (they cannot sign in or be notified).
+     */
+    suspended_at?: string | null;
     user_id: string;
     version: number;
+};
+
+export type MoveFavoriteBody = {
+    /**
+     * Index among the caller's visible favorites; larger values move it last.
+     */
+    position: number;
+};
+
+export type MovePageBody = {
+    expected_version: number;
+    /**
+     * The new parent; `null` moves the page to a space root. The page and its whole subtree
+     * take the parent's space.
+     */
+    parent_id: string | null;
+    /**
+     * Index among the new siblings.
+     */
+    position: number;
+    /**
+     * With `parent_id: null`: `true` moves the page into the caller's private space, `false`
+     * out of it (to the default teamspace unless `teamspace_id` is given).
+     */
+    private?: boolean | null;
+    /**
+     * With `parent_id: null`: the target teamspace. Omitted keeps the page's current space.
+     */
+    teamspace_id?: string | null;
+};
+
+export type MoveTeamspaceBody = {
+    expected_version: number;
+    /**
+     * Index among the workspace's teamspaces; larger values move it last. Index 0 makes it the
+     * default teamspace.
+     */
+    position: number;
 };
 
 /**
@@ -376,19 +481,552 @@ export type NewTaskRelationType = 'blocks' | 'blocked_by' | 'related';
 
 export type NotificationRecord = {
     actor_user_id: string;
+    /**
+     * The task comment of a `comment_mentioned` notification.
+     */
     comment_id?: string | null;
     created_at: string;
     id: string;
+    /**
+     * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or
+     * `page_mentioned` (an @mention in a page body).
+     */
     kind: string;
+    /**
+     * The block with the mention of a `page_mentioned` notification (a deep link anchor).
+     */
+    page_block_id?: string | null;
+    page_comment_id?: string | null;
+    /**
+     * Page, thread and comment of a `page_comment_mentioned` notification; the page of a
+     * `page_mentioned` one.
+     */
+    page_id?: string | null;
+    page_thread_id?: string | null;
     read_at?: string | null;
     recipient_user_id: string;
-    task_id: string;
+    /**
+     * Set for task notifications.
+     */
+    task_id?: string | null;
     workspace_id: string;
+};
+
+/**
+ * A Notion import. Never contains the token.
+ */
+export type NotionImport = {
+    created_at: string;
+    destination: null | NotionImportDestination;
+    /**
+     * Why the import failed or expired.
+     */
+    error: string | null;
+    id: string;
+    /**
+     * The Notion workspace name (connection tokens) or the token owner's name (personal
+     * access tokens).
+     */
+    notion_workspace_name: string | null;
+    progress: NotionImportProgress;
+    report: null | NotionImportReport;
+    /**
+     * The imported top-level pages that still exist, in order (for "Open imported pages").
+     */
+    root_page_ids: Array<string>;
+    status: NotionImportStatus;
+    tree: null | NotionImportTree;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * Where the import puts its root pages.
+ */
+export type NotionImportDestination = {
+    /**
+     * The page the imported root pages go under, if any.
+     */
+    parent_page_id: string | null;
+    private: boolean;
+    /**
+     * `null` for the importer's private space.
+     */
+    teamspace_id: string | null;
+};
+
+/**
+ * Where the imported top-level pages go. With `parent_page_id` they become its sub-pages
+ * (and join its space); otherwise they go to the root of `teamspace_id`, of the caller's
+ * private space (`private: true`), or of the default teamspace.
+ */
+export type NotionImportDestinationBody = {
+    parent_page_id?: string | null;
+    private?: boolean | null;
+    teamspace_id?: string | null;
+};
+
+/**
+ * A page the import could not create or fill.
+ */
+export type NotionImportFailure = {
+    error: string;
+    notion_id: string;
+    title: string;
+};
+
+export type NotionImportList = {
+    items: Array<NotionImport>;
+};
+
+/**
+ * One node of the scan tree.
+ */
+export type NotionImportNode = {
+    child_count: number;
+    /**
+     * Emoji icon, when the Notion icon is an emoji.
+     */
+    icon: string | null;
+    kind: NotionImportNodeKind;
+    /**
+     * Dashed lowercase Notion id; use it in `selection.notion_ids`.
+     */
+    notion_id: string;
+    /**
+     * The parent node's `notion_id`; `null` for a root (top-level, or its parent is not
+     * visible to the token).
+     */
+    parent_id: string | null;
+    title: string;
+};
+
+/**
+ * A Notion page or database in the scan tree.
+ */
+export type NotionImportNodeKind = 'page' | 'database';
+
+export type NotionImportProgress = {
+    done: number;
+    failed: number;
+    /**
+     * Pages to import (pages, databases and database rows).
+     */
+    total: number;
+};
+
+/**
+ * What the conversion could not carry over, summed over all imported pages.
+ */
+export type NotionImportReport = {
+    /**
+     * The first 200 failed pages.
+     */
+    failures: Array<NotionImportFailure>;
+    /**
+     * Files downloaded and attached to the new pages.
+     */
+    files_imported: number;
+    /**
+     * Blocks converted with information loss, by kind.
+     */
+    lossy: {
+        [key: string]: number;
+    };
+    /**
+     * Notion-hosted files that could not be downloaded.
+     */
+    missing_files: number;
+    /**
+     * Selected pages this member imported before (the import creates new copies).
+     */
+    previously_imported: number;
+    /**
+     * Blocks dropped, by Notion type.
+     */
+    skipped: {
+        [key: string]: number;
+    };
+    /**
+     * Top-level blocks cut from pages larger than the page size limit.
+     */
+    truncated_blocks: number;
+    /**
+     * Pages the import created but never filled because it failed or was cancelled; they
+     * were moved to the trash (a restored page no longer counts).
+     */
+    unfilled_pages_trashed: number;
+    /**
+     * Links to Notion pages that were not part of the import (they still point to Notion).
+     */
+    unresolved_page_links: number;
+};
+
+/**
+ * `{ "all": true }` for everything the token can see, or `{ "notion_ids": [...] }` for these
+ * pages and all their sub-pages.
+ */
+export type NotionImportSelectionBody = {
+    all?: boolean | null;
+    notion_ids?: Array<string> | null;
+};
+
+/**
+ * `notion_imports.status`.
+ */
+export type NotionImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * What the token can see. `nodes` are in tree order: every parent before its children,
+ * siblings in Notion creation order.
+ */
+export type NotionImportTree = {
+    /**
+     * Notion returned an incomplete search result; some pages may be missing.
+     */
+    incomplete: boolean;
+    nodes: Array<NotionImportNode>;
+    /**
+     * The token sees more than 5,000 pages; only the first 5,000 are listed.
+     */
+    truncated: boolean;
 };
 
 export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date';
 
 export type OrderDirection = 'asc' | 'desc';
+
+/**
+ * A page with its content.
+ */
+export type Page = {
+    /**
+     * Identifies the page's collaborative document. Pass it as the `epoch` query parameter of
+     * the co-editing socket (`GET /api/v1/workspaces/{workspace_id}/pages/{page_id}/collab`); it
+     * changes when the stored document is reset (backup restore, converter change), and a
+     * socket opened with an older value is closed with 4409.
+     */
+    collab_epoch: string;
+    /**
+     * BlockNote blocks; opaque to the server.
+     */
+    content: Array<unknown>;
+    /**
+     * Cover focal point as `"x,y"` percentages.
+     */
+    cover_position: string | null;
+    cover_url: string | null;
+    created_at: string;
+    creator_id: string;
+    deleted_at: string | null;
+    /**
+     * The editor column uses the whole pane width.
+     */
+    full_width: boolean;
+    icon: string | null;
+    id: string;
+    /**
+     * Set while the page is locked: title, icon, cover and content writes answer 423
+     * `page_locked` (REST, version restore, imports) and the co-editing socket ignores content
+     * updates. Moving, trashing, duplicating and `full_width` stay allowed.
+     */
+    locked_at: string | null;
+    locked_by: null | PageUser;
+    parent_id: string | null;
+    position: number;
+    /**
+     * True when the page is in the caller's private space (`teamspace_id` is `null`).
+     */
+    private: boolean;
+    /**
+     * The page's teamspace; `null` for a page in the caller's private space.
+     */
+    teamspace_id: string | null;
+    title: string;
+    updated_at: string;
+    updated_by: string;
+    /**
+     * The last editor (`updated_by`) with their display name.
+     */
+    updated_by_user: PageUser;
+    version: number;
+    workspace_id: string;
+};
+
+/**
+ * One comment of a thread. A deleted comment keeps its place with an empty body.
+ */
+export type PageComment = {
+    author_id: string;
+    /**
+     * BlockNote blocks (paragraphs; inline `text`, `link` and `mention {userId, name}`); `[]`
+     * once deleted.
+     */
+    body: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * Plain text of the body (mentions as `@name`).
+     */
+    body_text: string;
+    created_at: string;
+    deleted_at?: string | null;
+    edited_at?: string | null;
+    id: string;
+    /**
+     * Members this comment mentions who can see the page.
+     */
+    mentioned_user_ids: Array<string>;
+    thread_id: string;
+    updated_at: string;
+};
+
+export type PageCommentBody = {
+    /**
+     * BlockNote blocks of the comment editor (see `CreatePageThreadBody.body`).
+     */
+    body: Array<{
+        [key: string]: unknown;
+    }>;
+};
+
+export type PageExportArchive = Blob | File;
+
+/**
+ * One of the caller's favorite pages. `position` is the index among the caller's visible
+ * favorites.
+ */
+export type PageFavorite = {
+    page_id: string;
+    position: number;
+};
+
+/**
+ * The caller's favorites in this workspace, ordered by position.
+ */
+export type PageFavoriteList = {
+    items: Array<PageFavorite>;
+};
+
+/**
+ * A file attached to a page.
+ */
+export type PageFile = {
+    created_at: string;
+    file_name: string;
+    id: string;
+    /**
+     * Detected from the file's bytes, not taken from the client.
+     */
+    mime_type: string;
+    page_id: string;
+    size_bytes: number;
+    /**
+     * Same-origin download path (`/api/v1/workspaces/{workspace_id}/pages/{page_id}/files/{id}`);
+     * usable as an image `src`, a file link, or the page's `cover_url`.
+     */
+    url: string;
+};
+
+export type PageFileDownload = Blob | File;
+
+export type PageFileUploadBody = {
+    file: Blob | File;
+};
+
+export type PageList = {
+    items: Array<PageSummary>;
+};
+
+export type PageLockBody = {
+    /**
+     * `true` locks the page, `false` unlocks it.
+     */
+    locked: boolean;
+};
+
+export type PageSearch = {
+    items: Array<PageSearchResult>;
+};
+
+export type PageSearchResult = {
+    icon: string | null;
+    id: string;
+    parent_id: string | null;
+    /**
+     * True when the page is in the caller's private space.
+     */
+    private: boolean;
+    /**
+     * Plain body text around the best match (about 24 words, `…` where text was cut), or the
+     * start of the body when only the title matched.
+     */
+    snippet: string;
+    /**
+     * Matched words in `snippet`.
+     */
+    snippet_highlights: Array<TextRange>;
+    /**
+     * `null` for a page in the caller's private space.
+     */
+    teamspace_id: string | null;
+    title: string;
+    /**
+     * Matched words in `title`.
+     */
+    title_highlights: Array<TextRange>;
+};
+
+/**
+ * Page metadata for the tree, without content.
+ */
+export type PageSummary = {
+    icon: string | null;
+    id: string;
+    parent_id: string | null;
+    position: number;
+    /**
+     * True when the page is in the caller's private space.
+     */
+    private: boolean;
+    /**
+     * `null` for a page in the caller's private space.
+     */
+    teamspace_id: string | null;
+    title: string;
+    updated_at: string;
+    version: number;
+};
+
+/**
+ * A comment thread on a page, with its comments oldest first.
+ */
+export type PageThread = {
+    comments: Array<PageComment>;
+    created_at: string;
+    created_by: string;
+    id: string;
+    page_id: string;
+    /**
+     * The text selected when the thread was started.
+     */
+    quote: string;
+    resolved: boolean;
+    resolved_at?: string | null;
+    resolved_by?: string | null;
+    updated_at: string;
+    version: number;
+};
+
+export type PageThreadList = {
+    /**
+     * Open and resolved threads, oldest first.
+     */
+    items: Array<PageThread>;
+};
+
+export type PageTrash = {
+    items: Array<TrashedPage>;
+};
+
+/**
+ * Result of emptying the trash.
+ */
+export type PageTrashEmptied = {
+    /**
+     * Trash entries (pages trashed directly) deleted forever, sub-pages not counted.
+     */
+    purged: number;
+};
+
+export type PageUpdateBody = {
+    /**
+     * The whole BlockNote block array.
+     */
+    content?: Array<unknown> | null;
+    /**
+     * Absent: unchanged. `null`: cleared. Otherwise `"x,y"` percentages from 0 to 100.
+     */
+    cover_position?: string | null;
+    /**
+     * Absent: unchanged. `null`: cleared. Otherwise an http(s) URL, or the `url` of a file
+     * uploaded to this same page (`/api/v1/workspaces/{workspace_id}/pages/{page_id}/files/{file_id}`).
+     */
+    cover_url?: string | null;
+    expected_version: number;
+    /**
+     * Absent: unchanged. The editor column uses the whole pane width. Allowed on locked pages;
+     * not an edit (`updated_by` / `updated_at` stay).
+     */
+    full_width?: boolean | null;
+    /**
+     * Absent: unchanged. `null`: cleared.
+     */
+    icon?: string | null;
+    title?: string | null;
+};
+
+/**
+ * A user named on a page (last editor, locker).
+ */
+export type PageUser = {
+    display_name: string;
+    id: string;
+};
+
+/**
+ * A stored version with its content.
+ */
+export type PageVersion = {
+    /**
+     * BlockNote blocks as they were; opaque to the server.
+     */
+    content: Array<unknown>;
+    created_at: string;
+    created_by: null | PageVersionAuthor;
+    icon: string | null;
+    id: string;
+    kind: PageVersionKind;
+    page_id: string;
+    title: string;
+};
+
+export type PageVersionAuthor = {
+    display_name: string;
+    id: string;
+};
+
+/**
+ * Why a version was stored.
+ */
+export type PageVersionKind = 'auto' | 'restore' | 'import';
+
+/**
+ * A page's versions, newest first.
+ */
+export type PageVersionList = {
+    items: Array<PageVersionSummary>;
+    /**
+     * Pass as `cursor` for the next (older) versions; `null` on the last page.
+     */
+    next_cursor: string | null;
+};
+
+/**
+ * A stored version without its content.
+ */
+export type PageVersionSummary = {
+    /**
+     * When the version was stored; the page looked like this at that moment.
+     */
+    created_at: string;
+    created_by: null | PageVersionAuthor;
+    icon: string | null;
+    id: string;
+    kind: PageVersionKind;
+    page_id: string;
+    title: string;
+};
 
 export type PageAuditEvent = {
     items: Array<{
@@ -453,6 +1091,10 @@ export type PageMemberRecord = {
         email: string;
         id: string;
         role: string;
+        /**
+         * Set while the user's account is suspended (they cannot sign in or be notified).
+         */
+        suspended_at?: string | null;
         user_id: string;
         version: number;
     }>;
@@ -462,13 +1104,34 @@ export type PageMemberRecord = {
 export type PageNotificationRecord = {
     items: Array<{
         actor_user_id: string;
+        /**
+         * The task comment of a `comment_mentioned` notification.
+         */
         comment_id?: string | null;
         created_at: string;
         id: string;
+        /**
+         * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or
+         * `page_mentioned` (an @mention in a page body).
+         */
         kind: string;
+        /**
+         * The block with the mention of a `page_mentioned` notification (a deep link anchor).
+         */
+        page_block_id?: string | null;
+        page_comment_id?: string | null;
+        /**
+         * Page, thread and comment of a `page_comment_mentioned` notification; the page of a
+         * `page_mentioned` one.
+         */
+        page_id?: string | null;
+        page_thread_id?: string | null;
         read_at?: string | null;
         recipient_user_id: string;
-        task_id: string;
+        /**
+         * Set for task notifications.
+         */
+        task_id?: string | null;
         workspace_id: string;
     }>;
     next_cursor?: string | null;
@@ -583,6 +1246,35 @@ export type ProjectUpdateBody = {
 
 export type ReadAllResponse = {
     updated: number;
+};
+
+/**
+ * A page the caller opened recently.
+ */
+export type RecentPage = {
+    icon: string | null;
+    id: string;
+    parent_id: string | null;
+    /**
+     * True when the page is in the caller's private space.
+     */
+    private: boolean;
+    /**
+     * `null` for a page in the caller's private space.
+     */
+    teamspace_id: string | null;
+    title: string;
+    /**
+     * When the caller last opened the page.
+     */
+    visited_at: string;
+};
+
+/**
+ * The caller's recently opened pages in this workspace, most recent first.
+ */
+export type RecentPageList = {
+    items: Array<RecentPage>;
 };
 
 export type RecoveryCompleteBody = {
@@ -702,6 +1394,11 @@ export type SetupStatus = {
  * Which tasks in a done category (completed, cancelled, duplicate) stay visible.
  */
 export type ShowCompleted = 'all' | 'past_week' | 'past_month' | 'none';
+
+export type StartNotionImportBody = {
+    destination?: NotionImportDestinationBody;
+    selection: NotionImportSelectionBody;
+};
 
 export type StatusBody = {
     category: string;
@@ -855,10 +1552,72 @@ export type TaskUpdateBody = {
     title?: string | null;
 };
 
+export type Teamspace = {
+    created_at: string;
+    icon: string | null;
+    id: string;
+    /**
+     * True for the workspace's first teamspace by position; new root pages go there by default.
+     */
+    is_default: boolean;
+    name: string;
+    position: number;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
+export type TeamspaceList = {
+    items: Array<Teamspace>;
+};
+
+export type TeamspaceUpdateBody = {
+    expected_version: number;
+    /**
+     * Absent: unchanged. `null`: cleared.
+     */
+    icon?: string | null;
+    /**
+     * 1 to 100 characters after trimming.
+     */
+    name?: string | null;
+};
+
+/**
+ * A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`
+ * exclusive.
+ */
+export type TextRange = {
+    end: number;
+    start: number;
+};
+
 export type TransferBody = {
     expected_version: number;
     membership_id: string;
     membership_version: number;
+};
+
+/**
+ * A page trashed directly; its descendants trashed with it are restored together.
+ */
+export type TrashedPage = {
+    deleted_at: string;
+    icon: string | null;
+    id: string;
+    parent_id: string | null;
+    position: number;
+    /**
+     * True when the page is in the caller's private space.
+     */
+    private: boolean;
+    /**
+     * `null` for a page in the caller's private space.
+     */
+    teamspace_id: string | null;
+    title: string;
+    updated_at: string;
+    version: number;
 };
 
 export type UpdateMeBody = {
@@ -2755,6 +3514,308 @@ export type StartGithubManifestResponses = {
 
 export type StartGithubManifestResponse = StartGithubManifestResponses[keyof StartGithubManifestResponses];
 
+export type ListNotionImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/notion';
+};
+
+export type ListNotionImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * notion_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListNotionImportsError = ListNotionImportsErrors[keyof ListNotionImportsErrors];
+
+export type ListNotionImportsResponses = {
+    200: NotionImportList;
+};
+
+export type ListNotionImportsResponse = ListNotionImportsResponses[keyof ListNotionImportsResponses];
+
+export type CreateNotionImportData = {
+    body: CreateNotionImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/notion';
+};
+
+export type CreateNotionImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * notion_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, app_key_missing, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * notion_token_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * notion_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateNotionImportError = CreateNotionImportErrors[keyof CreateNotionImportErrors];
+
+export type CreateNotionImportResponses = {
+    201: NotionImport;
+};
+
+export type CreateNotionImportResponse = CreateNotionImportResponses[keyof CreateNotionImportResponses];
+
+export type GetNotionImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}';
+};
+
+export type GetNotionImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * notion_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetNotionImportError = GetNotionImportErrors[keyof GetNotionImportErrors];
+
+export type GetNotionImportResponses = {
+    200: NotionImport;
+};
+
+export type GetNotionImportResponse = GetNotionImportResponses[keyof GetNotionImportResponses];
+
+export type CancelNotionImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}/cancel';
+};
+
+export type CancelNotionImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * notion_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, notion_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelNotionImportError = CancelNotionImportErrors[keyof CancelNotionImportErrors];
+
+export type CancelNotionImportResponses = {
+    200: NotionImport;
+};
+
+export type CancelNotionImportResponse = CancelNotionImportResponses[keyof CancelNotionImportResponses];
+
+export type StartNotionImportData = {
+    body: StartNotionImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}/start';
+};
+
+export type StartNotionImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * notion_import_not_found, page_not_found, teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, notion_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, notion_import_too_large
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartNotionImportError = StartNotionImportErrors[keyof StartNotionImportErrors];
+
+export type StartNotionImportResponses = {
+    200: NotionImport;
+};
+
+export type StartNotionImportResponse = StartNotionImportResponses[keyof StartNotionImportResponses];
+
 export type ListInvitationsData = {
     body?: never;
     headers?: {
@@ -3519,6 +4580,2004 @@ export type ReadNotificationResponses = {
 };
 
 export type ReadNotificationResponse = ReadNotificationResponses[keyof ReadNotificationResponses];
+
+export type ListPagesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages';
+};
+
+export type ListPagesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListPagesError = ListPagesErrors[keyof ListPagesErrors];
+
+export type ListPagesResponses = {
+    200: PageList;
+};
+
+export type ListPagesResponse = ListPagesResponses[keyof ListPagesResponses];
+
+export type CreatePageData = {
+    body: CreatePageBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages';
+};
+
+export type CreatePageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreatePageError = CreatePageErrors[keyof CreatePageErrors];
+
+export type CreatePageResponses = {
+    201: Page;
+};
+
+export type CreatePageResponse = CreatePageResponses[keyof CreatePageResponses];
+
+export type ListPageFavoritesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/favorites';
+};
+
+export type ListPageFavoritesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListPageFavoritesError = ListPageFavoritesErrors[keyof ListPageFavoritesErrors];
+
+export type ListPageFavoritesResponses = {
+    200: PageFavoriteList;
+};
+
+export type ListPageFavoritesResponse = ListPageFavoritesResponses[keyof ListPageFavoritesResponses];
+
+export type MovePageFavoriteData = {
+    body: MoveFavoriteBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/favorites/{page_id}/move';
+};
+
+export type MovePageFavoriteErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MovePageFavoriteError = MovePageFavoriteErrors[keyof MovePageFavoriteErrors];
+
+export type MovePageFavoriteResponses = {
+    200: PageFavoriteList;
+};
+
+export type MovePageFavoriteResponse = MovePageFavoriteResponses[keyof MovePageFavoriteResponses];
+
+export type ListRecentPagesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: {
+        /**
+         * Pages to return, 1 to 50 (default 10).
+         */
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/pages/recent';
+};
+
+export type ListRecentPagesErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListRecentPagesError = ListRecentPagesErrors[keyof ListRecentPagesErrors];
+
+export type ListRecentPagesResponses = {
+    200: RecentPageList;
+};
+
+export type ListRecentPagesResponse = ListRecentPagesResponses[keyof ListRecentPagesResponses];
+
+export type SearchPagesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query: {
+        /**
+         * Words matched against titles and body text, ignoring case and diacritics; every word must
+         * match, the last one as a prefix. Search syntax (quotes, `*`, `:`, `-`, `NEAR`, parentheses)
+         * is treated as plain text. At most 200 characters.
+         */
+        q: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/pages/search';
+};
+
+export type SearchPagesErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SearchPagesError = SearchPagesErrors[keyof SearchPagesErrors];
+
+export type SearchPagesResponses = {
+    200: PageSearch;
+};
+
+export type SearchPagesResponse = SearchPagesResponses[keyof SearchPagesResponses];
+
+export type ListPageTrashData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/trash';
+};
+
+export type ListPageTrashErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListPageTrashError = ListPageTrashErrors[keyof ListPageTrashErrors];
+
+export type ListPageTrashResponses = {
+    200: PageTrash;
+};
+
+export type ListPageTrashResponse = ListPageTrashResponses[keyof ListPageTrashResponses];
+
+export type EmptyPageTrashData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/trash/empty';
+};
+
+export type EmptyPageTrashErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type EmptyPageTrashError = EmptyPageTrashErrors[keyof EmptyPageTrashErrors];
+
+export type EmptyPageTrashResponses = {
+    200: PageTrashEmptied;
+};
+
+export type EmptyPageTrashResponse = EmptyPageTrashResponses[keyof EmptyPageTrashResponses];
+
+export type DeletePageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}';
+};
+
+export type DeletePageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeletePageError = DeletePageErrors[keyof DeletePageErrors];
+
+export type DeletePageResponses = {
+    204: void;
+};
+
+export type DeletePageResponse = DeletePageResponses[keyof DeletePageResponses];
+
+export type GetPageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}';
+};
+
+export type GetPageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetPageError = GetPageErrors[keyof GetPageErrors];
+
+export type GetPageResponses = {
+    200: Page;
+};
+
+export type GetPageResponse = GetPageResponses[keyof GetPageResponses];
+
+export type UpdatePageData = {
+    body: PageUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}';
+};
+
+export type UpdatePageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * page_locked
+     */
+    423: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdatePageError = UpdatePageErrors[keyof UpdatePageErrors];
+
+export type UpdatePageResponses = {
+    200: Page;
+};
+
+export type UpdatePageResponse = UpdatePageResponses[keyof UpdatePageResponses];
+
+export type DuplicatePageData = {
+    body: DuplicatePageBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/duplicate';
+};
+
+export type DuplicatePageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DuplicatePageError = DuplicatePageErrors[keyof DuplicatePageErrors];
+
+export type DuplicatePageResponses = {
+    201: Page;
+};
+
+export type DuplicatePageResponse = DuplicatePageResponses[keyof DuplicatePageResponses];
+
+export type ExportPageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query: {
+        /**
+         * Only `markdown`: one `.md` file per page with its files under `assets/`.
+         */
+        format: 'markdown';
+        /**
+         * Also export the page's live sub-pages (in folders named after their parent). Defaults
+         * to `false`.
+         */
+        children?: boolean;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/export';
+};
+
+export type ExportPageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, export_too_many_pages, export_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ExportPageError = ExportPageErrors[keyof ExportPageErrors];
+
+export type ExportPageResponses = {
+    200: PageExportArchive;
+};
+
+export type ExportPageResponse = ExportPageResponses[keyof ExportPageResponses];
+
+export type RemovePageFavoriteData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/favorite';
+};
+
+export type RemovePageFavoriteErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RemovePageFavoriteError = RemovePageFavoriteErrors[keyof RemovePageFavoriteErrors];
+
+export type RemovePageFavoriteResponses = {
+    204: void;
+};
+
+export type RemovePageFavoriteResponse = RemovePageFavoriteResponses[keyof RemovePageFavoriteResponses];
+
+export type AddPageFavoriteData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/favorite';
+};
+
+export type AddPageFavoriteErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type AddPageFavoriteError = AddPageFavoriteErrors[keyof AddPageFavoriteErrors];
+
+export type AddPageFavoriteResponses = {
+    200: PageFavorite;
+};
+
+export type AddPageFavoriteResponse = AddPageFavoriteResponses[keyof AddPageFavoriteResponses];
+
+export type UploadPageFileData = {
+    body: PageFileUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/files';
+};
+
+export type UploadPageFileErrors = {
+    /**
+     * invalid_proxy_headers, invalid_multipart
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_file_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, upload_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UploadPageFileError = UploadPageFileErrors[keyof UploadPageFileErrors];
+
+export type UploadPageFileResponses = {
+    201: PageFile;
+};
+
+export type UploadPageFileResponse = UploadPageFileResponses[keyof UploadPageFileResponses];
+
+export type DownloadPageFileData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        file_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/files/{file_id}';
+};
+
+export type DownloadPageFileErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_file_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DownloadPageFileError = DownloadPageFileErrors[keyof DownloadPageFileErrors];
+
+export type DownloadPageFileResponses = {
+    200: PageFileDownload;
+};
+
+export type DownloadPageFileResponse = DownloadPageFileResponses[keyof DownloadPageFileResponses];
+
+export type SetPageLockData = {
+    body: PageLockBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/lock';
+};
+
+export type SetPageLockErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SetPageLockError = SetPageLockErrors[keyof SetPageLockErrors];
+
+export type SetPageLockResponses = {
+    200: Page;
+};
+
+export type SetPageLockResponse = SetPageLockResponses[keyof SetPageLockResponses];
+
+export type MovePageData = {
+    body: MovePageBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/move';
+};
+
+export type MovePageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MovePageError = MovePageErrors[keyof MovePageErrors];
+
+export type MovePageResponses = {
+    200: Page;
+};
+
+export type MovePageResponse = MovePageResponses[keyof MovePageResponses];
+
+export type PurgePageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/permanent';
+};
+
+export type PurgePageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict, page_not_trashed
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PurgePageError = PurgePageErrors[keyof PurgePageErrors];
+
+export type PurgePageResponses = {
+    204: void;
+};
+
+export type PurgePageResponse = PurgePageResponses[keyof PurgePageResponses];
+
+export type RestorePageData = {
+    body: RestoreBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/restore';
+};
+
+export type RestorePageErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RestorePageError = RestorePageErrors[keyof RestorePageErrors];
+
+export type RestorePageResponses = {
+    200: Page;
+};
+
+export type RestorePageResponse = RestorePageResponses[keyof RestorePageResponses];
+
+export type ListPageThreadsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads';
+};
+
+export type ListPageThreadsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListPageThreadsError = ListPageThreadsErrors[keyof ListPageThreadsErrors];
+
+export type ListPageThreadsResponses = {
+    200: PageThreadList;
+};
+
+export type ListPageThreadsResponse = ListPageThreadsResponses[keyof ListPageThreadsResponses];
+
+export type CreatePageThreadData = {
+    body: CreatePageThreadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads';
+};
+
+export type CreatePageThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreatePageThreadError = CreatePageThreadErrors[keyof CreatePageThreadErrors];
+
+export type CreatePageThreadResponses = {
+    201: PageThread;
+};
+
+export type CreatePageThreadResponse = CreatePageThreadResponses[keyof CreatePageThreadResponses];
+
+export type DeletePageThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads/{thread_id}';
+};
+
+export type DeletePageThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, page_comment_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, page_comment_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeletePageThreadError = DeletePageThreadErrors[keyof DeletePageThreadErrors];
+
+export type DeletePageThreadResponses = {
+    204: void;
+};
+
+export type DeletePageThreadResponse = DeletePageThreadResponses[keyof DeletePageThreadResponses];
+
+export type CreatePageCommentData = {
+    body: PageCommentBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads/{thread_id}/comments';
+};
+
+export type CreatePageCommentErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, page_comment_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreatePageCommentError = CreatePageCommentErrors[keyof CreatePageCommentErrors];
+
+export type CreatePageCommentResponses = {
+    201: PageComment;
+};
+
+export type CreatePageCommentResponse = CreatePageCommentResponses[keyof CreatePageCommentResponses];
+
+export type DeletePageCommentData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        thread_id: string;
+        comment_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads/{thread_id}/comments/{comment_id}';
+};
+
+export type DeletePageCommentErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, page_comment_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, page_comment_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeletePageCommentError = DeletePageCommentErrors[keyof DeletePageCommentErrors];
+
+export type DeletePageCommentResponses = {
+    204: void;
+};
+
+export type DeletePageCommentResponse = DeletePageCommentResponses[keyof DeletePageCommentResponses];
+
+export type UpdatePageCommentData = {
+    body: PageCommentBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        thread_id: string;
+        comment_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads/{thread_id}/comments/{comment_id}';
+};
+
+export type UpdatePageCommentErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, page_comment_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, page_comment_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdatePageCommentError = UpdatePageCommentErrors[keyof UpdatePageCommentErrors];
+
+export type UpdatePageCommentResponses = {
+    200: PageComment;
+};
+
+export type UpdatePageCommentResponse = UpdatePageCommentResponses[keyof UpdatePageCommentResponses];
+
+export type ReopenPageThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads/{thread_id}/reopen';
+};
+
+export type ReopenPageThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, page_comment_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReopenPageThreadError = ReopenPageThreadErrors[keyof ReopenPageThreadErrors];
+
+export type ReopenPageThreadResponses = {
+    200: PageThread;
+};
+
+export type ReopenPageThreadResponse = ReopenPageThreadResponses[keyof ReopenPageThreadResponses];
+
+export type ResolvePageThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/threads/{thread_id}/resolve';
+};
+
+export type ResolvePageThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, page_comment_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ResolvePageThreadError = ResolvePageThreadErrors[keyof ResolvePageThreadErrors];
+
+export type ResolvePageThreadResponses = {
+    200: PageThread;
+};
+
+export type ResolvePageThreadResponse = ResolvePageThreadResponses[keyof ResolvePageThreadResponses];
+
+export type ListPageVersionsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: {
+        /**
+         * `next_cursor` from the previous response, for older versions.
+         */
+        cursor?: string;
+        /**
+         * Versions per response, 1 to 100 (default 50).
+         */
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions';
+};
+
+export type ListPageVersionsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request, invalid_cursor
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListPageVersionsError = ListPageVersionsErrors[keyof ListPageVersionsErrors];
+
+export type ListPageVersionsResponses = {
+    200: PageVersionList;
+};
+
+export type ListPageVersionsResponse = ListPageVersionsResponses[keyof ListPageVersionsResponses];
+
+export type GetPageVersionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        version_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}';
+};
+
+export type GetPageVersionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found, page_version_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetPageVersionError = GetPageVersionErrors[keyof GetPageVersionErrors];
+
+export type GetPageVersionResponses = {
+    200: PageVersion;
+};
+
+export type GetPageVersionResponse = GetPageVersionResponses[keyof GetPageVersionResponses];
+
+export type RestorePageVersionData = {
+    body: RestoreBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+        version_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/versions/{version_id}/restore';
+};
+
+export type RestorePageVersionErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, page_version_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * page_locked
+     */
+    423: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RestorePageVersionError = RestorePageVersionErrors[keyof RestorePageVersionErrors];
+
+export type RestorePageVersionResponses = {
+    200: Page;
+};
+
+export type RestorePageVersionResponse = RestorePageVersionResponses[keyof RestorePageVersionResponses];
+
+export type RecordPageVisitData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/visit';
+};
+
+export type RecordPageVisitErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RecordPageVisitError = RecordPageVisitErrors[keyof RecordPageVisitErrors];
+
+export type RecordPageVisitResponses = {
+    204: void;
+};
+
+export type RecordPageVisitResponse = RecordPageVisitResponses[keyof RecordPageVisitResponses];
 
 export type ListProjectsData = {
     body?: never;
@@ -6124,6 +9183,313 @@ export type RestoreTaskResponses = {
 };
 
 export type RestoreTaskResponse = RestoreTaskResponses[keyof RestoreTaskResponses];
+
+export type ListTeamspacesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/teamspaces';
+};
+
+export type ListTeamspacesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTeamspacesError = ListTeamspacesErrors[keyof ListTeamspacesErrors];
+
+export type ListTeamspacesResponses = {
+    200: TeamspaceList;
+};
+
+export type ListTeamspacesResponse = ListTeamspacesResponses[keyof ListTeamspacesResponses];
+
+export type CreateTeamspaceData = {
+    body: CreateTeamspaceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/teamspaces';
+};
+
+export type CreateTeamspaceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateTeamspaceError = CreateTeamspaceErrors[keyof CreateTeamspaceErrors];
+
+export type CreateTeamspaceResponses = {
+    201: Teamspace;
+};
+
+export type CreateTeamspaceResponse = CreateTeamspaceResponses[keyof CreateTeamspaceResponses];
+
+export type DeleteTeamspaceData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        teamspace_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}';
+};
+
+export type DeleteTeamspaceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict, teamspace_not_empty
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * last_teamspace
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteTeamspaceError = DeleteTeamspaceErrors[keyof DeleteTeamspaceErrors];
+
+export type DeleteTeamspaceResponses = {
+    204: void;
+};
+
+export type DeleteTeamspaceResponse = DeleteTeamspaceResponses[keyof DeleteTeamspaceResponses];
+
+export type UpdateTeamspaceData = {
+    body: TeamspaceUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        teamspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}';
+};
+
+export type UpdateTeamspaceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateTeamspaceError = UpdateTeamspaceErrors[keyof UpdateTeamspaceErrors];
+
+export type UpdateTeamspaceResponses = {
+    200: Teamspace;
+};
+
+export type UpdateTeamspaceResponse = UpdateTeamspaceResponses[keyof UpdateTeamspaceResponses];
+
+export type MoveTeamspaceData = {
+    body: MoveTeamspaceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        teamspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/teamspaces/{teamspace_id}/move';
+};
+
+export type MoveTeamspaceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MoveTeamspaceError = MoveTeamspaceErrors[keyof MoveTeamspaceErrors];
+
+export type MoveTeamspaceResponses = {
+    200: TeamspaceList;
+};
+
+export type MoveTeamspaceResponse = MoveTeamspaceResponses[keyof MoveTeamspaceResponses];
 
 export type TransferOwnershipData = {
     body: TransferBody;

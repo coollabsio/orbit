@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
+use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditOutcome};
 
 #[derive(Clone)]
@@ -415,6 +416,9 @@ impl IdentityRepository {
             .await
             .map_err(SetupError::Unavailable)?;
         }
+        insert_default_teamspace(&mut transaction, defaults.workspace.id, user_id, now)
+            .await
+            .map_err(SetupError::Unavailable)?;
         let session = insert_session(&mut transaction, session_id, &session_token, user_id, now)
             .await
             .map_err(SetupError::Unavailable)?;
@@ -482,6 +486,23 @@ impl IdentityRepository {
     }
 
     pub async fn set_suspended(
+        &self,
+        actor_id: Id,
+        user_id: Id,
+        suspended: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), SuspensionError> {
+        let result = self
+            .set_suspended_unchecked(actor_id, user_id, suspended, request_id, now)
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn set_suspended_unchecked(
         &self,
         actor_id: Id,
         user_id: Id,
@@ -1113,6 +1134,23 @@ impl IdentityRepository {
     }
 
     pub async fn revoke_session_audited(
+        &self,
+        session_id: Id,
+        user_id: Id,
+        action: &str,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<bool, IdentityError> {
+        let result = self
+            .revoke_session_audited_unchecked(session_id, user_id, action, request_id, now)
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn revoke_session_audited_unchecked(
         &self,
         session_id: Id,
         user_id: Id,

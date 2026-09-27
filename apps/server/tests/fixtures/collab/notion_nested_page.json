@@ -1,0 +1,235 @@
+{
+ "blocks": [
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Plan",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000001",
+   "props": {
+    "backgroundColor": "default",
+    "isToggleable": false,
+    "level": 1,
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "heading"
+  },
+  {
+   "children": [
+    {
+     "children": [
+      {
+       "children": [
+        {
+         "children": [
+          {
+           "children": [],
+           "content": [
+            {
+             "styles": {},
+             "text": "SELECT 1;",
+             "type": "text"
+            }
+           ],
+           "id": "00000000-0000-4000-8000-000000000002",
+           "props": {
+            "language": "sql"
+           },
+           "type": "codeBlock"
+          }
+         ],
+         "content": [
+          {
+           "styles": {},
+           "text": "Level 4 quote",
+           "type": "text"
+          }
+         ],
+         "id": "00000000-0000-4000-8000-000000000003",
+         "props": {
+          "backgroundColor": "default",
+          "textColor": "default"
+         },
+         "type": "quote"
+        }
+       ],
+       "content": [
+        {
+         "styles": {},
+         "text": "Level 3",
+         "type": "text"
+        }
+       ],
+       "id": "00000000-0000-4000-8000-000000000004",
+       "props": {
+        "backgroundColor": "default",
+        "checked": true,
+        "textAlignment": "left",
+        "textColor": "default"
+       },
+       "type": "checkListItem"
+      }
+     ],
+     "content": [
+      {
+       "styles": {},
+       "text": "Level 2",
+       "type": "text"
+      }
+     ],
+     "id": "00000000-0000-4000-8000-000000000005",
+     "props": {
+      "backgroundColor": "default",
+      "textAlignment": "left",
+      "textColor": "default"
+     },
+     "type": "bulletListItem"
+    }
+   ],
+   "content": [
+    {
+     "styles": {},
+     "text": "Level 1",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000006",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "toggleListItem"
+  },
+  {
+   "children": [],
+   "id": "00000000-0000-4000-8000-000000000007",
+   "props": {
+    "pageId": "01900000-0000-7000-8000-000000000002"
+   },
+   "type": "page"
+  }
+ ],
+ "y_update": "ATkBAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAwdoZWFkaW5nBwABAgYEAAEDBFBsYW4oAAECD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAECCXRleHRDb2xvcgF3B2RlZmF1bHQoAAECDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABAgVsZXZlbAF9ASgAAQIMaXNUb2dnbGVhYmxlAXkoAAEBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxhwEBAw5ibG9ja0NvbnRhaW5lcgcAAQ4DDnRvZ2dsZUxpc3RJdGVtBwABDwYEAAEQB0xldmVsIDEoAAEPD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAEPCXRleHRDb2xvcgF3B2RlZmF1bHQoAAEPDXRleHRBbGlnbm1lbnQBdwRsZWZ0hwEPAwpibG9ja0dyb3VwBwABGwMOYmxvY2tDb250YWluZXIHAAEcAw5idWxsZXRMaXN0SXRlbQcAAR0GBAABHgdMZXZlbCAyKAABHQ9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABHQl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABHQ10ZXh0QWxpZ25tZW50AXcEbGVmdIcBHQMKYmxvY2tHcm91cAcAASkDDmJsb2NrQ29udGFpbmVyBwABKgMNY2hlY2tMaXN0SXRlbQcAASsGBAABLAdMZXZlbCAzKAABKw9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABKwl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABKw10ZXh0QWxpZ25tZW50AXcEbGVmdCgAASsHY2hlY2tlZAF4hwErAwpibG9ja0dyb3VwBwABOAMOYmxvY2tDb250YWluZXIHAAE5AwVxdW90ZQcAAToGBAABOw1MZXZlbCA0IHF1b3RlKAABOg9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABOgl0ZXh0Q29sb3IBdwdkZWZhdWx0hwE6AwpibG9ja0dyb3VwBwABSwMOYmxvY2tDb250YWluZXIHAAFMAwljb2RlQmxvY2sHAAFNBgQAAU4JU0VMRUNUIDE7KAABTQhsYW5ndWFnZQF3A3NxbCgAAUwCaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDIoAAE5AmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzKAABKgJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNCgAARwCaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDUoAAEOAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA2hwEOAw5ibG9ja0NvbnRhaW5lcgcAAV4DBHBhZ2UoAAFfBnBhZ2VJZAF3JDAxOTAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMigAAV4CaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDcA",
+ "expected": [
+  {
+   "id": "00000000-0000-4000-8000-000000000001",
+   "type": "heading",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "level": 1,
+    "isToggleable": false
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Plan",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000006",
+   "type": "toggleListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Level 1",
+     "styles": {}
+    }
+   ],
+   "children": [
+    {
+     "id": "00000000-0000-4000-8000-000000000005",
+     "type": "bulletListItem",
+     "props": {
+      "backgroundColor": "default",
+      "textColor": "default",
+      "textAlignment": "left"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Level 2",
+       "styles": {}
+      }
+     ],
+     "children": [
+      {
+       "id": "00000000-0000-4000-8000-000000000004",
+       "type": "checkListItem",
+       "props": {
+        "backgroundColor": "default",
+        "textColor": "default",
+        "textAlignment": "left",
+        "checked": true
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Level 3",
+         "styles": {}
+        }
+       ],
+       "children": [
+        {
+         "id": "00000000-0000-4000-8000-000000000003",
+         "type": "quote",
+         "props": {
+          "backgroundColor": "default",
+          "textColor": "default"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Level 4 quote",
+           "styles": {}
+          }
+         ],
+         "children": [
+          {
+           "id": "00000000-0000-4000-8000-000000000002",
+           "type": "codeBlock",
+           "props": {
+            "language": "sql"
+           },
+           "content": [
+            {
+             "type": "text",
+             "text": "SELECT 1;",
+             "styles": {}
+            }
+           ],
+           "children": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000007",
+   "type": "page",
+   "props": {
+    "pageId": "01900000-0000-7000-8000-000000000002"
+   },
+   "children": []
+  }
+ ]
+}

@@ -1,9 +1,11 @@
 mod migrate;
 mod test_db;
 
+use std::any::Any;
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use fs2::FileExt;
@@ -47,6 +49,18 @@ struct DatabaseInner {
     pool: SqlitePool,
     path: PathBuf,
     _ownership_lock: File,
+    extensions: Extensions,
+}
+
+/// Process-wide services bound to one open database (at most one value per type), e.g. the
+/// server's in-memory co-editing hub, which must be shared by every repository of the database.
+#[derive(Default)]
+struct Extensions(Mutex<Vec<Arc<dyn Any + Send + Sync>>>);
+
+impl fmt::Debug for Extensions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Extensions")
+    }
 }
 
 #[derive(Debug, Error)]
@@ -118,6 +132,7 @@ impl Database {
                 pool,
                 path: config.path.clone(),
                 _ownership_lock: ownership_lock,
+                extensions: Extensions::default(),
             }),
         })
     }
@@ -162,5 +177,37 @@ impl Database {
 
     pub fn pool(&self) -> &SqlitePool {
         &self.inner.pool
+    }
+
+    /// The database's extension of type `T`, created by `init` on first use. Extensions live as
+    /// long as the database (they must not hold a `Database` clone, or it is never closed).
+    pub fn extension<T: Any + Send + Sync>(&self, init: impl FnOnce() -> T) -> Arc<T> {
+        let mut extensions = self
+            .inner
+            .extensions
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(existing) = extensions
+            .iter()
+            .find_map(|extension| Arc::clone(extension).downcast::<T>().ok())
+        {
+            return existing;
+        }
+        let created = Arc::new(init());
+        extensions.push(Arc::clone(&created) as Arc<dyn Any + Send + Sync>);
+        created
+    }
+
+    /// The database's extension of type `T`, if one was created.
+    #[must_use]
+    pub fn existing_extension<T: Any + Send + Sync>(&self) -> Option<Arc<T>> {
+        self.inner
+            .extensions
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find_map(|extension| Arc::clone(extension).downcast::<T>().ok())
     }
 }

@@ -1,0 +1,259 @@
+{
+  "content": [
+    {
+      "children": [],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "backgroundColor": "default",
+        "caption": "A brocolli",
+        "name": "brocolli.jpeg",
+        "showPreview": true,
+        "textAlignment": "left",
+        "url": "/api/v1/files/img1"
+      },
+      "type": "image"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "https://website.domain/images/image.png",
+              "type": "text"
+            }
+          ],
+          "href": "https://website.domain/images/image.png",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000002",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {
+            "italic": true
+          },
+          "text": "File not imported from Notion: report.pdf",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000003",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "doc.txt",
+              "type": "text"
+            }
+          ],
+          "href": "https://companywebsite.com/files/doc.txt",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000004",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "The spec",
+              "type": "text"
+            }
+          ],
+          "href": "https://website.domain/files/doc.pdf",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000005",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "https://www.youtube.com/watch?v=abc",
+              "type": "text"
+            }
+          ],
+          "href": "https://www.youtube.com/watch?v=abc",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000006",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "id": "00000000-0000-4000-8000-000000000007",
+      "props": {
+        "backgroundColor": "default",
+        "caption": "",
+        "name": "sample.mp3",
+        "url": "/api/v1/files/audio1"
+      },
+      "type": "file"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "https://companywebsite.com",
+              "type": "text"
+            }
+          ],
+          "href": "https://companywebsite.com",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000008",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "Notion docs",
+              "type": "text"
+            }
+          ],
+          "href": "https://developers.notion.com",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000009",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "https://player.vimeo.com/video/226053498?h=a1599a8ee9",
+              "type": "text"
+            }
+          ],
+          "href": "https://player.vimeo.com/video/226053498?h=a1599a8ee9",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000010",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "id": "00000000-0000-4000-8000-000000000011",
+      "props": {
+        "backgroundColor": "default",
+        "caption": "",
+        "name": "page.html",
+        "url": "/api/v1/files/embed1"
+      },
+      "type": "file"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "content": [
+            {
+              "styles": {},
+              "text": "https://github.com/example/example-repo/pull/1234",
+              "type": "text"
+            }
+          ],
+          "href": "https://github.com/example/example-repo/pull/1234",
+          "type": "link"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000012",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    }
+  ],
+  "cover": null,
+  "icon": null,
+  "report": {
+    "lossy": {
+      "audio_as_file": 1,
+      "embed_as_file": 1,
+      "external_file_as_link": 1,
+      "external_image_as_link": 1,
+      "external_pdf_as_link": 1,
+      "external_video_as_link": 1
+    },
+    "missing_files": 1,
+    "skipped": {},
+    "truncated_blocks": 0,
+    "unresolved_page_links": 0
+  },
+  "title": "Media"
+}

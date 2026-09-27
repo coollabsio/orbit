@@ -24,3 +24,22 @@ test('at-mentions resolve to workspace member ids', async () => {
   expect(sent[0]?.ids).toEqual(['user-2'])
   expect(sent[0]?.body).toContain('@Ada')
 })
+
+test('Enter adds a new line and only the Send button sends', async () => {
+  const onSend = mock(async () => {})
+  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} onSend={onSend} />)
+  const field = view.getByPlaceholderText('Reply') as HTMLTextAreaElement
+  await userEvent.type(field, 'First{Enter}Second')
+
+  expect(onSend).not.toHaveBeenCalled()
+  expect(field.value).toBe('First\nSecond')
+})
+
+test('a second click while sending does not send the comment again', async () => {
+  const onSend = mock(() => new Promise<void>(() => {}))
+  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} onSend={onSend} />)
+  await userEvent.type(view.getByPlaceholderText('Reply'), 'Once')
+  await userEvent.dblClick(view.getByRole('button', { name: 'Send' }))
+
+  expect(onSend).toHaveBeenCalledTimes(1)
+})

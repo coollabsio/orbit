@@ -149,7 +149,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       {has('project') ? <ProjectChip project={project} className="text-xs max-[1099px]:hidden" /> : null}
       {has('due_date') ? <DueDateChip task={task} status={status} className="text-xs max-[640px]:hidden" /> : null}
       {has('assignee') ? (
-        <div onClick={(e) => e.stopPropagation()}>
+        <div className="flex" onClick={(e) => e.stopPropagation()}>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={

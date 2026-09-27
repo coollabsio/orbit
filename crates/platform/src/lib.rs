@@ -33,10 +33,11 @@ pub use db::{
     MigrationRunner, PendingMigration, TestDatabase, TestDatabaseError, run_guarded_migrations,
 };
 pub use files::{
-    AuthorizedAttachment, BlobDownload, BlobFuture, BlobObject, BlobReader, BlobStore,
-    BlobStoreError, ContentDisposition, DownloadMetadata, FinalizedAttachment, FinalizedBlob,
-    LocalBlobStore, NewAttachmentReference, ReconcileResult, StagedUpload, StoredObject,
-    UploadError, UploadFinalization, UploadLimitError, UploadLimits, UploadService,
+    AuthorizedAttachment, BLOB_REFERENCE_COUNT, BlobDownload, BlobFuture, BlobObject, BlobReader,
+    BlobStore, BlobStoreError, ContentDisposition, DownloadMetadata, FinalizedAttachment,
+    FinalizedBlob, INLINE_IMAGE_TYPES, LocalBlobStore, NewAttachmentReference, ReconcileResult,
+    StagedUpload, StoredObject, UploadError, UploadFinalization, UploadLimitError, UploadLimits,
+    UploadService,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{

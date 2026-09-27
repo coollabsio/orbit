@@ -8,7 +8,8 @@ import { relativeTime } from '@/lib/format'
 import { EmptyState } from '@/components/common/EmptyState'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useMembers } from '@/features/workspaces/api'
-import { notificationCopy, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
+import { isMention, notificationCopy, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
+import { usePageTree } from '@/features/docs/api/pages'
 
 type InboxTab = 'all' | 'unread' | 'mentions'
 
@@ -20,11 +21,13 @@ export function InboxPage() {
   const allQuery = useNotifications(workspace.id, false)
   const unreadQuery = useNotifications(workspace.id, true)
   const members = useMembers(workspace.id)
+  const hasPageMentions = (allQuery.data ?? []).some((notification) => notification.page_id)
+  const pageTree = usePageTree(workspace.id, hasPageMentions)
   const markRead = useMarkNotificationRead(workspace.id)
   const markAll = useMarkAllNotificationsRead(workspace.id)
   const items = (allQuery.data ?? []).filter((notification) => {
     if (tab === 'unread') return !notification.read_at
-    if (tab === 'mentions') return notification.kind === 'comment_mentioned'
+    if (tab === 'mentions') return isMention(notification)
     return true
   })
   const unreadCount = unreadQuery.data?.length ?? items.filter((notification) => !notification.read_at).length
@@ -81,7 +84,8 @@ export function InboxPage() {
           ) : (
             items.map((notification) => {
               const actor = members.data?.find((member) => member.id === notification.actor_user_id)
-              const copy = notificationCopy(notification)
+              const page = notification.page_id ? pageTree.data?.find((item) => item.id === notification.page_id) : undefined
+              const copy = notificationCopy(notification, page?.title, actor?.name)
               return (
                 <Button
                   key={notification.id}
@@ -89,8 +93,14 @@ export function InboxPage() {
                   className="flex h-auto min-h-14 w-full min-w-0 cursor-pointer justify-start gap-2.5 rounded-none border-0 border-b border-border px-3 py-1.5 text-left font-normal hover:bg-foreground/[0.02] active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-foreground/[0.02]"
                   onClick={() => {
                     if (!notification.read_at) markRead.mutate(notification.id)
+                    const target = notificationTarget(notification)
+                    if (!target) return
+                    if (notification.page_id) {
+                      navigate(target)
+                      return
+                    }
                     const params = new URLSearchParams({ redirect: `${location.pathname}${location.search}` })
-                    navigate(`/tasks/${notification.task_id}?${params}`)
+                    navigate(`${target}?${params}`)
                   }}
                 >
                   <span className="flex w-2 shrink-0 justify-center">

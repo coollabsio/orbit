@@ -1,8 +1,6 @@
 import { useRef, useState } from 'react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { updateDocCover } from '@/mock/actions'
-import type { Doc } from '@/mock/types'
 import {
   coverObjectPosition,
   coverSlack,
@@ -19,10 +17,25 @@ import { CoverSourcePanel } from './CoverSourcePanel'
  * Page cover banner (the reference app's UX): hover shows Reposition / Change / Remove; repositioning
  * drags the image's focal point (arrow keys fine-tune, Enter saves, Escape cancels).
  */
-export function CoverBanner({ doc }: { doc: Doc }) {
+export function CoverBanner({
+  url,
+  position,
+  onChange,
+  onUpload,
+  readOnly = false,
+}: {
+  url: string
+  /** No reposition / change / remove controls (locked page). */
+  readOnly?: boolean
+  position: string | null
+  /** Uploads a new cover image to the page; resolves to its URL. */
+  onUpload?: (file: File) => Promise<string>
+  /** A new cover (or null to remove it) and/or a new focal point. */
+  onChange: (patch: { cover_url?: string | null; cover_position?: string | null }) => void
+}) {
   const [repositioning, setRepositioning] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
-  const [pos, setPos] = useState<CoverPos>(() => parseCoverPos(doc.coverPos))
+  const [pos, setPos] = useState<CoverPos>(() => parseCoverPos(position))
   const drag = useRef<{ px: number; py: number; from: CoverPos } | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -38,13 +51,13 @@ export function CoverBanner({ doc }: { doc: Doc }) {
   const saveFraming = () => {
     setRepositioning(false)
     drag.current = null
-    updateDocCover(doc.id, { coverPos: formatCoverPos(pos) })
+    onChange({ cover_position: formatCoverPos(pos) })
   }
 
   const cancelFraming = () => {
     setRepositioning(false)
     drag.current = null
-    setPos(parseCoverPos(doc.coverPos))
+    setPos(parseCoverPos(position))
   }
 
   return (
@@ -92,13 +105,13 @@ export function CoverBanner({ doc }: { doc: Doc }) {
       <img
         ref={imgRef}
         className="pointer-events-none size-full object-cover"
-        src={doc.cover ?? ''}
+        src={url}
         alt=""
         draggable={false}
         style={{ objectPosition: coverObjectPosition(pos) }}
       />
 
-      <div
+      {readOnly ? null : <div
         className="absolute top-2 right-2 z-[5] hidden gap-1 group-hover/cover:flex data-[open]:flex"
         data-cover-actions=""
         data-open={repositioning || sourceOpen || undefined}
@@ -138,13 +151,13 @@ export function CoverBanner({ doc }: { doc: Doc }) {
               type="button"
               variant="outline"
               className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
-              onClick={() => updateDocCover(doc.id, { cover: null, coverPos: null })}
+              onClick={() => onChange({ cover_url: null, cover_position: null })}
             >
               Remove
             </Button>
           </>
         )}
-      </div>
+      </div>}
 
       {sourceOpen && !repositioning ? (
         <div
@@ -152,11 +165,12 @@ export function CoverBanner({ doc }: { doc: Doc }) {
           data-cover-actions=""
         >
           <CoverSourcePanel
-            onPicked={(url) => {
+            onUpload={onUpload}
+            onPicked={(next) => {
               setSourceOpen(false)
               // a new image resets the framing: the old focal point means nothing on another picture
               setPos(parseCoverPos(null))
-              updateDocCover(doc.id, { cover: url, coverPos: null })
+              onChange({ cover_url: next, cover_position: null })
             }}
           />
         </div>

@@ -15,6 +15,8 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
   const [files, setFiles] = useState<File[]>([])
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([])
   const input = useRef<HTMLInputElement>(null)
+  // `pending` arrives a render late; this blocks a second click before it does
+  const sending = useRef(false)
   const mentionQuery = useMemo(() => {
     const match = body.match(/(?:^|\s)@([^\s@]*)$/)
     return match ? match[1].toLowerCase() : null
@@ -26,11 +28,16 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
     if (files.length === 0 && input.current) input.current.value = ''
   }, [files.length])
   const send = async () => {
-    if (!body.trim() && files.length === 0) return
-    await onSend(body, files, mentionedUserIds)
-    setBody((current) => current === body ? '' : current)
-    setFiles((current) => current === files ? [] : current)
-    setMentionedUserIds((current) => current === mentionedUserIds ? [] : current)
+    if (sending.current || pending || (!body.trim() && files.length === 0)) return
+    sending.current = true
+    try {
+      await onSend(body, files, mentionedUserIds)
+      setBody((current) => current === body ? '' : current)
+      setFiles((current) => current === files ? [] : current)
+      setMentionedUserIds((current) => current === mentionedUserIds ? [] : current)
+    } finally {
+      sending.current = false
+    }
   }
   const insertMention = (member: User) => {
     setBody((current) => current.replace(/@([^\s@]*)$/, `@${member.name} `))
@@ -60,7 +67,6 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
           const pasted = Array.from(event.clipboardData.files)
           if (pasted.length > 0) setFiles((current) => [...current, ...pasted])
         }}
-        onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }}
       />
       {files.length > 0 ? <div className="flex flex-wrap items-center gap-2">{files.map((file, index) => <Badge variant="outline" className={PILL} key={`${file.name}-${index}`}>{file.name}<Button type="button" variant="ghost" size="icon-xs" className="ml-1 inline-flex size-auto rounded-none border-0 text-inherit hover:bg-transparent hover:text-inherit dark:hover:bg-transparent" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></Button></Badge>)}</div> : null}
       {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}

@@ -200,7 +200,62 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     22,
-                    include_str!("../../../../apps/server/migrations/0022_views.sql"),
+                    include_str!("../../../../apps/server/migrations/0022_pages.sql"),
+                    false,
+                ),
+                Migration::new(
+                    23,
+                    include_str!("../../../../apps/server/migrations/0023_page_spaces.sql"),
+                    false,
+                ),
+                Migration::new(
+                    24,
+                    include_str!("../../../../apps/server/migrations/0024_page_favorites.sql"),
+                    false,
+                ),
+                Migration::new(
+                    25,
+                    include_str!("../../../../apps/server/migrations/0025_page_files.sql"),
+                    false,
+                ),
+                Migration::new(
+                    26,
+                    include_str!("../../../../apps/server/migrations/0026_notion_imports.sql"),
+                    false,
+                ),
+                Migration::new(
+                    27,
+                    include_str!("../../../../apps/server/migrations/0027_page_search_fts.sql"),
+                    false,
+                ),
+                Migration::new(
+                    28,
+                    include_str!("../../../../apps/server/migrations/0028_page_versions.sql"),
+                    false,
+                ),
+                Migration::new(
+                    29,
+                    include_str!("../../../../apps/server/migrations/0029_page_collab.sql"),
+                    false,
+                ),
+                Migration::new(
+                    30,
+                    include_str!("../../../../apps/server/migrations/0030_page_comments.sql"),
+                    false,
+                ),
+                Migration::new(
+                    31,
+                    include_str!("../../../../apps/server/migrations/0031_page_options.sql"),
+                    false,
+                ),
+                Migration::new(
+                    32,
+                    include_str!("../../../../apps/server/migrations/0032_page_mentions.sql"),
+                    false,
+                ),
+                Migration::new(
+                    33,
+                    include_str!("../../../../apps/server/migrations/0033_views.sql"),
                     false,
                 ),
             ],

@@ -132,7 +132,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
       <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onBack} aria-label="Back to tasks">
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 min-[900px]:hidden" onClick={onBack} aria-label="Back to tasks">
           <ArrowLeft className="size-4" />
         </Button>
         <span className="text-xs text-muted-foreground/70">{task?.identifier ?? 'Task'}</span>
@@ -142,7 +142,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
           if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
           void deleteAndClose({ taskId: task.id, version: task.version })
         }}>Delete</Button> : null}
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onBack} aria-label="Close task">
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
           <X className="size-4" />
         </Button>
       </div>

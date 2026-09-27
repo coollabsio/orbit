@@ -1,0 +1,541 @@
+{
+ "blocks": [
+  {
+   "id": "mn-p1",
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "text",
+     "text": "Hi ",
+     "styles": {}
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    },
+    {
+     "type": "text",
+     "text": " and ",
+     "styles": {}
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": "Bob Stone"
+     }
+    },
+    {
+     "type": "text",
+     "text": ", see ",
+     "styles": {
+      "bold": true
+     }
+    },
+    {
+     "type": "link",
+     "href": "https://example.com",
+     "content": [
+      {
+       "type": "text",
+       "text": "this",
+       "styles": {}
+      }
+     ]
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mn-p2",
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": "Bob Stone"
+     }
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mn-p3",
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    },
+    {
+     "type": "text",
+     "text": "\nnext line",
+     "styles": {}
+    }
+   ]
+  },
+  {
+   "id": "mn-empty-name",
+   "type": "paragraph",
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "mn-h",
+   "type": "heading",
+   "props": {
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Owner: ",
+     "styles": {}
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": "Bob Stone"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mn-list",
+   "type": "checkListItem",
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    },
+    {
+     "type": "text",
+     "text": " reviews",
+     "styles": {
+      "italic": true
+     }
+    }
+   ],
+   "children": [
+    {
+     "id": "mn-list-c",
+     "type": "bulletListItem",
+     "content": [
+      {
+       "type": "text",
+       "text": "ask ",
+       "styles": {}
+      },
+      {
+       "type": "mention",
+       "props": {
+        "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+        "name": "Bob Stone"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "mn-callout",
+   "type": "callout",
+   "props": {
+    "emoji": "📣"
+   },
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mn-table",
+   "type": "table",
+   "content": {
+    "type": "tableContent",
+    "columnWidths": [
+     null,
+     null
+    ],
+    "rows": [
+     {
+      "cells": [
+       [
+        {
+         "type": "mention",
+         "props": {
+          "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+          "name": "Ann Lee"
+         }
+        }
+       ],
+       [
+        {
+         "type": "text",
+         "text": "with ",
+         "styles": {}
+        },
+        {
+         "type": "mention",
+         "props": {
+          "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+          "name": "Bob Stone"
+         }
+        }
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "mn-code",
+   "type": "codeBlock",
+   "content": "@not a mention"
+  }
+ ],
+ "y_update": "AY0BAQAHAQtwcm9zZW1pcnJvcgMKYmxvY2tHcm91cAcAAQADDmJsb2NrQ29udGFpbmVyBwABAQMJcGFyYWdyYXBoBwABAgYEAAEDA0hpIIcBAwMHbWVudGlvbigAAQcGdXNlcklkAXckMDE5OWEwYjAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMGExKAABBwRuYW1lAXcHQW5uIExlZYcBBwYEAAEKBSBhbmQghwEKAwdtZW50aW9uKAABEAZ1c2VySWQBdyQwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYjIoAAEQBG5hbWUBdwlCb2IgU3RvbmWHARAGBgABEwRib2xkAnt9hAEUBiwgc2VlIIYBGgRib2xkBG51bGyGARsEbGluax57ImhyZWYiOiJodHRwczovL2V4YW1wbGUuY29tIn2EARwEdGhpc4YBIARsaW5rBG51bGyHARMDB21lbnRpb24oAAEiBnVzZXJJZAF3JDAxOTlhMGIwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDBhMSgAASIEbmFtZQF3B0FubiBMZWUoAAECD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAECCXRleHRDb2xvcgF3B2RlZmF1bHQoAAECDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABAQJpZAF3BW1uLXAxhwEBAw5ibG9ja0NvbnRhaW5lcgcAASkDCXBhcmFncmFwaAcAASoDB21lbnRpb24oAAErBnVzZXJJZAF3JDAxOTlhMGIwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDBiMigAASsEbmFtZQF3CUJvYiBTdG9uZYcBKwMHbWVudGlvbigAAS4GdXNlcklkAXckMDE5OWEwYjAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMGExKAABLgRuYW1lAXcHQW5uIExlZSgAASoPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAASoJdGV4dENvbG9yAXcHZGVmYXVsdCgAASoNdGV4dEFsaWdubWVudAF3BGxlZnQoAAEpAmlkAXcFbW4tcDKHASkDDmJsb2NrQ29udGFpbmVyBwABNQMJcGFyYWdyYXBoBwABNgMHbWVudGlvbigAATcGdXNlcklkAXckMDE5OWEwYjAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMGExKAABNwRuYW1lAXcHQW5uIExlZYcBNwMJaGFyZEJyZWFrhwE6BgQAATsJbmV4dCBsaW5lKAABNg9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABNgl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABNg10ZXh0QWxpZ25tZW50AXcEbGVmdCgAATUCaWQBdwVtbi1wM4cBNQMOYmxvY2tDb250YWluZXIHAAFJAwlwYXJhZ3JhcGgHAAFKAwdtZW50aW9uKAABSwZ1c2VySWQBdyQwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYjIoAAFLBG5hbWUBdwAoAAFKD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFKCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFKDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABSQJpZAF3DW1uLWVtcHR5LW5hbWWHAUkDDmJsb2NrQ29udGFpbmVyBwABUgMHaGVhZGluZwcAAVMGBAABVAdPd25lcjoghwFUAwdtZW50aW9uKAABXAZ1c2VySWQBdyQwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYjIoAAFcBG5hbWUBdwlCb2IgU3RvbmUoAAFTD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFTCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFTDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABUwVsZXZlbAF9AigAAVMMaXNUb2dnbGVhYmxlAXkoAAFSAmlkAXcEbW4taIcBUgMOYmxvY2tDb250YWluZXIHAAFlAw1jaGVja0xpc3RJdGVtBwABZgMHbWVudGlvbigAAWcGdXNlcklkAXckMDE5OWEwYjAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMGExKAABZwRuYW1lAXcHQW5uIExlZYcBZwYGAAFqBml0YWxpYwJ7fYQBawggcmV2aWV3c4YBcwZpdGFsaWMEbnVsbCgAAWYPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAWYJdGV4dENvbG9yAXcHZGVmYXVsdCgAAWYNdGV4dEFsaWdubWVudAF3BGxlZnQoAAFmB2NoZWNrZWQBeYcBZgMKYmxvY2tHcm91cAcAAXkDDmJsb2NrQ29udGFpbmVyBwABegMOYnVsbGV0TGlzdEl0ZW0HAAF7BgQAAXwEYXNrIIcBfAMHbWVudGlvbigAAYEBBnVzZXJJZAF3JDAxOTlhMGIwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDBiMigAAYEBBG5hbWUBdwlCb2IgU3RvbmUoAAF7D2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAF7CXRleHRDb2xvcgF3B2RlZmF1bHQoAAF7DXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABegJpZAF3CW1uLWxpc3QtYygAAWUCaWQBdwdtbi1saXN0hwFlAw5ibG9ja0NvbnRhaW5lcgcAAYkBAwdjYWxsb3V0BwABigEDB21lbnRpb24oAAGLAQZ1c2VySWQBdyQwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYTEoAAGLAQRuYW1lAXcHQW5uIExlZSgAAYoBBWVtb2ppAXcE8J+ToygAAYoBD2JhY2tncm91bmRDb2xvcgF3BGdyYXkoAAGKAQl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABiQECaWQBdwptbi1jYWxsb3V0hwGJAQMOYmxvY2tDb250YWluZXIHAAGSAQMFdGFibGUHAAGTAQMIdGFibGVSb3cHAAGUAQMJdGFibGVDZWxsBwABlQEDDnRhYmxlUGFyYWdyYXBoBwABlgEDB21lbnRpb24oAAGXAQZ1c2VySWQBdyQwMTk5YTBiMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYTEoAAGXAQRuYW1lAXcHQW5uIExlZSgAAZUBCXRleHRDb2xvcgF3B2RlZmF1bHQoAAGVAQ9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABlQENdGV4dEFsaWdubWVudAF3BGxlZnQoAAGVAQdjb2xzcGFuAX0BKAABlQEHcm93c3BhbgF9AYcBlQEDCXRhYmxlQ2VsbAcAAZ8BAw50YWJsZVBhcmFncmFwaAcAAaABBgQAAaEBBXdpdGgghwGhAQMHbWVudGlvbigAAacBBnVzZXJJZAF3JDAxOTlhMGIwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDBiMigAAacBBG5hbWUBdwlCb2IgU3RvbmUoAAGfAQl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABnwEPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAZ8BDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABnwEHY29sc3BhbgF9ASgAAZ8BB3Jvd3NwYW4BfQEoAAGTAQl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABkgECaWQBdwhtbi10YWJsZYcBkgEDDmJsb2NrQ29udGFpbmVyBwABsQEDCWNvZGVCbG9jawcAAbIBBgQAAbMBDkBub3QgYSBtZW50aW9uKAABsgEIbGFuZ3VhZ2UBdwR0ZXh0KAABsQECaWQBdwdtbi1jb2RlAA==",
+ "expected": [
+  {
+   "id": "mn-p1",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Hi ",
+     "styles": {}
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    },
+    {
+     "type": "text",
+     "text": " and ",
+     "styles": {}
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": "Bob Stone"
+     }
+    },
+    {
+     "type": "text",
+     "text": ", see ",
+     "styles": {
+      "bold": true
+     }
+    },
+    {
+     "type": "link",
+     "href": "https://example.com",
+     "content": [
+      {
+       "type": "text",
+       "text": "this",
+       "styles": {}
+      }
+     ]
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "mn-p2",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": "Bob Stone"
+     }
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "mn-p3",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    },
+    {
+     "type": "text",
+     "text": "\nnext line",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "mn-empty-name",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": ""
+     }
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "mn-h",
+   "type": "heading",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "level": 2,
+    "isToggleable": false
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Owner: ",
+     "styles": {}
+    },
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+      "name": "Bob Stone"
+     }
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "mn-list",
+   "type": "checkListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "checked": false
+   },
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    },
+    {
+     "type": "text",
+     "text": " reviews",
+     "styles": {
+      "italic": true
+     }
+    }
+   ],
+   "children": [
+    {
+     "id": "mn-list-c",
+     "type": "bulletListItem",
+     "props": {
+      "backgroundColor": "default",
+      "textColor": "default",
+      "textAlignment": "left"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ask ",
+       "styles": {}
+      },
+      {
+       "type": "mention",
+       "props": {
+        "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+        "name": "Bob Stone"
+       }
+      }
+     ],
+     "children": []
+    }
+   ]
+  },
+  {
+   "id": "mn-callout",
+   "type": "callout",
+   "props": {
+    "emoji": "📣",
+    "backgroundColor": "gray",
+    "textColor": "default"
+   },
+   "content": [
+    {
+     "type": "mention",
+     "props": {
+      "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+      "name": "Ann Lee"
+     }
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "mn-table",
+   "type": "table",
+   "props": {
+    "textColor": "default"
+   },
+   "content": {
+    "type": "tableContent",
+    "columnWidths": [
+     null,
+     null
+    ],
+    "rows": [
+     {
+      "cells": [
+       {
+        "type": "tableCell",
+        "content": [
+         {
+          "type": "mention",
+          "props": {
+           "userId": "0199a0b0-0000-7000-8000-0000000000a1",
+           "name": "Ann Lee"
+          }
+         }
+        ],
+        "props": {
+         "colspan": 1,
+         "rowspan": 1,
+         "backgroundColor": "default",
+         "textColor": "default",
+         "textAlignment": "left"
+        }
+       },
+       {
+        "type": "tableCell",
+        "content": [
+         {
+          "type": "text",
+          "text": "with ",
+          "styles": {}
+         },
+         {
+          "type": "mention",
+          "props": {
+           "userId": "0199a0b0-0000-7000-8000-0000000000b2",
+           "name": "Bob Stone"
+          }
+         }
+        ],
+        "props": {
+         "colspan": 1,
+         "rowspan": 1,
+         "backgroundColor": "default",
+         "textColor": "default",
+         "textAlignment": "left"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "children": []
+  },
+  {
+   "id": "mn-code",
+   "type": "codeBlock",
+   "props": {
+    "language": "text"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "@not a mention",
+     "styles": {}
+    }
+   ],
+   "children": []
+  }
+ ]
+}

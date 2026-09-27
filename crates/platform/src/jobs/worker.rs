@@ -389,7 +389,8 @@ async fn execute_claim(
                 let now = store.database_now().await?;
                 match result {
                     Ok(()) => { store.complete(&claim, now).await?; }
-                    Err(_) if shutting_down => {}
+                    // Interrupted by shutdown: requeue without spending the attempt.
+                    Err(_) if shutting_down => { store.release(&claim, now).await?; }
                     Err(error) => { store.fail(&claim, error, now).await?; }
                 }
                 return Ok(());

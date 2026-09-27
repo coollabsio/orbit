@@ -1,0 +1,149 @@
+{
+  "content": [
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Kept child of a future block",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000001",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {
+            "bold": true
+          },
+          "text": "Team Sync",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000002",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Summary text",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000003",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Overview",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000004",
+      "props": {
+        "backgroundColor": "default",
+        "isToggleable": false,
+        "level": 3,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Tab 1 content",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000005",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Details",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000006",
+      "props": {
+        "backgroundColor": "default",
+        "isToggleable": false,
+        "level": 3,
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "heading"
+    },
+    {
+      "children": [],
+      "content": [
+        {
+          "styles": {},
+          "text": "Tab 2 content",
+          "type": "text"
+        }
+      ],
+      "id": "00000000-0000-4000-8000-000000000007",
+      "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+      },
+      "type": "paragraph"
+    }
+  ],
+  "cover": null,
+  "icon": null,
+  "report": {
+    "lossy": {
+      "meeting_notes": 1,
+      "tab": 1
+    },
+    "missing_files": 0,
+    "skipped": {
+      "breadcrumb": 1,
+      "future_block": 1,
+      "table_of_contents": 1,
+      "template": 1,
+      "unsupported:button": 1,
+      "unsupported:form": 1
+    },
+    "truncated_blocks": 0,
+    "unresolved_page_links": 0
+  },
+  "title": "Unsupported"
+}

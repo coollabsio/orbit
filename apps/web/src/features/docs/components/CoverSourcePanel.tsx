@@ -1,66 +1,97 @@
 import { useRef, useState } from 'react'
-import { Export as Upload } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Separator } from '@/components/ui/separator'
+import { Spinner } from '@/components/ui/spinner'
+import { validCoverUrl } from '@/features/docs/coverLib'
 
-/** Cover image source (the reference app's panel, mock-sized): upload from disk, or paste an image URL. */
-export function CoverSourcePanel({ onPicked }: { onPicked: (url: string) => void }) {
-  const fileInput = useRef<HTMLInputElement>(null)
+/** Raster types the server serves inline (anything else would download instead of rendering). */
+export const COVER_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp,image/avif'
+
+/**
+ * Cover image source: upload an image to the page, or paste an http(s) image URL.
+ * `onUpload` stores the file and resolves to its URL (reject with a user-facing message).
+ */
+export function CoverSourcePanel({
+  onPicked,
+  onUpload,
+}: {
+  onPicked: (url: string) => void
+  onUpload?: (file: File) => Promise<string>
+}) {
   const [url, setUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
 
-  const pickFile = (file: File | undefined) => {
-    if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setError('This file is not an image.')
+  const submit = () => {
+    const valid = validCoverUrl(url)
+    if (!valid) {
+      setError('Enter an http(s) image URL.')
       return
     }
-    onPicked(URL.createObjectURL(file))
+    setError(null)
+    onPicked(valid)
+  }
+
+  const upload = async (file: File | undefined) => {
+    if (!file || !onUpload) return
+    setError(null)
+    setUploading(true)
+    try {
+      const uploaded = await onUpload(file)
+      onPicked(uploaded)
+    } catch (uploadError) {
+      setError(uploadError instanceof Error && uploadError.message ? uploadError.message : 'Could not upload the image.')
+    } finally {
+      setUploading(false)
+      if (fileInput.current) fileInput.current.value = ''
+    }
   }
 
   return (
     <div className="flex flex-col gap-2.5">
-      <Button type="button" variant="outline" onClick={() => fileInput.current?.click()}>
-        <Upload className="size-3.5" />
-        Upload from my computer
-      </Button>
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/*"
-        hidden
-        aria-label="Upload cover image"
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          e.target.value = ''
-          pickFile(file)
-        }}
-      />
-      <div className="flex items-center gap-2">
-        <Separator className="flex-1" />
-        <span className="text-xs text-muted-foreground/70">or</span>
-        <Separator className="flex-1" />
-      </div>
+      {onUpload ? (
+        <>
+          <input
+            ref={fileInput}
+            type="file"
+            accept={COVER_IMAGE_TYPES}
+            className="hidden"
+            aria-label="Cover image file"
+            onChange={(e) => void upload(e.target.files?.[0])}
+          />
+          <Button type="button" variant="outline" disabled={uploading} onClick={() => fileInput.current?.click()}>
+            {uploading ? <Spinner /> : null}
+            {uploading ? 'Uploading…' : 'Upload image'}
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">or paste a link</p>
+        </>
+      ) : null}
       <div className="flex gap-2">
         <Input
           className="min-w-0 flex-1"
           value={url}
-          placeholder="Image URL"
+          placeholder="https://… image URL"
           aria-label="Image URL"
-          onChange={(e) => setUrl(e.target.value)}
+          aria-invalid={error ? true : undefined}
+          autoFocus
+          disabled={uploading}
+          onChange={(e) => {
+            setUrl(e.target.value)
+            setError(null)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && url.trim()) {
               e.preventDefault()
-              onPicked(url.trim())
+              submit()
             }
           }}
         />
-        <Button type="button" variant="outline" disabled={!url.trim()} onClick={() => onPicked(url.trim())}>
+        <Button type="button" variant="outline" disabled={!url.trim() || uploading} onClick={submit}>
           Use
         </Button>
       </div>
-      {error ? <p className="text-xs text-muted-foreground/70">{error}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   )
 }

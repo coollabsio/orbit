@@ -379,6 +379,39 @@ impl JobStore {
         Ok(result.rows_affected() == 1)
     }
 
+    /// Puts a running job back in the queue without spending its attempt, for work interrupted
+    /// by a graceful shutdown: the attempt row is removed and `attempt_count` goes back down, so
+    /// the next claim reuses the attempt number. Returns `false` for a stale claim.
+    pub async fn release(
+        &self,
+        claim: &Claim,
+        now: TimestampMillis,
+    ) -> Result<bool, JobStoreError> {
+        let mut transaction = self.database.transaction().await?;
+        let result = sqlx::query(
+            "UPDATE jobs SET state = 'queued', attempt_count = attempt_count - 1, \
+             available_at = ?, lease_owner = NULL, claim_token = NULL, lease_expires_at = NULL, \
+             updated_at = ? WHERE id = ? AND state = 'running' AND attempt_count = ? \
+             AND claim_token = ?",
+        )
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .bind(claim.job_id.to_string())
+        .bind(claim.attempt)
+        .bind(&claim.claim_token)
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() == 1 {
+            sqlx::query("DELETE FROM job_attempts WHERE job_id = ? AND attempt = ?")
+                .bind(claim.job_id.to_string())
+                .bind(claim.attempt)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn manual_retry(
         &self,
         original_id: Id,

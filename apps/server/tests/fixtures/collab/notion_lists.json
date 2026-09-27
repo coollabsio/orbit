@@ -1,0 +1,395 @@
+{
+ "blocks": [
+  {
+   "children": [
+    {
+     "children": [],
+     "content": [
+      {
+       "styles": {},
+       "text": "Apple",
+       "type": "text"
+      }
+     ],
+     "id": "00000000-0000-4000-8000-000000000001",
+     "props": {
+      "backgroundColor": "default",
+      "textAlignment": "left",
+      "textColor": "default"
+     },
+     "type": "bulletListItem"
+    },
+    {
+     "children": [
+      {
+       "children": [],
+       "content": [
+        {
+         "styles": {},
+         "text": "A note about pears",
+         "type": "text"
+        }
+       ],
+       "id": "00000000-0000-4000-8000-000000000002",
+       "props": {
+        "backgroundColor": "default",
+        "textAlignment": "left",
+        "textColor": "default"
+       },
+       "type": "paragraph"
+      }
+     ],
+     "content": [
+      {
+       "styles": {},
+       "text": "Pear",
+       "type": "text"
+      }
+     ],
+     "id": "00000000-0000-4000-8000-000000000003",
+     "props": {
+      "backgroundColor": "default",
+      "textAlignment": "left",
+      "textColor": "default"
+     },
+     "type": "bulletListItem"
+    }
+   ],
+   "content": [
+    {
+     "styles": {},
+     "text": "Fruits",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000004",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "bulletListItem"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Step one",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000005",
+   "props": {
+    "backgroundColor": "default",
+    "start": 3,
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "numberedListItem"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Step two",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000006",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "numberedListItem"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Roman step",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000007",
+   "props": {
+    "backgroundColor": "default",
+    "start": 1,
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "numberedListItem"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Finish Q3 goals",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000008",
+   "props": {
+    "backgroundColor": "default",
+    "checked": false,
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "checkListItem"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Ship the importer",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000009",
+   "props": {
+    "backgroundColor": "default",
+    "checked": true,
+    "textAlignment": "left",
+    "textColor": "purple"
+   },
+   "type": "checkListItem"
+  },
+  {
+   "children": [
+    {
+     "children": [],
+     "content": [
+      {
+       "styles": {},
+       "text": "Inside the toggle",
+       "type": "text"
+      }
+     ],
+     "id": "00000000-0000-4000-8000-000000000010",
+     "props": {
+      "backgroundColor": "default",
+      "textAlignment": "left",
+      "textColor": "default"
+     },
+     "type": "paragraph"
+    }
+   ],
+   "content": [
+    {
+     "styles": {},
+     "text": "Additional project details",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000011",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "toggleListItem"
+  }
+ ],
+ "y_update": "AWEBAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAw5idWxsZXRMaXN0SXRlbQcAAQIGBAABAwZGcnVpdHMoAAECD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAECCXRleHRDb2xvcgF3B2RlZmF1bHQoAAECDXRleHRBbGlnbm1lbnQBdwRsZWZ0hwECAwpibG9ja0dyb3VwBwABDQMOYmxvY2tDb250YWluZXIHAAEOAw5idWxsZXRMaXN0SXRlbQcAAQ8GBAABEAVBcHBsZSgAAQ8PYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAQ8JdGV4dENvbG9yAXcHZGVmYXVsdCgAAQ8NdGV4dEFsaWdubWVudAF3BGxlZnQoAAEOAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxhwEOAw5ibG9ja0NvbnRhaW5lcgcAARoDDmJ1bGxldExpc3RJdGVtBwABGwYEAAEcBFBlYXIoAAEbD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAEbCXRleHRDb2xvcgF3B2RlZmF1bHQoAAEbDXRleHRBbGlnbm1lbnQBdwRsZWZ0hwEbAwpibG9ja0dyb3VwBwABJAMOYmxvY2tDb250YWluZXIHAAElAwlwYXJhZ3JhcGgHAAEmBgQAAScSQSBub3RlIGFib3V0IHBlYXJzKAABJg9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABJgl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABJg10ZXh0QWxpZ25tZW50AXcEbGVmdCgAASUCaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDIoAAEaAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzKAABAQJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNIcBAQMOYmxvY2tDb250YWluZXIHAAFAAxBudW1iZXJlZExpc3RJdGVtBwABQQYEAAFCCFN0ZXAgb25lKAABQQ9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABQQl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABQQ10ZXh0QWxpZ25tZW50AXcEbGVmdCgAAUEFc3RhcnQBfQMoAAFAAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA1hwFAAw5ibG9ja0NvbnRhaW5lcgcAAVADEG51bWJlcmVkTGlzdEl0ZW0HAAFRBgQAAVIIU3RlcCB0d28oAAFRD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFRCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFRDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABUQVzdGFydAF/KAABUAJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNocBUAMOYmxvY2tDb250YWluZXIHAAFgAxBudW1iZXJlZExpc3RJdGVtBwABYQYEAAFiClJvbWFuIHN0ZXAoAAFhD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFhCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFhDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABYQVzdGFydAF9ASgAAWACaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDeHAWADDmJsb2NrQ29udGFpbmVyBwABcgMNY2hlY2tMaXN0SXRlbQcAAXMGBAABdA9GaW5pc2ggUTMgZ29hbHMoAAFzD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAFzCXRleHRDb2xvcgF3B2RlZmF1bHQoAAFzDXRleHRBbGlnbm1lbnQBdwRsZWZ0KAABcwdjaGVja2VkAXkoAAFyAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA4hwFyAw5ibG9ja0NvbnRhaW5lcgcAAYkBAw1jaGVja0xpc3RJdGVtBwABigEGBAABiwERU2hpcCB0aGUgaW1wb3J0ZXIoAAGKAQ9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABigEJdGV4dENvbG9yAXcGcHVycGxlKAABigENdGV4dEFsaWdubWVudAF3BGxlZnQoAAGKAQdjaGVja2VkAXgoAAGJAQJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwOYcBiQEDDmJsb2NrQ29udGFpbmVyBwABogEDDnRvZ2dsZUxpc3RJdGVtBwABowEGBAABpAEaQWRkaXRpb25hbCBwcm9qZWN0IGRldGFpbHMoAAGjAQ9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABowEJdGV4dENvbG9yAXcHZGVmYXVsdCgAAaMBDXRleHRBbGlnbm1lbnQBdwRsZWZ0hwGjAQMKYmxvY2tHcm91cAcAAcIBAw5ibG9ja0NvbnRhaW5lcgcAAcMBAwlwYXJhZ3JhcGgHAAHEAQYEAAHFARFJbnNpZGUgdGhlIHRvZ2dsZSgAAcQBD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAHEAQl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABxAENdGV4dEFsaWdubWVudAF3BGxlZnQoAAHDAQJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAxMCgAAaIBAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExAA==",
+ "expected": [
+  {
+   "id": "00000000-0000-4000-8000-000000000004",
+   "type": "bulletListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Fruits",
+     "styles": {}
+    }
+   ],
+   "children": [
+    {
+     "id": "00000000-0000-4000-8000-000000000001",
+     "type": "bulletListItem",
+     "props": {
+      "backgroundColor": "default",
+      "textColor": "default",
+      "textAlignment": "left"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Apple",
+       "styles": {}
+      }
+     ],
+     "children": []
+    },
+    {
+     "id": "00000000-0000-4000-8000-000000000003",
+     "type": "bulletListItem",
+     "props": {
+      "backgroundColor": "default",
+      "textColor": "default",
+      "textAlignment": "left"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Pear",
+       "styles": {}
+      }
+     ],
+     "children": [
+      {
+       "id": "00000000-0000-4000-8000-000000000002",
+       "type": "paragraph",
+       "props": {
+        "backgroundColor": "default",
+        "textColor": "default",
+        "textAlignment": "left"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "A note about pears",
+         "styles": {}
+        }
+       ],
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000005",
+   "type": "numberedListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "start": 3
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Step one",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000006",
+   "type": "numberedListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Step two",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000007",
+   "type": "numberedListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "start": 1
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Roman step",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000008",
+   "type": "checkListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "checked": false
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Finish Q3 goals",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000009",
+   "type": "checkListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "purple",
+    "textAlignment": "left",
+    "checked": true
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Ship the importer",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000011",
+   "type": "toggleListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Additional project details",
+     "styles": {}
+    }
+   ],
+   "children": [
+    {
+     "id": "00000000-0000-4000-8000-000000000010",
+     "type": "paragraph",
+     "props": {
+      "backgroundColor": "default",
+      "textColor": "default",
+      "textAlignment": "left"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Inside the toggle",
+       "styles": {}
+      }
+     ],
+     "children": []
+    }
+   ]
+  }
+ ]
+}

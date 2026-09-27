@@ -1,0 +1,549 @@
+{
+  "page": {
+    "object": "page",
+    "id": "20000000-0000-4000-8000-000000000002",
+    "created_time": "2022-10-24T22:54:00.000Z",
+    "last_edited_time": "2023-03-08T18:25:00.000Z",
+    "created_by": {
+      "object": "user",
+      "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+    },
+    "last_edited_by": {
+      "object": "user",
+      "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+    },
+    "cover": null,
+    "icon": null,
+    "parent": {
+      "type": "workspace",
+      "workspace": true
+    },
+    "archived": false,
+    "in_trash": false,
+    "properties": {
+      "title": {
+        "id": "title",
+        "type": "title",
+        "title": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Lists",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Lists",
+            "href": null
+          }
+        ]
+      }
+    },
+    "url": "https://app.notion.com/p/20000000000040008000000000000002",
+    "public_url": null
+  },
+  "blocks": [
+    {
+      "object": "block",
+      "id": "b0000000-0000-4000-8000-000000000018",
+      "parent": {
+        "type": "page_id",
+        "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+      },
+      "created_time": "2022-03-01T19:05:00.000Z",
+      "last_edited_time": "2022-07-06T19:41:00.000Z",
+      "created_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "last_edited_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "has_children": true,
+      "archived": false,
+      "in_trash": false,
+      "type": "bulleted_list_item",
+      "bulleted_list_item": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Fruits",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Fruits",
+            "href": null
+          }
+        ],
+        "color": "default"
+      },
+      "children": [
+        {
+          "object": "block",
+          "id": "b0000000-0000-4000-8000-000000000015",
+          "parent": {
+            "type": "page_id",
+            "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+          },
+          "created_time": "2022-03-01T19:05:00.000Z",
+          "last_edited_time": "2022-07-06T19:41:00.000Z",
+          "created_by": {
+            "object": "user",
+            "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+          },
+          "last_edited_by": {
+            "object": "user",
+            "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+          },
+          "has_children": false,
+          "archived": false,
+          "in_trash": false,
+          "type": "bulleted_list_item",
+          "bulleted_list_item": {
+            "rich_text": [
+              {
+                "type": "text",
+                "text": {
+                  "content": "Apple",
+                  "link": null
+                },
+                "annotations": {
+                  "bold": false,
+                  "italic": false,
+                  "strikethrough": false,
+                  "underline": false,
+                  "code": false,
+                  "color": "default"
+                },
+                "plain_text": "Apple",
+                "href": null
+              }
+            ],
+            "color": "default"
+          }
+        },
+        {
+          "object": "block",
+          "id": "b0000000-0000-4000-8000-000000000017",
+          "parent": {
+            "type": "page_id",
+            "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+          },
+          "created_time": "2022-03-01T19:05:00.000Z",
+          "last_edited_time": "2022-07-06T19:41:00.000Z",
+          "created_by": {
+            "object": "user",
+            "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+          },
+          "last_edited_by": {
+            "object": "user",
+            "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+          },
+          "has_children": true,
+          "archived": false,
+          "in_trash": false,
+          "type": "bulleted_list_item",
+          "bulleted_list_item": {
+            "rich_text": [
+              {
+                "type": "text",
+                "text": {
+                  "content": "Pear",
+                  "link": null
+                },
+                "annotations": {
+                  "bold": false,
+                  "italic": false,
+                  "strikethrough": false,
+                  "underline": false,
+                  "code": false,
+                  "color": "default"
+                },
+                "plain_text": "Pear",
+                "href": null
+              }
+            ],
+            "color": "default"
+          },
+          "children": [
+            {
+              "object": "block",
+              "id": "b0000000-0000-4000-8000-000000000016",
+              "parent": {
+                "type": "page_id",
+                "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+              },
+              "created_time": "2022-03-01T19:05:00.000Z",
+              "last_edited_time": "2022-07-06T19:41:00.000Z",
+              "created_by": {
+                "object": "user",
+                "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+              },
+              "last_edited_by": {
+                "object": "user",
+                "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+              },
+              "has_children": false,
+              "archived": false,
+              "in_trash": false,
+              "type": "paragraph",
+              "paragraph": {
+                "rich_text": [
+                  {
+                    "type": "text",
+                    "text": {
+                      "content": "A note about pears",
+                      "link": null
+                    },
+                    "annotations": {
+                      "bold": false,
+                      "italic": false,
+                      "strikethrough": false,
+                      "underline": false,
+                      "code": false,
+                      "color": "default"
+                    },
+                    "plain_text": "A note about pears",
+                    "href": null
+                  }
+                ],
+                "color": "default"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "object": "block",
+      "id": "b0000000-0000-4000-8000-000000000019",
+      "parent": {
+        "type": "page_id",
+        "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+      },
+      "created_time": "2022-03-01T19:05:00.000Z",
+      "last_edited_time": "2022-07-06T19:41:00.000Z",
+      "created_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "last_edited_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "numbered_list_item",
+      "numbered_list_item": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Step one",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Step one",
+            "href": null
+          }
+        ],
+        "color": "default",
+        "list_start_index": 3,
+        "list_format": "numbers"
+      }
+    },
+    {
+      "object": "block",
+      "id": "b0000000-0000-4000-8000-000000000020",
+      "parent": {
+        "type": "page_id",
+        "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+      },
+      "created_time": "2022-03-01T19:05:00.000Z",
+      "last_edited_time": "2022-07-06T19:41:00.000Z",
+      "created_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "last_edited_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "numbered_list_item",
+      "numbered_list_item": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Step two",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Step two",
+            "href": null
+          }
+        ],
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "b0000000-0000-4000-8000-000000000021",
+      "parent": {
+        "type": "page_id",
+        "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+      },
+      "created_time": "2022-03-01T19:05:00.000Z",
+      "last_edited_time": "2022-07-06T19:41:00.000Z",
+      "created_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "last_edited_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "numbered_list_item",
+      "numbered_list_item": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Roman step",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Roman step",
+            "href": null
+          }
+        ],
+        "color": "default",
+        "list_start_index": 1,
+        "list_format": "roman"
+      }
+    },
+    {
+      "object": "block",
+      "id": "b0000000-0000-4000-8000-000000000022",
+      "parent": {
+        "type": "page_id",
+        "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+      },
+      "created_time": "2022-03-01T19:05:00.000Z",
+      "last_edited_time": "2022-07-06T19:41:00.000Z",
+      "created_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "last_edited_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "to_do",
+      "to_do": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Finish Q3 goals",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Finish Q3 goals",
+            "href": null
+          }
+        ],
+        "checked": false,
+        "color": "default"
+      }
+    },
+    {
+      "object": "block",
+      "id": "b0000000-0000-4000-8000-000000000023",
+      "parent": {
+        "type": "page_id",
+        "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+      },
+      "created_time": "2022-03-01T19:05:00.000Z",
+      "last_edited_time": "2022-07-06T19:41:00.000Z",
+      "created_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "last_edited_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "has_children": false,
+      "archived": false,
+      "in_trash": false,
+      "type": "to_do",
+      "to_do": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Ship the importer",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Ship the importer",
+            "href": null
+          }
+        ],
+        "checked": true,
+        "color": "purple"
+      }
+    },
+    {
+      "object": "block",
+      "id": "b0000000-0000-4000-8000-000000000025",
+      "parent": {
+        "type": "page_id",
+        "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+      },
+      "created_time": "2022-03-01T19:05:00.000Z",
+      "last_edited_time": "2022-07-06T19:41:00.000Z",
+      "created_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "last_edited_by": {
+        "object": "user",
+        "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+      },
+      "has_children": true,
+      "archived": false,
+      "in_trash": false,
+      "type": "toggle",
+      "toggle": {
+        "rich_text": [
+          {
+            "type": "text",
+            "text": {
+              "content": "Additional project details",
+              "link": null
+            },
+            "annotations": {
+              "bold": false,
+              "italic": false,
+              "strikethrough": false,
+              "underline": false,
+              "code": false,
+              "color": "default"
+            },
+            "plain_text": "Additional project details",
+            "href": null
+          }
+        ],
+        "color": "default"
+      },
+      "children": [
+        {
+          "object": "block",
+          "id": "b0000000-0000-4000-8000-000000000024",
+          "parent": {
+            "type": "page_id",
+            "page_id": "59833787-2cf9-4fdf-8782-e53db20768a5"
+          },
+          "created_time": "2022-03-01T19:05:00.000Z",
+          "last_edited_time": "2022-07-06T19:41:00.000Z",
+          "created_by": {
+            "object": "user",
+            "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+          },
+          "last_edited_by": {
+            "object": "user",
+            "id": "ee5f0f84-409a-440f-983a-a5315961c6e4"
+          },
+          "has_children": false,
+          "archived": false,
+          "in_trash": false,
+          "type": "paragraph",
+          "paragraph": {
+            "rich_text": [
+              {
+                "type": "text",
+                "text": {
+                  "content": "Inside the toggle",
+                  "link": null
+                },
+                "annotations": {
+                  "bold": false,
+                  "italic": false,
+                  "strikethrough": false,
+                  "underline": false,
+                  "code": false,
+                  "color": "default"
+                },
+                "plain_text": "Inside the toggle",
+                "href": null
+              }
+            ],
+            "color": "default"
+          }
+        }
+      ]
+    }
+  ]
+}

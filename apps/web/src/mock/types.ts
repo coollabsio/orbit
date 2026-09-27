@@ -18,36 +18,6 @@ export interface Role {
   position: number
 }
 
-export interface Doc {
-  id: string
-  title: string
-  icon: string | null
-  /** Optional cover banner: image URL + focal point "x,y" in percent (null = centered). */
-  cover?: string | null
-  coverPos?: string | null
-  parentId: string | null
-  content: DocBlock[]
-  createdBy: string
-  updatedBy: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface DocBlock {
-  id: string
-  type: 'h1' | 'h2' | 'h3' | 'p' | 'bullet' | 'numbered' | 'quote' | 'code' | 'divider' | 'todo' | 'page' | 'embed' | 'image' | 'file'
-  /** For 'embed' blocks the text holds the URL. */
-  text: string
-  checked?: boolean
-  /** For 'page' blocks: the linked document id (reference-style page block). */
-  refId?: string
-  /** Media blocks ('image' / 'file'): source and file facts. */
-  url?: string
-  fileName?: string
-  fileSize?: number
-  mimeType?: string
-}
-
 export interface MailFolder {
   id: string
   name: string
@@ -193,7 +163,6 @@ export interface AppState {
   currentUserId: string
   users: User[]
   roles: Role[]
-  docs: Doc[]
   mailFolders: MailFolder[]
   mailThreads: MailThread[]
   chatCategories: ChatCategory[]

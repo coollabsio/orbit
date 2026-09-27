@@ -490,18 +490,46 @@ async fn stage_request(
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<StagedRequest, AttachmentApiError> {
-    let mut multipart = Multipart::from_request(request, state)
+    stage_single_file(&state.uploads, request, workspace_id, actor_id)
+        .await
+        .map_err(|failure| match failure {
+            StageFailure::TooLarge => AttachmentApiError::request_too_large(instance, request_id),
+            StageFailure::InvalidMultipart => {
+                AttachmentApiError::invalid_multipart(instance, request_id)
+            }
+            StageFailure::Upload(error) => AttachmentApiError::upload(error, instance, request_id),
+        })
+}
+
+/// Why a multipart upload request could not be staged.
+pub(crate) enum StageFailure {
+    /// The request or its file exceeded the transport limit.
+    TooLarge,
+    /// Not multipart, no `file` field, more than one file, or a malformed body.
+    InvalidMultipart,
+    Upload(UploadError),
+}
+
+/// Streams the single `file` field of a multipart request into a staged upload. Authorize the
+/// caller before calling this: it consumes the body. Other named fields are ignored.
+pub(crate) async fn stage_single_file(
+    uploads: &UploadService,
+    request: Request,
+    workspace_id: Id,
+    actor_id: Id,
+) -> Result<StagedRequest, StageFailure> {
+    let mut multipart = Multipart::from_request(request, &())
         .await
         .map_err(|error| {
             let length_limited = has_length_limit(&error);
             if length_limited || error.into_response().status() == StatusCode::PAYLOAD_TOO_LARGE {
-                AttachmentApiError::request_too_large(instance, request_id)
+                StageFailure::TooLarge
             } else {
-                AttachmentApiError::invalid_multipart(instance, request_id)
+                StageFailure::InvalidMultipart
             }
         })?;
     let mut received = 0_u64;
-    let mut staged_uploads = StagedRequest::new(state.uploads.clone());
+    let mut staged_uploads = StagedRequest::new(uploads.clone());
     loop {
         let field = match multipart.next_field().await {
             Ok(Some(field)) => field,
@@ -509,22 +537,22 @@ async fn stage_request(
             Err(error) => {
                 staged_uploads.discard().await;
                 return Err(if multipart_too_large(&error) {
-                    AttachmentApiError::request_too_large(instance, request_id)
+                    StageFailure::TooLarge
                 } else {
-                    AttachmentApiError::invalid_multipart(instance, request_id)
+                    StageFailure::InvalidMultipart
                 });
             }
         };
         if field.name() != Some("file") {
             if field.file_name().is_some() {
                 staged_uploads.discard().await;
-                return Err(AttachmentApiError::invalid_multipart(instance, request_id));
+                return Err(StageFailure::InvalidMultipart);
             }
             continue;
         }
         if !staged_uploads.is_empty() {
             staged_uploads.discard().await;
-            return Err(AttachmentApiError::invalid_multipart(instance, request_id));
+            return Err(StageFailure::InvalidMultipart);
         }
         let name = field.file_name().unwrap_or("attachment").to_owned();
         let reader = StreamReader::new(field.map_err(|error| {
@@ -534,22 +562,21 @@ async fn stage_request(
                 io::Error::new(io::ErrorKind::InvalidData, error.to_string())
             }
         }));
-        let staged = match state
-            .uploads
+        let staged = match uploads
             .stage_in_request(workspace_id, actor_id, &name, received, reader)
             .await
         {
             Ok(staged) => staged,
             Err(error) => {
                 staged_uploads.discard().await;
-                return Err(AttachmentApiError::upload(error, instance, request_id));
+                return Err(StageFailure::Upload(error));
             }
         };
         received = received.saturating_add(staged.size_bytes);
         staged_uploads.push(staged);
     }
     if staged_uploads.is_empty() {
-        return Err(AttachmentApiError::invalid_multipart(instance, request_id));
+        return Err(StageFailure::InvalidMultipart);
     }
     Ok(staged_uploads)
 }
@@ -569,7 +596,7 @@ fn has_length_limit(error: &(dyn StdError + 'static)) -> bool {
     false
 }
 
-struct StagedRequest {
+pub(crate) struct StagedRequest {
     uploads: Vec<orbit_platform::StagedUpload>,
     service: UploadService,
 }
@@ -590,15 +617,15 @@ impl StagedRequest {
         self.uploads.push(upload);
     }
 
-    fn upload(&self) -> &orbit_platform::StagedUpload {
+    pub(crate) fn upload(&self) -> &orbit_platform::StagedUpload {
         &self.uploads[0]
     }
 
-    fn complete(&mut self) {
+    pub(crate) fn complete(&mut self) {
         self.uploads.clear();
     }
 
-    async fn discard(&mut self) {
+    pub(crate) async fn discard(&mut self) {
         // Keep ownership in the guard across every await so cancellation falls through to Drop.
         for upload in self.uploads.clone() {
             let _ = self.service.discard(&upload).await;
@@ -767,10 +794,14 @@ async fn download_attachment(
         .download(&session, workspace_id, task_id, comment_id, attachment_id)
         .await
         .map_err(|error| AttachmentApiError::repository(error, &instance, request_id))?;
-    let content_type = HeaderValue::from_str(&download.metadata.content_type)
-        .map_err(|_| AttachmentApiError::internal(&instance, request_id))?;
-    let disposition = HeaderValue::from_str(&download.metadata.content_disposition)
-        .map_err(|_| AttachmentApiError::internal(&instance, request_id))?;
+    download_response(download).ok_or_else(|| AttachmentApiError::internal(&instance, request_id))
+}
+
+/// Streams a blob with the download safety headers (type, disposition, nosniff); `None` when
+/// the stored metadata cannot form header values.
+pub(crate) fn download_response(download: orbit_platform::BlobDownload) -> Option<Response> {
+    let content_type = HeaderValue::from_str(&download.metadata.content_type).ok()?;
+    let disposition = HeaderValue::from_str(&download.metadata.content_disposition).ok()?;
     let mut response = Response::new(Body::from_stream(ReaderStream::new(download.reader)));
     response.headers_mut().insert(CONTENT_TYPE, content_type);
     response
@@ -780,7 +811,7 @@ async fn download_attachment(
         "x-content-type-options",
         HeaderValue::from_static(download.metadata.x_content_type_options),
     );
-    Ok(response)
+    Some(response)
 }
 
 async fn authorize_task(

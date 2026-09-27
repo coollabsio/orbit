@@ -5,8 +5,6 @@ import type {
   ChatCategory,
   ChatMessage,
   CustomEmoji,
-  Doc,
-  DocBlock,
   MailThread,
   MailFolder,
   Role,
@@ -36,94 +34,6 @@ export function renameCustomEmoji(emojiId: string, name: string) {
 
 export function deleteCustomEmoji(emojiId: string) {
   updateState((s) => ({ ...s, customEmojis: s.customEmojis.filter((e) => e.id !== emojiId) }))
-}
-
-/* ---------- docs ---------- */
-
-export function updateDocTitle(docId: string, title: string) {
-  updateState((s) => ({
-    ...s,
-    docs: s.docs.map((d) =>
-      d.id === docId ? { ...d, title, updatedAt: now(), updatedBy: s.currentUserId } : d,
-    ),
-  }))
-}
-
-export function updateDocIcon(docId: string, icon: string | null) {
-  updateState((s) => ({
-    ...s,
-    docs: s.docs.map((d) => (d.id === docId ? { ...d, icon, updatedAt: now(), updatedBy: s.currentUserId } : d)),
-  }))
-}
-
-export function updateDocCover(docId: string, patch: { cover?: string | null; coverPos?: string | null }) {
-  updateState((s) => ({
-    ...s,
-    docs: s.docs.map((d) => (d.id === docId ? { ...d, ...patch, updatedAt: now(), updatedBy: s.currentUserId } : d)),
-  }))
-}
-
-export function updateDocContent(docId: string, content: DocBlock[]) {
-  updateState((s) => ({
-    ...s,
-    docs: s.docs.map((d) =>
-      d.id === docId ? { ...d, content, updatedAt: now(), updatedBy: s.currentUserId } : d,
-    ),
-  }))
-}
-
-export function createDoc(parentId: string | null): Doc {
-  const s = getState()
-  const doc: Doc = {
-    id: nextId('d'),
-    title: 'Untitled',
-    icon: null,
-    parentId,
-    content: [{ id: nextId('db'), type: 'p', text: '' }],
-    createdBy: s.currentUserId,
-    updatedBy: s.currentUserId,
-    createdAt: now(),
-    updatedAt: now(),
-  }
-  updateState((prev) => ({ ...prev, docs: [...prev.docs, doc] }))
-  return doc
-}
-
-/** Deletes a page and every page below it. */
-export function deleteDoc(docId: string) {
-  updateState((s) => {
-    const gone = new Set([docId])
-    let grew = true
-    while (grew) {
-      grew = false
-      for (const d of s.docs) {
-        if (d.parentId && gone.has(d.parentId) && !gone.has(d.id)) {
-          gone.add(d.id)
-          grew = true
-        }
-      }
-    }
-    return { ...s, docs: s.docs.filter((d) => !gone.has(d.id)) }
-  })
-}
-
-/** Moves a page under `parentId` (null = root), inserted before `beforeId` (null = last sibling). */
-export function moveDoc(docId: string, parentId: string | null, beforeId: string | null = null) {
-  updateState((s) => {
-    const doc = s.docs.find((d) => d.id === docId)
-    if (!doc || docId === parentId) return s
-    // never move a page into its own subtree
-    let cursor = parentId
-    while (cursor) {
-      if (cursor === docId) return s
-      cursor = s.docs.find((d) => d.id === cursor)?.parentId ?? null
-    }
-    const moved = { ...doc, parentId, updatedAt: now(), updatedBy: s.currentUserId }
-    const rest = s.docs.filter((d) => d.id !== docId)
-    const at = beforeId ? rest.findIndex((d) => d.id === beforeId) : -1
-    const docs = at === -1 ? [...rest, moved] : [...rest.slice(0, at), moved, ...rest.slice(at)]
-    return { ...s, docs }
-  })
 }
 
 /* ---------- mail ---------- */

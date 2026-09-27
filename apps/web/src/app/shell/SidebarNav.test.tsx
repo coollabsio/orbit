@@ -94,3 +94,21 @@ test('the views entry shows only while the user is in Tasks', () => {
     inside.unmount()
   }
 })
+
+test('docs are enabled in the sidebar and highlight on page routes', () => {
+  const view = render(
+    <MemoryRouter initialEntries={['/tasks']}>
+      <SidebarNav />
+      <Location />
+    </MemoryRouter>,
+  )
+
+  const docs = view.getByRole('link', { name: 'Docs' })
+  expect(docs.textContent).not.toContain('Coming soon')
+  fireEvent.click(docs)
+  expect(view.getByTestId('location').textContent).toBe('/docs')
+  expect(view.getByRole('link', { name: 'Docs' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  for (const label of ['Mail', 'Chat']) {
+    expect(view.queryByRole('link', { name: label })).toBeNull()
+  }
+})

@@ -986,8 +986,18 @@ fn download_metadata_allows_only_safe_images_inline_and_always_uses_nosniff() {
 #[tokio::test]
 async fn sniffed_media_types_drive_safe_inline_disposition() {
     let fixture = Fixture::new().await;
-    let cases: [(&str, &[u8], ContentDisposition); 6] = [
+    let cases: [(&str, &[u8], ContentDisposition); 8] = [
         ("photo.jpg", b"\xff\xd8\xffdata", ContentDisposition::Inline),
+        (
+            "photo.avif",
+            b"\x00\x00\x00\x1cftypavif\x00\x00\x00\x00avifmif1miaf",
+            ContentDisposition::Inline,
+        ),
+        (
+            "compatible.avif",
+            b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1avif",
+            ContentDisposition::Inline,
+        ),
         ("image.gif", b"GIF89adata", ContentDisposition::Inline),
         (
             "image.webp",

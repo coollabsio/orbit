@@ -7,6 +7,11 @@ export function AuthInput({ label, value, onChange, type = 'text', required = tr
   return <Label className="grid gap-1.5 text-[13px] text-muted-foreground"><span>{label}</span><Input type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} /></Label>
 }
 
+export function AuthBrand() {
+  // 22px keeps the 11-unit pixel logo on whole device pixels.
+  return <span className="flex items-center gap-2 text-[13px] font-bold tracking-[0.08em] text-primary uppercase"><img src="/logo.svg" alt="" className="size-[22px]" />Orbit</span>
+}
+
 export function AuthForm({ title, children, error, pending, submitLabel, onSubmit, footer }: { title: string; children: React.ReactNode; error: Error | null; pending: boolean; submitLabel: string; onSubmit: () => Promise<unknown>; footer?: React.ReactNode }) {
   return (
     <main className="grid min-h-screen place-items-center bg-background p-6"><form className="grid w-[min(100%,420px)] gap-[18px] rounded-xl border border-border bg-card p-8 shadow-lg" onSubmit={(event) => {
@@ -15,7 +20,7 @@ export function AuthForm({ title, children, error, pending, submitLabel, onSubmi
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
       void onSubmit().catch(() => undefined)
     }}>
-      <span className="text-[13px] font-bold tracking-[0.08em] text-primary uppercase">Orbit</span><h1 className="mt-4 mb-2">{title}</h1>
+      <AuthBrand /><h1 className="mt-4 mb-2">{title}</h1>
       <div className="grid gap-[14px]">{children}</div>
       {error ? <p className="text-[13px] text-destructive" role="alert">{error instanceof ApiProblem ? error.detail : 'The server could not complete the request.'}</p> : null}
       <Button type="submit" disabled={pending}>{pending ? 'Please wait…' : submitLabel}</Button>

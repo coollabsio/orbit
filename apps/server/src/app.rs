@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use axum::serve::ListenerExt;
 use base64::Engine;
 use orbit_platform::{
     BackupService, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry, HttpLimits,
@@ -20,18 +21,29 @@ use tokio_util::sync::CancellationToken;
 
 use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
+use crate::export_routes::ExportState;
+use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
 use crate::metrics::Metrics;
+use crate::notion::client::NotionClientConfig;
+use crate::notion::import::{NotionImportService, NotionImportSettings};
+use crate::page_comment_routes::PageCommentState;
+use crate::page_file_routes::PageFileState;
+use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
+use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
 use crate::router::{ApiRoutes, production_router};
 use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
 use crate::task_routes::TaskState;
+use crate::teamspace_routes::TeamspaceState;
 use crate::workspace_routes::WorkspaceState;
 
 const BACKGROUND_DRAIN: Duration = Duration::from_secs(30);
+/// Hourly: deletes tokens of Notion scans not started within 24 hours.
+const NOTION_CLEANUP: &str = "notion.cleanup";
 
 pub struct App {
     config: Config,
@@ -183,28 +195,6 @@ impl App {
             .await
             .map_err(|error| AppError::WritableStorage(error.to_string()))?;
 
-        let production_services = initialize_production_services(
-            &database,
-            Arc::clone(&workspaces),
-            integrity.clone(),
-            config.jobs.concurrency,
-        )
-        .await?;
-
-        let health = health_registry(&config, &database, &integrity);
-        if !health.readiness().await.ready {
-            return Err(AppError::Readiness);
-        }
-
-        let assets = StaticAssets::verified(crate::openapi::CONTRACT_ID, FRONTEND_REVISION)?;
-        let mut origin_policy = OriginPolicy::new(&config.http.public_origin);
-        if config.environment == orbit_platform::EnvironmentMode::Development {
-            origin_policy = origin_policy.allow_any_http_origin();
-        }
-        for proxy in &config.http.trusted_proxies {
-            origin_policy = origin_policy.trust_proxy(*proxy);
-        }
-        let metrics = Metrics::default();
         let app_key = config
             .secrets
             .get("app_key")
@@ -223,6 +213,39 @@ impl App {
                 })
             })
             .transpose()?;
+        let notion_imports = NotionImportService::new(
+            database.clone(),
+            PageFileRepository::new(database.clone(), attachment_state.uploads.clone()),
+            NotionImportSettings {
+                client: NotionClientConfig::default(),
+                app_key,
+                max_file_bytes: config.uploads.max_file_bytes,
+            },
+        );
+
+        let production_services = initialize_production_services(
+            &database,
+            Arc::clone(&workspaces),
+            integrity.clone(),
+            notion_imports.clone(),
+            config.jobs.concurrency,
+        )
+        .await?;
+
+        let health = health_registry(&config, &database, &integrity);
+        if !health.readiness().await.ready {
+            return Err(AppError::Readiness);
+        }
+
+        let assets = StaticAssets::verified(crate::openapi::CONTRACT_ID, FRONTEND_REVISION)?;
+        let mut origin_policy = OriginPolicy::new(&config.http.public_origin);
+        if config.environment == orbit_platform::EnvironmentMode::Development {
+            origin_policy = origin_policy.allow_any_http_origin();
+        }
+        for proxy in &config.http.trusted_proxies {
+            origin_policy = origin_policy.trust_proxy(*proxy);
+        }
+        let metrics = Metrics::default();
         let router = metrics.instrument(production_router(
             ApiRoutes {
                 auth,
@@ -234,6 +257,20 @@ impl App {
                     backups.clone(),
                 ),
                 tasks: TaskState::new(Arc::clone(&identity), cookie_mode),
+                pages: PageState::new(Arc::clone(&identity), cookie_mode),
+                page_comments: PageCommentState::new(Arc::clone(&identity), cookie_mode),
+                page_files: PageFileState::new(
+                    Arc::clone(&identity),
+                    attachment_state.uploads.clone(),
+                    cookie_mode,
+                ),
+                exports: ExportState::new(
+                    Arc::clone(&identity),
+                    attachment_state.uploads.clone(),
+                    cookie_mode,
+                    config.http.public_origin.clone(),
+                ),
+                teamspaces: TeamspaceState::new(Arc::clone(&identity), cookie_mode),
                 attachments: attachment_state.clone(),
                 integrations: IntegrationState::new(
                     Arc::new(ApiTokenRepository::new(database.clone())),
@@ -246,6 +283,7 @@ impl App {
                     config.environment == orbit_platform::EnvironmentMode::Development,
                     app_key,
                 ),
+                imports: ImportState::new(Arc::clone(&identity), notion_imports, cookie_mode),
             },
             health,
             assets,
@@ -370,6 +408,10 @@ impl App {
                 .map_err(|error| error.to_string())
         });
         let http_shutdown = CancellationToken::new();
+        // Small y-sync frames otherwise wait for Nagle + delayed ACK (~40 ms stalls).
+        let listener = listener.tap_io(|stream| {
+            let _ = stream.set_nodelay(true);
+        });
         let server = axum::serve(
             listener,
             self.router
@@ -410,6 +452,10 @@ impl App {
         if tokio::time::timeout(BACKGROUND_DRAIN, drain).await.is_err() {
             abort_services(&mut services);
             return Err(AppError::DrainTimeout);
+        }
+        // Open documents: write and project every pending edit, close their sockets (1012).
+        if let Some(hub) = crate::collab::CollabHub::existing(&self.database) {
+            hub.shutdown().await;
         }
         http_result
             .expect("HTTP server result is recorded during drain")
@@ -560,6 +606,7 @@ async fn initialize_production_services(
     database: &Database,
     workspaces: Arc<WorkspaceRepository>,
     integrity: IntegrityService,
+    notion_imports: NotionImportService,
     concurrency: usize,
 ) -> Result<ProductionServices, AppError> {
     let store = JobStore::new(database.clone());
@@ -592,6 +639,20 @@ async fn initialize_production_services(
                 }
             })
         })
+        .and_then(|worker| {
+            let cleanup = notion_imports.clone();
+            worker.with_handler(maintenance_kind(NOTION_CLEANUP), move |_| {
+                let service = cleanup.clone();
+                async move {
+                    service
+                        .expire_stale(TimestampMillis::now())
+                        .await
+                        .map(|_| ())
+                        .map_err(|_| JobError::Retryable("Notion import cleanup failed".to_owned()))
+                }
+            })
+        })
+        .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
         .map_err(|error| AppError::ProductionServices(error.to_string()))?;
 
     let now = database
@@ -619,6 +680,14 @@ async fn initialize_production_services(
         &scheduler,
         "integrity.weekly",
         Duration::from_secs(7 * 24 * 60 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        database,
+        &scheduler,
+        NOTION_CLEANUP,
+        Duration::from_secs(60 * 60),
         now,
     )
     .await?;

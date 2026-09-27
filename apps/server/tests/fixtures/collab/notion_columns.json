@@ -1,0 +1,181 @@
+{
+ "blocks": [
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Before the columns",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000001",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Left",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000002",
+   "props": {
+    "backgroundColor": "default",
+    "isToggleable": false,
+    "level": 2,
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "heading"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Left content",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000003",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Right item",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000004",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "bulletListItem"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "After the columns",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000005",
+   "props": {
+    "backgroundColor": "default",
+    "textAlignment": "left",
+    "textColor": "default"
+   },
+   "type": "paragraph"
+  }
+ ],
+ "y_update": "ASsBAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAwlwYXJhZ3JhcGgHAAECBgQAAQMSQmVmb3JlIHRoZSBjb2x1bW5zKAABAg9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABAgl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABAg10ZXh0QWxpZ25tZW50AXcEbGVmdCgAAQECaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDGHAQEDDmJsb2NrQ29udGFpbmVyBwABGgMHaGVhZGluZwcAARsGBAABHARMZWZ0KAABGw9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABGwl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABGw10ZXh0QWxpZ25tZW50AXcEbGVmdCgAARsFbGV2ZWwBfQIoAAEbDGlzVG9nZ2xlYWJsZQF5KAABGgJpZAF3JDAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMocBGgMOYmxvY2tDb250YWluZXIHAAEnAwlwYXJhZ3JhcGgHAAEoBgQAASkMTGVmdCBjb250ZW50KAABKA9iYWNrZ3JvdW5kQ29sb3IBdwdkZWZhdWx0KAABKAl0ZXh0Q29sb3IBdwdkZWZhdWx0KAABKA10ZXh0QWxpZ25tZW50AXcEbGVmdCgAAScCaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDOHAScDDmJsb2NrQ29udGFpbmVyBwABOgMOYnVsbGV0TGlzdEl0ZW0HAAE7BgQAATwKUmlnaHQgaXRlbSgAATsPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAATsJdGV4dENvbG9yAXcHZGVmYXVsdCgAATsNdGV4dEFsaWdubWVudAF3BGxlZnQoAAE6AmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA0hwE6Aw5ibG9ja0NvbnRhaW5lcgcAAUsDCXBhcmFncmFwaAcAAUwGBAABTRFBZnRlciB0aGUgY29sdW1ucygAAUwPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAUwJdGV4dENvbG9yAXcHZGVmYXVsdCgAAUwNdGV4dEFsaWdubWVudAF3BGxlZnQoAAFLAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA1AA==",
+ "expected": [
+  {
+   "id": "00000000-0000-4000-8000-000000000001",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Before the columns",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000002",
+   "type": "heading",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left",
+    "level": 2,
+    "isToggleable": false
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Left",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000003",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Left content",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000004",
+   "type": "bulletListItem",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Right item",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000005",
+   "type": "paragraph",
+   "props": {
+    "backgroundColor": "default",
+    "textColor": "default",
+    "textAlignment": "left"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "After the columns",
+     "styles": {}
+    }
+   ],
+   "children": []
+  }
+ ]
+}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
@@ -20,12 +21,15 @@ import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import {
+  prefetchTaskDetail,
   useCommentAttachments,
   useCreateTask,
   useTask,
   useTaskActivity,
   useTaskAttachments,
   useTaskComments,
+  useTaskGithubLinks,
+  useTaskRelations,
 } from '@/features/tasks/api/tasks'
 import { TaskBoard } from '@/features/tasks/components/TaskBoard'
 import { TaskDetail } from '@/features/tasks/components/TaskDetail'
@@ -55,6 +59,7 @@ import { validateFilterOnServer } from '@/features/views/validateFilter'
 import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
+const OPEN_WAIT_MS = 300
 
 const OPTION =
   `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[active]:bg-accent data-[active]:font-medium`
@@ -88,6 +93,7 @@ function WorkspaceTasksPage() {
   const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
   const createTask = useCreateTask(workspace.id)
+  const queryClient = useQueryClient()
   const [showNewProject, setShowNewProject] = useState(false)
   const [pxPerDay, setPxPerDay] = useTimelineZoom()
   const timelineRef = useRef<TimelineHandle>(null)
@@ -140,6 +146,16 @@ function WorkspaceTasksPage() {
   const activityQuery = useTaskActivity(workspace.id, taskId)
   const attachmentsQuery = useTaskAttachments(workspace.id, taskId)
   const commentAttachments = useCommentAttachments(workspace.id, taskId, commentsQuery.data ?? [])
+  // TaskDetail reads these from the same cache; waiting here keeps the first paint stable
+  // (GitHub links decide whether the title and description are editable)
+  const githubLinksQuery = useTaskGithubLinks(workspace.id, taskId)
+  const relationsQuery = useTaskRelations(workspace.id, taskId)
+  const detailPending = detailQuery.isPending || activityQuery.isPending || commentsQuery.isPending || attachmentsQuery.isPending
+    || commentAttachments.isPending || githubLinksQuery.isPending || relationsQuery.isPending
+  // wait only for the first paint: a new comment adds a pending attachments query, which must not blank the open task
+  const [shownTaskId, setShownTaskId] = useState<string>()
+  if (taskId && !detailPending && shownTaskId !== taskId) setShownTaskId(taskId)
+  const detailLoading = detailPending && shownTaskId !== taskId
 
   const records = tasksQuery.tasks
   const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
@@ -201,7 +217,15 @@ function WorkspaceTasksPage() {
     if (taskId || viewId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
     else setSearchParams(next, { replace: true })
   }
-  const openTask = (id: string) => navigate(`${basePath}/${id}${detailSearchSuffix}`, { state: originState })
+  // keep the current view on screen until the task can render complete (at most OPEN_WAIT_MS)
+  const opening = useRef<string | null>(null)
+  const openTask = (id: string) => {
+    opening.current = id
+    const wait = new Promise((resolve) => setTimeout(resolve, OPEN_WAIT_MS))
+    void Promise.race([prefetchTaskDetail(queryClient, workspace.id, id), wait]).then(() => {
+      if (opening.current === id) navigate(`${basePath}/${id}${detailSearchSuffix}`, { state: originState })
+    })
+  }
   const closeTask = () => navigate(redirect ?? `${basePath}${closeSearchSuffix}`)
 
   useEffect(() => {
@@ -285,7 +309,10 @@ function WorkspaceTasksPage() {
   // `viewState.isLoading` too: after a page or view switch the disabled task query still shows the previous
   // page's tasks as placeholder data, which must not render under the new page's title and placeholder display.
   // On a list, the task query loads and fails inside the list area, so the filter stays reachable to fix it.
-  if (viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending || (taskId && (tasksQuery.isLoading || detailQuery.isPending || activityQuery.isPending))) {
+  const pending = viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending
+  // a task opens straight from a blank canvas: a loading message in between reads as a flicker
+  if (taskId && (pending || tasksQuery.isLoading || detailLoading)) return <div className="flex-1 bg-background" />
+  if (pending) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
   if (detailQuery.isError) {
@@ -321,9 +348,9 @@ function WorkspaceTasksPage() {
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
-                      <Button type="button" variant="ghost" className="h-auto min-w-0 gap-[7px] rounded-md border-0 px-[7px] py-[5px] font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground dark:hover:bg-accent" aria-label="Select project">
+                      <Button type="button" variant="ghost" className="h-auto min-w-0 gap-[7px] rounded-md border-0 px-[7px] py-[5px] font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground max-[899px]:max-w-[30vw] dark:hover:bg-accent" aria-label="Select project">
                         {activeProject ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: activeProject.color }} /> : null}
-                        <span>{activeProject?.name ?? 'All projects'}</span><ChevronDown className="size-3.5" />
+                        <span className="truncate">{activeProject?.name ?? 'All projects'}</span><ChevronDown className="size-3.5 shrink-0" />
                       </Button>
                     }
                   />
@@ -340,8 +367,8 @@ function WorkspaceTasksPage() {
                     <DropdownMenuItem className={OPTION} onClick={() => setShowNewProject(true)}><Plus className="size-3.5" />New project</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <span className="truncate text-[13px] font-semibold text-foreground">{viewTitle}</span>
-                <div className="flex-1" />
+                <span className="truncate text-[13px] font-semibold text-foreground max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-0">{viewTitle}</span>
+                <div className="flex-1 max-[899px]:hidden" />
               </>
             )}
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}

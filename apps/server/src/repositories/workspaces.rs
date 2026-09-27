@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use orbit_domain::{WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
-    AttachmentMutationCoordinator, BlobStore, BlobStoreError, Database, Id, IssuedSession, Job,
-    JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore, RecurringSchedule,
-    ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig, WorkerError,
-    generate_opaque_token, normalize_email,
+    AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
+    IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
+    RecurringSchedule, ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig,
+    WorkerError, generate_opaque_token, normalize_email,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -17,8 +17,10 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
+use super::page_versions;
 use super::task_relations;
 use super::tasks::TaskError;
+use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditEvent, AuditOutcome};
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
@@ -48,6 +50,9 @@ pub struct MemberRecord {
     pub version: u64,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    /// Set while the user's account is suspended (they cannot sign in or be notified).
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub suspended_at: Option<TimestampMillis>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -269,6 +274,7 @@ impl WorkspaceRepository {
         .execute(&mut *transaction)
         .await?;
         insert_default_project(&mut transaction, &defaults, now).await?;
+        insert_default_teamspace(&mut transaction, id, actor_id, now).await?;
         audit::record(
             &mut transaction,
             id,
@@ -393,7 +399,8 @@ impl WorkspaceRepository {
         self.get(workspace_id, actor_id).await?;
         let rows = sqlx::query(
             "SELECT memberships.id, memberships.user_id, memberships.role, memberships.version, \
-             memberships.created_at, users.email, users.display_name FROM memberships \
+             memberships.created_at, users.email, users.display_name, users.suspended_at \
+             FROM memberships \
              JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = ? \
              AND (? IS NULL OR memberships.id > ?) ORDER BY memberships.id LIMIT ?",
         )
@@ -1164,6 +1171,31 @@ impl WorkspaceRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
+        let result = self
+            .remove_member_unchecked(
+                workspace_id,
+                membership_id,
+                actor_id,
+                expected_version,
+                request_id,
+                now,
+            )
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn remove_member_unchecked(
+        &self,
+        workspace_id: Id,
+        membership_id: Id,
+        actor_id: Id,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
         let (target, current_version) =
@@ -1339,6 +1371,31 @@ impl WorkspaceRepository {
     }
 
     pub async fn set_deleted(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        deleted: bool,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        let result = self
+            .set_deleted_unchecked(
+                workspace_id,
+                actor_id,
+                deleted,
+                expected_version,
+                request_id,
+                now,
+            )
+            .await;
+        // Open co-editing sockets re-check their access right away.
+        crate::collab::CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn set_deleted_unchecked(
         &self,
         workspace_id: Id,
         actor_id: Id,
@@ -1660,12 +1717,11 @@ impl WorkspaceRepository {
                 .await?;
             for blob in blobs {
                 let blob_id: String = blob.get("id");
-                let references: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?",
-                )
-                .bind(&blob_id)
-                .fetch_one(&mut *transaction)
-                .await?;
+                let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                    .bind(&blob_id)
+                    .bind(&blob_id)
+                    .fetch_one(&mut *transaction)
+                    .await?;
                 if references == 0 {
                     sqlx::query(
                         "INSERT OR IGNORE INTO attachment_file_deletions \
@@ -1685,6 +1741,20 @@ impl WorkspaceRepository {
                 }
             }
         }
+        // A trashed subtree shares one deleted_at, so it expires together; pages.parent_id is
+        // ON DELETE SET NULL, so the delete order inside the batch does not matter.
+        sqlx::query(
+            "DELETE FROM pages WHERE deleted_at <= ? AND workspace_id IN \
+             (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
+        )
+        .bind(
+            now.as_millis()
+                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+        )
+        .execute(&mut *transaction)
+        .await?;
+        // Page history: all of the last 30 days, then one per day up to a year, newest 20 always.
+        page_versions::thin_versions(&mut transaction, now).await?;
         sqlx::query(
             "DELETE FROM projects WHERE deleted_at <= ? AND workspace_id IN \
              (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
@@ -1713,14 +1783,20 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
+            // Page files hold their blobs with ON DELETE RESTRICT, so they go before the blobs.
+            attachment_references_purged +=
+                sqlx::query("DELETE FROM page_files WHERE workspace_id = ?")
+                    .bind(&workspace_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
             for row in blob_rows {
                 let blob_id: String = row.get("id");
-                let references: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?",
-                )
-                .bind(&blob_id)
-                .fetch_one(&mut *transaction)
-                .await?;
+                let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                    .bind(&blob_id)
+                    .bind(&blob_id)
+                    .fetch_one(&mut *transaction)
+                    .await?;
                 if references == 0 {
                     sqlx::query(
                         "INSERT OR IGNORE INTO attachment_file_deletions \
@@ -1759,6 +1835,16 @@ impl WorkspaceRepository {
             // Tasks go before the workspace cascade: tasks.status_id is ON DELETE RESTRICT, and
             // SQLite may cascade into task_statuses first (it was rebuilt after tasks in 0021).
             sqlx::query("DELETE FROM tasks WHERE workspace_id = ?")
+                .bind(&workspace_id)
+                .execute(&mut *transaction)
+                .await?;
+            // Pages before teamspaces (pages.teamspace_id cascades), teamspaces before the
+            // workspace, so no cascade order is left to SQLite.
+            sqlx::query("DELETE FROM pages WHERE workspace_id = ?")
+                .bind(&workspace_id)
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query("DELETE FROM teamspaces WHERE workspace_id = ?")
                 .bind(&workspace_id)
                 .execute(&mut *transaction)
                 .await?;
@@ -1969,6 +2055,9 @@ fn member_from_row(row: sqlx::sqlite::SqliteRow) -> Result<MemberRecord, Workspa
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         created_at: TimestampMillis::from_millis(row.get("created_at")),
+        suspended_at: row
+            .get::<Option<i64>, _>("suspended_at")
+            .map(TimestampMillis::from_millis),
     })
 }
 
@@ -2012,7 +2101,7 @@ async fn require_manager(
     Ok(())
 }
 
-async fn require_role(
+pub(super) async fn require_role(
     transaction: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,

@@ -11,4 +11,6 @@ export interface User {
   title: string
   roleIds: string[]
   version: number
+  /** The account is suspended: it cannot sign in, be mentioned or be notified. */
+  suspended?: boolean
 }

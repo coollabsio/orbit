@@ -1,0 +1,75 @@
+{
+ "blocks": [
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Callout in synced block",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000001",
+   "props": {
+    "backgroundColor": "default",
+    "emoji": "⭐",
+    "textColor": "default"
+   },
+   "type": "callout"
+  },
+  {
+   "children": [],
+   "content": [
+    {
+     "styles": {},
+     "text": "Callout in synced block",
+     "type": "text"
+    }
+   ],
+   "id": "00000000-0000-4000-8000-000000000002",
+   "props": {
+    "backgroundColor": "default",
+    "emoji": "⭐",
+    "textColor": "default"
+   },
+   "type": "callout"
+  }
+ ],
+ "y_update": "AREBAAcBC3Byb3NlbWlycm9yAwpibG9ja0dyb3VwBwABAAMOYmxvY2tDb250YWluZXIHAAEBAwdjYWxsb3V0BwABAgYEAAEDF0NhbGxvdXQgaW4gc3luY2VkIGJsb2NrKAABAgVlbW9qaQF3A+KtkCgAAQIPYmFja2dyb3VuZENvbG9yAXcHZGVmYXVsdCgAAQIJdGV4dENvbG9yAXcHZGVmYXVsdCgAAQECaWQBdyQwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDGHAQEDDmJsb2NrQ29udGFpbmVyBwABHwMHY2FsbG91dAcAASAGBAABIRdDYWxsb3V0IGluIHN5bmNlZCBibG9jaygAASAFZW1vamkBdwPirZAoAAEgD2JhY2tncm91bmRDb2xvcgF3B2RlZmF1bHQoAAEgCXRleHRDb2xvcgF3B2RlZmF1bHQoAAEfAmlkAXckMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyAA==",
+ "expected": [
+  {
+   "id": "00000000-0000-4000-8000-000000000001",
+   "type": "callout",
+   "props": {
+    "emoji": "⭐",
+    "backgroundColor": "default",
+    "textColor": "default"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Callout in synced block",
+     "styles": {}
+    }
+   ],
+   "children": []
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000002",
+   "type": "callout",
+   "props": {
+    "emoji": "⭐",
+    "backgroundColor": "default",
+    "textColor": "default"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Callout in synced block",
+     "styles": {}
+    }
+   ],
+   "children": []
+  }
+ ]
+}

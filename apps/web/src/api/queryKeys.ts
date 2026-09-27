@@ -38,6 +38,30 @@ export const queryKeys = {
     [...workspace(workspaceId), 'view-preferences', pageKey] as const,
   /** Under `tasks.all`, so every task mutation's existing invalidation and optimistic patch reaches it. */
   taskQuery: (workspaceId: string, body: object) => [...workspace(workspaceId), 'tasks', 'query', body] as const,
+  teamspaces: (workspaceId: string) => [...workspace(workspaceId), 'teamspaces'] as const,
+  pages: {
+    all: (workspaceId: string) => [...workspace(workspaceId), 'pages'] as const,
+    tree: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'tree'] as const,
+    detail: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'detail', pageId] as const,
+    trash: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'trash'] as const,
+    search: (workspaceId: string, query: string) => [...workspace(workspaceId), 'pages', 'search', query] as const,
+    favorites: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'favorites'] as const,
+    recent: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'recent'] as const,
+    versions: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'versions', pageId] as const,
+    threads: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'threads', pageId] as const,
+    version: (workspaceId: string, pageId: string, versionId: string) =>
+      [...workspace(workspaceId), 'pages', 'versions', pageId, versionId] as const,
+  },
+  /**
+   * Deliberately outside the workspace prefix: realtime events invalidate that whole prefix, and an import creates
+   * thousands of pages. The import views poll these keys instead of refetching a (large) scan tree on every event.
+   */
+  notionImports: {
+    all: (workspaceId: string) => ['notion-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['notion-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'tree', importId] as const,
+  },
   tasks: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'tasks'] as const,
     list: (workspaceId: string, filters: TaskFilters = {}) =>

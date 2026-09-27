@@ -3,7 +3,16 @@
 ## Migration history
 - Do not squash or edit a migration after a local database has applied it. Orbit checks both version and checksum at startup. If an uncommitted migration must be consolidated, compare the old and new schemas and back up the database before reconciling its migration records; do not reset user data to make the dev server start.
 - SQLite table rebuilds (to change a CHECK): the runner holds a transaction with `foreign_keys=ON`, so `PRAGMA foreign_keys=OFF` is a no-op and `ALTER TABLE … RENAME` fails on triggers that name the table. Copy rows aside, `DROP`, re-`CREATE` under the same name, re-insert under `PRAGMA defer_foreign_keys=ON`, then recreate the table's own indexes and triggers (see `0021`).
+- `scripts/dev-server-watch.sh` reruns `migrate run --seed` against `data/orbit.sqlite` on every source change, so a new migration is applied to the dev DB (and its checksum frozen) the moment it compiles. Get the SQL right in tests (`embedded_through`) before any `cargo build` of the server while the watcher runs (0023 was applied this way on 2026-09-25).
+- A new migration also needs `SUPPORTED_SCHEMA_VERSION` in `crates/platform/src/backup.rs` bumped (restore refuses newer snapshots); grepping the tests for the old version number does not find it (0026, 2026-09-25).
 - A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
+
+## SQLite 3.46.0 (bundled by sqlx 0.8) FTS5 integrity false positive
+- `PRAGMA integrity_check` reports "malformed inverted index for FTS5 table …" after a row of an FTS5 table is UPDATEd twice
+  (or after `'rebuild'`), although queries are right and FTS5's own `INSERT INTO t(t) VALUES('integrity-check')` passes
+  (Python's SQLite 3.46.1 also says ok). It made the weekly integrity job (which runs at App start in tests) stop the
+  server once `page_search` rows were updated. `IntegrityService::full` now confirms such findings with FTS5's own check
+  (2026-09-25). Check new virtual tables against `integrity_check` with the bundled SQLite, not the system one.
 
 ## API retry load
 - A failed `invalidateQueries` call can refetch many active queries. Do not retry it on a short fixed UI timer; use bounded backoff so an API error cannot exhaust the shared rate limit.
@@ -88,3 +97,42 @@
   then `getBoundingClientRect()` on before/after variants.
 - **Build the class string with the real `cn()`** (import it from node_modules). Hand-concatenating base + override classes
   lets both survive, and the stylesheet order decides the winner, so the probe silently disagrees with the app.
+
+## Production CSP blocks injected `<style>` tags
+- Production CSP is `style-src 'self'` (`crates/platform/src/http/security.rs`). Libraries that inject a `<style>` tag at runtime (Tiptap/BlockNote `injectCSS`, sonner toasts) break silently in production but work in dev (Vite serves no CSP). Sonner: import `sonner/dist/styles.css` in `components/ui/sonner.tsx`. Verify against the Rust-served build (`include_dir!` embeds `apps/web/dist` at compile time: `bun run build`, then rebuild/run the server) and count `[data-…]` rules in `document.styleSheets`. Turn the injection off (`_tiptapOptions: { injectCSS: false }`) and copy the CSS into our stylesheet. `img-src` is `'self' data: blob: https:` since 2026-09-25: external https images (image blocks, cover URLs) load, plain http ones do not. Tradeoff: the image host sees every viewer's IP and user agent (tracking pixels work); uploaded page files stay same-origin.
+
+## Bun + happy-dom: never let `expect(domNode)` fail inside `waitFor`
+- A failing `expect(node).toBeNull()` makes Bun format the whole happy-dom node (it links to the window) for the error. It costs ~40 ms alone and ~750 ms late in the full run, and `waitFor` repeats it on every poll, so tests time out only in the full suite (SessionsPage, 2026-09-25).
+- Use `waitForAbsence(() => view.queryBy…)` from `src/test/waitForAbsence.ts`, or throw a plain `Error` in the callback.
+
+## Parallel agents: format only your own files
+- `cargo fmt --all` rewrote another agent's in-progress files under `apps/server/src/notion/` (2026-09-25). While someone
+  else works in the tree, run `cargo fmt --check` and `rustfmt` on your own files instead of formatting the workspace.
+
+## Base UI Input in tests and dark-mode checkbox states
+- `fireEvent.change` and `userEvent.clear` do not reach a *controlled* Base UI `Input` / `InputGroupInput` under happy-dom
+  (the DOM value changes, React state does not). Use `userEvent.type(input, text)` and clear with backspaces
+  (`'{Backspace}'.repeat(value.length)`) (Notion import pane, 2026-09-25).
+- shadcn checkbox fills need a `dark:` twin (`dark:data-checked:bg-primary`) to beat `dark:bg-input/30`; a new state such as
+  `data-indeterminate` needs `dark:data-indeterminate:bg-primary` too, or it renders as an outline in dark mode only.
+
+
+## Realtime refresh pauses while a draft is focused
+- `useWorkspaceEvents` skips query invalidation while an input/textarea/contenteditable is focused (protects form drafts).
+  Surfaces that are focused almost all the time must merge remote updates themselves and opt out with
+  `data-realtime-safe` (Docs `DocEditor`), or they never refresh while someone types — the other user's title change
+  never arrived and the next save hit a 409 (2026-09-25). Portalled dialogs/popovers stay outside the marker.
+
+## Print CSS: cascade layers and BlockNote's `.dark`
+- Unlayered `!important` loses to layered `!important` (important order reverses layer priority). Tailwind `…!` utilities
+  and the base `max-md:text-[16px]!` input rule beat any plain `@media print { … !important }` override; the page title
+  printed at 16px because A4 print width is under `md`. Put such overrides in `@layer base` with a more specific
+  selector (docs export, 2026-09-25).
+- BlockNote puts the scheme class (`dark`) on its own containers, so `.dark { --foreground … }` re-applies there: a
+  light-theme override on `<html>` alone left white editor text on white paper. Override `html.x, html.x .dark`.
+
+## Opening detail views without flicker
+- Do not show a "Loading…" boundary between a list and a detail view, and do not let detail sections arrive one by one (a late query that toggles read-only/editable remounts the fields). Put the detail queries in shared `queryOptions` factories, prefetch them all on open and navigate when they resolve (short cap, e.g. 300ms); on a direct URL load render a blank canvas until every detail query settles (`features/tasks/api/tasks.ts` `prefetchTaskDetail`, 2026-09-26).
+
+## Brand mark
+- The logo is the pink pixel "O" in `apps/web/public/logo.svg` (11x11 grid, pink `#f2458f`, shadow `#742f4d` 1 unit down-right). `favicon.svg`, the PNG app icons and the launch-video `OrbitMark` copy it; change them together. The UI `--primary`/`--sidebar-primary` tokens (both themes) use the same pink, `oklch(0.659 0.216 358.989)`, with white foreground. Show it at multiples of 11px (22, 44…) so pixels stay crisp.

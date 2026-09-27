@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
-import { useWorkspaceEvents } from './useWorkspaceEvents'
+import { focusedDraftBlocksRefresh, REALTIME_SAFE_ATTRIBUTE, useWorkspaceEvents } from './useWorkspaceEvents'
 
 test('failed WebSocket handshakes do not repeatedly revalidate HTTP queries', () => {
   const originalWebSocket = globalThis.WebSocket
@@ -222,5 +222,30 @@ test('a batch of only saved-view changes refreshes just the views; anything else
     input.remove()
     globalThis.WebSocket = originalWebSocket
     client.clear()
+  }
+})
+
+test('a focused draft pauses refreshes unless it sits inside a realtime-safe surface', () => {
+  const form = document.createElement('form')
+  const input = document.createElement('input')
+  form.append(input)
+  const safe = document.createElement('section')
+  safe.setAttribute(REALTIME_SAFE_ATTRIBUTE, '')
+  const title = document.createElement('input')
+  const editor = document.createElement('div')
+  editor.setAttribute('contenteditable', 'true')
+  safe.append(title, editor)
+  const button = document.createElement('button')
+  document.body.append(form, safe, button)
+  try {
+    expect(focusedDraftBlocksRefresh(input)).toBe(true)
+    expect(focusedDraftBlocksRefresh(title)).toBe(false)
+    expect(focusedDraftBlocksRefresh(editor)).toBe(false)
+    expect(focusedDraftBlocksRefresh(button)).toBe(false)
+    expect(focusedDraftBlocksRefresh(null)).toBe(false)
+  } finally {
+    form.remove()
+    safe.remove()
+    button.remove()
   }
 })

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="4 4 92 92">
+  <!-- Orbit planet mark without glows (favicons, small sizes). Same geometry as orbit-planet-mark.svg. -->
+  <defs>
+    <linearGradient id="planet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff8ac0"/>
+      <stop offset="55%" stop-color="#f2458f"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <mask id="ring-behind" maskUnits="userSpaceOnUse" x="-10" y="-10" width="120" height="120">
+      <rect x="-10" y="-10" width="120" height="120" fill="#fff"/>
+      <path d="M26 50A24 24 0 0 1 74 50Z" fill="#000"/>
+    </mask>
+  </defs>
+  <g transform="rotate(-18 50 50)">
+    <circle cx="50" cy="50" r="24" fill="url(#planet)"/>
+    <!-- one closed ring, hidden where the top half of the planet covers it (no seams) -->
+    <ellipse cx="50" cy="50" rx="46" ry="16" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="3" mask="url(#ring-behind)"/>
+    <circle cx="22.93" cy="62.94" r="4.2" fill="#fff"/>
+  </g>
+</svg>

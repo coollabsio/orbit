@@ -4,7 +4,9 @@
 
 Milestone one persists setup, login and recovery, sessions, workspaces, memberships, invitations, projects, statuses, labels, tasks, comments, attachments, trash, and audit records. Those flows use the generated `/api/v1` client and never substitute mock records after an error.
 
-Home, Docs, Mail, Chat, direct messages, Inbox, Profile, webhooks, custom emoji administration, typing, and realtime behavior still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP, mailboxes, WebSockets, presence, and typing transport are follow-up milestones.
+Docs pages persist too (tree, content, trash, search; see Docs below).
+
+Home, Mail, Chat, direct messages, Inbox, Profile, webhooks, custom emoji administration, typing, and realtime behavior still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP, mailboxes, WebSockets, presence, and typing transport are follow-up milestones.
 
 ## Global shell
 
@@ -55,20 +57,301 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 
 ## Docs
 
-Core files: `DocsPage.tsx`, `components/DocTree.tsx`, `components/DocEditor.tsx`, `components/BlockEditor.tsx`.
+Core files: `features/docs/pages/DocsPage.tsx`, `pages/PageTrashPane.tsx`, `components/DocTree.tsx`, `components/DocEditor.tsx`,
+`editor/PageEditor.tsx` (BlockNote), `api/pages.ts` + `api/teamspaces.ts` + `api/favorites.ts` (query hooks), `autosave.ts`,
+`pageTree.ts` (pure tree and space helpers).
 
-This feature is mock-backed and does not persist across a reload.
+Pages persist in SQLite through `/api/v1/workspaces/{id}/pages`, teamspaces through `/api/v1/workspaces/{id}/teamspaces`,
+favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DELETE) and `/pages/favorites/{page_id}/move`.
 
-- Hierarchical page tree with create, delete confirmation, deep subtree deletion, reorder, and nesting drag-and-drop.
-- Navigable page breadcrumbs.
-- Page emoji icons use the shared chat emoji picker, including custom emoji.
-- Cover banners support upload/URL, change/remove, and focal-point repositioning.
-- Blocks render markdown while idle and become editable on click.
-- Slash menu includes text headings, lists, todo, quote, code, divider, page creation/linking, embed, image, and file.
-- Mentions reuse chat autocomplete but omit the right-side handle column.
-- Pasted/dropped files create media blocks.
-- Image blocks fill the editor column and open a lightbox.
-- Bare GitHub issue/PR/repository links render compact GitHub-style references through the shared markdown renderer.
+- Spaces: every page lives in a teamspace or in the caller's Private space (a page's space is its root's; sub-pages follow).
+  Every member sees and edits all teamspaces; private pages are visible only to their owner (tree, search, trash, links).
+  Each workspace starts with a default teamspace "General"; new root pages go there unless created in another space.
+  The default is derived: the first teamspace by position (with several teamspaces its header shows a small "Default"
+  label with a tooltip), so moving another teamspace to the top makes it the default.
+- Sidebar: 48px "Documents" header (its "+" creates a page in the default teamspace), a "Teamspaces" label with "+" (create
+  dialog), one collapsible section per teamspace (hover "+" adds a page there; "…" menu: Rename inline, Change icon (emoji
+  picker anchored to the header; "Remove" returns to the default people glyph), Move up / Move down, Delete teamspace for
+  owners/admins only — refused with a toast while it has pages or is the last one), then the Private section (lock, hover "+").
+  Empty sections show "No pages inside". Collapsed sections persist per workspace in localStorage.
+- Teamspace order: drag a teamspace header before/after another one (primary line indicator, the dragged header stays
+  mounted and faded; the drag carries `application/x-orbit-teamspace`, so page rows and the Private/Favorites headers ignore
+  it, and page drags onto a header still move the page into that space). `POST /teamspaces/{id}/move`
+  `{ expected_version, position }` → the renumbered list (any member, audited `teamspace.moved`, only the moved teamspace's
+  version changes). Optimistic with rollback and an error toast.
+- Auto-reveal: whenever the active page changes (navigation, search, links, favorites, imports) the sidebar opens the
+  collapsed section of its space and its collapsed ancestor rows (it never closes anything), then scrolls its row into view
+  (`block: 'nearest'`). Collapsing while staying on the page sticks; Favorites rows keep their own expansion.
+- Favorites (Notion-style): per user and workspace, nobody else sees them, not audited. A "Favorites" section (star label) sits
+  above Teamspaces and is hidden while empty; it lists favorite pages in the user's order as normal rows (icon, title, expandable
+  sub-pages with their own expand state, active highlight); the pages stay in their own space too. Toggle with the star button in
+  the page header (filled when favorited, `aria-pressed`), "Add to / Remove from favorites" in the page "…" menu and every row "…"
+  menu, or by dropping a page from another section onto the Favorites header. Dragging a favorite reorders the favorites only
+  (the page never moves); drops between Favorites and other sections do nothing. Only live pages the user can see are listed:
+  a trashed favorite drops out and comes back on restore; a page moved into someone else's private space disappears for others.
+  Add/remove/reorder are optimistic with rollback and an error toast.
+
+- Routes: `/docs` opens the first root page of the default teamspace, else the first private page, else the first page of
+  another teamspace, on desktop (phones show the page list first); no pages → "Create your first page" (default teamspace).
+  `/docs/:pageId` opens a page; a trashed or unknown id shows "Page not found" with a link back. `/docs/trash` is the page trash.
+- Page tree: create (root or child), "Move to trash" with confirmation (the whole subtree goes), HTML5 drag and drop
+  before/inside/after mapped to `move` with `parent_id` + sibling index (root siblings are per space). Drops can cross spaces:
+  onto/under a page the space follows the parent; next to a root page or onto a section header/empty row the page goes to that
+  space (`teamspace_id` or `private: true`), taking its subtree along, with a "Moved to …" toast. The tree updates
+  optimistically (space included for the whole subtree) and rolls back on error.
+- Duplicate (row "…" menu and page header menu: "Duplicate", plus "Duplicate with sub-pages" when the page has children):
+  `POST /pages/{page_id}/duplicate` `{ include_children }` → 201 `Page` (the new root). "<title> (copy)" ("Untitled (copy)"),
+  same space and parent, placed right after the original; copies icon, cover, content and, with sub-pages, the live subtree
+  in order. Files are shared: new `page_files` rows for the same blobs (no byte copy), and page-file URLs (image/file blocks,
+  cover), `page` block `pageId`s and `/docs/<id>` links that point inside the copied pages are rewritten to the copies;
+  links elsewhere stay. Any member who can see the page; each copy is audited `page.duplicated`. The open editor is flushed
+  first; on success the copy opens with a toast. (`features/docs/pageActions.ts` context from DocsPage.)
+- Export (page header "…" → Export: "Markdown", "Markdown with sub-pages" only when the page has children, "PDF"):
+  `GET /pages/{page_id}/export?format=markdown&children=false|true` → `application/zip` (`Content-Disposition` with an
+  ASCII `filename` and an RFC 5987 `filename*`, `no-store`). Access = the page's (another member's private page, trashed or
+  unknown → 404 `page_not_found`); with children only the live sub-pages the caller can see (a trashed sub-page drops its
+  subtree). Open documents are flushed first. Limits: 500 pages (413 `export_too_many_pages`) and 200 MiB uncompressed
+  (413 `export_too_large`); the archive is written to an anonymous temp file on a blocking thread and streamed.
+  Layout (Notion-like): `<Title>.md`; sub-pages in the folder `<Title>/` next to it; a page's files (only those its
+  content or cover references) in `<Title>/assets/`. Names: separators/reserved characters → `-`, control characters,
+  leading/trailing dots and Windows device names handled, 80-character stems, "Untitled" when empty, unique per folder
+  ignoring case (" (2)"), `assets` reserved in sub-page folders. Each `.md` has front matter (`title`, `icon`,
+  `exported_at`), `# Title`, the cover as an image, then the body. Links: `page` blocks and `/docs/<id>` links to exported
+  pages → relative `.md` paths, page files of exported pages → relative asset paths (all percent-encoded); other visible
+  pages and files → absolute URLs on the configured public origin; pages the caller cannot see → "*Missing page*" (no
+  title leak); external links unchanged. Converter (`apps/server/src/export/markdown.rs`, BlockNote JSON → GFM,
+  deterministic): headings 1-6 (toggle headings too), paragraphs, bulleted/numbered (with `start`)/check lists and toggle
+  lists with nesting, quotes, code fences with language (longer fences when the code has backticks), dividers, GFM tables
+  (first row as header, `\|` escaped, colspans padded, newlines `<br>`), images `![name](path)` + italic caption, files
+  as links, callouts as `> 💡 text` blockquotes with their children, bold/italic/strike/code/`<u>` underline, links, hard
+  breaks (`\`), Markdown punctuation escaped; colors and alignment dropped. Goldens: `apps/server/tests/fixtures/export/`
+  (`UPDATE_EXPORT_GOLDENS=1`). Web: `features/docs/pageExport.ts` (SDK blob download with progress/success/error toasts;
+  413 shows the server's message). PDF = `printPage`: adds `orbit-print-doc` to `<html>` and the page title as document
+  title, calls `window.print()`, restores on `afterprint`; `@media print` rules in `src/index.css` keep only
+  `[data-print-root]` (DocEditor's content; `[data-print-hide]` drops the add icon/cover row), full width, light theme
+  (also over BlockNote's own `.dark` containers), images fitted, page breaks avoided inside images/code/tables/headings.
+  Static CSS (production CSP). Smoke: `target/orbit-smoke/export.mjs`.
+- Editor: BlockNote 0.55 (rich text, markdown shortcuts, nested blocks, drag handles, undo, slash menu), lazy-loaded in its own
+  chunk. Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
+  Slash items "Sub-page" (creates a child page, inserts the link, opens it) and "Link a page" (picker over the tree).
+  Custom `callout` block (`editor/CalloutBlock.tsx`; slash "Callout" in Basic blocks after Quote, aliases callout/note/tip/
+  warning/info): inline rich text, props `emoji` (default 💡; click it to pick another in the app's emoji picker),
+  `backgroundColor` (BlockNote color names, default `gray`; `default` = border only) and `textColor`, both editable in the
+  block "Colors" menu. Notion-like rounded box that also holds nested blocks; tint mixed per theme (light full, dark faint).
+  Copy/paste inside Orbit keeps it; other apps get "emoji + text".
+  Image and File blocks (slash menu, file panel, paste and drop) upload to the page; video/audio blocks stay off. Image/file
+  block URLs are limited to page-file paths, http(s) or empty (anything else is blanked on load and before saving).
+- Page files: `POST /pages/{page_id}/files` (multipart, one `file` field) → `PageFile` with a same-origin `url`
+  (`/api/v1/workspaces/{ws}/pages/{page_id}/files/{file_id}`, satisfies the CSP `img-src 'self'`); `GET` that url downloads.
+  Access = the page's: teamspace pages for every member, private pages only for their owner, trashed pages for nobody
+  (404). Bytes use the task-attachment blob layer (`UploadService`: size limits, sniffed type, per-workspace dedup);
+  png/jpeg/gif/webp/avif are served inline, everything else (SVG, HTML, …) as an attachment, always `nosniff`. Upload
+  audits `page.file_added`. Rows (`page_files`, migration 0025) go with the page (trash purge, teamspace/workspace
+  delete) and quarantine the blob; reconciliation reclaims blobs no task attachment or page file references.
+  `PageFileRepository::create_from_bytes` attaches server-held bytes (Notion import) through the same checks.
+- Header: breadcrumbs prefixed with the space (teamspace name, or a lock + "Private"; the mobile top bar too), presence
+  avatars and the sync status (see "Real-time co-editing, web" below; a failed title/icon/cover save shows Save failed +
+  Retry or Conflict instead), page menu with "Move to" (teamspaces + Private, current disabled; moves to
+  the end of that space's root) and "Move to trash".
+- Title input (empty title shows "Untitled" everywhere), emoji icon picker, cover (upload an image to the page, or an http(s)
+  URL; `cover_url` also accepts a file url of the same page only) with remove/change and focal-point repositioning.
+- Content is live-collaborative (next bullet but one); the client never PATCHes `content` (`savePage` takes
+  `PageMetadataUpdate` = no `content`; REST content writes stay for API clients).
+- Autosave (`autosave.ts`) covers title/icon/cover only: title debounces 800 ms; icon/cover save immediately; blur, page
+  switch, unmount and tab hide flush. One PATCH in flight at a time; each save sends the latest `expected_version`. A 409
+  on changes that touch the same fields shows a banner: "Reload page" (take the server's title/icon/cover) or "Overwrite".
+- Remote metadata updates (realtime refresh, other tabs) apply title/icon/cover when there are no unsaved local edits;
+  metadata-only changes (e.g. a move) just advance the version. Content never comes from the page query after mount.
+- Real-time co-editing, web (`features/docs/collab/`: `session.ts` state machine, `connection.ts` socket factory +
+  `CollabConnectContext` for tests, `useCollabSession.ts`, `presence.ts`, `PresenceAvatars.tsx`, `palette.ts`; test fake
+  `src/test/fakeCollab.ts`): DocEditor opens one Y.Doc + y-websocket provider per page/epoch (yjs + y-websocket load on
+  demand, `disableBc`, backoff ≤ 5 s) and mounts `PageEditor` with `collab` (`withCollaboration`, no `initialContent`,
+  Yjs undo, caret labels `showCursorLabels: 'activity'`) only after the first sync; both are destroyed on page switch.
+  Header status: "Live" (green dot) / "Connecting…" (before the first sync and for the first 2 s of a drop) / "Offline —
+  changes will sync" / "Access lost" / "Not syncing". Close handling: 4404/4403 → the editor turns read-only, a toast
+  ("“X” was moved to the trash." / "You no longer have access to “X”."), the page leaves the tree and the app goes to
+  /docs (not for the user's own "Move to trash", which announces itself); 4409 → refetch the page (new epoch) and
+  reconnect with a fresh document; 4401 → the app-wide unauthorized flow (login); 4413 → "too large" banner + read-only
+  until "Reload page"; 4400/4426 → "Reload app" banner; 4429 → toast, reconnect after 5 s; 1012/1013 and drops →
+  y-websocket retries. Handshakes refused before the upgrade (HTTP 401/404 arrive as 1006) trigger a throttled REST
+  check of the page after 2 failures (404 → leave like a trash, 401 → login). `beforeunload` warns only while
+  disconnected with local edits typed offline or within 3 s before the drop (and for unsaved title edits).
+  Presence: avatars (max 4 + "+n", tooltips, `aria-label` "Also here: …") from awareness, deduped by the server-stamped
+  user id, without the own user (other tabs included); colors = `collabColor(user id)`, the same hash and 8 colors as
+  `hub.rs::user_color`, so avatar and caret match. Restore from history, Notion import and REST content PATCH arrive
+  live through Y; the history pane's restore only applies the returned title/icon (+ toast, list refresh).
+  E2E: `target/orbit-smoke/collab.mjs [base] [label]` (two users, REST PATCH live, typing both ways with latency,
+  presence colors, reload, restore both ways, trash notice, CSP/console check; `COLLAB_DB` backdates the test page so a
+  version exists).
+- Trash: lists pages trashed directly with their space; Restore brings back the subtree trashed with them (to the root of its
+  space if the parent is gone). "Delete forever" (row, danger confirm) → `DELETE /pages/{page_id}/permanent?expected_version=`
+  hard-deletes a directly-trashed page and the sub-pages trashed with it (live or not-directly-trashed pages: 409
+  `page_not_trashed`); "Empty trash" (pane header, confirm with the count) → `POST /pages/trash/empty` → `{ purged }` deletes
+  every trashed page the caller may purge. Rule: own private pages by their owner (others get 404, as everywhere);
+  teamspace pages only by workspace owners/admins (members: 403 `workspace_action_forbidden`, and the UI hides the button;
+  Empty trash leaves them alone). Files (blobs quarantined, then reconciled), favorites and the search entry go too; sub-pages
+  trashed separately earlier keep their own entry and restore to their space root. Audited `page.purged` (`{"pages": n}`).
+- Search: the command palette searches page titles and body text (debounced, only for a non-empty query), shows
+  "Page · <space>", the title and a body snippet with matched words in bold, and opens `/docs/:id`. Server: SQLite FTS5
+  (migration 0027: `page_search` over title + `content_text`, tokenizer `unicode61 remove_diacritics 2`, kept in sync by
+  triggers; rowids come from `page_search_rows`, stable across VACUUM). Input is split on whitespace, words without a
+  letter/digit dropped, each word quoted (FTS syntax is plain text), the last one a prefix, all must match (max 16 words,
+  200 chars). Live, visible pages of the workspace only; ranked by `bm25` with title ×10. Results carry `snippet` (plain text,
+  ~24 words, `…` where cut; the body start for title-only hits), `snippet_highlights` and `title_highlights` as
+  `TextRange { start, end }` in UTF-16 code units (JS string indices, end exclusive); the UI renders them as `<strong>`
+  text nodes (no HTML).
+- Notion import (`pages/NotionImportPane.tsx`, `components/NotionImportChooser.tsx`, `api/notionImports.ts`,
+  `notionImport/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
+  Notion" opens `/docs/import`, a pane next to the tree like Trash. Steps follow the import's status at
+  `/docs/import/:importId`: Connect (password field for a Notion personal access token, sent once, never cached client-side;
+  problems map to sentences: invalid token, app key missing, import in progress + link to it, Notion unavailable) →
+  Scanning (polls every 2 s) → Choose pages (tri-state tree: checking a page includes its sub-pages, unchecking one also
+  un-checks its ancestors; filter, Select all / Clear, "N pages selected", truncated/incomplete warnings; destination
+  teamspace or Private plus optional "Inside page" of that space; sends `{all:true}` or the minimal checked roots) →
+  Importing (progress bar, failed count, Cancel with confirmation) → Complete / Failed / Cancelled / Expired (stats, conversion
+  notes, failures with titles and errors, links to the imported top-level pages, "Open imported pages", "Import more").
+  The connect step lists the member's 20 recent imports. Imports are private to their creator. Import query keys live outside
+  the workspace prefix (polled, not refetched on every realtime event); pages are refreshed when an import ends.
+  `GET /imports/notion/{id}` is light (no scan tree; also list/create/start/cancel); `?include=tree` adds it. The pane polls
+  the light detail every 2 s only while scanning/queued/importing and fetches the tree once, under its own query key, when
+  the import is `ready`. Notion callouts become `callout` blocks (emoji icon, color, nested children; a non-emoji icon
+  becomes 💡 and counts as `callout_icon` in the report).
+  When an import fails (e.g. revoked token) or is cancelled, the pages it had created but not filled go to the trash (one
+  audited batch per top-level page; a subtree is kept if anything in it has content or is not from the import) and the report
+  counts them (`unfilled_pages_trashed`). Filled pages stay.
+- Version history (`components/PageHistoryPane.tsx`, `api/pageVersions.ts`; server `repositories/page_versions.rs`,
+  migration 0028 `page_versions`): page "…" → "Version history" opens a right pane next to the editor (full screen on
+  phones): "Current version" on top, then versions grouped by day (time, author avatar + name, "Before a restore" /
+  "Imported from Notion"), "Load older versions" (cursor pages of 50); the selected version (newest by default) is
+  previewed read-only with BlockNote (same lazy chunk, never collaborative); "Restore this version" asks first, flushes
+  pending title/icon/cover edits, then every open editor receives the restored content live (Yjs replace), this one takes
+  the restored title/icon from the response, the pane closes and a toast confirms. Arrow keys/Home/End move through the
+  list, Escape closes. No history yet: "Versions appear after you edit this page."
+  Snapshot rule (server, inside the save transaction): an edit that changes title or content stores the *previous* state
+  (title, icon, content, author = its last editor) as `auto` when the newest version, or the page itself if it has none,
+  is at least 10 minutes old; blank states and states equal to the newest version are skipped. Restore stores the current
+  state as `restore` first, then writes through `page_versions::replace_content` (the single server-side document
+  replacement; it also replaces the live collaborative document); Notion imports store the imported state as `import`;
+  duplicates start without history; versions go with their page. Retention (`workspace.retention` job): all from the last
+  30 days, then the newest per UTC day up to a year, always the newest 20 per page. API: `GET /pages/{id}/versions`
+  (`?cursor&limit` 1–100) → `{ items, next_cursor }` without content, `GET /pages/{id}/versions/{vid}` (with content),
+  `POST /pages/{id}/versions/{vid}/restore` `{ expected_version }` → `Page` (409 on a stale version, audited
+  `page.restored_version` with `version_id`). Visibility = the page's: hidden or trashed pages answer `page_not_found`
+  like unknown ids; an unknown version of a visible page is `page_version_not_found`. Cover and place are not versioned.
+- Real-time co-editing, server side (`apps/server/src/collab/`, migration 0029 `page_collab_*`; web side above): one in-memory Yjs document ("room", yrs 0.28) per open page, always on.
+  Socket `GET /api/v1/workspaces/{ws}/pages/{id}/collab?v=1&epoch=<Page.collab_epoch>` speaks y-sync v1 (y-websocket 3:
+  `new WebsocketProvider(origin + '/api/v1/workspaces/{ws}/pages/{id}', 'collab', doc, { params: { v: '1', epoch } })`,
+  fragment `prosemirror`). Handshake: one allowed `Origin` (platform layer, 403), session cookie (401), then membership +
+  live page visible to the user, else 404 exactly like an unknown id. After the upgrade: `v` ≠ 1 → 4426, stale/missing
+  epoch → 4409. Close codes (4400–4499 terminal for y-websocket): 4400 malformed, 4401 session ended, 4403 no access (moved
+  into someone's Private, removed from the workspace), 4404 trashed/deleted, 4409 reset, 4413 frame > 1 MiB or document
+  > 8 MiB (checked before applying), 4429 > 200 sync / 30 awareness msgs/s; 1012 restart, 1013 overloaded (50 sockets per
+  page, 20 per user, 2000 per process, 256 MiB document budget, lagging socket). Every socket re-checks access every
+  15 s and at once after page move/trash/purge, empty trash, teamspace delete, member removal, workspace delete, user
+  suspension and session revocation. Pings every 20 s; accepted TCP sockets use TCP_NODELAY (`App::serve`).
+  Awareness: the server echoes updates to everyone incl. the sender, overwrites `state.user` with
+  `{ id, name: display name, color: one of 8 by user id }`, lets a socket speak only for its own client ids (≤ 4) and
+  broadcasts their removal when it closes.
+  Storage: first open converts `content_json` in Rust (`collab/blocknote.rs`, schema table `blocknote-schema.json`
+  generated from `pageEditorSchema`; parity goldens in `apps/server/tests/fixtures/collab`, both directions) inside the
+  room lock, so no client ever binds to an empty document. Updates are applied in memory, broadcast, and written as one
+  merged row per 150 ms / 64 updates; the log is folded into the snapshot every 500 updates or 1 MiB and on eviction
+  (30 s after the last socket closes, LRU above the budget). Shutdown writes everything and closes sockets with 1012;
+  clients re-push what the server missed on reconnect. Projection: 2 s after the last change (≤ 10 s while typing), on
+  eviction and on demand (page GET, duplicate, restore) the document is written to `content_json`/`content_text` through
+  `page_versions::project_collab_content` — history rule of edits, `updated_by` = last editor, `pages.version` unchanged,
+  at most one `page.updated` audit/outbox event per page per 10 min. Unsafe links / image-file URLs arriving in Yjs updates
+  are repaired by a server transaction that everyone receives. Server-side content writes (version restore, REST PATCH
+  `content`, Notion import) lock the room, apply a normal Yjs replace transaction logged in the same DB transaction and
+  broadcast it after commit (open editors switch live); pages never opened only get `content_json`. `Page.collab_epoch`
+  changes on converter/schema changes (stored document rebuilt from JSON) and on backup restore (all epochs and the
+  generation of never-opened pages rotate), so clients holding newer state reset instead of re-pushing it.
+- Page options (migration 0031: `pages.full_width`, `locked_at`, `locked_by` → users SET NULL; `page_visits`):
+  `Page` carries `full_width`, `locked_at`, `locked_by { id, display_name }` and `updated_by_user { id, display_name }`.
+  Full width: PATCH `full_width` with `expected_version` (any member who can see the page; a layout change, not an edit:
+  `updated_by`/`updated_at` stay; allowed while locked); page "…" → "Full width" (checkbox item, saved through the
+  autosaver) makes the editor column use the pane width.
+  Lock: `POST /pages/{id}/lock { locked }` → `Page` (any member who can see the page; setting the current state is a no-op;
+  a change bumps the version, audited `page.locked` / `page.unlocked`); page "…" → "Lock page" / "Unlock page". While
+  locked, PATCH title/icon/cover/content, version restore and Notion import fills answer 423 `page_locked` (checked before
+  the version); moving, trashing, duplicating (the copy is unlocked), favorites and full width stay allowed. Co-editing:
+  the room holds `locked` (loaded from the page; flipped by `CollabHub::lock_change` holding the room lock across the
+  transaction); while locked, client Update/SyncStep2 messages are ignored (not applied, broadcast or stored), SyncStep1
+  and awareness still work; lock and unlock close every socket with **4423**, which the web treats like 4409 (refetch the
+  page, fresh Y.Doc, reconnect), so refused edits never resurface. Web: locked pages render read-only (editor
+  `editable=false`, title read-only, icon picker disabled, no Add icon/cover or cover controls) with a "🔒 Locked by
+  <name|you>" pill + Unlock above the title; unsaved title/icon/cover edits are dropped when the lock arrives.
+  Header "Edited <just now | n minutes/hours/days ago | on Mon d> by <name | you>" (`lastEdited.ts`, hidden below
+  1100 px): the server's `updated_by_user`/`updated_at`, overridden by live edits seen on the Y doc (local typing → you;
+  remote updates → the awareness user of the writing client id), re-evaluated every 30 s.
+  Recent pages: `POST /pages/{id}/visit` (204; sent once after 1.5 s on a page, so background refetches never count;
+  upsert, newest 50 kept per member and workspace) and `GET /pages/recent?limit=1..50` (default 10) → `{ items: RecentPage }`
+  with live pages the caller can see now only (a page moved into someone else's private space or trashed drops out).
+  Private to the member, not audited. Shown as a "Recent" group (6) at the top of the command palette while the query is
+  empty; not in the docs sidebar (Favorites + spaces already fill it; the palette is one keystroke away).
+  E2E: `target/orbit-smoke/options.mjs`.
+- Comments + @mentions (migration 0030: `page_threads`, `page_comments`, `page_comment_mentions`; `notifications`
+  rebuilt with optional `task_id` and `page_id`/`page_thread_id`/`page_comment_id`, kind `page_comment_mentioned`):
+  server `repositories/page_comments.rs` + `page_comment_routes.rs`; web `features/docs/comments/` (`threadStore.ts`,
+  `api.ts`, `mentions.ts`, `CommentEditor.tsx`, `CommentComposer.tsx`, `ThreadCard.tsx`, `ThreadList.tsx`,
+  `CommentsPanel.tsx`). REST under `/pages/{page_id}/threads`: GET (open and
+  resolved threads with comments oldest first) / POST `{ body, quote }` → 201 `PageThread`; `DELETE /threads/{id}` (thread
+  creator); `POST /threads/{id}/comments { body }` → 201 `PageComment`; `PATCH|DELETE /threads/{id}/comments/{cid}` (author
+  only, else 403 `page_comment_forbidden`; delete keeps a placeholder, the last live comment takes the thread with it);
+  `POST /threads/{id}/resolve|reopen` (anyone who sees the page; `resolved_by`/`resolved_at`). Access = the page's (hidden,
+  trashed or foreign pages answer 404 `page_not_found`, like an unknown id). Bodies are comment-editor BlockNote blocks,
+  cleaned server-side (paragraphs; text with bold/italic/underline/strike/code, safe links, `mention { userId, name }`;
+  ≤ 10 000 chars); `body_text` for plain text. Mentions come from the body and count only for members who can see the page
+  (every member for teamspace pages, only the owner for private pages); newly mentioned ones (never the author, once per
+  comment) get an Inbox notification. The Inbox lists "You were mentioned in a comment … on “<page>”" and opens
+  `/docs/<page>?thread=<id>` (Comments panel open, thread selected); entries hide while the page is trashed or out of the
+  recipient's reach, and go when the comment is deleted. Every change is audited (`page.thread_created|resolved|reopened|
+  deleted`, `page.comment_created|updated|deleted`), so other viewers refresh through workspace events.
+  Anchors: BlockNote's `comment` mark (`threadId`, `orphan`) inside the collaborative document (y-prosemirror key
+  `comment--<hash>`), set by the author's editor; the JSON projection never contains it (Rust converter ignores it; golden
+  `tests/fixtures/collab/marks/comment_marks.json`). Every collaborative editor loads `CommentsExtension` (without the
+  mark y-prosemirror would drop the anchored text) and mounts only after the threads query settled (an empty store would
+  flip every anchor to orphan). Resolved/deleted threads keep their mark as `orphan` (no highlight; reopen restores it).
+  UI (Orbit components on BlockNote's comment data flow; BlockNote's stock thread/composer/sidebar are not used): select
+  text → "Comment" in the formatting toolbar → floating composer: a textarea-style field (2–8 lines, "Add a comment… Use @
+  to mention", "@" button opening the member picker), Cancel + primary "Comment" (disabled while empty); Enter is a new
+  line, Cmd/Ctrl+Enter sends (also replies and edits), Esc cancels. Thread card (floating next to a clicked highlight, or
+  in the panel): quoted anchor text on top (amber left border, 2 lines), Resolve/Reopen icon button, comment rows (avatar,
+  name, relative time, "edited", kebab with Edit/Delete on own comments), "Resolved by X · time" on resolved threads
+  (dimmed, no reply field), a one-line "Reply…" field that expands on focus. Header comment button with an open-count
+  badge toggles the "Comments" panel (segmented Open / Resolved tabs with counts, empty states; cards in document order,
+  anchorless threads last and labelled "Text removed"; clicking a card scrolls to and highlights its anchor; while the
+  panel is open, threads show there instead of floating cards). Anchors: amber wash + underline, stronger when selected
+  (light and dark). Comment placeholders are static CSS (CSP). No reactions. REST content writes, version restores and
+  converter rebuilds replace the document without marks (their threads show as "Text removed" in the panel). E2E:
+  `target/orbit-smoke/comments.mjs`; visual check `target/orbit-smoke/comments-ui.mjs` (dark + light screenshots).
+- @mentions in the page body (migration 0032: `notifications` rebuilt with kind `page_mentioned` and optional
+  `page_block_id`): inline content `mention { userId, name }` (`name` = snapshot for export/fallback) in
+  `pageEditorSchema` (`editor/MentionInline.tsx`, `PageMentionChip.tsx`, `mentionItems.tsx`, `MentionMenu.tsx`,
+  `pageMentions.ts`). Typing "@" at a word start (not inside "a@b", never in code blocks) opens BlockNote's suggestion menu
+  (next to "/"): members who can see the page (teamspace page: every active member, yourself last; private page: only you,
+  under the hint "Only you can see this private page"), filtered by name/handle/email (≤ 10), avatar initials, keyboard
+  navigable; picking inserts a non-editable chip "@Name" (primary text on a subtle primary wash) plus a space. Chips show the
+  member's current name, the stored one while members load, "Unknown user" once the member is gone. Works in co-editing:
+  the Rust converter (`collab/blocknote.rs`) writes/reads mentions as y-prosemirror atom elements (`inline` section of
+  `blocknote-schema.json`; parity golden `tests/fixtures/collab/editor_mentions.json`); `sanitize.rs` keeps only a UUID
+  `userId` (lowercased) and a ≤ 100-char `name` (invalid ones become `@name` text in JSON and are removed from live
+  documents). `content_text` has "@Name" (search finds mentions); Markdown export writes "@<current name>".
+  Notifications (`repositories/page_mentions.rs`): the collab projection and REST content edits (not imports, restores or
+  duplicates) diff the mentioned user sets before/after; a user newly mentioned on the page gets `page_mentioned` ("<editor>
+  mentioned you in “<page>”", actor = editor, `page_block_id` = first block with the mention) unless they are the editor,
+  cannot see the page (private page of someone else, non-member, suspended) or already got one for this page in the last
+  10 minutes. Moving or re-projecting a mention never notifies. Each batch is audited `page.mentioned` (workspace events
+  refresh the Inbox). The Inbox opens `/docs/<page>?block=<id>`; the page scrolls to and flashes that block, then drops the
+  parameter. Notion import: user mentions whose `person.email` matches an active member become `mention`s, others stay
+  "@Name" text. `MemberRecord.suspended_at` lets the picker skip suspended members. E2E `target/orbit-smoke/mention.mjs`.
+- Links: the editor accepts http(s), mailto and exact in-app page links `/docs/<uuid>` (what the import writes between
+  imported pages); clicking one navigates in the app (Cmd/Ctrl/Shift-click opens a new tab). `javascript:`, `data:` and
+  other relative paths are dropped.
+
+Not supported yet: video and audio blocks, offline storage of co-edited content (IndexedDB; edits live only in the open
+tab while disconnected), presence dots in the page tree, teamspace membership or per-page sharing, comment reactions, templates, export and ZIP import. The production CSP allows external https images (`img-src 'self' data: blob: https:`), so external image
+blocks and cover URLs load; the image host then sees the viewer's IP. Plain http images stay blocked.
 
 ## Mail
 
@@ -119,7 +402,8 @@ This feature is mock-backed.
 
 ## Notifications, profile, and settings
 
-- Inbox can mark individual/all notifications read and links to resources.
+- Inbox can mark individual/all notifications read and links to resources (tasks; docs comment mentions open the page
+  with the thread; page body mentions open the page at the mentioned block).
 - Inbox and Profile remain mock-backed.
 - Profile edits the current mock user's name, email, and title.
 - Workspace Settings: General, Members, Sessions.
@@ -131,5 +415,5 @@ This feature is mock-backed.
 
 - Tasks, Docs, Mail, Chat, DMs, and Inbox use their own compact headers instead of the global topbar.
 - Chat uses compact messages, avatars, attachment grids, date separators, and pinned system notices; header search is an icon that expands when used.
-- Docs use matching compact body typography and scaled headings while retaining block editing and media behavior.
+- Docs drop BlockNote's side-menu gutter on phones; the page list and the page are separate screens.
 - Shared confirmation and input modals remain vertically and horizontally centered at mobile sizes.

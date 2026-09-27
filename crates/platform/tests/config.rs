@@ -355,3 +355,28 @@ fn public_origin_must_be_an_http_origin_without_path_or_query() {
         assert!(error.to_string().contains("http.public_origin"), "{origin}");
     }
 }
+
+#[test]
+fn notion_import_has_no_operator_settings() {
+    // The Notion API origin and request rate are fixed in the client (api.notion.com, 180/min):
+    // the old keys are unknown settings now, like any typo.
+    let error = load_fixture(
+        "",
+        [("ORBIT__NOTION__API_BASE", "https://api.notion.com")],
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("ORBIT__NOTION__API_BASE"),
+        "{error}"
+    );
+    let error =
+        load_fixture("", [("ORBIT__NOTION__REQUESTS_PER_MINUTE", "600")], None).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("ORBIT__NOTION__REQUESTS_PER_MINUTE"),
+        "{error}"
+    );
+    assert!(load_fixture("[notion]\nrequests_per_minute = 600", [], None).is_err());
+}

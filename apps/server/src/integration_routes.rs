@@ -7,8 +7,6 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use hmac::{Hmac, Mac};
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis, generate_opaque_token};
 use serde::de::DeserializeOwned;
@@ -25,6 +23,9 @@ use crate::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiToke
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::tasks::{
     DiscordTask, GithubWorkItem, TaskError, TaskRecord, TaskRepository,
+};
+use crate::secret_box::{
+    decrypt_secret as decrypt_github_secret, encrypt_secret as encrypt_github_secret,
 };
 
 const INSTANCE: &str = "/api/v1/integrations/discord/events";
@@ -210,26 +211,6 @@ fn app_key(
             request_id,
         )
     })
-}
-
-fn encrypt_github_secret(key: &[u8; 32], value: &str) -> Result<Vec<u8>, ()> {
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let encrypted = cipher.encrypt(&nonce, value.as_bytes()).map_err(|_| ())?;
-    let mut result = nonce.to_vec();
-    result.extend_from_slice(&encrypted);
-    Ok(result)
-}
-
-fn decrypt_github_secret(key: &[u8; 32], value: &[u8]) -> Result<String, ()> {
-    if value.len() < 28 {
-        return Err(());
-    }
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-    let plaintext = cipher
-        .decrypt(Nonce::from_slice(&value[..12]), &value[12..])
-        .map_err(|_| ())?;
-    String::from_utf8(plaintext).map_err(|_| ())
 }
 
 async fn github_session_user(

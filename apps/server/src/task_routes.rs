@@ -168,7 +168,7 @@ pub fn task_router(state: TaskState) -> Router {
 }
 
 pub(crate) struct ApiJson<T>(pub(crate) T);
-struct ApiQuery<T>(T);
+pub(crate) struct ApiQuery<T>(pub(crate) T);
 
 impl<S, T> FromRequestParts<S> for ApiQuery<T>
 where
@@ -211,7 +211,17 @@ where
         Json::<T>::from_request(request, state)
             .await
             .map(|Json(value)| Self(value))
-            .map_err(|_| {
+            .map_err(|rejection| {
+                if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                    return ApiError::new(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "request_too_large",
+                        "Request too large",
+                        "The request exceeds the configured limit.",
+                        instance,
+                        request_id.as_ref(),
+                    );
+                }
                 ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_request",
@@ -237,8 +247,8 @@ struct PageQuery {
 #[derive(Deserialize, IntoParams, ToSchema)]
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
-struct MutationQuery {
-    expected_version: u64,
+pub(crate) struct MutationQuery {
+    pub(crate) expected_version: u64,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -260,8 +270,8 @@ struct ProjectUpdateBody {
 
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-struct RestoreBody {
-    expected_version: u64,
+pub(crate) struct RestoreBody {
+    pub(crate) expected_version: u64,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::ProjectRecord>)))]
@@ -1800,17 +1810,25 @@ fn source_url(
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<Option<String>, ApiError> {
     value
-        .map(|url| {
-            let url = bounded(url, 2048, 2048, "source_url", instance, request_id)?;
-            let valid = reqwest::Url::parse(&url).is_ok_and(|parsed| {
-                matches!(parsed.scheme(), "https" | "http") && parsed.host_str().is_some()
-            });
-            if !valid || url.chars().any(char::is_whitespace) {
-                return Err(validation("source_url", instance, request_id));
-            }
-            Ok(url)
-        })
+        .map(|url| http_url(url, "source_url", instance, request_id))
         .transpose()
+}
+
+/// An absolute http(s) URL of at most 2048 bytes.
+pub(crate) fn http_url(
+    url: String,
+    field: &'static str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<String, ApiError> {
+    let url = bounded(url, 2048, 2048, field, instance, request_id)?;
+    let valid = reqwest::Url::parse(&url).is_ok_and(|parsed| {
+        matches!(parsed.scheme(), "https" | "http") && parsed.host_str().is_some()
+    });
+    if !valid || url.chars().any(char::is_whitespace) {
+        return Err(validation(field, instance, request_id));
+    }
+    Ok(url)
 }
 
 pub(crate) fn deserialize_source_patch<'de, D>(
@@ -1890,19 +1908,34 @@ async fn authenticate(
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<AuthenticatedSession, ApiError> {
-    let token =
-        cookie_value(headers, state.cookie_mode.session_cookie_name()).ok_or_else(|| {
-            ApiError::new(
-                StatusCode::UNAUTHORIZED,
-                "authentication_required",
-                "Authentication required",
-                "A valid session is required.",
-                instance,
-                request_id,
-            )
-        })?;
-    state
-        .identity
+    authenticate_session(
+        &state.identity,
+        state.cookie_mode,
+        headers,
+        instance,
+        request_id,
+    )
+    .await
+}
+
+pub(crate) async fn authenticate_session(
+    identity: &IdentityRepository,
+    cookie_mode: CookieMode,
+    headers: &HeaderMap,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<AuthenticatedSession, ApiError> {
+    let token = cookie_value(headers, cookie_mode.session_cookie_name()).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Authentication required",
+            "A valid session is required.",
+            instance,
+            request_id,
+        )
+    })?;
+    identity
         .authenticate_session(&token, TimestampMillis::now())
         .await
         .map_err(|_| {
@@ -1981,7 +2014,7 @@ fn text(
     }
 }
 
-fn bounded(
+pub(crate) fn bounded(
     value: String,
     max_chars: usize,
     max_bytes: usize,
@@ -2074,7 +2107,7 @@ fn priority(
     }
 }
 
-fn validation(
+pub(crate) fn validation(
     field: &'static str,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
@@ -2211,7 +2244,7 @@ pub(crate) struct ApiError {
 }
 
 impl ApiError {
-    fn new(
+    pub(crate) fn new(
         status: StatusCode,
         code: &'static str,
         title: &'static str,
@@ -2237,7 +2270,7 @@ impl ApiError {
         }
     }
 
-    fn version_conflict(
+    pub(crate) fn version_conflict(
         current: Value,
         instance: String,
         request_id: Option<&Extension<RequestId>>,
@@ -2307,6 +2340,18 @@ fn refresh_for_current(current: &Value) -> Option<String> {
     let id = current.get("id")?.as_str()?;
     if current.get("visibility").is_some() {
         return Some(format!("/api/v1/workspaces/{workspace}/views/{id}"));
+    }
+    if current.get("cover_url").is_some() {
+        if current
+            .get("deleted_at")
+            .is_some_and(|value| !value.is_null())
+        {
+            return Some(format!("/api/v1/workspaces/{workspace}/pages/trash"));
+        }
+        return Some(format!("/api/v1/workspaces/{workspace}/pages/{id}"));
+    }
+    if current.get("is_default").is_some() {
+        return Some(format!("/api/v1/workspaces/{workspace}/teamspaces"));
     }
     if current.get("author_id").is_some() {
         let task = current.get("task_id")?.as_str()?;

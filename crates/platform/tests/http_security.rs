@@ -712,9 +712,14 @@ async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() 
         .to_str()
         .unwrap();
     assert!(csp.contains("script-src 'self' 'sha256-YWJj'"));
-    assert!(csp.contains("img-src 'self' data: blob:"));
+    // External https images load (covers, image blocks); plain http and other sources stay blocked.
+    assert!(csp.contains("img-src 'self' data: blob: https:;"));
     assert!(csp.contains("style-src 'self'; style-src-attr 'unsafe-inline'"));
-    assert!(!csp.contains("img-src 'self' https:"));
+    assert!(!csp.contains("http:"));
+    assert_eq!(
+        csp,
+        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+    );
 }
 
 #[tokio::test]
