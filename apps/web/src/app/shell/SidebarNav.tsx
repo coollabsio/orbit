@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Fragment } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import { Calendar, DirectInbox as Inbox, Home2 as Home, Layer, Message as MessageSquare, Messages2 as MessagesSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
 import { cn } from 'cn'
@@ -8,26 +8,25 @@ import { Separator } from '@/components/ui/separator'
 
 const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
-  { to: '/views', label: 'Views', icon: Layer, enabled: true },
   { to: '/', label: 'Home', icon: Home, enabled: false },
   { to: '/docs', label: 'Docs', icon: FileText, enabled: false },
   { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
 ]
 
-export function sidebarItemClass(active: boolean, collapsed: boolean) {
+function sidebarItemClass(active: boolean, collapsed: boolean) {
   return cn(
-    'relative flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
+    'relative flex h-8 w-full min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
     collapsed && 'justify-center px-0',
     active && 'bg-sidebar-accent text-sidebar-accent-foreground',
   )
 }
 
-export function sidebarLabelClass(collapsed: boolean) {
+function sidebarLabelClass(collapsed: boolean) {
   return cn('min-w-0 flex-1 truncate', collapsed && 'hidden')
 }
 
-export function SidebarSection({ label, collapsed, first }: { label: string; collapsed: boolean; first?: boolean }) {
+function SidebarSection({ label, collapsed, first }: { label: string; collapsed: boolean; first?: boolean }) {
   if (collapsed) {
     if (first) return null
     return <Separator className="mx-1 my-1.5 data-horizontal:w-auto" aria-hidden="true" />
@@ -40,7 +39,7 @@ export function SidebarSection({ label, collapsed, first }: { label: string; col
 }
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
-export function SidebarNav({ onNavigate, collapsed = false, favorites }: { onNavigate?: () => void; collapsed?: boolean; favorites?: ReactNode }) {
+export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const location = useLocation()
   const currentParams = new URLSearchParams(location.search)
   const view = currentParams.get('view')
@@ -61,6 +60,8 @@ export function SidebarNav({ onNavigate, collapsed = false, favorites }: { onNav
   const comingSoonClass = 'ml-auto text-[10px] text-muted-foreground/70'
 
   const taskViewActive = (name: string | null) => location.pathname === '/tasks' && view === name
+  // Views is a part of Tasks: its entry shows only while the user is somewhere in Tasks
+  const inTasks = /^\/(tasks|views)(\/|-|$)/.test(location.pathname)
 
   return (
     <>
@@ -90,18 +91,32 @@ export function SidebarNav({ onNavigate, collapsed = false, favorites }: { onNav
       <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto', collapsed ? 'gap-1' : 'gap-0.5')}>
         <SidebarSection label="Workspace" collapsed={collapsed} first />
         {WORKSPACE_LINKS.map((link) => link.enabled ? (
-          <NavLink
-            key={link.to}
-            to={link.to === '/tasks' ? taskViewPath() : link.to}
-            end={link.to === '/views'}
-            className={({ isActive }) => itemClass(isActive && !view)}
-            aria-label={link.label}
-            title={collapsed ? link.label : undefined}
-            onClick={onNavigate}
-          >
-            <link.icon className="size-[18px] shrink-0 opacity-90" />
-            <span className={labelClass}>{link.label}</span>
-          </NavLink>
+          <Fragment key={link.to}>
+            <NavLink
+              to={link.to === '/tasks' ? taskViewPath() : link.to}
+              className={({ isActive }) => itemClass(isActive && !view)}
+              aria-label={link.label}
+              title={collapsed ? link.label : undefined}
+              onClick={onNavigate}
+            >
+              <link.icon className="size-[18px] shrink-0 opacity-90" />
+              <span className={labelClass}>{link.label}</span>
+            </NavLink>
+            {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps */}
+            {link.to === '/tasks' && inTasks ? (
+              <NavLink
+                to="/views"
+                end
+                className={({ isActive }) => cn(itemClass(isActive), !collapsed && 'h-7 pl-[34px] font-normal')}
+                aria-label="Task views"
+                title={collapsed ? 'Task views' : undefined}
+                onClick={onNavigate}
+              >
+                <Layer className={cn('shrink-0 opacity-90', collapsed ? 'size-[18px]' : 'size-4')} />
+                <span className={labelClass}>Views</span>
+              </NavLink>
+            ) : null}
+          </Fragment>
         ) : (
           <Button key={link.to} variant="ghost" className={cn(disabledClass, itemClass(false))} disabled title={`${link.label} — Coming soon`}>
             <link.icon className="size-[18px] shrink-0 opacity-90" />
@@ -109,7 +124,6 @@ export function SidebarNav({ onNavigate, collapsed = false, favorites }: { onNav
             {!collapsed ? <span className={comingSoonClass}>Coming soon</span> : null}
           </Button>
         ))}
-        {favorites}
         <SidebarSection label="Personal" collapsed={collapsed} />
         <NavLink
           to={inboxPath}

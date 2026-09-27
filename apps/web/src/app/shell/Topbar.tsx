@@ -86,7 +86,7 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       return { crumbs }
     }
     case 'views':
-      return { crumbs: [{ label: 'Views', to: '/views' }] }
+      return { crumbs: [{ label: 'Tasks', to: '/tasks' }, { label: 'Views', to: '/views' }] }
     case 'inbox':
       return { crumbs: [{ label: 'Inbox' }] }
     case 'profile':

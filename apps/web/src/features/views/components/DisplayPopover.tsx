@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, Calendar, Kanban, List, Setting4, type IconComponent } from 'reicon-react'
+import { ArrowDown, ArrowUp, Setting4 } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { shouldIgnoreShortcut } from '../shortcuts'
 import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type TaskProperty } from '../viewState'
+import { GROUP_LABEL, LAYOUTS } from '../displayMeta'
 import { POPOVER_MOTION } from './motion'
 
 export interface DisplayPopoverProps {
@@ -17,20 +18,6 @@ export interface DisplayPopoverProps {
   onChange: (patch: Partial<DisplayOptions>) => void
 }
 
-const LAYOUTS: Array<{ value: Layout; label: string; icon: IconComponent }> = [
-  { value: 'list', label: 'List', icon: List },
-  { value: 'board', label: 'Board', icon: Kanban },
-  { value: 'timeline', label: 'Timeline', icon: Calendar },
-]
-
-const GROUP_LABEL: Record<GroupBy, string> = {
-  status: 'Status',
-  assignee: 'Assignee',
-  priority: 'Priority',
-  project: 'Project',
-  label: 'Label',
-  none: 'No grouping',
-}
 const GROUP_ORDER: GroupBy[] = ['status', 'assignee', 'priority', 'project', 'label', 'none']
 
 const ORDER_LABEL: Record<OrderBy, string> = {

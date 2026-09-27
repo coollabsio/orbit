@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
-import { FavoritesNav } from './FavoritesNav'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
@@ -91,7 +90,7 @@ export function AppShell() {
         >
           <WorkspaceSwitcher collapsed={sidebarCollapsed} />
         </div>
-        <SidebarNav collapsed={sidebarCollapsed} favorites={<FavoritesNav collapsed={sidebarCollapsed} />} />
+        <SidebarNav collapsed={sidebarCollapsed} />
         <div
           className={cn(
             'flex shrink-0 items-center gap-2 border-t border-border pt-2',
@@ -127,7 +126,7 @@ export function AppShell() {
             <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
               <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
             </div>
-            <SidebarNav onNavigate={() => setDrawerOpen(false)} favorites={<FavoritesNav onNavigate={() => setDrawerOpen(false)} />} />
+            <SidebarNav onNavigate={() => setDrawerOpen(false)} />
             <div className="flex shrink-0 items-center gap-2 border-t border-border pt-2">
               <UserMenu />
             </div>
