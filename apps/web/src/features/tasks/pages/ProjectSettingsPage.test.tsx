@@ -124,3 +124,58 @@ test('a second toggle right after the first carries the version the PATCH just r
   expect((first!.body as { expected_version: number }).expected_version).toBe(1)
   expect((second!.body as { expected_version: number }).expected_version).toBe(2)
 }, 20000)
+
+test('two quick toggles while the first save is in flight both persist, one PATCH after the other', async () => {
+  const calls: Array<{ method: string; body: unknown }> = []
+  let releaseFirst: () => void = () => {}
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    const path = new URL(request.url).pathname
+    const method = request.method
+    if (method === 'PATCH' && path.endsWith('/projects/project-1')) {
+      const body = (await request.json()) as { expected_version: number }
+      calls.push({ method, body })
+      if (calls.length === 1) await firstGate
+      return Response.json({ ...project, ...body, version: body.expected_version + 1 })
+    }
+    if (path.endsWith('/statuses')) return Response.json({ items: [status('todo', 'Todo', 'unstarted', 0)], next_cursor: null })
+    if (path.endsWith('/projects')) return new Promise<Response>((resolve) => {
+      // Only the first load resolves; later refetches hang so the queue must use the PATCH responses.
+      if (calls.length === 0) resolve(Response.json({ items: [{ ...project, auto_close_parent: true, auto_close_sub_issues: false }], next_cursor: null }))
+    })
+    if (path.endsWith('/tasks')) return Response.json({ items: [], next_cursor: null })
+    return Response.json({ type: 'about:blank', title: 'Not found', status: 404, detail: 'missing', code: 'not_found', instance: path, request_id: 'request-1' }, { status: 404, headers: { 'content-type': 'application/problem+json' } })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
+        <MemoryRouter initialEntries={['/tasks/projects/project-1/settings']}>
+          <Routes><Route path="/tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} /></Routes>
+        </MemoryRouter>
+      </WorkspaceContext.Provider>
+    </QueryClientProvider>,
+  )
+
+  const closeParent = await view.findByRole('switch', { name: 'Close parent when all sub-issues are done' })
+  const closeChildren = view.getByRole('switch', { name: 'Close open sub-issues when parent is closed' })
+
+  fireEvent.click(closeChildren)
+  await waitFor(() => expect(calls).toHaveLength(1))
+  // The first PATCH is still pending: the other switch stays usable and shows the new value at once.
+  expect(closeParent.hasAttribute('data-disabled')).toBe(false)
+  fireEvent.click(closeParent)
+  expect(closeParent.getAttribute('aria-checked')).toBe('false')
+  expect(closeChildren.getAttribute('aria-checked')).toBe('true')
+  expect(calls).toHaveLength(1)
+
+  releaseFirst()
+  await waitFor(() => expect(calls).toHaveLength(2))
+  expect(calls.map((call) => call.body)).toEqual([
+    { name: 'Launch', key: 'ORB', color: '#e0457b', expected_version: 1, auto_close_parent: true, auto_close_sub_issues: true },
+    { name: 'Launch', key: 'ORB', color: '#e0457b', expected_version: 2, auto_close_parent: false, auto_close_sub_issues: true },
+  ])
+  await waitFor(() => expect(closeParent.getAttribute('aria-checked')).toBe('false'))
+  expect(closeChildren.getAttribute('aria-checked')).toBe('true')
+}, 20000)
