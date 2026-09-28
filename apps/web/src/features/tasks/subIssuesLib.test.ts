@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { ApiProblem } from '@/api/problem'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
-import { breadcrumbParts, parentErrorMessage, parentPickerTitle, parentToastMessage, subIssueDefaults, trashedSubIssuesLabel } from './subIssuesLib'
+import { breadcrumbParts, descendantCount, parentErrorMessage, parentPickerTitle, parentToastMessage, subIssueDefaults, trashConfirmDescription, trashedSubIssuesLabel } from './subIssuesLib'
 
 const problem = (code: string) => new ApiProblem({ type: 'about:blank', title: 'Unprocessable', status: 422, detail: 'x', code, instance: '/', request_id: 'r' } as never)
 
@@ -53,4 +53,20 @@ test('trash rows count the sub-issues trashed with a parent', () => {
   expect(trashedSubIssuesLabel(0)).toBeNull()
   expect(trashedSubIssuesLabel(1)).toBe('+1 sub-issue')
   expect(trashedSubIssuesLabel(3)).toBe('+3 sub-issues')
+})
+
+test('the trash confirmation counts every sub-issue going with the task, or only claims the direct ones', () => {
+  const levels: Record<string, Array<{ id: string; sub_issue_count: number }>> = {
+    root: [{ id: 'a', sub_issue_count: 2 }, { id: 'b', sub_issue_count: 0 }],
+    a: [{ id: 'a1', sub_issue_count: 0 }, { id: 'a2', sub_issue_count: 0 }],
+  }
+  expect(descendantCount(2, (id) => levels[id], 'root')).toEqual({ total: 4, exact: true })
+  // level "a" is not loaded: only the direct count is known
+  expect(descendantCount(2, (id) => (id === 'a' ? undefined : levels[id]), 'root')).toEqual({ total: 2, exact: false })
+  expect(descendantCount(0, () => undefined, 'root')).toEqual({ total: 0, exact: true })
+
+  expect(trashConfirmDescription({ total: 0, exact: true })).toBe('You can restore this task from trash later.')
+  expect(trashConfirmDescription({ total: 1, exact: true })).toBe('This also moves 1 sub-issue to trash. You can restore them from trash later.')
+  expect(trashConfirmDescription({ total: 4, exact: true })).toBe('This also moves 4 sub-issues to trash. You can restore them from trash later.')
+  expect(trashConfirmDescription({ total: 2, exact: false })).toBe('This also moves its 2 sub-issues and everything nested under them to trash. You can restore them from trash later.')
 })

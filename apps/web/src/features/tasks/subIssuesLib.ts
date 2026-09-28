@@ -49,6 +49,34 @@ export function breadcrumbParts<T>(ancestors: T[]): { head: T[]; hidden: T[]; ta
   return { head: ancestors.slice(0, 1), hidden: ancestors.slice(1, -1), tail: ancestors.slice(-1) }
 }
 
+type SubIssueCountNode = { id: string; sub_issue_count?: number | null }
+
+/**
+ * How many live sub-issues sit below a task (at every level), from the loaded levels. `direct` is the task's own
+ * count; `childrenOf(id)` gives a task's loaded sub-issues, or undefined when that level is not loaded. Exact when
+ * every level that has sub-issues is loaded; otherwise only the direct count is known (`exact: false`).
+ */
+export function descendantCount(direct: number, childrenOf: (id: string) => readonly SubIssueCountNode[] | undefined, taskId: string): { total: number; exact: boolean } {
+  if (direct === 0) return { total: 0, exact: true }
+  let total = 0
+  const pending = [taskId]
+  while (pending.length > 0) {
+    const children = childrenOf(pending.pop()!)
+    if (!children) return { total: direct, exact: false }
+    total += children.length
+    for (const child of children) if ((child.sub_issue_count ?? 0) > 0) pending.push(child.id)
+  }
+  return { total, exact: true }
+}
+
+/** The trash confirmation's body: says how many sub-issues go to trash too (spec §5 trashes the whole subtree). */
+export function trashConfirmDescription({ total, exact }: { total: number; exact: boolean }): string {
+  if (total === 0) return 'You can restore this task from trash later.'
+  const count = `${total} sub-issue${total === 1 ? '' : 's'}`
+  const moved = exact ? `This also moves ${count} to trash.` : `This also moves its ${count} and everything nested under them to trash.`
+  return `${moved} You can restore them from trash later.`
+}
+
 /** "+2 sub-issues" beside a trashed parent; null when it went to trash alone. */
 export function trashedSubIssuesLabel(count: number): string | null {
   return count > 0 ? `+${count} sub-issue${count === 1 ? '' : 's'}` : null

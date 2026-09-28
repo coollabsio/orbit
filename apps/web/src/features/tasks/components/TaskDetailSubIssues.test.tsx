@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
+import { registerConfirmationHandler, type ConfirmationOptions } from '@/components/common/confirmAction'
 import { TaskDetail } from './TaskDetail'
 
 const originalFetch = globalThis.fetch
@@ -89,4 +90,58 @@ test('"Set parent" never offers the task or anything loaded below it', async () 
   const picker = await view.findByRole('dialog', { name: 'Set parent of ORB-0012…' })
   await within(picker).findByRole('option', { name: /Pricing page/ })
   expect(within(picker).queryAllByRole('option')).toHaveLength(1)
+}, 20000)
+
+test('Esc in the composer returns focus to the "Add sub-issue" button that opened it', async () => {
+  const calls: Call[] = []
+  api(calls, {}, [])
+  const view = render(<TaskDetail task={task} project={project} state={state} onBack={() => {}} />, { wrapper: Wrapper })
+  fireEvent.click(view.getByRole('button', { name: 'Add sub-issue' }))
+  const input = await view.findByRole('textbox', { name: 'Sub-issue title' })
+  expect(document.activeElement === input).toBe(true)
+  // clicking the section's + while composing puts the caret back in the field
+  const section = view.getByRole('region', { name: 'Sub-issues' })
+  const plus = within(section).getByRole('button', { name: 'Add sub-issue' })
+  plus.focus()
+  fireEvent.click(plus)
+  expect(document.activeElement === input).toBe(true)
+  fireEvent.keyDown(input, { key: 'Escape' })
+  await waitFor(() => expect(view.queryAllByRole('textbox', { name: 'Sub-issue title' })).toHaveLength(0))
+  // compared as booleans: a failing element diff of the whole page can exhaust the test memory cap
+  expect(document.activeElement === view.getByRole('button', { name: 'Add sub-issue' })).toBe(true)
+}, 20000)
+
+test('with sub-issues, Esc in the composer returns focus to the section\'s +', async () => {
+  const calls: Call[] = []
+  api(calls, { 'task-0012': [record('task-0031', 'Payment form', 'task-0012')] }, [])
+  const view = render(<TaskDetail task={{ ...task, subIssueCount: 1 }} project={project} state={state} onBack={() => {}} />, { wrapper: Wrapper })
+  const section = await view.findByRole('region', { name: 'Sub-issues' })
+  await within(section).findByText('Payment form')
+  const plus = within(section).getByRole('button', { name: 'Add sub-issue' })
+  fireEvent.click(plus)
+  const input = await view.findByRole('textbox', { name: 'Sub-issue title' })
+  fireEvent.keyDown(input, { key: 'Escape' })
+  expect(view.queryAllByRole('textbox', { name: 'Sub-issue title' })).toHaveLength(0)
+  expect(document.activeElement === plus).toBe(true)
+}, 20000)
+
+test('the trash confirmation counts the sub-issues at every loaded level', async () => {
+  const calls: Call[] = []
+  api(calls, {
+    'task-0012': [record('task-0031', 'Payment form', 'task-0012', 2), record('task-0033', 'Receipt email', 'task-0012')],
+    'task-0031': [record('task-0045', 'Card validation', 'task-0031'), record('task-0046', 'Card number mask', 'task-0031')],
+  }, [])
+  const asked: ConfirmationOptions[] = []
+  const unregister = registerConfirmationHandler(async (options) => { asked.push(options); return false })
+  try {
+    const view = render(<TaskDetail task={{ ...task, subIssueCount: 2 }} project={project} state={state} onBack={() => {}} />, { wrapper: Wrapper })
+    const section = await view.findByRole('region', { name: 'Sub-issues' })
+    await within(section).findByText('Card number mask')
+    fireEvent.click(view.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(asked).toHaveLength(1))
+    expect(asked[0]!.description).toBe('This also moves 4 sub-issues to trash. You can restore them from trash later.')
+    expect(writes(calls)).toHaveLength(0)
+  } finally {
+    unregister()
+  }
 }, 20000)

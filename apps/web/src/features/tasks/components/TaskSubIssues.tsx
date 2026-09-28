@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type Ref } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Add as Plus, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
@@ -39,9 +39,11 @@ export interface SubIssuesSectionProps {
   onComposingChange: (open: boolean) => void
   onAddExisting: () => void
   onOpen: (taskId: string) => void
+  /** The header "+", so the page can return focus to it when Esc closes the composer. */
+  addButtonRef?: Ref<HTMLButtonElement>
 }
 
-type Context = Omit<SubIssuesSectionProps, 'parent' | 'composing' | 'onComposingChange' | 'onAddExisting'> & {
+type Context = Omit<SubIssuesSectionProps, 'parent' | 'composing' | 'onComposingChange' | 'onAddExisting' | 'addButtonRef'> & {
   collapsed: ReadonlySet<string>
   toggle: (id: string) => void
   newIds: ReadonlySet<string>
@@ -55,8 +57,9 @@ function useChildren(parentId: string, projects: Project[]): Task[] {
 }
 
 /** Main-column section above Relations: progress, the sub-issue tree (same gutter as the list) and the inline composer. */
-export function SubIssuesSection({ parent, composing, onComposingChange, onAddExisting, ...rest }: SubIssuesSectionProps) {
+export function SubIssuesSection({ parent, composing, onComposingChange, onAddExisting, addButtonRef, ...rest }: SubIssuesSectionProps) {
   const { workspace } = useWorkspace()
+  const composerInputRef = useRef<HTMLInputElement>(null)
   const children = useChildren(parent.id, rest.projects)
   const { collapsed, toggle } = useCollapsedTasks(workspace.id)
   const [newIds, setNewIds] = useState<string[]>([])
@@ -72,13 +75,15 @@ export function SubIssuesSection({ parent, composing, onComposingChange, onAddEx
         <div className="flex-1" />
         <Button variant="ghost" size="xs" className={cn('text-muted-foreground', PRESS_MOTION)} onClick={onAddExisting}>Add existing</Button>
         <Button
+          ref={addButtonRef}
           variant="ghost"
           size="icon-xs"
           className={cn('text-muted-foreground', PRESS_MOTION)}
           aria-label="Add sub-issue"
           title="Add sub-issue"
           aria-pressed={composing}
-          onClick={() => onComposingChange(true)}
+          // already composing: take the user back to the field instead of doing nothing
+          onClick={() => (composing ? composerInputRef.current?.focus() : onComposingChange(true))}
         >
           <Plus className="size-3.5" />
         </Button>
@@ -91,6 +96,7 @@ export function SubIssuesSection({ parent, composing, onComposingChange, onAddEx
         ) : null}
         {composing ? (
           <SubIssueComposer
+            inputRef={composerInputRef}
             parent={parent}
             siblings={children}
             statuses={rest.statuses}
@@ -190,7 +196,8 @@ function SubIssueRow({ task, depth, context }: { task: Task; depth: number; cont
  * Inline "new sub-issue" row: Enter creates one with the parent's defaults and keeps the field focused for the next;
  * Esc closes the composer only (the task page closes on a document-level Esc).
  */
-function SubIssueComposer({ parent, siblings, statuses, currentUserId, onCreated, onClose }: {
+function SubIssueComposer({ inputRef, parent, siblings, statuses, currentUserId, onCreated, onClose }: {
+  inputRef: Ref<HTMLInputElement>
   parent: Task
   siblings: Task[]
   statuses: TaskStatusDef[]
@@ -245,6 +252,7 @@ function SubIssueComposer({ parent, siblings, statuses, currentUserId, onCreated
         <TaskStatusIcon status={defaultStatusOf(statuses, parent.projectId)} />
       </span>
       <Input
+        ref={inputRef}
         autoFocus
         aria-label="Sub-issue title"
         placeholder="Sub-issue title"

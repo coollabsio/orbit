@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
 import { ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
@@ -22,16 +22,16 @@ import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
-import { cachedDescendantIds } from '@/features/tasks/api/optimistic'
+import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
 import { useProjects } from '@/features/tasks/api/projects'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
-  useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask, useUploadTaskAttachments,
+  subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask, useUploadTaskAttachments,
 } from '@/features/tasks/api/tasks'
 import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { useParentActions } from '@/features/tasks/useParentActions'
-import { parentPickerTitle } from '@/features/tasks/subIssuesLib'
+import { descendantCount, parentPickerTitle, trashConfirmDescription } from '@/features/tasks/subIssuesLib'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { AddRelationMenu, DuplicateBanner, TaskRelationsSection } from './TaskRelations'
 import { TaskBreadcrumb } from './TaskBreadcrumb'
@@ -107,6 +107,16 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
   const queryClient = useQueryClient()
   const parentActions = useParentActions(workspace.id)
   const [composingSubIssue, setComposingSubIssue] = useState(false)
+  // Esc closes the composer: focus returns to the section's "+" while the section stays (it has sub-issues),
+  // else to the "Add sub-issue" button beside Attach, which comes back once the composer and section are gone
+  const subIssueAddRef = useRef<HTMLButtonElement>(null)
+  const subIssueHeaderAddRef = useRef<HTMLButtonElement>(null)
+  const restoreSubIssueFocus = useRef(false)
+  useEffect(() => {
+    if (composingSubIssue || !restoreSubIssueFocus.current) return
+    restoreSubIssueFocus.current = false
+    ;(subIssueHeaderAddRef.current ?? subIssueAddRef.current)?.focus()
+  }, [composingSubIssue])
   const [parentPicker, setParentPicker] = useState<'set' | 'add' | null>(null)
   const childIds = (useSubIssues(workspace.id, task?.id).data?.items ?? []).map((record) => record.id)
   // the banner animates only when the task becomes a duplicate while open, never on page load;
@@ -150,7 +160,9 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
         {githubSyncPaused ? <Badge variant="secondary">GitHub sync paused</Badge> : null}
         <div className="flex-1" />
         {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
-          if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: task.subIssueCount ? 'Its sub-issues move to trash with it. You can restore them from trash later.' : 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
+          // the whole subtree goes to trash with it: count every loaded level (the Sub-issues section loads them)
+          const below = descendantCount(task.subIssueCount ?? 0, (id) => queryClient.getQueryData<PageTaskRecord>(subIssuesQuery(workspace.id, id).queryKey)?.items, task.id)
+          if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: trashConfirmDescription(below), confirmLabel: 'Move to trash', danger: true })) return
           void deleteAndClose({ taskId: task.id, version: task.version })
         }}>Delete</Button> : null}
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
@@ -198,7 +210,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                 </Button>
                 <AddRelationMenu onChoose={setPicker} />
                 {(task.subIssueCount ?? 0) === 0 && childIds.length === 0 && !composingSubIssue ? (
-                  <Button variant="ghost" className="text-xs text-muted-foreground/70" onClick={() => setComposingSubIssue(true)}>
+                  <Button ref={subIssueAddRef} variant="ghost" className="text-xs text-muted-foreground/70" onClick={() => setComposingSubIssue(true)}>
                     <Hierarchy2 className="size-3.5" aria-hidden="true" />
                     Add sub-issue
                   </Button>
@@ -232,7 +244,11 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
               users={users}
               currentUserId={state.currentUserId}
               composing={composingSubIssue}
-              onComposingChange={setComposingSubIssue}
+              onComposingChange={(open) => {
+                if (!open) restoreSubIssueFocus.current = true
+                setComposingSubIssue(open)
+              }}
+              addButtonRef={subIssueHeaderAddRef}
               onAddExisting={() => setParentPicker('add')}
               onOpen={openTask}
             />
