@@ -47,6 +47,25 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 - Bulk and reorder requests are one atomic request of at most 100 items. Empty unchanged choices are local no-ops.
 - Task and project trash have server-backed restore flows and 30-day retention.
 
+### Sub-issues
+
+Core files: `apps/server/src/repositories/sub_issues.rs` (parent checks, tree walks, auto-close), `features/views/taskTree.ts`,
+`components/TreeGutter.tsx`, `components/TaskSubIssues.tsx`, `useParentActions.ts`, `views/nestDrop.ts` + `useNestDrop.ts`.
+
+- `tasks.parent_task_id` (migration 0034): unlimited depth, parent may be in another project of the same workspace. Self-parent
+  or a cycle → 422 `parent_cycle`; missing/trashed parent → 422 `parent_invalid`.
+- Task JSON: `parent`, `sub_issue_count`, `sub_issue_closed_count` (closed = completed, cancelled, duplicate); `ancestors` on
+  GET one; `trashed_descendant_count` in trash.
+- Display `sub_issues`: nested (default, list only) / flat / hidden. Nested subtrees stay in their root's group; a match
+  whose parent is filtered out shows as a root with a "Parent ›" prefix. Filters: Parent (task or "No parent"), Sub-issues.
+- Drag onto the middle of a row or card nests it (toast + Undo); in nested mode an edge drop makes a sibling (beside a root
+  row = detach). BulkBar has Set parent… / Remove parent.
+- Per-project automations, default on: close the parent when every sub-issue is closed and one is completed; close open
+  sub-issues when the parent closes (same category). They run in the write transaction for PATCH, bulk, delete and GitHub
+  sync; PATCH/bulk responses carry `auto_closed` for the toasts.
+- Deleting a task trashes its subtree; restoring it restores what was trashed with it. A task restored alone under a trashed
+  parent comes back top-level.
+
 ### Project workflows
 
 - Statuses are per-project entities, not a fixed enum.
