@@ -191,11 +191,13 @@ pub struct AutoClosed {
     pub status_id: Id,
 }
 
-/// Who and when, for the audit rows the automation writes.
+/// Who and when, for the audit rows the automation writes. `service_account` is set when an
+/// integration (GitHub sync) made the triggering change; its audit rows then carry no user actor.
 #[derive(Clone, Copy)]
 pub(super) struct AutomationActor<'a> {
     pub(super) workspace_id: Id,
     pub(super) actor_id: Id,
+    pub(super) service_account: Option<(Id, &'a str)>,
     pub(super) request_id: &'a str,
     pub(super) now: TimestampMillis,
 }
@@ -204,7 +206,7 @@ pub(super) struct AutomationActor<'a> {
 #[derive(Clone, Debug)]
 pub(super) struct TaskSnapshot {
     category: String,
-    parent_task_id: Option<Id>,
+    pub(super) parent_task_id: Option<Id>,
     project_id: Id,
 }
 
@@ -238,25 +240,48 @@ pub(super) async fn snapshot_in_tx(
     }))
 }
 
-/// Runs rules B then A for `task_id`, which the caller changed from `before` (spec §4).
+/// The id of the project `task_id` belongs to, even when the task or its project is in the
+/// trash (audit rows use it to build identifiers of hidden tasks).
+pub(super) async fn project_id_of_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    task_id: Option<Id>,
+) -> Result<Option<Id>, TaskError> {
+    let Some(task_id) = task_id else {
+        return Ok(None);
+    };
+    sqlx::query_scalar::<_, String>("SELECT project_id FROM tasks WHERE id = ?")
+        .bind(task_id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?
+        .map(parse_id)
+        .transpose()
+}
+
+/// Runs rules B then A for `task_id`, which the caller's own write changed from `before` to
+/// `after` (spec §4). `after` must be read right after that write and before any automation
+/// runs, so a task the automation closed never looks like it was closed by the caller (rule B
+/// only follows the caller's writes, whatever order a bulk request lists them in).
 pub(super) async fn run_automation_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     actor: AutomationActor<'_>,
     task_id: Id,
     before: &TaskSnapshot,
+    after: &TaskSnapshot,
     auto_closed: &mut Vec<AutoClosed>,
 ) -> Result<(), TaskError> {
-    let Some(after) = snapshot_in_tx(tx, task_id).await? else {
-        return Ok(());
-    };
     let became_closed = !is_closed(&before.category) && is_closed(&after.category);
+    // A child moving between closed categories into `completed` (cancelled -> completed) can
+    // now satisfy rule A's "at least one completed" clause.
+    let became_completed = before.category != "completed" && after.category == "completed";
     if became_closed
         && matches!(after.category.as_str(), "completed" | "cancelled")
         && closes_sub_issues_in_tx(tx, after.project_id).await?
     {
         close_descendants_in_tx(tx, actor, task_id, &after.category, auto_closed).await?;
     }
-    if became_closed && let Some(parent_id) = after.parent_task_id {
+    if (became_closed || became_completed)
+        && let Some(parent_id) = after.parent_task_id
+    {
         close_ancestors_in_tx(tx, actor, parent_id, task_id, auto_closed).await?;
     }
     if before.parent_task_id != after.parent_task_id
@@ -437,22 +462,32 @@ async fn close_in_tx(
         .bind(source_id.to_string())
         .fetch_one(&mut **tx)
         .await?;
+    let mut metadata = json!({
+        "source_task_id": source_id,
+        "source_project_id": source_project_id,
+        "from_status_id": from,
+        "to_status_id": to,
+        "reason": reason,
+    });
+    // Same shape as the other integration audits (`record_relation_audit`).
+    let actor_id = match actor.service_account {
+        Some((id, name)) => {
+            metadata["actor_service_account_id"] = json!(id);
+            metadata["actor_service_account_name"] = json!(name);
+            None
+        }
+        None => Some(actor.actor_id),
+    };
     audit::record(
         tx,
         actor.workspace_id,
-        Some(actor.actor_id),
+        actor_id,
         "task.auto_closed",
         AuditOutcome::Success,
         "task",
         Some(task_id),
         actor.request_id,
-        json!({
-            "source_task_id": source_id,
-            "source_project_id": source_project_id,
-            "from_status_id": from,
-            "to_status_id": to,
-            "reason": reason,
-        }),
+        metadata,
         actor.now,
     )
     .await?;

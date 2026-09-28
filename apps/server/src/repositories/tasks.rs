@@ -1409,11 +1409,52 @@ impl TaskRepository {
                 )
                 .await?
                     == task_relations::DUPLICATE;
+            let before = sub_issues::snapshot_in_tx(&mut tx, task_id).await?;
+            // Spec §5: a task un-trashed while its parent is still in the trash comes back
+            // top-level, as in `restore_task`.
+            let orphaned_from = match before.as_ref().and_then(|before| before.parent_task_id) {
+                Some(parent_id)
+                    if was_deleted
+                        && !sub_issues::task_is_live_in_tx(&mut tx, parent_id).await? =>
+                {
+                    Some(parent_id)
+                }
+                _ => None,
+            };
             let changed = sqlx::query(
                     "UPDATE tasks SET title = ?, description = ?, source_url = ?, status_id = ?, deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND (deleted_at IS NOT NULL OR title != ? OR description != ? OR source_url IS NOT ? OR status_id != ?)",
                 ).bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).bind(now.as_millis())
                     .bind(task_id.to_string()).bind(workspace_id.to_string())
                     .bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).execute(&mut *tx).await?;
+            if let Some(parent_id) = orphaned_from {
+                // The UPDATE above always ran (the task was in the trash) and bumped the version.
+                sqlx::query("UPDATE tasks SET parent_task_id = NULL WHERE id = ?")
+                    .bind(task_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                let from_project_id =
+                    sub_issues::project_id_of_in_tx(&mut tx, Some(parent_id)).await?;
+                audit::record(
+                    &mut tx,
+                    workspace_id,
+                    None,
+                    "task.parent_changed",
+                    AuditOutcome::Success,
+                    "task",
+                    Some(task_id),
+                    request_id,
+                    json!({
+                        "from": parent_id,
+                        "to": Value::Null,
+                        "from_project_id": from_project_id,
+                        "to_project_id": Value::Null,
+                        "actor_service_account_id": service_account_id,
+                        "actor_service_account_name": service_account_name,
+                    }),
+                    now,
+                )
+                .await?;
+            }
             if leaves_duplicate {
                 task_relations::delete_duplicate_relation_in_tx(
                     &mut tx,
@@ -1443,6 +1484,27 @@ impl TaskRepository {
                     task_id,
                     request_id,
                     now,
+                )
+                .await?;
+            }
+            // Spec §4: the automation follows every write path, GitHub's included.
+            let after = sub_issues::snapshot_in_tx(&mut tx, task_id).await?;
+            if let (Some(before), Some(after)) = (before, after) {
+                let actor = sub_issues::AutomationActor {
+                    workspace_id,
+                    actor_id,
+                    service_account: Some((service_account_id, &service_account_name)),
+                    request_id,
+                    now,
+                };
+                let mut auto_closed = Vec::new();
+                sub_issues::run_automation_in_tx(
+                    &mut tx,
+                    actor,
+                    task_id,
+                    &before,
+                    &after,
+                    &mut auto_closed,
                 )
                 .await?;
             }
@@ -1656,6 +1718,7 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+        let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1668,15 +1731,23 @@ impl TaskRepository {
         )
         .await?;
         let mut auto_closed = Vec::new();
-        if let Some(before) = before {
+        if let (Some(before), Some(after)) = (before, after) {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,
+                service_account: None,
                 request_id,
                 now,
             };
-            sub_issues::run_automation_in_tx(&mut tx, actor, update.id, &before, &mut auto_closed)
-                .await?;
+            sub_issues::run_automation_in_tx(
+                &mut tx,
+                actor,
+                update.id,
+                &before,
+                &after,
+                &mut auto_closed,
+            )
+            .await?;
         }
         // Re-read: the automation may have changed this task's sub-issue counts.
         let task = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
@@ -1714,10 +1785,14 @@ impl TaskRepository {
     ) -> Result<BulkUpdateOutcome, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let mut before = Vec::with_capacity(updates.len());
+        // Each item's before/after pair brackets its own write only; the automation runs after
+        // every write, so its result never depends on the order of the items.
+        let mut snapshots = Vec::with_capacity(updates.len());
         for update in updates {
-            before.push(sub_issues::snapshot_in_tx(&mut tx, update.id).await?);
+            let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
             update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+            let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
+            snapshots.push(before.zip(after));
         }
         record_mutation(
             &mut tx,
@@ -1735,17 +1810,19 @@ impl TaskRepository {
         let actor = sub_issues::AutomationActor {
             workspace_id,
             actor_id,
+            service_account: None,
             request_id,
             now,
         };
         let mut auto_closed = Vec::new();
-        for (update, before) in updates.iter().zip(&before) {
-            if let Some(before) = before {
+        for (update, snapshot) in updates.iter().zip(&snapshots) {
+            if let Some((before, after)) = snapshot {
                 sub_issues::run_automation_in_tx(
                     &mut tx,
                     actor,
                     update.id,
                     before,
+                    after,
                     &mut auto_closed,
                 )
                 .await?;
@@ -1833,6 +1910,7 @@ impl TaskRepository {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,
+                service_account: None,
                 request_id,
                 now,
             };
@@ -1902,11 +1980,8 @@ impl TaskRepository {
         if parent_task_id != current.parent_task_id {
             // The trashed parent's project, so the activity feed can build its identifier even
             // though the parent itself is not visible.
-            let from_project_id: Option<String> =
-                sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
-                    .bind(current.parent_task_id.map(|id| id.to_string()))
-                    .fetch_optional(&mut *tx)
-                    .await?;
+            let from_project_id =
+                sub_issues::project_id_of_in_tx(&mut tx, current.parent_task_id).await?;
             audit::record(
                 &mut tx,
                 workspace_id,
@@ -2390,7 +2465,13 @@ pub(super) async fn update_task_in_tx(
         sub_issues::parent_ref_in_tx(tx, parent_task_id).await?
     };
     if parent_task_id != current.parent_task_id {
-        // Project ids let the activity feed build cross-project identifiers (ORB-91C0).
+        // Project ids let the activity feed build cross-project identifiers (ORB-91C0). A hidden
+        // old parent (trashed, or in a trashed project) has no `current.parent`, so read its
+        // project straight from `tasks`.
+        let from_project_id = match &current.parent {
+            Some(parent) => Some(parent.project_id),
+            None => sub_issues::project_id_of_in_tx(tx, current.parent_task_id).await?,
+        };
         audit::record(
             tx,
             workspace_id,
@@ -2403,7 +2484,7 @@ pub(super) async fn update_task_in_tx(
             json!({
                 "from": current.parent_task_id,
                 "to": parent_task_id,
-                "from_project_id": current.parent.as_ref().map(|p| p.project_id),
+                "from_project_id": from_project_id,
                 "to_project_id": parent.as_ref().map(|p| p.project_id),
             }),
             now,
