@@ -13,7 +13,10 @@ type ApiClient = ReturnType<typeof createApiClient>
 export const TASK_QUERY_PAGE_SIZE = 100
 const NO_TASKS: TaskRecord[] = []
 
-/** POST /tasks/query body: the effective filter plus the display options the server applies. */
+/**
+ * POST /tasks/query body: the effective filter plus the display options the server applies. Nested and flat
+ * sub-issues are a client layout only, so they share one body (and one cached query).
+ */
 export function taskQueryBody(filter: FilterGroup, display: DisplayOptions): TaskQueryBody {
   return {
     // The hand-written FilterGroup is the source of truth; the generated schema type describes the same JSON.
@@ -21,7 +24,7 @@ export function taskQueryBody(filter: FilterGroup, display: DisplayOptions): Tas
     order_by: display.order_by,
     order_direction: display.order_direction,
     show_completed: display.show_completed,
-    sub_issues: display.sub_issues,
+    ...(display.sub_issues === 'hidden' ? { sub_issues: 'hidden' as const } : {}),
   }
 }
 

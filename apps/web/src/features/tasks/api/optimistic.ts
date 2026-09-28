@@ -62,14 +62,19 @@ function withAncestors(record: TaskRecord, cached: TaskRecord): TaskRecord {
   return { ...record, ancestors: sameParent ? kept : next.parent ? [next.parent] : [] } as TaskRecord
 }
 
-function findTaskData(data: unknown, taskId: string): TaskRecord | undefined {
-  if (!data || typeof data !== 'object') return undefined
-  if ('id' in data && data.id === taskId && 'workspace_id' in data) return data as TaskRecord
-  const children = 'items' in data && Array.isArray(data.items) ? data.items : 'pages' in data && Array.isArray(data.pages) ? data.pages : []
-  for (const child of children) {
-    const found = findTaskData(child, taskId)
-    if (found) return found
+/** Every task record in a cached value: a record, a page (`items`) or an infinite query (`pages`), as `mapTaskData`. */
+function* taskRecordsIn(data: unknown): Generator<TaskRecord> {
+  if (!data || typeof data !== 'object') return
+  if ('id' in data && 'workspace_id' in data) {
+    yield data as TaskRecord
+    return
   }
+  const children = 'items' in data && Array.isArray(data.items) ? data.items : 'pages' in data && Array.isArray(data.pages) ? data.pages : []
+  for (const child of children) yield* taskRecordsIn(child)
+}
+
+function findTaskData(data: unknown, taskId: string): TaskRecord | undefined {
+  for (const record of taskRecordsIn(data)) if (record.id === taskId) return record
   return undefined
 }
 
@@ -100,23 +105,12 @@ export function findCachedTask(queryClient: QueryClient, workspaceId: string, ta
   return undefined
 }
 
-function collectTaskData(data: unknown, into: TaskRecord[]): void {
-  if (!data || typeof data !== 'object') return
-  if ('id' in data && 'workspace_id' in data) {
-    into.push(data as TaskRecord)
-    return
-  }
-  const children = 'items' in data && Array.isArray(data.items) ? data.items : 'pages' in data && Array.isArray(data.pages) ? data.pages : []
-  for (const child of children) collectTaskData(child, into)
-}
-
 /**
  * Every descendant of a task that any cached query knows about (lists, boards, the detail's sub-issue levels): the
  * "Set parent" picker must not offer them. Deeper, unloaded ones are refused by the server (`parent_cycle`).
  */
 export function cachedDescendantIds(queryClient: QueryClient, workspaceId: string, taskId: string): string[] {
-  const records: TaskRecord[] = []
-  for (const [, data] of queryClient.getQueriesData({ queryKey: queryKeys.tasks.all(workspaceId) })) collectTaskData(data, records)
+  const records = queryClient.getQueriesData({ queryKey: queryKeys.tasks.all(workspaceId) }).flatMap(([, data]) => [...taskRecordsIn(data)])
   const children = new Map<string, Set<string>>()
   for (const record of records) {
     const parentId = (record as TaskRecord & { parent_task_id?: string | null }).parent_task_id

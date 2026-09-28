@@ -46,8 +46,8 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
   onDuplicate: (task: Task) => void
   /** Nested list: a drop at root level (a group zone) detaches a nested row. */
   detach?: (task: Task) => boolean
-  /** After a write that detached `task` (as it was before the drop); `records` are the write's results. */
-  onDetached?: (task: Task, records: TaskRecord[]) => void
+  /** After a write that detached `task` (as it was before the drop); `records` are the write's results, `response` its raw body. */
+  onDetached?: (task: Task, records: TaskRecord[], response: unknown) => void
 }) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
@@ -73,9 +73,9 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
     const extra: TaskPatch = detach?.(task) ? { parent_task_id: null } : {}
     const hasExtra = Object.keys(extra).length > 0
     // a detach gets the same toast and Undo as a nest drop
-    const announce = (records: TaskRecord[]) => { if (hasExtra) onDetached?.(task, records) }
-    const single = { onError: reportMoveError, onSuccess: (record: TaskRecord) => announce([record]) }
-    const bulk = { onError: reportMoveError, onSuccess: (page: { items: TaskRecord[] }) => announce(page.items) }
+    const announce = (records: TaskRecord[], response: unknown) => { if (hasExtra) onDetached?.(task, records, response) }
+    const single = { onError: reportMoveError, onSuccess: (record: TaskRecord) => announce([record], record) }
+    const bulk = { onError: reportMoveError, onSuccess: (page: { items: TaskRecord[] }) => announce(page.items, page) }
     const patchOnly = () => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...extra } }, single)
     if (zoneIdOf(current.from) === zone.id) {
       if (index === null) {

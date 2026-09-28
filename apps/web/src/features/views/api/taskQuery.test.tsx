@@ -26,8 +26,12 @@ const testClient = () => new QueryClient({ defaultOptions: { queries: { retry: f
 
 test('the query body carries the effective filter and the display ordering', () => {
   expect(taskQueryBody(PRESET_FILTERS.mine, { ...DEFAULT_DISPLAY, order_by: 'due_date', order_direction: 'desc', show_completed: 'past_week' })).toEqual({
-    filter: PRESET_FILTERS.mine, order_by: 'due_date', order_direction: 'desc', show_completed: 'past_week', sub_issues: 'nested',
+    filter: PRESET_FILTERS.mine, order_by: 'due_date', order_direction: 'desc', show_completed: 'past_week',
   })
+})
+
+test('nested and flat sub-issues share one query body, so switching them does not refetch', () => {
+  expect(taskQueryBody(emptyFilter(), { ...DEFAULT_DISPLAY, sub_issues: 'flat' })).toEqual(taskQueryBody(emptyFilter(), { ...DEFAULT_DISPLAY, sub_issues: 'nested' }))
 })
 
 test('hidden sub-issues travel in the query body', () => {

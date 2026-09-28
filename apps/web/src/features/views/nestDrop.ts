@@ -32,8 +32,9 @@ export function canNestOn(tasks: ReadonlyArray<Pick<Task, 'id' | 'parentTaskId'>
 
 /**
  * Spec §7.4. Inside: the target becomes the parent. The edges of a nested row (tree given, target nested in it): the task
- * becomes the target's sibling, placed beside it when the order is manual. Every other edge passes to the group zone
- * (flat list, board, root rows). Drops that change nothing are invalid, so they show no highlight.
+ * becomes the target's sibling, placed beside it when the order is manual and every sibling shares its status and
+ * project. Every other edge passes to the group zone (flat list, board, root rows). Drops that change nothing are
+ * invalid, so they show no highlight.
  */
 export function planNestDrop({ tasks, tree, dragId, target, zone, manual }: {
   tasks: Task[]
@@ -52,8 +53,11 @@ export function planNestDrop({ tasks, tree, dragId, target, zone, manual }: {
   if (!tree || !tree.nested.has(target.id) || !target.parentTaskId) return { kind: 'pass' }
   const parentId = target.parentTaskId
   if (target.id === dragId || !canNestOn(tasks, dragId, parentId)) return { kind: 'invalid' }
-  if (!manual) return dragged.parentTaskId === parentId ? { kind: 'invalid' } : { kind: 'parent', parentId, placement: null }
   const siblings = tree.childrenOf.get(parentId) ?? []
+  // positions count within one project and status (a board column): placing among sub-issues in other columns would
+  // renumber them there, so such a drop only changes the parent
+  const oneColumn = siblings.every((task) => task.projectId === dragged.projectId && task.statusId === dragged.statusId)
+  if (!manual || !oneColumn) return dragged.parentTaskId === parentId ? { kind: 'invalid' } : { kind: 'parent', parentId, placement: null }
   const others = siblings.filter((task) => task.id !== dragId)
   return { kind: 'parent', parentId, placement: { siblings, index: others.indexOf(target) + (zone === 'after' ? 1 : 0) } }
 }

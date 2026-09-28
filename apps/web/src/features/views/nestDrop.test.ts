@@ -43,3 +43,13 @@ test('edges of a nested row make a sibling; root rows, flat lists and boards pas
   expect(planNestDrop({ tasks, tree, dragId: 'b', target: d, zone: 'before', manual: true })).toEqual({ kind: 'pass' })
   expect(planNestDrop({ tasks, tree: null, dragId: 'd', target: b, zone: 'after', manual: true })).toEqual({ kind: 'pass' })
 })
+
+test('in manual order, sub-issues in another status or project only take a new parent, never a new position', () => {
+  const tasks = [t('a'), { ...t('b', 'a'), statusId: 'doing' }, t('c', 'a'), t('d')]
+  const tree = buildTaskTree(tasks)
+  const [, b, c, d] = tasks as [Task, Task, Task, Task]
+  expect(planNestDrop({ tasks, tree, dragId: 'd', target: c, zone: 'before', manual: true })).toEqual({ kind: 'parent', parentId: 'a', placement: null })
+  expect(planNestDrop({ tasks, tree, dragId: 'c', target: b, zone: 'before', manual: true })).toEqual({ kind: 'invalid' })
+  expect(planNestDrop({ tasks: [...tasks.slice(0, 3), { ...d, projectId: 'project-2' }], tree, dragId: 'd', target: c, zone: 'after', manual: true }))
+    .toEqual({ kind: 'parent', parentId: 'a', placement: null })
+})

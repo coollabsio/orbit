@@ -295,6 +295,8 @@ export function useCreateTask(workspaceId: string) {
     },
     onSuccess: (record) => {
       queryClient.setQueryData(queryKeys.tasks.detail(workspaceId, record.id), record)
+      // a sub-issue created in a closed status can close its parent
+      announceAutoClosed(queryClient, workspaceId, [record], record)
       void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
     },
   })

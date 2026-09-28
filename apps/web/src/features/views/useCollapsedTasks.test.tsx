@@ -16,3 +16,13 @@ test('trees start expanded; collapsing is remembered per workspace and expand un
   act(() => again.result.current.expand('task-1'))
   expect(window.localStorage.getItem('orbit:task_tree_collapsed:workspace-1')).toBe('[]')
 })
+
+test('the list and the detail share one state, so a toggle in one never overwrites the other', () => {
+  const list = renderHook(() => useCollapsedTasks('workspace-1'))
+  const detail = renderHook(() => useCollapsedTasks('workspace-1'))
+  act(() => detail.result.current.toggle('task-x'))
+  act(() => list.result.current.toggle('task-y'))
+  expect([...list.result.current.collapsed]).toEqual(['task-x', 'task-y'])
+  expect([...detail.result.current.collapsed]).toEqual(['task-x', 'task-y'])
+  expect(window.localStorage.getItem('orbit:task_tree_collapsed:workspace-1')).toBe('["task-x","task-y"]')
+})

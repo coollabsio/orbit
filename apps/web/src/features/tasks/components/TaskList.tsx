@@ -104,7 +104,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     onDuplicate: (task) => setDuplicatePicker([task]),
     // nested: a group zone is the root level, so a sub-issue dropped there leaves its parent
     detach: nested ? (task) => tree.nested.has(task.id) : undefined,
-    onDetached: (task, records) => parentActions.announce([task], null, records),
+    onDetached: (task, records, response) => parentActions.announce([task], null, records, response),
   })
   const nest = useNestDrop({
     tasks,
