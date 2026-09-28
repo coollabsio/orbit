@@ -7,6 +7,7 @@ use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::sub_issues;
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
@@ -98,6 +99,19 @@ pub struct TaskRecord {
     pub duplicate_of: Option<TaskRef>,
     /// True while at least one live task that is not completed, cancelled or a duplicate blocks it.
     pub blocked: bool,
+    /// The direct parent; null for top-level tasks.
+    #[schema(value_type = Option<String>, required = true)]
+    pub parent_task_id: Option<Id>,
+    /// The parent while it is visible (live, in a live project); null otherwise.
+    #[schema(required = true)]
+    pub parent: Option<TaskRef>,
+    /// Direct live children (sub-issues).
+    pub sub_issue_count: i64,
+    /// Direct live children in a completed, cancelled or duplicate status.
+    pub sub_issue_closed_count: i64,
+    /// `GET /tasks/{id}` only: visible ancestors, root first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancestors: Option<Vec<TaskRef>>,
 }
 
 /// A task reference small enough to embed; clients build the display identifier themselves.
@@ -107,6 +121,8 @@ pub struct TaskRef {
     pub id: Id,
     #[schema(value_type = String)]
     pub project_id: Id,
+    /// The key of the task's (live) project, e.g. `ORB`.
+    pub project_key: String,
     pub title: String,
 }
 
@@ -178,6 +194,7 @@ pub struct CreateTask {
     pub label_ids: Vec<Id>,
     pub due_start_at: Option<TimestampMillis>,
     pub due_at: Option<TimestampMillis>,
+    pub parent_task_id: Option<Id>,
 }
 
 #[derive(Clone, Debug)]
@@ -217,6 +234,8 @@ pub struct TaskChanges {
     pub due_at: Option<Option<TimestampMillis>>,
     /// `Some(Some(id))` marks the task as a duplicate of `id`; `Some(None)` unmarks it.
     pub duplicate_of_id: Option<Option<Id>>,
+    /// `Some(Some(id))` makes the task a sub-issue of `id`; `Some(None)` detaches it.
+    pub parent_task_id: Option<Option<Id>>,
 }
 
 #[derive(Clone, Debug)]
@@ -251,6 +270,8 @@ pub struct TaskFilter {
     pub show_completed: ShowCompleted,
     pub sort: TaskSort,
     pub order: SortOrder,
+    /// Only direct children of this task (`GET /tasks?parent_task_id=`, `POST /tasks/query`).
+    pub parent_task_id: Option<Id>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -281,6 +302,10 @@ pub enum TaskError {
     InvalidFilter { path: String, message: &'static str },
     #[error("the caller may not change this resource")]
     Forbidden,
+    #[error("the parent would create a cycle")]
+    ParentCycle,
+    #[error("the parent task is not available")]
+    ParentInvalid,
     #[error("task repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
 }
@@ -1114,6 +1139,11 @@ impl TaskRepository {
             &task_filter::FilterContext { actor_id, now },
         );
         task_filter::push_show_completed(&mut query, filter.show_completed, now);
+        if let Some(parent_id) = filter.parent_task_id {
+            query
+                .push(" AND tasks.parent_task_id = ")
+                .push_bind(parent_id.to_string());
+        }
         let column = task_sort_column(&filter.sort, &filter.order);
         let (operator, direction) = if filter.order == SortOrder::Asc {
             (">", " ASC")
@@ -1173,7 +1203,9 @@ impl TaskRepository {
             .fetch_optional(self.database.pool())
             .await?
             .ok_or(TaskError::NotFound)?;
-        task_from_row(self.database.pool(), row).await
+        let mut task = task_from_row(self.database.pool(), row).await?;
+        task.ancestors = Some(sub_issues::ancestors(self.database.pool(), task_id).await?);
+        Ok(task)
     }
 
     pub async fn create_task(
@@ -1203,6 +1235,9 @@ impl TaskRepository {
         }
         validate_assignees(&mut tx, workspace_id, &input.assignee_ids).await?;
         validate_labels(&mut tx, workspace_id, &input.label_ids).await?;
+        if let Some(parent_id) = input.parent_task_id {
+            sub_issues::validate_parent_in_tx(&mut tx, workspace_id, None, parent_id).await?;
+        }
         let position = match input.position {
             Some(position) => position,
             None => sqlx::query_scalar::<_, i64>(
@@ -1215,8 +1250,8 @@ impl TaskRepository {
             .await?,
         };
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -1230,6 +1265,7 @@ impl TaskRepository {
         .bind(actor_id.to_string())
         .bind(input.due_start_at.map(TimestampMillis::as_millis))
         .bind(input.due_at.map(TimestampMillis::as_millis))
+        .bind(input.parent_task_id.map(|id| id.to_string()))
         .bind(now.as_millis())
         .bind(now.as_millis())
         .execute(&mut *tx)
@@ -1260,31 +1296,9 @@ impl TaskRepository {
             now,
         )
         .await?;
+        let task = task_in_tx(&mut tx, workspace_id, id, false).await?;
         tx.commit().await?;
-        Ok(TaskRecord {
-            id,
-            workspace_id,
-            project_id: input.project_id,
-            status_id: input.status_id,
-            title: input.title,
-            description: input.description,
-            source_url: input.source_url,
-            priority: input.priority,
-            position,
-            creator_id: Some(actor_id),
-            creator_service_account_id: None,
-            creator_service_account_name: None,
-            assignee_ids: input.assignee_ids,
-            label_ids: input.label_ids,
-            due_start_at: input.due_start_at,
-            due_at: input.due_at,
-            version: 0,
-            deleted_at: None,
-            created_at: now,
-            updated_at: now,
-            duplicate_of: None,
-            blocked: false,
-        })
+        Ok(task)
     }
 
     pub async fn sync_github_work_item(
@@ -2166,6 +2180,14 @@ pub(super) async fn update_task_in_tx(
     if let Some(labels) = &update.changes.label_ids {
         validate_labels(tx, workspace_id, labels).await?;
     }
+    let parent_task_id = match update.changes.parent_task_id {
+        Some(Some(parent_id)) if Some(parent_id) != current.parent_task_id => {
+            sub_issues::validate_parent_in_tx(tx, workspace_id, Some(update.id), parent_id).await?;
+            Some(parent_id)
+        }
+        Some(requested) => requested,
+        None => current.parent_task_id,
+    };
     let title = update
         .changes
         .title
@@ -2199,8 +2221,34 @@ pub(super) async fn update_task_in_tx(
             field: "due_start_at",
         });
     }
-    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
-        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, parent_task_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
+        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_task_id.map(|id| id.to_string())).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    let parent = if parent_task_id == current.parent_task_id {
+        current.parent.clone()
+    } else {
+        sub_issues::parent_ref_in_tx(tx, parent_task_id).await?
+    };
+    if parent_task_id != current.parent_task_id {
+        // Project ids let the activity feed build cross-project identifiers (ORB-91C0).
+        audit::record(
+            tx,
+            workspace_id,
+            Some(actor_id),
+            "task.parent_changed",
+            AuditOutcome::Success,
+            "task",
+            Some(update.id),
+            request_id,
+            json!({
+                "from": current.parent_task_id,
+                "to": parent_task_id,
+                "from_project_id": current.parent.as_ref().map(|p| p.project_id),
+                "to_project_id": parent.as_ref().map(|p| p.project_id),
+            }),
+            now,
+        )
+        .await?;
+    }
     let actor = RelationActor {
         user_id: actor_id,
         service_account: None,
@@ -2298,6 +2346,8 @@ pub(super) async fn update_task_in_tx(
         version: current.version + 1,
         updated_at: now,
         duplicate_of,
+        parent_task_id,
+        parent,
         ..current
     })
 }
@@ -2398,8 +2448,11 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     format!(
-        "tasks:w={workspace_id}:f={digest}:c={:?}:sort={:?}:order={:?}",
-        filter.show_completed, filter.sort, filter.order,
+        "tasks:w={workspace_id}:f={digest}:c={:?}:sort={:?}:order={:?}:p={:?}",
+        filter.show_completed,
+        filter.sort,
+        filter.order,
+        filter.parent_task_id.map(|id| id.to_string()),
     )
 }
 
@@ -3048,7 +3101,7 @@ async fn task_from_row_tx(
 /// or NULL when the task is not a duplicate or its target (or target's project) is in the trash.
 fn duplicate_of_subquery(task_id_sql: &str) -> String {
     format!(
-        "(SELECT json_object('id', canonical.id, 'project_id', canonical.project_id, 'title', canonical.title) \
+        "(SELECT json_object('id', canonical.id, 'project_id', canonical.project_id, 'project_key', canonical_project.project_key, 'title', canonical.title) \
          FROM task_relations AS duplicate_relation \
          JOIN tasks AS canonical ON canonical.id = duplicate_relation.related_task_id \
          JOIN projects AS canonical_project ON canonical_project.id = canonical.project_id \
@@ -3072,12 +3125,24 @@ fn task_columns() -> String {
                  JOIN task_statuses AS blocker_status ON blocker_status.id = blocker.status_id \
                  WHERE blocker_relation.related_task_id = tasks.id AND blocker_relation.type = 'blocks' \
                  AND blocker.deleted_at IS NULL AND blocker_project.deleted_at IS NULL \
-                 AND blocker_status.category NOT IN ('completed', 'cancelled', 'duplicate')) AS blocked",
-        duplicate_of_subquery("tasks.id")
+                 AND blocker_status.category NOT IN ('completed', 'cancelled', 'duplicate')) AS blocked, \
+         tasks.parent_task_id, {} AS parent_json, \
+         (SELECT COUNT(*) FROM tasks AS child \
+          JOIN projects AS child_project ON child_project.id = child.project_id \
+          WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
+          AND child_project.deleted_at IS NULL) AS sub_issue_count, \
+         (SELECT COUNT(*) FROM tasks AS child \
+          JOIN projects AS child_project ON child_project.id = child.project_id \
+          JOIN task_statuses AS child_status ON child_status.id = child.status_id \
+          WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
+          AND child_project.deleted_at IS NULL \
+          AND child_status.category IN ('completed', 'cancelled', 'duplicate')) AS sub_issue_closed_count",
+        duplicate_of_subquery("tasks.id"),
+        sub_issues::parent_subquery("tasks.parent_task_id")
     )
 }
 
-fn parse_task_ref(value: Option<String>) -> Result<Option<TaskRef>, TaskError> {
+pub(super) fn parse_task_ref(value: Option<String>) -> Result<Option<TaskRef>, TaskError> {
     value
         .map(|json| serde_json::from_str(&json).map_err(|_| TaskError::Conflict))
         .transpose()
@@ -3138,6 +3203,11 @@ fn task_record_from_row(
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
         duplicate_of: parse_task_ref(row.get("duplicate_of_json"))?,
         blocked: row.get::<bool, _>("blocked"),
+        parent_task_id: optional_id(row.get("parent_task_id"))?,
+        parent: parse_task_ref(row.get("parent_json"))?,
+        sub_issue_count: row.get("sub_issue_count"),
+        sub_issue_closed_count: row.get("sub_issue_closed_count"),
+        ancestors: None,
     })
 }
 

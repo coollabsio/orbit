@@ -1429,6 +1429,8 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
         | TaskError::InvalidCursor
         | TaskError::InvalidFilter { .. }
         | TaskError::Forbidden
+        | TaskError::ParentCycle
+        | TaskError::ParentInvalid
         | TaskError::Unavailable(_) => ApiError::internal(request_id),
     }
 }

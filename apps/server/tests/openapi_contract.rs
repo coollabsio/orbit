@@ -125,6 +125,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
             "priority",
             "search",
             "view",
+            "parent_task_id",
             "sort",
             "order",
             "cursor",
@@ -547,7 +548,7 @@ fn task_records_document_duplicate_and_blocked_fields() {
     assert_eq!(record["properties"]["blocked"]["type"], "boolean");
     assert_eq!(
         document["components"]["schemas"]["TaskRef"]["required"],
-        serde_json::json!(["id", "project_id", "title"])
+        serde_json::json!(["id", "project_id", "project_key", "title"])
     );
 }
 

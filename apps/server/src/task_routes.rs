@@ -809,6 +809,7 @@ struct TaskQuery {
     priority: Option<String>,
     search: Option<String>,
     view: Option<String>,
+    parent_task_id: Option<String>,
     #[serde(default = "default_task_sort")]
     #[param(required = false)]
     sort: String,
@@ -834,6 +835,8 @@ struct TaskQueryBody {
     cursor: Option<String>,
     /// Page size, 1–100 (default 50).
     limit: Option<usize>,
+    /// Only direct children of this task.
+    parent_task_id: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -856,6 +859,8 @@ struct CreateTaskBody {
     due_start_at: Option<TimestampMillis>,
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<TimestampMillis>,
+    /// Create the task as a sub-issue of this task.
+    parent_task_id: Option<String>,
 }
 
 #[derive(Clone, Deserialize, ToSchema)]
@@ -881,6 +886,9 @@ struct TaskUpdateBody {
     /// Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     duplicate_of_id: Option<Option<String>>,
+    /// Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    parent_task_id: Option<Option<String>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -913,6 +921,9 @@ struct BulkItem {
     /// Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     duplicate_of_id: Option<Option<String>>,
+    /// Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    parent_task_id: Option<Option<String>>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(TaskQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
@@ -931,6 +942,7 @@ async fn list_tasks(
     let status_id = optional_id(query.status_id, &instance, request_id.as_ref())?;
     let assignee_id = optional_id(query.assignee_id, &instance, request_id.as_ref())?;
     let label_id = optional_id(query.label_id, &instance, request_id.as_ref())?;
+    let parent_task_id = optional_id(query.parent_task_id, &instance, request_id.as_ref())?;
     let priority_value = query
         .priority
         .map(|value| priority(value, &instance, request_id.as_ref()))
@@ -1024,6 +1036,7 @@ async fn list_tasks(
         show_completed: ShowCompleted::All,
         sort,
         order,
+        parent_task_id,
     };
     state
         .tasks
@@ -1062,11 +1075,13 @@ async fn query_tasks(
     let tree = task_filter::parse_filter(&body.filter)
         .map_err(|error| task_problem(error.into(), instance.clone(), request_id.as_ref()))?;
     let (sort, order) = task_order(body.order_by, body.order_direction);
+    let parent_task_id = optional_id(body.parent_task_id, &instance, request_id.as_ref())?;
     let filter = TaskFilter {
         tree,
         show_completed: body.show_completed,
         sort,
         order,
+        parent_task_id,
     };
     state
         .tasks
@@ -1309,6 +1324,7 @@ async fn create_task(
         label_ids: parse_ids(body.label_ids, &instance, request_id.as_ref())?,
         due_start_at: body.due_start_at,
         due_at: body.due_at,
+        parent_task_id: optional_id(body.parent_task_id, &instance, request_id.as_ref())?,
     };
     state
         .tasks
@@ -1384,6 +1400,7 @@ async fn bulk_tasks(
                     due_start_at: item.due_start_at,
                     due_at: item.due_at,
                     duplicate_of_id: item.duplicate_of_id,
+                    parent_task_id: item.parent_task_id,
                 },
                 &instance,
                 request_id.as_ref(),
@@ -1800,6 +1817,10 @@ fn task_update(
                 .duplicate_of_id
                 .map(|value| optional_id(value, instance, request_id))
                 .transpose()?,
+            parent_task_id: body
+                .parent_task_id
+                .map(|value| optional_id(value, instance, request_id))
+                .transpose()?,
         },
     })
 }
@@ -2176,6 +2197,22 @@ pub(crate) fn task_problem(
             "task_action_forbidden",
             "Action forbidden",
             "You do not have permission to change this resource.",
+            instance,
+            request_id,
+        ),
+        TaskError::ParentCycle => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "parent_cycle",
+            "Invalid parent",
+            "A task cannot be its own parent or a sub-issue of its own sub-issues.",
+            instance,
+            request_id,
+        ),
+        TaskError::ParentInvalid => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "parent_invalid",
+            "Invalid parent",
+            "The parent task does not exist, is in the trash, or is not in this workspace.",
             instance,
             request_id,
         ),
