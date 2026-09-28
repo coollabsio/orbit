@@ -74,3 +74,53 @@ test('sub-issue automations show the saved settings and save a switch at once', 
     name: 'Launch', key: 'ORB', color: '#e0457b', expected_version: 1, auto_close_parent: true, auto_close_sub_issues: true,
   })
 }, 20000)
+
+test('a second toggle right after the first carries the version the PATCH just returned, not a stale refetch', async () => {
+  const calls: Array<{ method: string; body: unknown }> = []
+  let projectsRequests = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    const path = new URL(request.url).pathname
+    const method = request.method
+    if (method === 'PATCH' && path.endsWith('/projects/project-1')) {
+      const body = (await request.json()) as { expected_version: number }
+      calls.push({ method, body })
+      return Response.json({ ...project, auto_close_parent: true, auto_close_sub_issues: true, ...body, version: body.expected_version + 1 })
+    }
+    if (path.endsWith('/statuses')) return Response.json({ items: [status('todo', 'Todo', 'unstarted', 0), status('dup', 'Duplicate', 'duplicate', 1)], next_cursor: null })
+    if (path.endsWith('/projects')) {
+      projectsRequests += 1
+      // First load resolves; the background refetch the mutation's onSuccess triggers afterwards
+      // never resolves in this test, so the second toggle's version must come from the PATCH
+      // response written into the cache directly, not from that refetch landing.
+      if (projectsRequests > 1) return new Promise<Response>(() => {})
+      return Response.json({ items: [{ ...project, auto_close_parent: true, auto_close_sub_issues: false }], next_cursor: null })
+    }
+    if (path.endsWith('/tasks')) return Response.json({ items: [], next_cursor: null })
+    return Response.json({ type: 'about:blank', title: 'Not found', status: 404, detail: 'missing', code: 'not_found', instance: path, request_id: 'request-1' }, { status: 404, headers: { 'content-type': 'application/problem+json' } })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
+        <MemoryRouter initialEntries={['/tasks/projects/project-1/settings']}>
+          <Routes><Route path="/tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} /></Routes>
+        </MemoryRouter>
+      </WorkspaceContext.Provider>
+    </QueryClientProvider>,
+  )
+
+  const closeParent = await view.findByRole('switch', { name: 'Close parent when all sub-issues are done' })
+  const closeChildren = view.getByRole('switch', { name: 'Close open sub-issues when parent is closed' })
+
+  await userEvent.click(closeChildren)
+  await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1))
+  await waitFor(() => expect(closeParent.hasAttribute('data-disabled')).toBe(false))
+
+  await userEvent.click(closeParent)
+  await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(2))
+
+  const [first, second] = calls.filter((call) => call.method === 'PATCH')
+  expect((first!.body as { expected_version: number }).expected_version).toBe(1)
+  expect((second!.body as { expected_version: number }).expected_version).toBe(2)
+}, 20000)

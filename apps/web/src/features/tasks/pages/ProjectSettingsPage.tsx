@@ -407,7 +407,8 @@ function SubIssueSettingsCard({ project }: { project: Project }) {
       </div>
       {updateProject.isError ? (
         <p role="alert" className="mt-2 text-xs text-destructive">
-          Couldn’t save the sub-issue settings. <Button variant="ghost" size="xs" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</Button>
+          {/* expected_version is recomputed from the current project, not replayed from the failed attempt: a stale version (e.g. from a 409) must not repeat on retry. */}
+          Couldn’t save the sub-issue settings. <Button variant="ghost" size="xs" onClick={() => updateProject.variables && updateProject.mutate({ ...updateProject.variables, expected_version: project.version })}>Retry</Button>
         </p>
       ) : null}
     </SettingsCard>

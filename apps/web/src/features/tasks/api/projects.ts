@@ -116,7 +116,15 @@ export function useUpdateProject(workspaceId: string, projectId: string) {
       const { data } = await updateProject({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, body, throwOnError: true })
       return required(data, 'Update project response was empty.')
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.projects(workspaceId) }),
+    // Write the returned record into the list cache synchronously: callers that key a follow-up
+    // mutation off `project.version` (e.g. the sub-issue automation switches) must see the bumped
+    // version immediately, not after the async refetch below lands.
+    onSuccess: (record: ProjectRecord) => {
+      queryClient.setQueryData(queryKeys.projects(workspaceId), (current: ProjectRecord[] | undefined) =>
+        current?.map((project) => (project.id === record.id ? record : project)),
+      )
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects(workspaceId) })
+    },
   })
 }
 
