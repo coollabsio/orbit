@@ -35,7 +35,8 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()
     const method = request.method()
-    const path = new URL(request.url()).pathname
+    const url = new URL(request.url())
+    const path = url.pathname
     if (method === 'PATCH' && /\/tasks\/[^/]+$/.test(path)) {
       const body = request.postDataJSON() as { duplicate_of_id?: string | null }
       writes.push({ method, path, body })
@@ -62,7 +63,11 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
         { id: 'duplicate', project_id: 'project-1', name: 'Duplicate', description: '', category: 'duplicate', color: '#8b8f98', position: 1, version: 1 },
       ], next_cursor: null }
     }
-    if (path.endsWith('/tasks') || path.endsWith('/tasks/query')) body = { items: tasks, next_cursor: null }
+    if (path.endsWith('/tasks') || path.endsWith('/tasks/query')) {
+      // the detail page's Sub-issues section asks for direct children: none of this fixture's tasks have a parent
+      const parentId = url.searchParams.get('parent_task_id')
+      body = { items: parentId ? [] : tasks, next_cursor: null }
+    }
     const detail = path.match(/\/tasks\/([^/]+)$/)
     if (detail) body = tasks.find((task) => task.id === detail[1]) ?? body
     const relations = path.match(/\/tasks\/([^/]+)\/relations$/)
