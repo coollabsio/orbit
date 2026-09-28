@@ -114,3 +114,16 @@ test('sub-issues: nested by default, flat or hidden, plus a progress property', 
   await userEvent.click(view.getByRole('button', { name: 'Sub-issue progress' }))
   expect(read(view).properties).not.toContain('sub_issue_progress')
 })
+
+test('on board and timeline, Nested sub-issues say they show flat there', async () => {
+  const view = render(<Harness />)
+  open(view)
+  const select = await view.findByRole('combobox', { name: 'Sub-issues' })
+  expect(view.queryAllByText(/shows sub-issues flat/)).toHaveLength(0)
+  await userEvent.click(view.getByRole('button', { name: 'Board' }))
+  const hint = view.getByText('Board shows sub-issues flat')
+  expect(select.getAttribute('aria-describedby')).toBe(hint.id)
+  await userEvent.click(view.getByRole('button', { name: 'Timeline' }))
+  expect(view.getByText('Timeline shows sub-issues flat')).toBeTruthy()
+  expect(read(view).sub_issues).toBe('nested')
+})
