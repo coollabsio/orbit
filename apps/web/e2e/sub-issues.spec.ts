@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { keepIdentifiersTogether } from '../src/lib/toast'
 
 test.use({ viewport: { width: 1280, height: 800 } })
 
@@ -148,7 +149,7 @@ test('add two sub-issues inline, close both, and the parent closes itself', asyn
     await section.getByRole('listitem').filter({ hasText: title }).getByRole('button', { name: 'Status: Todo' }).click()
     await page.getByRole('menuitem', { name: /Done$/ }).click()
   }
-  await expect(page.getByText('Closed parent TEST-0012')).toBeVisible()
+  await expect(page.getByText(keepIdentifiersTogether('Closed parent TEST-0012'))).toBeVisible()
   await expect(section.getByRole('img', { name: '2 of 2 sub-issues closed' })).toBeVisible()
 })
 
@@ -159,7 +160,7 @@ test('drag a task onto another in the list to nest it, then undo', async ({ page
   await page.goto('/tasks?workspace=alpha')
 
   await page.locator('[data-task-row]', { hasText: 'Receipt email' }).dragTo(page.locator('[data-task-row]', { hasText: 'Checkout redesign' }))
-  await expect(page.getByText('TEST-0033 is now a sub-issue of TEST-0012')).toBeVisible()
+  await expect(page.getByText(keepIdentifiersTogether('TEST-0033 is now a sub-issue of TEST-0012'))).toBeVisible()
   await expect(page.locator('[data-task-row][data-depth="1"]', { hasText: 'Receipt email' })).toBeVisible()
   expect(writes).toContainEqual({ method: 'PATCH', path: '/api/v1/workspaces/alpha/tasks/task-0033', body: { expected_version: 1, parent_task_id: 'task-0012' } })
 

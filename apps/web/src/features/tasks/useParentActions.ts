@@ -9,6 +9,7 @@ import { announceAutoClosed, autoClosedOf } from '@/features/tasks/api/autoClose
 import { findCachedTask, reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'
 import { bulkTaskDuplicateUpdates } from '@/features/tasks/api/tasks'
 import { parentErrorMessage, parentToastMessage } from '@/features/tasks/subIssuesLib'
+import { UNDO_TOAST_DURATION, keepIdentifiersTogether } from '@/lib/toast'
 import { placementUpdates } from '@/features/views/layoutGroups'
 import type { NestPlacement } from '@/features/views/nestDrop'
 
@@ -60,7 +61,8 @@ export function useParentActions(workspaceId: string) {
   const announce = (changed: Task[], parent: ParentTarget | null, records: TaskRecord[]) => {
     if (changed.length === 0) return
     const previous = new Map(changed.map((task) => [task.id, task.parentTaskId ?? null]))
-    toast.success(parentToastMessage(changed.map((task) => task.identifier), parent?.identifier ?? null), {
+    toast.success(keepIdentifiersTogether(parentToastMessage(changed.map((task) => task.identifier), parent?.identifier ?? null)), {
+      duration: UNDO_TOAST_DURATION,
       action: { label: 'Undo', onClick: () => void restore(records.filter((record) => previous.has(record.id)), previous) },
     })
   }

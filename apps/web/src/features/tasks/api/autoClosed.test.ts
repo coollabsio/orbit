@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { TaskRecord } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed, autoClosedMessage, autoClosedOf } from './autoClosed'
+import { keepIdentifiersTogether } from '@/lib/toast'
 
 const done = (id: string) => ({ id, status_id: 'done' })
 const identifierOf = (id: string) => `ORB-${id}`
@@ -34,7 +35,7 @@ test('the toast finds the parent chain and project key in the cache', () => {
   client.setQueryData(queryKeys.tasks.list('ws', {}), { pages: [{ items: [record('task-0012', 'task-0009'), record('task-0009')], next_cursor: null }], pageParams: [undefined] })
   const success = spyOn(toast, 'success').mockImplementation(() => 0)
   announceAutoClosed(client, 'ws', [record('task-0031', 'task-0012')], { auto_closed: [done('task-0012')] })
-  expect(success.mock.calls[0]![0]).toBe('Closed parent ORB-0012')
+  expect(success.mock.calls[0]![0]).toBe(keepIdentifiersTogether('Closed parent ORB-0012'))
   announceAutoClosed(client, 'ws', [record('task-0031', 'task-0012')], { auto_closed: [done('task-0012'), done('task-0009')] })
   expect(success.mock.calls[1]![0]).toBe('Closed 2 parent tasks')
   announceAutoClosed(client, 'ws', [record('task-0031', 'task-0012')], { auto_closed: [] })

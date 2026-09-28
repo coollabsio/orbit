@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { SubIssuesSection, type SubIssuesSectionProps } from './TaskSubIssues'
+import { keepIdentifiersTogether } from '@/lib/toast'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -129,8 +130,8 @@ test('removing the last open sub-issue announces the parent the server closed', 
   try {
     const view = renderSection()
     fireEvent.click(await view.findByRole('button', { name: 'Remove ORB-0032 from parent' }))
-    await waitFor(() => expect(success.mock.calls.map((call) => call[0])).toContain('Closed parent ORB-0012'))
-    expect(success.mock.calls.map((call) => call[0])).toContain('ORB-0032 is no longer a sub-issue')
+    await waitFor(() => expect(success.mock.calls.map((call) => call[0])).toContain(keepIdentifiersTogether('Closed parent ORB-0012')))
+    expect(success.mock.calls.map((call) => call[0])).toContain(keepIdentifiersTogether('ORB-0032 is no longer a sub-issue'))
   } finally {
     success.mockRestore()
   }

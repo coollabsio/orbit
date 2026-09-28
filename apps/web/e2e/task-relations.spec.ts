@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { keepIdentifiersTogether } from '../src/lib/toast'
 
 test.use({ viewport: { width: 1280, height: 800 } })
 
@@ -100,7 +101,7 @@ test('mark a task as duplicate from its detail page, see the banner, then undo',
   await expect(banner).toContainText('Login fails on Safari')
   expect(writes[0]).toMatchObject({ method: 'PATCH', body: { expected_version: 1, duplicate_of_id: 'task-91c0' } })
 
-  await expect(page.getByText('Marked as duplicate of TEST-91C0')).toBeVisible()
+  await expect(page.getByText(keepIdentifiersTogether('Marked as duplicate of TEST-91C0'))).toBeVisible()
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect.poll(() => writes.length).toBe(2)
   expect(writes[1]).toMatchObject({ method: 'PATCH', body: { expected_version: 2, duplicate_of_id: null } })
@@ -128,7 +129,7 @@ test('bulk mark two tasks as duplicates of a third, then undo both', async ({ pa
   ] } })
   await expect(page.getByRole('button', { name: 'Collapse Duplicate' })).toBeVisible()
 
-  await expect(page.getByText('Marked 2 tasks as duplicate of TEST-91C0')).toBeVisible()
+  await expect(page.getByText(keepIdentifiersTogether('Marked 2 tasks as duplicate of TEST-91C0'))).toBeVisible()
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect.poll(() => writes.length).toBe(2)
   expect(writes[1]).toMatchObject({ method: 'POST', body: { updates: [

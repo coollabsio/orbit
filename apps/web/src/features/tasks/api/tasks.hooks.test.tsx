@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { queryKeys } from '@/api/queryKeys'
 import type { PageTaskRecord, TaskRecord, TaskRelationRecord } from '@/api/generated/types.gen'
 import { useAddTaskRelation, useBulkTasks, useCreateTaskComment, useRemoveTaskRelation, useTaskRelations, useTasks, useUpdateTask, useUploadTaskAttachments } from './tasks'
+import { keepIdentifiersTogether } from '@/lib/toast'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -230,7 +231,7 @@ test('a drag that detaches the last open sub-issue names the parent the server c
   try {
     const view = renderHook(() => useUpdateTask('workspace-1'), { wrapper: withClient(client) })
     await act(async () => { await view.result.current.mutateAsync({ taskId: 'task-0031', body: { expected_version: 1, parent_task_id: null } }) })
-    expect(success.mock.calls.map((call) => call[0])).toEqual(['Closed parent ORB-0012'])
+    expect(success.mock.calls.map((call) => call[0])).toEqual([keepIdentifiersTogether('Closed parent ORB-0012')])
   } finally {
     success.mockRestore()
   }
@@ -242,7 +243,7 @@ test('a bulk move that detaches the last open sub-issue names the parent the ser
   try {
     const view = renderHook(() => useBulkTasks('workspace-1'), { wrapper: withClient(client) })
     await act(async () => { await view.result.current.mutateAsync([{ id: 'task-0031', expected_version: 1, position: 3, parent_task_id: null }]) })
-    expect(success.mock.calls.map((call) => call[0])).toEqual(['Closed parent ORB-0012'])
+    expect(success.mock.calls.map((call) => call[0])).toEqual([keepIdentifiersTogether('Closed parent ORB-0012')])
   } finally {
     success.mockRestore()
   }

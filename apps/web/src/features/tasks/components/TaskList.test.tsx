@@ -12,6 +12,7 @@ import { DEFAULT_DISPLAY, type DisplayOptions } from '@/features/views/viewState
 import type { User } from '@/features/workspaces/models'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { TaskList } from './TaskList'
+import { UNDO_TOAST_DURATION, keepIdentifiersTogether } from '@/lib/toast'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -526,7 +527,7 @@ test('the bulk bar hides the Duplicate status and marks the selection in one cal
     { id: 'task-2', expected_version: 1, duplicate_of_id: 'task-91c0' },
   ] } })
   await waitFor(() => expect(success).toHaveBeenCalledTimes(1))
-  expect(success.mock.calls[0]![0]).toBe('Marked 2 tasks as duplicate of ORB-91C0')
+  expect(success.mock.calls[0]![0]).toBe(keepIdentifiersTogether('Marked 2 tasks as duplicate of ORB-91C0'))
   success.mockRestore()
 }, 20000)
 
@@ -599,7 +600,8 @@ test('dropping a row on the middle of another row makes it a sub-issue, with Und
   await waitFor(() => expect(writes(calls)).toHaveLength(1))
   expect(writes(calls)[0]).toEqual({ method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-2', body: { expected_version: 1, parent_task_id: 'task-1' } })
   await waitFor(() => expect(success).toHaveBeenCalledTimes(1))
-  expect(success.mock.calls[0]![0]).toBe('ORB-2 is now a sub-issue of ORB-1')
+  expect(success.mock.calls[0]![0]).toBe(keepIdentifiersTogether('ORB-2 is now a sub-issue of ORB-1'))
+  expect((success.mock.calls[0]![1] as { duration?: number }).duration).toBe(UNDO_TOAST_DURATION)
   ;(success.mock.calls[0]![1] as unknown as { action: { onClick: () => void } }).action.onClick()
   await waitFor(() => expect(writes(calls)).toHaveLength(2))
   expect(writes(calls)[1]!.body).toEqual({ expected_version: 2, parent_task_id: null })
@@ -675,7 +677,7 @@ test('nested: a root-level detach drop shows a toast whose Undo restores the par
   fireEvent.dragStart(rowOf(view, 'Task 2'), { dataTransfer })
   dropAt(zoneOf(view, 'Todo'), 0)
   await waitFor(() => expect(success).toHaveBeenCalledTimes(1))
-  expect(success.mock.calls[0]![0]).toBe('ORB-2 is no longer a sub-issue')
+  expect(success.mock.calls[0]![0]).toBe(keepIdentifiersTogether('ORB-2 is no longer a sub-issue'))
   ;(success.mock.calls[0]![1] as unknown as { action: { onClick: () => void } }).action.onClick()
   await waitFor(() => expect(writes(calls)).toHaveLength(2))
   expect(writes(calls)[1]).toEqual({ method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-2', body: { expected_version: 2, parent_task_id: 'task-1' } })
@@ -741,7 +743,7 @@ test('the bulk bar sets one parent for the whole selection in one call', async (
     { id: 'task-2', expected_version: 1, parent_task_id: 'task-91c0' },
   ] } })
   await waitFor(() => expect(success).toHaveBeenCalledTimes(1))
-  expect(success.mock.calls[0]![0]).toBe('2 tasks are now sub-issues of ORB-91C0')
+  expect(success.mock.calls[0]![0]).toBe(keepIdentifiersTogether('2 tasks are now sub-issues of ORB-91C0'))
   success.mockRestore()
 }, 20000)
 

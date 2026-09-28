@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { UNDO_TOAST_DURATION } from '@/lib/toast'
 import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { ApiProblem } from '@/api/problem'
@@ -299,7 +300,7 @@ function WorkspaceTasksPage() {
   const clearFilters = () => {
     const previous = viewState.state.filter
     viewState.setFilter(emptyFilter())
-    toast('Filters cleared', { action: { label: 'Undo', onClick: () => viewState.setFilter(previous) } })
+    toast('Filters cleared', { duration: UNDO_TOAST_DURATION, action: { label: 'Undo', onClick: () => viewState.setFilter(previous) } })
   }
   const viewTitle = preset ? PRESET_TITLE[preset] : 'All tasks'
 

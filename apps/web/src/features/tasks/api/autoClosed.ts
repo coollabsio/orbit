@@ -4,6 +4,7 @@ import type { ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { refIdentifier, taskIdentifier } from './models'
 import { findCachedTask } from './optimistic'
+import { keepIdentifiersTogether } from '@/lib/toast'
 
 /** A task the server closed by automation in the same request (`auto_closed` on PATCH and bulk responses). */
 export type AutoClosedTask = { id: string; status_id: string }
@@ -57,5 +58,5 @@ export function announceAutoClosed(queryClient: QueryClient, workspaceId: string
   const identifierOf = (taskId: string) => embedded.get(taskId)
     ?? taskIdentifier(taskId, projects.find((project) => project.id === findCachedTask(queryClient, workspaceId, taskId)?.project_id))
   const message = autoClosedMessage({ items, parentIds, identifierOf })
-  if (message) toast.success(message)
+  if (message) toast.success(keepIdentifiersTogether(message))
 }

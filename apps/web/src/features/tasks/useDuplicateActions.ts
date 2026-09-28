@@ -7,6 +7,7 @@ import { announceAutoClosed } from '@/features/tasks/api/autoClosed'
 import { reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'
 import { bulkSetTaskDuplicateOf, bulkTaskDuplicateUpdates, setTaskDuplicateOf, type VersionedTask } from '@/features/tasks/api/tasks'
 import { duplicateErrorMessage, duplicateToastMessage } from '@/features/tasks/relationsLib'
+import { UNDO_TOAST_DURATION, keepIdentifiersTogether } from '@/lib/toast'
 
 export interface DuplicateTarget {
   id: string
@@ -67,7 +68,8 @@ export function useDuplicateActions(workspaceId: string) {
     try {
       const record = await setTaskDuplicateOf(apiClient, workspaceId, task, target.id)
       settle([record], record)
-      toast.success(duplicateToastMessage(1, target.identifier), {
+      toast.success(keepIdentifiersTogether(duplicateToastMessage(1, target.identifier)), {
+        duration: UNDO_TOAST_DURATION,
         action: { label: 'Undo', onClick: () => void restore([record], previousTargets([task])) },
       })
       return record
@@ -82,7 +84,8 @@ export function useDuplicateActions(workspaceId: string) {
     try {
       const page = await bulkSetTaskDuplicateOf(apiClient, workspaceId, tasks, target.id)
       settle(page.items, page)
-      toast.success(duplicateToastMessage(tasks.length, target.identifier), {
+      toast.success(keepIdentifiersTogether(duplicateToastMessage(tasks.length, target.identifier)), {
+        duration: UNDO_TOAST_DURATION,
         action: { label: 'Undo', onClick: () => void restore(page.items, previousTargets(tasks)) },
       })
     } catch (error) {
