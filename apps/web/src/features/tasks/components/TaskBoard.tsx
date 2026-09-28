@@ -12,6 +12,8 @@ import type { GroupContext, TaskGroup } from '@/features/views/grouping'
 import { boardGrid, canDrag, cellTasks, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
 import { useCollapsedGroups } from '@/features/views/useCollapsedGroups'
 import { useGroupDrop } from '@/features/views/useGroupDrop'
+import { useNestDrop } from '@/features/views/useNestDrop'
+import { useParentActions } from '@/features/tasks/useParentActions'
 import type { DisplayOptions, TaskProperty } from '@/features/views/viewState'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -19,6 +21,7 @@ import { BlockedIndicator } from './BlockedIndicator'
 import { PriorityPicker } from './PriorityPicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { LabelPill } from './TaskLabels'
+import { NestChip } from './NestChip'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { DateStamp, DueDateChip, ProjectChip } from './TaskPropertyChips'
 import { TaskStatusIcon } from './TaskStatusIcon'
@@ -40,9 +43,12 @@ export interface TaskBoardProps {
 const COLUMN_WIDTH = 320
 const ZONE_RING = 'data-[drop-over]:ring-1 data-[drop-over]:ring-primary/40 data-[drop-over]:ring-inset'
 const PLACEHOLDER = 'min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10'
-/** Lift only where hover is real and motion is welcome; transition named properties, never `all`. */
+/**
+ * Lift only where hover is real and motion is welcome; transition named properties, never `all`. While a drop would
+ * nest into the card: tint + inset ring (the chip names the action).
+ */
 const CARD =
-  'flex cursor-pointer flex-col gap-[7px] rounded-md border border-border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out hover-fine:hover:border-foreground/20 hover-fine:hover:bg-accent hover-fine:hover:shadow-md motion-safe:hover-fine:hover:-translate-y-px data-[dragging]:border-dashed data-[dragging]:opacity-35 data-[active]:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none'
+  'relative flex cursor-pointer flex-col gap-[7px] rounded-md border border-border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out hover-fine:hover:border-foreground/20 hover-fine:hover:bg-accent hover-fine:hover:shadow-md motion-safe:hover-fine:hover:-translate-y-px data-[dragging]:border-dashed data-[dragging]:opacity-35 data-[active]:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-[nest=inside]:border-primary/40 data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset'
 /**
  * Column headers are 12px padding + 38px tall; lane headers stick right under them. A collapsed lane is a
  * drop zone itself, tinted like a list group header while a card is over it.
@@ -63,12 +69,28 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
   const [duplicateTask, setDuplicateTask] = useState<Task | null>(null)
   const [collapsed, toggle] = useCollapsedGroups(`orbit:task_board_lanes_collapsed:${workspace.id}:${collapseScope}`)
   const manual = display.order_by === 'manual'
-  const { drag, drop, startDrag, endDrag, zoneProps, saving } = useGroupDrop({
+  const { drag, drop, startDrag, endDrag, clearDrop, zoneProps, saving } = useGroupDrop({
     tasks,
     manual,
     groupContext,
     itemSelector: '[data-board-card]',
     onDuplicate: setDuplicateTask,
+  })
+  const parentActions = useParentActions(workspace.id)
+  // the board renders nested as flat: a card's middle nests, its edges keep the column/lane drop
+  const nest = useNestDrop({
+    tasks,
+    tree: null,
+    manual,
+    dragId: drag?.taskId ?? null,
+    onTakeOver: clearDrop,
+    endDrag,
+    onNest: (plan, dragId) => {
+      const moving = tasks.find((task) => task.id === dragId)
+      const parent = tasks.find((task) => task.id === plan.parentId)
+      if (!moving || !parent) return
+      void parentActions.setParent([moving], { id: parent.id, identifier: parent.identifier }, { placement: plan.placement })
+    },
   })
   // the placeholder takes the dragged card's height
   const [dragHeight, setDragHeight] = useState(0)
@@ -106,6 +128,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
         onKeyDown={(event) => {
           if (event.key === 'Enter' && event.target === event.currentTarget) onOpen(task.id)
         }}
+        {...nest.rowProps(task)}
       >
         {/* status · id · blocked … assignees · priority (priority changes in place) */}
         {showTop ? (
@@ -150,6 +173,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
             {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} /> : null}
           </div>
         ) : null}
+        {nest.nestAt?.id === task.id && nest.nestAt.zone === 'inside' ? <NestChip className="top-2 right-2" /> : null}
       </article>
     )
   }

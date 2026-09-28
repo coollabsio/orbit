@@ -26,6 +26,8 @@ import { LinkifiedText } from './LinkifiedText'
 import { DateStamp, DueDateChip, ProjectChip } from './TaskPropertyChips'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { TreeGutter } from './TreeGutter'
+import { NestChip } from './NestChip'
+import type { NestRowProps } from '@/features/views/useNestDrop'
 
 const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
 const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
@@ -38,6 +40,8 @@ const HEADING = 'px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-fo
 /** 2px insertion line on the row edge while a manual-order drag hovers it; absolute, so nothing shifts. */
 const DROP_LINE =
   'data-[drop-edge]:before:pointer-events-none data-[drop-edge]:before:absolute data-[drop-edge]:before:inset-x-0 data-[drop-edge]:before:z-[1] data-[drop-edge]:before:h-0.5 data-[drop-edge]:before:bg-primary data-[drop-edge=top]:before:-top-px data-[drop-edge=bottom]:before:-bottom-px'
+/** Tint + inset ring while a drop would nest into the row (the chip names the action). */
+const NEST = 'data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset'
 
 /** A row's place in the nested list's tree. */
 export interface TaskRowTree {
@@ -72,10 +76,12 @@ interface TaskRowProps {
   tree: TaskRowTree | null
   /** Muted "Parent title ›" before the title: flat lists, and nested roots whose parent is not in the result. */
   showParent: boolean
+  /** Drop onto the row (`useNestDrop`): nest into it, or become a sibling of a sub-issue. */
+  nest?: NestRowProps
 }
 
 /** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title · progress … labels · project · due · assignee · created · updated. */
-export function TaskRow({ task, statuses, labels, users, assignees, project, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent }: TaskRowProps) {
+export function TaskRow({ task, statuses, labels, users, assignees, project, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent, nest }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
@@ -86,6 +92,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       className={cn(
         'group/row relative flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2 border-b border-border px-3 py-1.5 text-left transition-colors hover:bg-foreground/[0.02] data-[dragging]:bg-muted data-[dragging]:opacity-50 data-[selected]:bg-primary/10 max-[480px]:gap-1.5',
         DROP_LINE,
+        NEST,
       )}
       data-task-row
       data-depth={tree?.depth ?? 0}
@@ -105,6 +112,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(task.id)
       }}
+      {...nest}
     >
       <div className="relative -my-1.5 -ml-3 flex w-7 shrink-0 cursor-pointer self-stretch" onClick={(e) => e.stopPropagation()}>
         {/* the ::after overlay stretches the hit area over the whole 28px strip (the old label click target) */}
@@ -244,6 +252,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       {has('created') ? <DateStamp property="created" iso={task.createdAt} className="min-w-[44px] text-right text-xs text-muted-foreground/70 max-[480px]:hidden" /> : null}
       {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} className="min-w-[44px] text-right text-xs text-muted-foreground/70 max-[480px]:hidden" /> : null}
       {updateTask.isError ? <span role="alert" className="text-xs text-destructive">Status update failed. <Button variant="ghost" onClick={(event) => { event.stopPropagation(); if (updateTask.variables) updateTask.mutate(updateTask.variables) }}>Retry</Button></span> : null}
+      {nest?.['data-nest'] === 'inside' ? <NestChip className="top-1/2 right-3 -translate-y-1/2" /> : null}
     </div>
   )
 }

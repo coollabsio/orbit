@@ -1,0 +1,75 @@
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { apiClient } from '@/api/client'
+import { updateTask } from '@/api/generated/sdk.gen'
+import type { BulkItem, TaskRecord } from '@/api/generated/types.gen'
+import { queryKeys } from '@/api/queryKeys'
+import type { Task } from '@/features/tasks/api/models'
+import { reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'
+import { bulkTaskDuplicateUpdates } from '@/features/tasks/api/tasks'
+import { parentErrorMessage, parentToastMessage } from '@/features/tasks/subIssuesLib'
+import { placementUpdates } from '@/features/views/layoutGroups'
+import type { NestPlacement } from '@/features/views/nestDrop'
+
+export type ParentTarget = { id: string; identifier: string }
+
+/**
+ * Set or remove the parent of tasks with an Undo toast. Plain SDK calls plus the shared QueryClient (like
+ * `useDuplicateActions`): Undo must still work after the row that triggered it re-mounts under its new parent.
+ */
+export function useParentActions(workspaceId: string) {
+  const queryClient = useQueryClient()
+  const settle = (records: TaskRecord[]) => {
+    for (const record of records) reconcileWorkspaceTask(queryClient, workspaceId, record)
+    void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
+  }
+  /** One PATCH for a single update, one atomic bulk call otherwise. Returns the records and the raw response. */
+  const write = async (updates: BulkItem[]): Promise<{ records: TaskRecord[]; response: unknown }> => {
+    if (updates.length === 1) {
+      const { id, ...body } = updates[0]!
+      const { data } = await updateTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, body, throwOnError: true })
+      if (!data) throw new Error('Update task response was empty.')
+      return { records: [data], response: data }
+    }
+    const page = await bulkTaskDuplicateUpdates(apiClient, workspaceId, updates)
+    return { records: page.items, response: page }
+  }
+  /** Undo: every task goes back to its parent before the change (`null` = it was top-level). */
+  const restore = async (records: TaskRecord[], previous: ReadonlyMap<string, string | null>) => {
+    try {
+      const { records: restored } = await write(records.map((record) => ({ id: record.id, expected_version: record.version, parent_task_id: previous.get(record.id) ?? null })))
+      settle(restored)
+    } catch (error) {
+      settle([])
+      toast.error(parentErrorMessage(error))
+    }
+  }
+  /**
+   * `parent` null detaches (only the tasks that have a parent are written). `placement` (one task, manual order) also
+   * moves it among its new siblings; a reorder among the same siblings writes positions only, with no toast.
+   */
+  const setParent = async (tasks: Task[], parent: ParentTarget | null, options: { placement?: NestPlacement | null } = {}) => {
+    const moving = parent ? tasks : tasks.filter((task) => task.parentTaskId)
+    if (moving.length === 0) return
+    const parentId = parent?.id ?? null
+    const changed = moving.filter((task) => (task.parentTaskId ?? null) !== parentId)
+    const patch = { parent_task_id: parentId }
+    const updates = options.placement && moving.length === 1
+      ? placementUpdates(moving[0]!, options.placement.siblings, options.placement.index, changed.length > 0 ? patch : {})
+      : changed.map((task) => ({ id: task.id, expected_version: task.version, ...patch }))
+    if (updates.length === 0) return
+    const previous = new Map(changed.map((task) => [task.id, task.parentTaskId ?? null]))
+    try {
+      const { records } = await write(updates)
+      settle(records)
+      if (changed.length === 0) return
+      toast.success(parentToastMessage(changed.map((task) => task.identifier), parent?.identifier ?? null), {
+        action: { label: 'Undo', onClick: () => void restore(records.filter((record) => previous.has(record.id)), previous) },
+      })
+    } catch (error) {
+      settle([])
+      toast.error(parentErrorMessage(error))
+    }
+  }
+  return { setParent }
+}

@@ -4,7 +4,7 @@ import type { Task } from '@/features/tasks/api/models'
 import { useBulkTasks, useUpdateTask } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { GroupContext } from './grouping'
-import { acceptsDrop, placementUpdates, planDrop, zoneIdOf, type GroupValues } from './layoutGroups'
+import { acceptsDrop, placementUpdates, planDrop, zoneIdOf, type GroupValues, type TaskPatch } from './layoutGroups'
 import { reportMoveError } from './moveErrors'
 
 type GroupDrag = { taskId: string; from: GroupValues }
@@ -32,7 +32,7 @@ function indexAt(zone: HTMLElement, itemSelector: string, clientY: number) {
  * zone, and the drop → write mapping. A drop plans every changed group field at once (`planDrop`), so a
  * board drop into another column and lane is one write. Every move error goes through `reportMoveError`.
  */
-export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDuplicate }: {
+export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDuplicate, detach }: {
   tasks: Task[]
   manual: boolean
   groupContext: GroupContext
@@ -40,6 +40,8 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
   itemSelector: string
   /** A drop on the Duplicate status: the caller asks for the canonical task. */
   onDuplicate: (task: Task) => void
+  /** Nested list: a drop at root level (a group zone) detaches a nested row. */
+  detach?: (task: Task) => boolean
 }) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
@@ -53,12 +55,24 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
     setDrop(null)
   }
 
+  const detaches = (taskId: string) => {
+    const task = tasks.find((item) => item.id === taskId)
+    return Boolean(task && detach?.(task))
+  }
+
   const dropInto = (current: GroupDrag, zone: DropZone, index: number | null) => {
     const task = tasks.find((item) => item.id === current.taskId)
     if (!task) return
+    // merged into every write: a nested row dropped at root level leaves its parent
+    const extra: TaskPatch = detach?.(task) ? { parent_task_id: null } : {}
+    const hasExtra = Object.keys(extra).length > 0
+    const patchOnly = () => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...extra } }, { onError: reportMoveError })
     if (zoneIdOf(current.from) === zone.id) {
-      if (index === null) return
-      const updates = placementUpdates(task, zone.tasks, index)
+      if (index === null) {
+        if (hasExtra) patchOnly()
+        return
+      }
+      const updates = placementUpdates(task, zone.tasks, index, extra)
       if (updates.length > 0) moveTasks.mutate(updates, { onError: reportMoveError })
       return
     }
@@ -66,8 +80,12 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
     if (plan.kind === 'duplicate') onDuplicate(task)
     else if (plan.kind === 'error') toast.error(plan.message)
     else if (plan.kind === 'update') {
-      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, plan.patch), { onError: reportMoveError })
-      else updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...plan.patch } }, { onError: reportMoveError })
+      const patch = { ...plan.patch, ...extra }
+      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, patch), { onError: reportMoveError })
+      else updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...patch } }, { onError: reportMoveError })
+    } else if (hasExtra) {
+      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, extra), { onError: reportMoveError })
+      else patchOnly()
     }
   }
 
@@ -82,8 +100,8 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
       'data-drop-over': drop?.zone === zone.id || undefined,
       onDragOver: (event: DragEvent<HTMLElement>) => {
         if (!drag || !acceptsDrop(drag.from, zone.values)) return
-        // same zone without manual order: nothing would change, so no drop target
-        if (!manual && zoneIdOf(drag.from) === zone.id) return
+        // same zone without manual order: nothing would change (unless a nested row detaches), so no drop target
+        if (!manual && zoneIdOf(drag.from) === zone.id && !detaches(drag.taskId)) return
         event.preventDefault()
         event.stopPropagation()
         event.dataTransfer.dropEffect = 'move'
@@ -102,5 +120,8 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
     }
   }
 
-  return { drag, drop, startDrag, endDrag, zoneProps, saving: moveTasks.isPending || updateTask.isPending }
+  /** A row took the hover over (`useNestDrop`): hide the zone's insertion line. */
+  const clearDrop = () => setDrop(null)
+
+  return { drag, drop, startDrag, endDrag, clearDrop, zoneProps, saving: moveTasks.isPending || updateTask.isPending }
 }

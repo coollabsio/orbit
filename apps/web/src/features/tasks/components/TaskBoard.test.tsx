@@ -254,3 +254,13 @@ test('cards show the parent above the title and sub-issue progress', () => {
   expect(opened).toEqual(['parent'])
   expect(within(cardOf(view, 'parent')).getByRole('img', { name: '1 of 3 sub-issues closed' })).toBeTruthy()
 })
+
+test('dropping a card on the middle of another card makes it a sub-issue', async () => {
+  const writes: Write[] = []
+  captureWrites(writes)
+  const view = renderBoard([task('moving', 'todo', 1), task('other', 'doing', 2)])
+  fireEvent.dragStart(cardOf(view, 'Moving'), { dataTransfer })
+  dropAt(cardOf(view, 'other'), 0)
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0]).toEqual({ method: 'PATCH', body: { expected_version: 1, parent_task_id: 'other' } })
+})
