@@ -13306,7 +13306,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskRecord"
+                  "$ref": "#/components/schemas/TaskUpdateResponse"
                 }
               }
             }
@@ -24313,7 +24313,7 @@
             }
           }
         ],
-        "description": "`PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation changed."
+        "description": "`POST /tasks` and `PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation\nchanged."
       },
       "Teamspace": {
         "type": "object",

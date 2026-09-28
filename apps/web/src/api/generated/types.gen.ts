@@ -1670,7 +1670,8 @@ export type TaskUpdateBody = {
 };
 
 /**
- * `PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation changed.
+ * `POST /tasks` and `PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation
+ * changed.
  */
 export type TaskUpdateResponse = TaskRecord & {
     auto_closed: Array<AutoClosed>;
@@ -7748,7 +7749,7 @@ export type CreateTaskErrors = {
 export type CreateTaskError = CreateTaskErrors[keyof CreateTaskErrors];
 
 export type CreateTaskResponses = {
-    201: TaskRecord;
+    201: TaskUpdateResponse;
 };
 
 export type CreateTaskResponse = CreateTaskResponses[keyof CreateTaskResponses];

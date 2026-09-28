@@ -1291,6 +1291,11 @@ fn sub_issue_contract_is_documented() {
             ["schema"]["$ref"],
         "#/components/schemas/TaskUpdateResponse"
     );
+    assert_eq!(
+        operation(&document, "/api/v1/workspaces/{workspace_id}/tasks", "post")["responses"]["201"]
+            ["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/TaskUpdateResponse"
+    );
     let update = &schemas["TaskUpdateResponse"]["allOf"];
     assert_eq!(update[0]["$ref"], "#/components/schemas/TaskRecord");
     assert_eq!(update[1]["required"], serde_json::json!(["auto_closed"]));

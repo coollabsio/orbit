@@ -4534,7 +4534,7 @@ async fn due_date_order_keeps_empty_dates_last_across_pages() {
             .await
             .unwrap();
         if due_day.is_none() {
-            undated.push((task.id, title));
+            undated.push((task.task.id, title));
         }
     }
     // Ties (both undated) fall back to the id, in the same direction as the sort.
@@ -5193,6 +5193,131 @@ async fn sub_issue_ancestors_are_listed_root_first_on_the_task_endpoint() {
 }
 
 #[tokio::test]
+async fn sub_issue_under_a_hidden_parent_lists_as_top_level_everywhere_and_ancestors_stop_there() {
+    let fixture = Fixture::new().await;
+    let other = create_project(&fixture, "HID").await;
+    let root = create_sub_issue(&fixture, "Root", None).await;
+    let hidden = create_task_in(&fixture, &other, "Hidden", Some(id_of(&root))).await;
+    let visible = create_sub_issue(&fixture, "Visible", Some(id_of(&hidden))).await;
+    let leaf = create_sub_issue(&fixture, "Leaf", Some(id_of(&visible))).await;
+    let everything = json!({"op": "and", "children": []});
+    assert_eq!(
+        titles_for(&fixture, everything.clone(), "hidden").await,
+        ["Root"]
+    );
+    let hidden_id = id_of(&hidden).to_owned();
+    assert_eq!(
+        titles_for(&fixture, only("parent", "is", json!([hidden_id])), "nested").await,
+        ["Visible"]
+    );
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!(
+            "/api/v1/workspaces/{}/projects/{other}?expected_version=0",
+            fixture.workspace_id
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Visible shows no parent, so the walk from Leaf ends there instead of skipping to Root.
+    let visible_key = project_key_of(&fixture, &fixture.project_id).await;
+    let leaf = fetch_task(&fixture, id_of(&leaf)).await;
+    assert_eq!(
+        leaf["ancestors"],
+        json!([{"id": id_of(&visible), "project_id": fixture.project_id, "project_key": visible_key, "title": "Visible"}])
+    );
+    let visible = fetch_task(&fixture, id_of(&visible)).await;
+    assert_eq!(visible["parent"], Value::Null);
+    assert_eq!(visible["ancestors"], json!([]));
+    // `hidden` keeps Visible reachable: it lists as top-level, Leaf stays under it.
+    assert_eq!(
+        titles_for(&fixture, everything, "hidden").await,
+        ["Root", "Visible"]
+    );
+    // The parent filter reads the same visible parent.
+    let cases = [
+        (
+            only("parent", "is", json!(["none"])),
+            vec!["Root", "Visible"],
+        ),
+        (only("parent", "is", json!([hidden_id])), vec![]),
+        (
+            only("parent", "is_not", json!([hidden_id])),
+            vec!["Leaf", "Root", "Visible"],
+        ),
+        (only("parent", "is_not", json!(["none"])), vec!["Leaf"]),
+        (only("parent", "is", json!([visible["id"]])), vec!["Leaf"]),
+    ];
+    for (filter, expected) in cases {
+        assert_eq!(
+            titles_for(&fixture, filter.clone(), "nested").await,
+            expected,
+            "{filter}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sub_issue_restored_under_a_parent_in_a_trashed_project_keeps_the_link() {
+    let fixture = Fixture::new().await;
+    let other = create_project(&fixture, "KEP").await;
+    let parent = create_task_in(&fixture, &other, "Parent elsewhere", None).await;
+    let child = create_sub_issue(&fixture, "Child", Some(id_of(&parent))).await;
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&child))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let project_uri = format!(
+        "/api/v1/workspaces/{}/projects/{other}",
+        fixture.workspace_id
+    );
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{project_uri}?expected_version=0"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // The parent itself is not in the trash, so the link stays, hidden like the parent.
+    let (status, restored) = call(
+        &fixture,
+        "POST",
+        &format!("{}/restore", task_uri(&fixture, id_of(&child))),
+        Some(json!({"expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["parent_task_id"], id_of(&parent));
+    assert_eq!(restored["parent"], Value::Null);
+    assert_eq!(
+        fetch_task(&fixture, id_of(&child)).await["ancestors"],
+        json!([])
+    );
+
+    let (status, project) = call(
+        &fixture,
+        "POST",
+        &format!("{project_uri}/restore"),
+        Some(json!({"expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{project}");
+    assert_eq!(
+        fetch_task(&fixture, id_of(&child)).await["parent"]["id"],
+        id_of(&parent)
+    );
+}
+
+#[tokio::test]
 async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trashed_with_it() {
     let fixture = Fixture::new().await;
     let pool = fixture.database.pool();
@@ -5267,6 +5392,26 @@ async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trash
     assert_eq!(descendants(id_of(&parent)), 2);
     assert_eq!(descendants(id_of(&child)), 1);
     assert_eq!(descendants(id_of(&earlier)), 0);
+    // One-item pages carry the same counts as the full page.
+    let mut paged = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut uri = format!(
+            "/api/v1/workspaces/{}/tasks/trash?limit=1",
+            fixture.workspace_id
+        );
+        if let Some(cursor) = &cursor {
+            uri.push_str(&format!("&cursor={cursor}"));
+        }
+        let (status, page) = call(&fixture, "GET", &uri, None).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        paged.extend(page["items"].as_array().unwrap().iter().cloned());
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => break,
+        }
+    }
+    assert_eq!(paged, trash["items"].as_array().unwrap().clone());
 
     let (status, restored) = call(
         &fixture,
@@ -5878,6 +6023,119 @@ async fn sub_issue_parent_closes_when_a_cancelled_child_becomes_completed() {
     );
     // Rule B did not run: the child was already closed, so the cancelled sibling is untouched.
     assert_eq!(status_of(&fixture, id_of(&second)).await, cancelled);
+}
+
+#[tokio::test]
+async fn sub_issue_moving_a_closed_task_under_a_parent_can_complete_it() {
+    let fixture = Fixture::new().await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let cancelled = status_id_by_category(&fixture, &fixture.project_id, "cancelled").await;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let dropped = create_sub_issue(&fixture, "Dropped", Some(id_of(&parent))).await;
+    let (status, _) =
+        patch_current(&fixture, id_of(&dropped), json!({"status_id": cancelled})).await;
+    assert_eq!(status, StatusCode::OK);
+    let finished = create_sub_issue(&fixture, "Finished", None).await;
+    let (status, _) = patch_current(&fixture, id_of(&finished), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status_of(&fixture, id_of(&parent)).await, fixture.status_id);
+
+    let (status, moved) = patch_current(
+        &fixture,
+        id_of(&finished),
+        json!({"parent_task_id": id_of(&parent)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(
+        moved["auto_closed"],
+        json!([{"id": id_of(&parent), "status_id": done}])
+    );
+    assert_eq!(
+        auto_closed_metadata(&fixture, id_of(&parent)).await["source_task_id"],
+        id_of(&finished)
+    );
+
+    // Bulk moves run the same check.
+    let other_parent = create_sub_issue(&fixture, "Other parent", None).await;
+    let finished = fetch_task(&fixture, id_of(&finished)).await;
+    let (status, bulk) = call(
+        &fixture,
+        "POST",
+        &bulk_uri(&fixture),
+        Some(json!({"updates": [{
+            "id": id_of(&finished),
+            "expected_version": finished["version"],
+            "parent_task_id": id_of(&other_parent),
+        }]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bulk}");
+    assert_eq!(
+        bulk["auto_closed"],
+        json!([{"id": id_of(&other_parent), "status_id": done}])
+    );
+}
+
+#[tokio::test]
+async fn sub_issue_created_closed_can_complete_its_parent() {
+    let fixture = Fixture::new().await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let cancelled = status_id_by_category(&fixture, &fixture.project_id, "cancelled").await;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let dropped = create_sub_issue(&fixture, "Dropped", Some(id_of(&parent))).await;
+    let (status, _) =
+        patch_current(&fixture, id_of(&dropped), json!({"status_id": cancelled})).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let tasks_uri = format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id);
+    let (status, created) = call(
+        &fixture,
+        "POST",
+        &tasks_uri,
+        Some(json!({
+            "project_id": fixture.project_id,
+            "status_id": done,
+            "title": "Done on arrival",
+            "parent_task_id": id_of(&parent),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["parent_task_id"], id_of(&parent));
+    assert_eq!(
+        created["auto_closed"],
+        json!([{"id": id_of(&parent), "status_id": done}])
+    );
+    assert_eq!(
+        auto_closed_metadata(&fixture, id_of(&parent)).await["source_task_id"],
+        id_of(&created)
+    );
+
+    // The parent's project flag still decides.
+    let off = create_project(&fixture, "OFF").await;
+    sqlx::query("UPDATE projects SET auto_close_parent = 0 WHERE id = ?")
+        .bind(&off)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let off_parent = create_task_in(&fixture, &off, "Off parent", None).await;
+    let (status, created) = call(
+        &fixture,
+        "POST",
+        &tasks_uri,
+        Some(json!({
+            "project_id": fixture.project_id,
+            "status_id": done,
+            "title": "Done under off",
+            "parent_task_id": id_of(&off_parent),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["auto_closed"], json!([]));
+    let off_backlog = status_id_by_category(&fixture, &off, "unstarted").await;
+    assert_eq!(status_of(&fixture, id_of(&off_parent)).await, off_backlog);
 }
 
 #[tokio::test]

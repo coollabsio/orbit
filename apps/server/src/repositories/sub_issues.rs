@@ -9,12 +9,20 @@ use serde_json::json;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use utoipa::ToSchema;
 
-use super::tasks::{TaskError, TaskRef, parse_id, parse_task_ref};
+use super::tasks::{TaskError, TaskRef, parse_id};
 use crate::audit::{self, AuditOutcome};
 
 /// Upper bound for walks over `parent_task_id`. The repository never lets a cycle in; the bound
 /// only keeps a corrupt database from looping.
 const MAX_DEPTH: i64 = 1_000;
+
+/// A task's parent is visible when it is live and its project is too. The rule behind the
+/// `parent` field, the `ancestors` walk and the `hidden` sub-issue display; `parent` and
+/// `parent_project` are the aliases it expects.
+const VISIBLE_PARENT_FROM: &str =
+    "tasks AS parent JOIN projects AS parent_project ON parent_project.id = parent.project_id";
+const VISIBLE_PARENT_WHERE: &str =
+    "parent.deleted_at IS NULL AND parent_project.deleted_at IS NULL";
 
 /// Correlated subquery rendering the visible parent `parent_id_sql` as a `TaskRef` JSON object,
 /// or NULL when there is none or it (or its project) is in the trash.
@@ -22,25 +30,16 @@ pub(super) fn parent_subquery(parent_id_sql: &str) -> String {
     format!(
         "(SELECT json_object('id', parent.id, 'project_id', parent.project_id, \
          'project_key', parent_project.project_key, 'title', parent.title) \
-         FROM tasks AS parent JOIN projects AS parent_project ON parent_project.id = parent.project_id \
-         WHERE parent.id = {parent_id_sql} AND parent.deleted_at IS NULL \
-         AND parent_project.deleted_at IS NULL)"
+         FROM {VISIBLE_PARENT_FROM} WHERE parent.id = {parent_id_sql} AND {VISIBLE_PARENT_WHERE})"
     )
 }
 
-pub(super) async fn parent_ref_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-    parent_id: Option<Id>,
-) -> Result<Option<TaskRef>, TaskError> {
-    let Some(parent_id) = parent_id else {
-        return Ok(None);
-    };
-    let sql = format!("SELECT {}", parent_subquery("?"));
-    let value: Option<String> = sqlx::query_scalar(&sql)
-        .bind(parent_id.to_string())
-        .fetch_one(&mut **tx)
-        .await?;
-    parse_task_ref(value)
+/// Condition true when `parent_id_sql` names a visible parent (false for NULL).
+pub(super) fn has_visible_parent_sql(parent_id_sql: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM {VISIBLE_PARENT_FROM} \
+         WHERE parent.id = {parent_id_sql} AND {VISIBLE_PARENT_WHERE})"
+    )
 }
 
 /// `task_id` is `None` for a task being created (it cannot be anyone's ancestor yet).
@@ -89,24 +88,26 @@ pub(super) async fn validate_parent_in_tx(
     Ok(())
 }
 
-/// Visible ancestors of `task_id`, root first (`GET /tasks/{id}`).
+/// Visible ancestors of `task_id`, root first (`GET /tasks/{id}`). The walk stops at the first
+/// hidden ancestor, as the `parent` field does, so the chain always ends at the task's parent.
 pub(super) async fn ancestors(pool: &SqlitePool, task_id: Id) -> Result<Vec<TaskRef>, TaskError> {
-    let rows = sqlx::query(
-        "WITH RECURSIVE chain(id, depth) AS ( \
-             SELECT parent_task_id, 1 FROM tasks WHERE id = ? AND parent_task_id IS NOT NULL \
+    let sql = format!(
+        "WITH RECURSIVE chain(id, project_id, project_key, title, parent_task_id, depth) AS ( \
+             SELECT parent.id, parent.project_id, parent_project.project_key, parent.title, \
+             parent.parent_task_id, 1 FROM tasks AS child, {VISIBLE_PARENT_FROM} \
+             WHERE child.id = ? AND parent.id = child.parent_task_id AND {VISIBLE_PARENT_WHERE} \
              UNION ALL \
-             SELECT tasks.parent_task_id, chain.depth + 1 FROM tasks JOIN chain ON tasks.id = chain.id \
-             WHERE tasks.parent_task_id IS NOT NULL AND chain.depth < ? \
+             SELECT parent.id, parent.project_id, parent_project.project_key, parent.title, \
+             parent.parent_task_id, chain.depth + 1 FROM chain, {VISIBLE_PARENT_FROM} \
+             WHERE parent.id = chain.parent_task_id AND {VISIBLE_PARENT_WHERE} AND chain.depth < ? \
          ) \
-         SELECT tasks.id, tasks.project_id, projects.project_key, tasks.title FROM chain \
-         JOIN tasks ON tasks.id = chain.id JOIN projects ON projects.id = tasks.project_id \
-         WHERE tasks.deleted_at IS NULL AND projects.deleted_at IS NULL \
-         ORDER BY chain.depth DESC",
-    )
-    .bind(task_id.to_string())
-    .bind(MAX_DEPTH)
-    .fetch_all(pool)
-    .await?;
+         SELECT id, project_id, project_key, title FROM chain ORDER BY depth DESC"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(task_id.to_string())
+        .bind(MAX_DEPTH)
+        .fetch_all(pool)
+        .await?;
     rows.into_iter()
         .map(|row| {
             Ok(TaskRef {
@@ -170,6 +171,47 @@ where
         .collect()
 }
 
+/// `trashed_with(root, root.deleted_at).len()` for every root in `roots` in one query (the
+/// trash page's "+N sub-issues"). Roots with no such descendants are absent from the map.
+pub(super) async fn trashed_with_counts(
+    pool: &SqlitePool,
+    roots: &[Id],
+) -> Result<BTreeMap<Id, i64>, TaskError> {
+    if roots.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut query = sqlx::QueryBuilder::<Sqlite>::new(
+        "WITH RECURSIVE subtree(root, id, deleted_at) AS ( \
+             SELECT root.id, tasks.id, tasks.deleted_at FROM tasks \
+             JOIN tasks AS root ON root.id = tasks.parent_task_id AND root.deleted_at = tasks.deleted_at \
+             WHERE root.id IN (",
+    );
+    let mut ids = query.separated(", ");
+    for root in roots {
+        ids.push_bind(root.to_string());
+    }
+    query.push(
+        ") \
+         UNION \
+         SELECT subtree.root, tasks.id, tasks.deleted_at FROM tasks \
+         JOIN subtree ON tasks.parent_task_id = subtree.id AND tasks.deleted_at = subtree.deleted_at \
+         ) \
+         SELECT root, COUNT(*) AS count FROM subtree GROUP BY root",
+    );
+    query
+        .build()
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|row| Ok((parse_id(row.get("root"))?, row.get("count"))))
+        .collect()
+}
+
+/// Whether `task_id` itself is out of the trash. Restore (and GitHub's un-trash) detach a task
+/// only from a parent that is still in the trash (spec §5); a parent whose project is in the
+/// trash stays linked, like the children of any task in a trashed project, and shows again when
+/// that project is restored. `validate_parent_in_tx` is stricter because it gates picking a new
+/// parent, which must be visible.
 pub(super) async fn task_is_live_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     task_id: Id,
@@ -279,7 +321,9 @@ pub(super) async fn run_automation_in_tx(
     {
         close_descendants_in_tx(tx, actor, task_id, &after.category, auto_closed).await?;
     }
-    if (became_closed || became_completed)
+    // A closed task moved under a new parent can complete it too (rule A).
+    let joined_closed = before.parent_task_id != after.parent_task_id && is_closed(&after.category);
+    if (became_closed || became_completed || joined_closed)
         && let Some(parent_id) = after.parent_task_id
     {
         close_ancestors_in_tx(tx, actor, parent_id, task_id, auto_closed).await?;

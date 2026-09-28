@@ -11,6 +11,8 @@ use serde_json::{Map, Value, json};
 use sqlx::{QueryBuilder, Sqlite};
 use utoipa::ToSchema;
 
+use super::sub_issues;
+
 /// Groups may nest this many levels below the root group (the root is level 0).
 pub const MAX_NESTING: usize = 3;
 /// Conditions across the whole tree.
@@ -1049,8 +1051,9 @@ fn push_column_in(
     }
 }
 
-/// `parent is [ids…, "none"]`. The positive expression is never NULL, so `is_not [id]` keeps
-/// top-level tasks.
+/// `parent is [ids…, "none"]`, matched against the visible parent (the `parent` field): a task
+/// whose parent is hidden has parent `none`. The positive expression is never NULL (the EXISTS
+/// is false for a NULL parent), so `is_not [id]` keeps top-level tasks.
 fn push_parent(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>, negated: bool) {
     let none = values.iter().any(|value| value == "none");
     let ids: Vec<String> = values.into_iter().filter(|value| value != "none").collect();
@@ -1058,15 +1061,19 @@ fn push_parent(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>, negate
         query.push(if negated { "1 = 1" } else { "0 = 1" });
         return;
     }
+    let visible_parent = sub_issues::has_visible_parent_sql("tasks.parent_task_id");
     query.push(if negated { "NOT (" } else { "(" });
     if none {
-        query.push("tasks.parent_task_id IS NULL");
+        query.push("NOT ").push(&visible_parent);
         if !ids.is_empty() {
             query.push(" OR ");
         }
     }
     if !ids.is_empty() {
-        query.push("(tasks.parent_task_id IS NOT NULL AND tasks.parent_task_id IN ");
+        query
+            .push("(")
+            .push(&visible_parent)
+            .push(" AND tasks.parent_task_id IN ");
         push_list(query, ids);
         query.push(")");
     }
@@ -1897,10 +1904,11 @@ mod sql_tests {
         let sql = compile(json!({ "op": "and", "children": [
             { "field": "parent", "operator": "is_not", "value": ["0190f5b4-7c1e-7a3b-8c4d-5e6f7a8b9c0d", "none"] }
         ] }));
+        let visible = sub_issues::has_visible_parent_sql("tasks.parent_task_id");
         assert!(
-            sql.contains(
-                "NOT (tasks.parent_task_id IS NULL OR (tasks.parent_task_id IS NOT NULL AND tasks.parent_task_id IN (?)))"
-            ),
+            sql.contains(&format!(
+                "NOT (NOT {visible} OR ({visible} AND tasks.parent_task_id IN (?)))"
+            )),
             "{sql}"
         );
     }

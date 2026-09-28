@@ -1149,7 +1149,8 @@ async fn get_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-/// `PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation changed.
+/// `POST /tasks` and `PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation
+/// changed.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct TaskUpdateResponse {
     #[serde(flatten)]
@@ -1317,7 +1318,7 @@ async fn delete_task_relation(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks", params(("workspace_id" = String, Path)), request_body = CreateTaskBody, responses((status = 201, body = crate::repositories::tasks::TaskRecord)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks", params(("workspace_id" = String, Path)), request_body = CreateTaskBody, responses((status = 201, body = TaskUpdateResponse)))]
 async fn create_task(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
@@ -1366,7 +1367,13 @@ async fn create_task(
             TimestampMillis::now(),
         )
         .await
-        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map(|outcome| {
+            let body = TaskUpdateResponse {
+                task: outcome.task,
+                auto_closed: outcome.auto_closed,
+            };
+            (StatusCode::CREATED, Json(body)).into_response()
+        })
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
