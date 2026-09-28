@@ -23,7 +23,8 @@ import { useUpdateTask } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { PriorityPicker } from './PriorityPicker'
 import { LinkifiedText } from './LinkifiedText'
-import { DateStamp, DueDateChip, ProjectChip } from './TaskPropertyChips'
+import { DateStamp, ProjectChip } from './TaskPropertyChips'
+import { DueDatePicker } from './DueDatePicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { TreeGutter } from './TreeGutter'
 import { NestChip } from './NestChip'
@@ -80,7 +81,7 @@ interface TaskRowProps {
   nest?: NestRowProps
 }
 
-/** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title · progress … labels · project · due · assignee · created · updated. */
+/** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title … labels · progress · project · due · assignee · created · updated. */
 export function TaskRow({ task, statuses, labels, users, assignees, project, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent, nest }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
@@ -190,9 +191,6 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       ) : (
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
       )}
-      {has('sub_issue_progress') && (task.subIssueCount ?? 0) > 0 ? (
-        <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} className="max-[640px]:hidden" />
-      ) : null}
       {has('labels') && task.labels.length > 0 ? (
         <span className="flex shrink-0 gap-1 max-[1099px]:hidden">
           {task.labels.map((labelId) => {
@@ -201,10 +199,17 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
           })}
         </span>
       ) : null}
-      {has('project') ? <ProjectChip project={project} className="text-xs max-[1099px]:hidden" /> : null}
-      {has('due_date') ? <DueDateChip task={task} status={status} className="text-xs max-[640px]:hidden" /> : null}
+      {/* fixed-width progress, project, due date and assignee slots keep the columns aligned across rows;
+          the progress slot is a min width (right-aligned) so rare 3-digit counts grow it instead of overflowing */}
+      {has('sub_issue_progress') ? (
+        <span className="flex min-w-[3.5rem] shrink-0 justify-end max-[640px]:hidden">
+          {(task.subIssueCount ?? 0) > 0 ? <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} /> : null}
+        </span>
+      ) : null}
+      {has('project') ? <span className="flex w-[4.5rem] shrink-0 max-[1099px]:hidden"><ProjectChip project={project} className="max-w-full text-xs" /></span> : null}
+      {has('due_date') ? <DueDatePicker task={task} status={status} className="w-[4.25rem] shrink-0 text-xs max-[640px]:hidden" /> : null}
       {has('assignee') ? (
-        <div className="flex" onClick={(e) => e.stopPropagation()}>
+        <div className="flex w-7 shrink-0 justify-end" onClick={(e) => e.stopPropagation()}>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -214,7 +219,8 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
                   className="inline-flex h-auto cursor-pointer rounded-none border-0 bg-transparent p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
                   aria-label={assignees.length > 0 ? `Assignees: ${assignees.map((user) => user.name).join(', ')}` : 'Assign task'}
                 >
-                  <UserAvatarStack users={assignees} size={18} />
+                  {/* at most two circles (28px) so the slot stays narrow */}
+                  <UserAvatarStack users={assignees} size={18} max={assignees.length > 2 ? 1 : 2} />
                 </Button>
               }
             />

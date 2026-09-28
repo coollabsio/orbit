@@ -11,6 +11,7 @@ import { DocsPage } from '@/features/docs/pages/DocsPage'
 import { SettingsLayout } from '@/features/settings/pages/SettingsLayout'
 import { GeneralPage } from '@/features/settings/pages/GeneralPage'
 import { GithubPage } from '@/features/settings/pages/GithubPage'
+import { LabelsPage } from '@/features/settings/pages/LabelsPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
@@ -66,6 +67,7 @@ export default function App() {
               <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
+                <Route path="labels" element={<LabelsPage />} />
                 <Route path="github" element={<GithubPage />} />
                 <Route path="danger-zone" element={<DangerZonePage />} />
                 <Route path="members" element={<MembersPage />} />

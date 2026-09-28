@@ -135,6 +135,30 @@ test('bulk toolbar rejects more than 100 selected tasks without a server request
   // each of the 101 checkbox clicks re-renders every row (~170ms apiece under happy-dom)
 }, 30000)
 
+test('bulk due date picker schedules the selected tasks for this week', async () => {
+  const writes = captureWrites()
+  const view = viewFor([task(1), task(2)])
+  act(() => {
+    for (const checkbox of view.getAllByRole('checkbox')) checkbox.click()
+  })
+  await waitFor(() => expect(view.getByText('2 selected')).toBeTruthy(), { timeout: 5000 })
+
+  fireEvent.click(within(view.getByRole('toolbar', { name: 'Selected tasks' })).getByRole('button', { name: 'Due date' }))
+  await userEvent.click(await view.findByRole('button', { name: 'This week' }, { timeout: 5000 }))
+  await userEvent.click(view.getByRole('button', { name: 'Done' }))
+
+  await waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 })
+  const { updates } = writes[0].body as { updates: { id: string; due_start_at: string; due_at: string }[] }
+  expect(updates.map((update) => update.id)).toEqual(['task-1', 'task-2'])
+  const start = new Date(updates[0].due_start_at)
+  const end = new Date(updates[0].due_at)
+  expect([start.getDay(), start.getHours(), start.getMinutes()]).toEqual([1, 0, 0])
+  expect([end.getDay(), end.getHours(), end.getMinutes()]).toEqual([0, 9, 0])
+  expect(end.getTime() - start.getTime()).toBeLessThan(7 * 24 * 3600 * 1000)
+  expect(start.getTime()).toBeLessThanOrEqual(Date.now())
+  expect(updates[1]).toMatchObject({ due_start_at: updates[0].due_start_at, due_at: updates[0].due_at })
+}, 20000)
+
 test('bulk toolbar retry repeats the original valid atomic payload', async () => {
   const bodies: unknown[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {

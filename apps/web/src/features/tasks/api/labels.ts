@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
-import { createLabel, listLabels } from '@/api/generated/sdk.gen'
+import { createLabel, deleteLabel, listLabels, updateLabel } from '@/api/generated/sdk.gen'
 import type { LabelBody, LabelRecord } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
@@ -51,5 +51,35 @@ export function useCreateLabel(workspaceId: string) {
       )
       void queryClient.invalidateQueries({ queryKey: queryKeys.labels(workspaceId) })
     },
+  })
+}
+
+export function useUpdateLabel(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ label, name, color }: { label: LabelRecord; name: string; color: string }) => {
+      const { data } = await updateLabel({
+        client: apiClient,
+        path: { workspace_id: workspaceId, label_id: label.id },
+        body: { name, color, expected_version: label.version },
+        throwOnError: true,
+      })
+      if (!data) throw new Error('Update label response was empty.')
+      return data
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.labels(workspaceId) }),
+  })
+}
+
+export function useDeleteLabel(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (label: LabelRecord) => deleteLabel({
+      client: apiClient,
+      path: { workspace_id: workspaceId, label_id: label.id },
+      query: { expected_version: label.version },
+      throwOnError: true,
+    }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.labels(workspaceId) }),
   })
 }

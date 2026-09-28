@@ -42,12 +42,14 @@ interface DatePickerProps {
   startValue: string | null
   /** ISO range end or single due date. */
   value: string | null
+  /** Enables Clear; defaults to whether `value` is set. */
+  clearable?: boolean
   onClear: () => void
   onDone: (value: { start: string | null; end: string }) => void
 }
 
 /** Calendar + time picker that supports one date, a date range, and this/next-week shortcuts. */
-export function DatePicker({ startValue, value, onClear, onDone }: DatePickerProps) {
+export function DatePicker({ startValue, value, clearable = !!value, onClear, onDone }: DatePickerProps) {
   const initialEnd = value ? new Date(value) : undefined
   const [range, setRange] = useState<DateRange | undefined>(() => initialEnd
     ? { from: startValue ? new Date(startValue) : initialEnd, to: startValue ? initialEnd : undefined }
@@ -89,7 +91,7 @@ export function DatePicker({ startValue, value, onClear, onDone }: DatePickerPro
         </Select>
       </div>
       <div className="flex justify-between">
-        <Button variant="ghost" onClick={onClear} disabled={!value}>Clear</Button>
+        <Button variant="ghost" onClick={onClear} disabled={!clearable}>Clear</Button>
         <Button onClick={save} disabled={!range?.from}>Done</Button>
       </div>
     </div>

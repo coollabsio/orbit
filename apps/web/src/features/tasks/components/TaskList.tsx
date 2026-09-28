@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
+import { Calendar, ChevronRight, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { DatePicker } from '@/components/common/DatePicker'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -328,7 +330,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
   )
 }
 
-/** Floating toolbar for the selected rows: bulk status, priority, assignees and labels. */
+/** Floating toolbar for the selected rows: bulk status, priority, assignees, labels and due dates. */
 function BulkBar({
   tasks,
   users,
@@ -403,6 +405,18 @@ function BulkBar({
     })))
   }
 
+  // the picker starts from the shared due range, or empty when the selection disagrees
+  const [first] = tasks
+  const sameDue = tasks.every((task) => task.dueAt === first.dueAt && (task.dueStartAt ?? null) === (first.dueStartAt ?? null))
+  const [dueOpen, setDueOpen] = useState(false)
+  const bulkDue = (start: string | null, end: string | null) => {
+    const updates = tasks
+      .filter((task) => (task.dueStartAt ?? null) !== start || task.dueAt !== end)
+      .map((task) => ({ id: task.id, expected_version: task.version, due_start_at: start, due_at: end }))
+    if (updates.length > 0) bulkTasks.mutate(updates)
+    setDueOpen(false)
+  }
+
   return (
     // outer layer centres the bar, so the enter animation can own the bar's transform
     <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-6 max-[899px]:bottom-2.5 max-[899px]:px-2">
@@ -475,6 +489,18 @@ function BulkBar({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
+        <Popover open={dueOpen} onOpenChange={setDueOpen}>
+          <PopoverTrigger render={<Button variant="ghost" className={BULK_BTN}><Calendar aria-hidden className={BULK_ICON} /><span className={BULK_LABEL}>Due date</span></Button>} />
+          <PopoverContent side="top" align="end" className="w-auto gap-0 p-0">
+            <DatePicker
+              startValue={sameDue ? first.dueStartAt ?? null : null}
+              value={sameDue ? first.dueAt : null}
+              clearable={tasks.some((task) => task.dueAt)}
+              onClear={() => bulkDue(null, null)}
+              onDone={({ start, end }) => bulkDue(start, end)}
+            />
+          </PopoverContent>
+        </Popover>
         <Button variant="ghost" className={BULK_BTN} aria-label="Mark as duplicate…" title="Mark as duplicate…" onClick={onMarkDuplicate}>
           <Copy aria-hidden className={BULK_ICON} />
           <span className={BULK_LABEL}>Duplicate</span>

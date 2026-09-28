@@ -24,7 +24,7 @@ export function DueDateChip({ task, status, className }: { task: Task; status: T
 export function ProjectChip({ project, className }: { project: Project | undefined; className?: string }) {
   if (!project) return null
   return (
-    <span data-property="project" className={cn('inline-flex max-w-[140px] min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground', className)}>
+    <span data-property="project" title={project.name} className={cn('inline-flex max-w-[140px] min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground', className)}>
       <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
       <span className="truncate">{project.name}</span>
     </span>
