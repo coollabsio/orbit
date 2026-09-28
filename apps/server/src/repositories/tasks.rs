@@ -8,7 +8,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::sub_issues::{self, AutoClosed};
-use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted};
+use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
 
@@ -300,6 +300,8 @@ pub struct TaskFilter {
     pub order: SortOrder,
     /// Only direct children of this task (`GET /tasks?parent_task_id=`, `POST /tasks/query`).
     pub parent_task_id: Option<Id>,
+    /// `hidden` lists top-level tasks only.
+    pub sub_issues: SubIssuesDisplay,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1185,6 +1187,9 @@ impl TaskRepository {
             query
                 .push(" AND tasks.parent_task_id = ")
                 .push_bind(parent_id.to_string());
+        }
+        if filter.sub_issues == SubIssuesDisplay::Hidden {
+            query.push(" AND tasks.parent_task_id IS NULL");
         }
         let column = task_sort_column(&filter.sort, &filter.order);
         let (operator, direction) = if filter.order == SortOrder::Asc {
@@ -2604,11 +2609,12 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     format!(
-        "tasks:w={workspace_id}:f={digest}:c={:?}:sort={:?}:order={:?}:p={:?}",
+        "tasks:w={workspace_id}:f={digest}:c={:?}:sort={:?}:order={:?}:p={:?}:s={:?}",
         filter.show_completed,
         filter.sort,
         filter.order,
         filter.parent_task_id.map(|id| id.to_string()),
+        filter.sub_issues,
     )
 }
 

@@ -6,7 +6,7 @@ use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, Times
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::task_filter::{
-    FilterGroup, ShowCompleted, parse_filter, preset_filter,
+    FilterGroup, ShowCompleted, SubIssuesDisplay, parse_filter, preset_filter,
 };
 use orbit_server::repositories::tasks::{
     CreateTask, GithubWorkItem, SortOrder, TaskError, TaskFilter, TaskRepository, TaskSort,
@@ -4177,6 +4177,7 @@ async fn filtered(data: &FilterData, actor: Id, tree: &Value, now: i64) -> Vec<S
         sort: TaskSort::Title,
         order: SortOrder::Asc,
         parent_task_id: None,
+        sub_issues: SubIssuesDisplay::Nested,
     };
     page_titles(&data.repo, data.workspace, actor, &filter, 100, now).await
 }
@@ -4495,6 +4496,7 @@ async fn show_completed_windows_use_completed_at() {
             sort: TaskSort::Title,
             order: SortOrder::Asc,
             parent_task_id: None,
+            sub_issues: SubIssuesDisplay::Nested,
         };
         assert_eq!(
             page_titles(&repo, workspace, fixture.owner_id, &filter, 100, FILTER_NOW).await,
@@ -4552,6 +4554,7 @@ async fn due_date_order_keeps_empty_dates_last_across_pages() {
             sort: TaskSort::DueDate,
             order,
             parent_task_id: None,
+            sub_issues: SubIssuesDisplay::Nested,
         };
         assert_eq!(
             page_titles(&repo, workspace, fixture.owner_id, &filter, 2, FILTER_NOW).await,
@@ -4566,6 +4569,7 @@ async fn due_date_order_keeps_empty_dates_last_across_pages() {
         sort: TaskSort::DueDate,
         order: SortOrder::Asc,
         parent_task_id: None,
+        sub_issues: SubIssuesDisplay::Nested,
     };
     let now = TimestampMillis::from_millis(FILTER_NOW);
     let first = repo
@@ -5815,4 +5819,116 @@ async fn sub_issue_bulk_delete_and_detach_run_the_parent_automation() {
         detached["auto_closed"],
         json!([{"id": id_of(&s), "status_id": done}])
     );
+}
+
+async fn titles_for(fixture: &Fixture, filter: Value, sub_issues: &str) -> Vec<String> {
+    let mut body = query_body(filter, "title", "asc", "all");
+    body["sub_issues"] = json!(sub_issues);
+    let (status, page) = call(fixture, "POST", &query_uri(fixture), Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    query_titles(&page)
+}
+
+#[tokio::test]
+async fn sub_issue_filters_and_hidden_display_select_by_hierarchy() {
+    let fixture = Fixture::new().await;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let parent_id = id_of(&parent).to_owned();
+    let child = create_sub_issue(&fixture, "Child", Some(&parent_id)).await;
+    create_sub_issue(&fixture, "Loner", None).await;
+
+    let cases = [
+        (only("parent", "is", json!([parent_id])), vec!["Child"]),
+        (
+            only("parent", "is", json!(["none"])),
+            vec!["Loner", "Parent"],
+        ),
+        (
+            only("parent", "is", json!(["none", parent_id])),
+            vec!["Child", "Loner", "Parent"],
+        ),
+        (
+            only("parent", "is_not", json!([parent_id])),
+            vec!["Loner", "Parent"],
+        ),
+        (only("parent", "is_not", json!(["none"])), vec!["Child"]),
+        (only("sub_issues", "is", json!(["has"])), vec!["Parent"]),
+        (
+            only("sub_issues", "is", json!(["none"])),
+            vec!["Child", "Loner"],
+        ),
+        (
+            only("sub_issues", "is", json!(["has", "none"])),
+            vec!["Child", "Loner", "Parent"],
+        ),
+    ];
+    for (filter, expected) in cases {
+        assert_eq!(
+            titles_for(&fixture, filter.clone(), "nested").await,
+            expected,
+            "{filter}"
+        );
+    }
+    let everything = json!({"op": "and", "children": []});
+    assert_eq!(
+        titles_for(&fixture, everything.clone(), "flat").await,
+        ["Child", "Loner", "Parent"]
+    );
+    assert_eq!(
+        titles_for(&fixture, everything.clone(), "hidden").await,
+        ["Loner", "Parent"]
+    );
+    // Omitting sub_issues keeps today's result.
+    let (_, page) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(query_body(everything.clone(), "title", "asc", "all")),
+    )
+    .await;
+    assert_eq!(query_titles(&page), ["Child", "Loner", "Parent"]);
+
+    // Trashed children are not sub-issues.
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&child))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(
+        titles_for(&fixture, only("sub_issues", "is", json!(["has"])), "nested")
+            .await
+            .is_empty()
+    );
+
+    for (filter, path) in [
+        (
+            only("parent", "is", json!(["me"])),
+            "filter.children[0].value[0]",
+        ),
+        (
+            only("sub_issues", "is", json!(["some"])),
+            "filter.children[0].value[0]",
+        ),
+        (
+            only("sub_issues", "is_not", json!(["has"])),
+            "filter.children[0].operator",
+        ),
+    ] {
+        let (status, problem) = call(
+            &fixture,
+            "POST",
+            &query_uri(&fixture),
+            Some(query_body(filter, "title", "asc", "all")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+        assert_eq!(problem["path"], path);
+    }
+    let mut body = query_body(everything, "title", "asc", "all");
+    body["sub_issues"] = json!("tree");
+    let (status, _) = call(&fixture, "POST", &query_uri(&fixture), Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

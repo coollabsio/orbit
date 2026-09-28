@@ -33,7 +33,7 @@ const STATUS_CATEGORIES: [&str; 5] = [
 ];
 const DONE_CATEGORIES: [&str; 3] = ["completed", "cancelled", "duplicate"];
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
-const DISPLAY_KEYS: [&str; 8] = [
+const DISPLAY_KEYS: [&str; 9] = [
     "layout",
     "group_by",
     "sub_group_by",
@@ -42,6 +42,7 @@ const DISPLAY_KEYS: [&str; 8] = [
     "properties",
     "show_completed",
     "show_empty_groups",
+    "sub_issues",
 ];
 
 /// Filter and display options shared by saved views and per-page preferences.
@@ -102,6 +103,8 @@ pub enum FilterField {
     CreatedAt,
     UpdatedAt,
     Text,
+    Parent,
+    SubIssues,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -131,6 +134,9 @@ pub struct DisplayOptions {
     pub properties: Vec<TaskProperty>,
     pub show_completed: ShowCompleted,
     pub show_empty_groups: bool,
+    /// Optional in stored and received states (default `nested`).
+    #[serde(default)]
+    pub sub_issues: SubIssuesDisplay,
 }
 
 impl Default for DisplayOptions {
@@ -149,9 +155,11 @@ impl Default for DisplayOptions {
                 TaskProperty::Project,
                 TaskProperty::DueDate,
                 TaskProperty::Labels,
+                TaskProperty::SubIssueProgress,
             ],
             show_completed: ShowCompleted::All,
             show_empty_groups: false,
+            sub_issues: SubIssuesDisplay::Nested,
         }
     }
 }
@@ -205,6 +213,7 @@ pub enum TaskProperty {
     Labels,
     Created,
     Updated,
+    SubIssueProgress,
 }
 
 /// Which tasks in a done category (completed, cancelled, duplicate) stay visible.
@@ -215,6 +224,17 @@ pub enum ShowCompleted {
     PastWeek,
     PastMonth,
     None,
+}
+
+/// How a view shows sub-issues. `nested` and `flat` only change the client; `hidden` lists
+/// top-level tasks only (`POST /tasks/query` `sub_issues`).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubIssuesDisplay {
+    #[default]
+    Nested,
+    Flat,
+    Hidden,
 }
 
 /// The first invalid node: `path` is a JSON path such as `filter.children[2].value`.
@@ -385,6 +405,12 @@ fn parse_display(value: &Value) -> Result<DisplayOptions, FilterError> {
             "must be all, past_week, past_month or none",
         )?,
         show_empty_groups: required(object, "display", "show_empty_groups", "must be a boolean")?,
+        sub_issues: optional(
+            object,
+            "display",
+            "sub_issues",
+            "must be nested, flat or hidden",
+        )?,
     })
 }
 
@@ -399,6 +425,19 @@ fn required<T: DeserializeOwned>(
         .get(key)
         .ok_or_else(|| invalid(key_path.clone(), "is required"))?;
     T::deserialize(value).map_err(|_| invalid(key_path, message))
+}
+
+/// Like [`required`], but a missing key takes the type's default (keys added after v1).
+fn optional<T: DeserializeOwned + Default>(
+    object: &Map<String, Value>,
+    path: &str,
+    key: &str,
+    message: &'static str,
+) -> Result<T, FilterError> {
+    match object.get(key) {
+        None => Ok(T::default()),
+        Some(value) => T::deserialize(value).map_err(|_| invalid(format!("{path}.{key}"), message)),
+    }
 }
 
 /// Checks limits and field/operator/value compatibility. Paths start with `filter`.
@@ -450,7 +489,8 @@ fn allowed_operators(field: FilterField) -> &'static [FilterOperator] {
         | FilterField::StatusCategory
         | FilterField::Creator
         | FilterField::Priority
-        | FilterField::Project => &[O::Is, O::IsNot],
+        | FilterField::Project
+        | FilterField::Parent => &[O::Is, O::IsNot],
         FilterField::Assignee => &[O::Is, O::IsNot, O::IsEmpty, O::IsNotEmpty],
         FilterField::Label => &[
             O::IncludesAny,
@@ -462,6 +502,7 @@ fn allowed_operators(field: FilterField) -> &'static [FilterOperator] {
         FilterField::DueDate => &[O::Before, O::After, O::Between, O::IsEmpty, O::IsNotEmpty],
         FilterField::CreatedAt | FilterField::UpdatedAt => &[O::Before, O::After],
         FilterField::Text => &[O::Contains],
+        FilterField::SubIssues => &[O::Is],
     }
 }
 
@@ -533,6 +574,8 @@ fn validate_values(field: FilterField, value: &Value, path: &str) -> Result<(), 
             | FilterField::CreatedAt
             | FilterField::UpdatedAt
             | FilterField::Text => false,
+            FilterField::Parent => text == "none" || is_id(text),
+            FilterField::SubIssues => matches!(text, "has" | "none"),
         };
         if !valid {
             return Err(invalid(item_path, "is not a valid value for this field"));
@@ -792,6 +835,11 @@ const TASK_STATUS: &str = "SELECT 1 FROM task_statuses WHERE task_statuses.id = 
 const DONE_STATUS: &str = "EXISTS (SELECT 1 FROM task_statuses \
      WHERE task_statuses.id = tasks.status_id \
      AND task_statuses.category IN ('completed', 'cancelled', 'duplicate'))";
+/// A live direct child of the outer task, counted like `TaskRecord.sub_issue_count`.
+const LIVE_CHILD: &str = "SELECT 1 FROM tasks AS child \
+     JOIN projects AS child_project ON child_project.id = child.project_id \
+     WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
+     AND child_project.deleted_at IS NULL";
 
 /// Appends ` AND (<compiled tree>)` to `query`. Every value is bound. The tree must already be
 /// validated; an unexpected node fails closed (`0 = 1`).
@@ -921,6 +969,8 @@ fn push_condition(
             push_date(query, "tasks.updated_at", condition, ctx.now);
         }
         (F::Text, O::Contains) => push_text(query, value),
+        (F::Parent, O::Is | O::IsNot) => push_parent(query, values(value, ctx, false), negated),
+        (F::SubIssues, O::Is) => push_sub_issues(query, values(value, ctx, false)),
         _ => {
             query.push("0 = 1");
         }
@@ -996,6 +1046,50 @@ fn push_column_in(
     } else {
         query.push(column).push(" IN ");
         push_list(query, values);
+    }
+}
+
+/// `parent is [ids…, "none"]`. The positive expression is never NULL, so `is_not [id]` keeps
+/// top-level tasks.
+fn push_parent(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>, negated: bool) {
+    let none = values.iter().any(|value| value == "none");
+    let ids: Vec<String> = values.into_iter().filter(|value| value != "none").collect();
+    if !none && ids.is_empty() {
+        query.push(if negated { "1 = 1" } else { "0 = 1" });
+        return;
+    }
+    query.push(if negated { "NOT (" } else { "(" });
+    if none {
+        query.push("tasks.parent_task_id IS NULL");
+        if !ids.is_empty() {
+            query.push(" OR ");
+        }
+    }
+    if !ids.is_empty() {
+        query.push("(tasks.parent_task_id IS NOT NULL AND tasks.parent_task_id IN ");
+        push_list(query, ids);
+        query.push(")");
+    }
+    query.push(")");
+}
+
+/// `sub_issues is [has|none]`: whether the task has live direct children.
+fn push_sub_issues(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
+    let has = values.iter().any(|value| value == "has");
+    let none = values.iter().any(|value| value == "none");
+    match (has, none) {
+        (true, true) => {
+            query.push("1 = 1");
+        }
+        (true, false) => {
+            query.push("EXISTS (").push(LIVE_CHILD).push(")");
+        }
+        (false, true) => {
+            query.push("NOT EXISTS (").push(LIVE_CHILD).push(")");
+        }
+        (false, false) => {
+            query.push("0 = 1");
+        }
     }
 }
 
@@ -1343,6 +1437,9 @@ mod tests {
             ),
             condition("updated_at", "before", json!({ "relative": "end_of_week" })),
             condition("text", "contains", json!("  spaced  ")),
+            condition("parent", "is", json!(["none", ID])),
+            condition("parent", "is_not", json!([ID])),
+            condition("sub_issues", "is", json!(["has", "none"])),
         ];
         for node in valid {
             assert!(parse_filter(&tree(vec![node.clone()])).is_ok(), "{node}");
@@ -1461,6 +1558,22 @@ mod tests {
                 condition("text", "contains", json!(["x"])),
                 "filter.children[0].value",
             ),
+            (
+                condition("parent", "is", json!(["me"])),
+                "filter.children[0].value[0]",
+            ),
+            (
+                condition("parent", "is_empty", Value::Null),
+                "filter.children[0].operator",
+            ),
+            (
+                condition("sub_issues", "is_not", json!(["has"])),
+                "filter.children[0].operator",
+            ),
+            (
+                condition("sub_issues", "is", json!(["some"])),
+                "filter.children[0].value[0]",
+            ),
         ] {
             assert_eq!(path_of(tree(vec![node.clone()])), path, "{node}");
         }
@@ -1479,9 +1592,10 @@ mod tests {
                 "sub_group_by": "none",
                 "order_by": "manual",
                 "order_direction": "asc",
-                "properties": ["id", "status", "assignee", "priority", "project", "due_date", "labels"],
+                "properties": ["id", "status", "assignee", "priority", "project", "due_date", "labels", "sub_issue_progress"],
                 "show_completed": "all",
-                "show_empty_groups": false
+                "show_empty_groups": false,
+                "sub_issues": "nested"
             })
         );
 
@@ -1548,6 +1662,23 @@ mod tests {
         assert_eq!(
             validate_view_state(&typed).unwrap_err().path,
             "display.sub_group_by"
+        );
+
+        let mut legacy = serde_json::to_value(ViewState::default()).unwrap();
+        legacy["display"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sub_issues");
+        assert_eq!(
+            parse_view_state(&legacy.to_string())
+                .unwrap()
+                .display
+                .sub_issues,
+            SubIssuesDisplay::Nested
+        );
+        assert_eq!(
+            error(with_display(json!({ "sub_issues": "tree" }))),
+            "display.sub_issues"
         );
     }
 
@@ -1758,6 +1889,19 @@ mod sql_tests {
             query.sql().contains("tasks.completed_at >= ?"),
             "{}",
             query.sql()
+        );
+    }
+
+    #[test]
+    fn parent_filters_never_compare_null() {
+        let sql = compile(json!({ "op": "and", "children": [
+            { "field": "parent", "operator": "is_not", "value": ["0190f5b4-7c1e-7a3b-8c4d-5e6f7a8b9c0d", "none"] }
+        ] }));
+        assert!(
+            sql.contains(
+                "NOT (tasks.parent_task_id IS NULL OR (tasks.parent_task_id IS NOT NULL AND tasks.parent_task_id IN (?)))"
+            ),
+            "{sql}"
         );
     }
 }

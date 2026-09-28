@@ -185,7 +185,8 @@ fn view_state() -> Value {
             "order_direction": "asc",
             "properties": ["id", "status", "assignee", "priority", "project", "due_date", "labels"],
             "show_completed": "all",
-            "show_empty_groups": false
+            "show_empty_groups": false,
+            "sub_issues": "nested"
         }
     })
 }
@@ -204,7 +205,8 @@ fn other_state() -> Value {
             "order_direction": "desc",
             "properties": ["id", "status"],
             "show_completed": "past_week",
-            "show_empty_groups": true
+            "show_empty_groups": true,
+            "sub_issues": "flat"
         }
     })
 }
@@ -1489,4 +1491,57 @@ async fn unreadable_stored_preference_is_returned_with_a_state_error() {
     assert_eq!(stored["page_key"], "preset:overdue");
     assert_eq!(stored["state"], Value::Null);
     assert!(!stored["state_error"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn views_store_the_sub_issues_display_and_default_it_to_nested() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let mut hidden = view_state();
+    hidden["display"]["sub_issues"] = json!("hidden");
+    hidden["display"]["properties"] = json!(["id", "status", "sub_issue_progress"]);
+    let (status, created) = fixture
+        .call(
+            "POST",
+            "/views",
+            &cookie,
+            Some(json!({"name": "Roots", "visibility": "personal", "state": hidden})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["state"], hidden);
+
+    // States saved before sub-issues existed read as nested.
+    let mut legacy = view_state();
+    legacy["display"]
+        .as_object_mut()
+        .unwrap()
+        .remove("sub_issues");
+    let (status, created) = fixture
+        .call(
+            "POST",
+            "/views",
+            &cookie,
+            Some(json!({"name": "Legacy", "visibility": "personal", "state": legacy})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["state"]["display"]["sub_issues"], "nested");
+
+    // POST /views deserializes `state` straight into the typed `ViewState` (as it already does
+    // for every other display enum, e.g. `layout`); an unknown enum literal fails that typed
+    // parse before `validate_view_state` runs, so it surfaces as the generic 400 used for any
+    // malformed body, not a path-carrying 422. (`parse_view_state`'s path-based errors are used
+    // when re-reading stored state, e.g. `decode_state`, not on this write path.)
+    let mut invalid = view_state();
+    invalid["display"]["sub_issues"] = json!("tree");
+    let (status, _problem) = fixture
+        .call(
+            "POST",
+            "/views",
+            &cookie,
+            Some(json!({"name": "Bad", "visibility": "personal", "state": invalid})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

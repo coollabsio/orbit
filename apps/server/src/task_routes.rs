@@ -19,7 +19,7 @@ use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
     self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, OrderBy,
-    OrderDirection, ShowCompleted,
+    OrderDirection, ShowCompleted, SubIssuesDisplay,
 };
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
@@ -846,6 +846,9 @@ struct TaskQueryBody {
     limit: Option<usize>,
     /// Only direct children of this task.
     parent_task_id: Option<String>,
+    /// The view's sub-issue display; `hidden` returns top-level tasks only (default `nested`).
+    #[serde(default)]
+    sub_issues: SubIssuesDisplay,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1046,6 +1049,7 @@ async fn list_tasks(
         sort,
         order,
         parent_task_id,
+        sub_issues: SubIssuesDisplay::Nested,
     };
     state
         .tasks
@@ -1091,6 +1095,7 @@ async fn query_tasks(
         sort,
         order,
         parent_task_id,
+        sub_issues: body.sub_issues,
     };
     state
         .tasks
