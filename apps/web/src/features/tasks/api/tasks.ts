@@ -210,6 +210,11 @@ export function useTask(workspaceId: string, taskId: string | undefined) {
   return useQuery(taskDetailQueries(workspaceId, taskId).task)
 }
 
+/** The detail task `queryOptions`, same cache as `useTask` — used to load a task by id without mounting the detail view. */
+export function taskRecordQuery(workspaceId: string, taskId: string) {
+  return taskDetailQueries(workspaceId, taskId).task
+}
+
 export function useTaskGithubLinks(workspaceId: string, taskId: string | undefined) {
   return useQuery(taskDetailQueries(workspaceId, taskId).githubLinks)
 }

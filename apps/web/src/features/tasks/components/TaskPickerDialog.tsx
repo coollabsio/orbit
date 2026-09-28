@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { taskFromRecord, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
+import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
-import { useTasks } from '@/features/tasks/api/tasks'
-import { pickerCandidates } from '@/features/tasks/relationsLib'
+import { useTaskCandidates } from '@/features/tasks/useTaskCandidates'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { TaskStatusIcon } from './TaskStatusIcon'
 
@@ -19,9 +18,6 @@ export interface TaskPickerDialogProps {
   onSelect: (task: Task) => void
 }
 
-/** Recently updated tasks: the browse list, and where identifiers match (the server search only knows text). */
-const RECENT = { sort: 'updated_at', order: 'desc', limit: 100 } as const
-
 /**
  * Pick another task (duplicate target, blocker, related). Same data pattern as the command palette; the title is
  * rendered inside the popup so it names the dialog. Mount only while open: the queries start on mount.
@@ -30,17 +26,8 @@ export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeI
   const { workspace } = useWorkspace()
   const projects = useProjects(workspace.id)
   const [query, setQuery] = useState('')
-  const search = query.trim()
-  const recent = useTasks(workspace.id, RECENT)
-  // with an empty query this is the same query key as `recent`, so a single request goes out
-  const searched = useTasks(workspace.id, { ...RECENT, search: search || undefined })
-  const candidates = useMemo(() => {
-    const records = [...(searched.data?.pages ?? []), ...(recent.data?.pages ?? [])].flatMap((page) => page.items)
-    const tasks = records.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))
-    return pickerCandidates({ tasks, query: search, excludeIds, excludeDuplicates, statuses })
-  }, [excludeDuplicates, excludeIds, projects.data, recent.data, search, searched.data, statuses])
+  const { candidates, loading } = useTaskCandidates({ query, excludeIds, excludeDuplicates, statuses })
   const projectName = (projectId: string) => projects.data?.find((project) => project.id === projectId)?.name
-  const loading = recent.isPending || searched.isFetching
 
   return (
     <Dialog open={open} onOpenChange={(next) => onOpenChange(next)}>

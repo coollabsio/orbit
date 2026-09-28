@@ -248,7 +248,7 @@ function ConditionRow({ condition, path, root, options, issue, issueNode, onChan
   const meta = FIELD_META[condition.field]
   const label = `Condition ${nodeNumber(path)}`
   const error = issue && samePath(issueNode, path) ? issue.message : null
-  const count = meta.kind === 'list' ? listValue(condition).length : 1
+  const count = meta.kind === 'list' || meta.kind === 'task' ? listValue(condition).length : 1
   const replace = (next: Condition) => onChange(updateNode(root, path, () => next))
   const fieldItems = FIELD_ORDER.map((field) => ({ value: field, label: FIELD_META[field].label }))
   const operatorItems = meta.operators.map((operator) => ({ value: operator, label: operatorLabel(operator, count) }))

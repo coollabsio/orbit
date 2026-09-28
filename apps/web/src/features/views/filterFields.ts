@@ -6,8 +6,10 @@ import {
   Clock,
   Flag,
   Folder,
+  Hierarchy2,
   RecordCircle,
   Tag,
+  TaskSquare,
   Text as TextIcon,
   User as UserIcon,
   UserEdit,
@@ -19,6 +21,8 @@ import { CATEGORY_LABEL, CATEGORY_ORDER, PRIORITY_LABEL, PRIORITY_ORDER, sortSta
 import type { User } from '@/features/workspaces/models'
 import type { Condition, DateValue, FilterField, FilterOperator, TaskPreset } from './viewState'
 
+export type TaskFilterRef = { identifier: string; title: string }
+
 /** Everything the pickers can offer, loaded once by the page. */
 export type FilterOptions = {
   statuses: TaskStatusDef[]
@@ -26,9 +30,14 @@ export type FilterOptions = {
   labels: LabelRecord[]
   projects: ProjectRecord[]
   currentUserId: string
+  /** Parent filter values → task (null: deleted or trashed). Filled by `useFilterTaskRefs`. */
+  taskRefs?: Readonly<Record<string, TaskFilterRef | null>>
 }
 
-export type FieldKind = 'list' | 'date' | 'text'
+export type FieldKind = 'list' | 'date' | 'text' | 'task'
+
+/** The Parent filter's "no parent" value. */
+export const NO_PARENT = 'none'
 
 export type FieldMeta = {
   label: string
@@ -47,13 +56,15 @@ export const FIELD_META: Record<FilterField, FieldMeta> = {
   label: { label: 'Label', plural: 'labels', icon: Tag, kind: 'list', operators: ['includes_any', 'includes_all', 'excludes', 'is_empty', 'is_not_empty'], defaultOperator: 'includes_any' },
   priority: { label: 'Priority', plural: 'priorities', icon: Flag, kind: 'list', operators: ['is', 'is_not'], defaultOperator: 'is' },
   project: { label: 'Project', plural: 'projects', icon: Folder, kind: 'list', operators: ['is', 'is_not'], defaultOperator: 'is' },
+  parent: { label: 'Parent', plural: 'tasks', icon: Hierarchy2, kind: 'task', operators: ['is', 'is_not'], defaultOperator: 'is' },
+  sub_issues: { label: 'Sub-issues', plural: 'options', icon: Hierarchy2, kind: 'list', operators: ['is'], defaultOperator: 'is' },
   due_date: { label: 'Due date', plural: 'dates', icon: Calendar, kind: 'date', operators: ['before', 'after', 'between', 'is_empty', 'is_not_empty'], defaultOperator: 'before' },
   created_at: { label: 'Created', plural: 'dates', icon: CalendarTick, kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   updated_at: { label: 'Updated', plural: 'dates', icon: Clock, kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   text: { label: 'Text', plural: 'text', icon: TextIcon, kind: 'text', operators: ['contains'], defaultOperator: 'contains' },
 }
 
-export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'due_date', 'created_at', 'updated_at', 'text']
+export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'parent', 'sub_issues', 'due_date', 'created_at', 'updated_at', 'text']
 
 /** User conditions per tree: the server allows 50 on the effective tree, and a scope adds up to 3 preset conditions + 1 project condition. */
 export const MAX_FILTER_CONDITIONS = 46
@@ -75,6 +86,7 @@ export type Glyph =
   | { kind: 'dot'; color: string }
   | { kind: 'member'; member: User | undefined; name: string }
   | { kind: 'priority'; priority: TaskPriority }
+  | { kind: 'icon'; icon: IconComponent }
 
 export type ValueOption = { value: string; label: string; glyph: Glyph }
 
@@ -119,6 +131,11 @@ export function valueOptions(field: FilterField, options: FilterOptions): ValueO
       return PRIORITY_ORDER.map((priority): ValueOption => ({ value: priority, label: PRIORITY_LABEL[priority], glyph: { kind: 'priority', priority } }))
     case 'project':
       return [...options.projects].sort(byName).map((project): ValueOption => ({ value: project.id, label: project.name, glyph: { kind: 'dot', color: project.color } }))
+    case 'sub_issues':
+      return [
+        { value: 'has', label: 'Has sub-issues', glyph: { kind: 'icon', icon: Hierarchy2 } },
+        { value: 'none', label: 'No sub-issues', glyph: { kind: 'icon', icon: TaskSquare } },
+      ]
     default:
       return []
   }
@@ -209,6 +226,14 @@ export function operatorLabel(operator: FilterOperator, count: number): string {
   }
 }
 
+/** Chip and picker text for one Parent value. A task not loaded yet reads as its short id. */
+export function taskValueLabel(value: string, options: FilterOptions): string {
+  if (value === NO_PARENT) return 'No parent'
+  const ref = options.taskRefs?.[value]
+  if (ref === null) return 'Deleted task'
+  return ref ? `${ref.identifier} ${ref.title || 'Untitled'}` : `TASK-${value.slice(-4).toUpperCase()}`
+}
+
 /** Chip value text: up to two names, then a count ("3 labels"). Empty for is_empty / is_not_empty. */
 export function valueSummary(condition: Condition, options: FilterOptions): string {
   if (!operatorNeedsValue(condition.operator)) return ''
@@ -220,6 +245,10 @@ export function valueSummary(condition: Condition, options: FilterOptions): stri
       return range.length === 2 && isDateValue(range[0]) && isDateValue(range[1]) ? `${dateValueLabel(range[0])} – ${dateValueLabel(range[1])}` : ''
     }
     return isDateValue(condition.value) ? dateValueLabel(condition.value) : ''
+  }
+  if (meta.kind === 'task') {
+    const values = listValue(condition)
+    return values.length > 2 ? `${values.length} tasks` : values.map((value) => taskValueLabel(value, options)).join(', ')
   }
   const values = listValue(condition)
   if (values.length > 2) return `${values.length} ${meta.plural}`

@@ -4,7 +4,7 @@
  */
 
 export type GroupOp = 'and' | 'or'
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text'
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'parent' | 'sub_issues' | 'due_date' | 'created_at' | 'updated_at' | 'text'
 export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains'
 export type DateValue = { absolute: string } | { relative: 'today' | 'start_of_week' | 'end_of_week'; offset_days?: number }
 export type Condition = { field: FilterField; operator: FilterOperator; value?: unknown }

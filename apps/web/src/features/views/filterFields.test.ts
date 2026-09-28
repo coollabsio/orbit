@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { isCompleteCondition, operatorLabel, statusOptions, valueOptions, valueSummary, withOperator } from './filterFields'
+import { FIELD_META, isCompleteCondition, operatorLabel, statusOptions, valueOptions, valueSummary, withOperator } from './filterFields'
 import { FILTER_OPTIONS } from './testFixtures'
 import type { Condition } from './viewState'
 
@@ -44,4 +44,19 @@ test('switching operators keeps compatible values and marks missing ones incompl
   expect(isCompleteCondition(reopened)).toBe(false)
   expect(isCompleteCondition({ field: 'text', operator: 'contains', value: '  ' })).toBe(false)
   expect(isCompleteCondition({ field: 'assignee', operator: 'is_not_empty' })).toBe(true)
+})
+
+test('parent chips read identifier and title, "No parent", "Deleted task", or a count', () => {
+  const options = { ...FILTER_OPTIONS, taskRefs: { 'task-0012': { identifier: 'LAU-0012', title: 'Checkout redesign' }, 'task-gone': null } }
+  expect(FIELD_META.parent.operators).toEqual(['is', 'is_not'])
+  expect(valueSummary({ field: 'parent', operator: 'is', value: ['task-0012'] }, options)).toBe('LAU-0012 Checkout redesign')
+  expect(valueSummary({ field: 'parent', operator: 'is', value: ['none'] }, options)).toBe('No parent')
+  expect(valueSummary({ field: 'parent', operator: 'is_not', value: ['task-gone'] }, options)).toBe('Deleted task')
+  expect(valueSummary({ field: 'parent', operator: 'is', value: ['a', 'b', 'c'] }, options)).toBe('3 tasks')
+})
+
+test('the sub-issues filter offers has / none with one operator', () => {
+  expect(FIELD_META.sub_issues.operators).toEqual(['is'])
+  expect(valueOptions('sub_issues', FILTER_OPTIONS).map((option) => [option.value, option.label])).toEqual([['has', 'Has sub-issues'], ['none', 'No sub-issues']])
+  expect(valueSummary({ field: 'sub_issues', operator: 'is', value: ['has'] }, FILTER_OPTIONS)).toBe('Has sub-issues')
 })

@@ -255,7 +255,7 @@ function ConditionChip({ condition, options, enter, onChange, onRemove }: Condit
   const meta = FIELD_META[condition.field]
   const Icon = meta.icon
   const shown = draft ?? condition
-  const count = meta.kind === 'list' ? listValue(shown).length : 1
+  const count = meta.kind === 'list' || meta.kind === 'task' ? listValue(shown).length : 1
   const glyphs = selectedOptions(shown, options).slice(0, 3)
   const summary = valueSummary(shown, options)
   const operatorText = operatorLabel(shown.operator, count)

@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
-import { FIELD_META, MAX_FILTER_VALUES, isDateValue, listValue, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
+import { useTaskCandidates } from '@/features/tasks/useTaskCandidates'
+import { FIELD_META, MAX_FILTER_VALUES, NO_PARENT, isDateValue, listValue, taskValueLabel, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
 import type { Condition, DateValue } from '../viewState'
 
 export interface FilterValuePickerProps {
@@ -25,10 +26,11 @@ export function FilterValuePicker(props: FilterValuePickerProps) {
   const kind = FIELD_META[props.condition.field].kind
   if (kind === 'text') return <TextValue {...props} />
   if (kind === 'date') return <DateValuePicker {...props} />
+  if (kind === 'task') return <TaskValue {...props} />
   return <ListValue {...props} />
 }
 
-/** The value's own mark: status ring, priority bars, label/project dot, or avatar. */
+/** The value's own mark: status ring, priority bars, label/project dot, avatar, or a plain icon. */
 export function ValueGlyph({ glyph, size = 14 }: { glyph: Glyph; size?: number }) {
   switch (glyph.kind) {
     case 'status':
@@ -39,10 +41,16 @@ export function ValueGlyph({ glyph, size = 14 }: { glyph: Glyph; size?: number }
       return <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: glyph.color }} />
     case 'member':
       return <UserAvatar user={glyph.member} name={glyph.name} size={size + 2} />
+    case 'icon': {
+      const Icon = glyph.icon
+      return <Icon aria-hidden className="size-3.5 text-muted-foreground" />
+    }
   }
 }
 
 const VALUES_FULL_TITLE = `Up to ${MAX_FILTER_VALUES} values per filter`
+
+const CHECK = 'flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border border-input text-primary-foreground transition-colors duration-150 data-checked:border-primary data-checked:bg-primary'
 
 function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
   const selected = listValue(condition)
@@ -75,11 +83,7 @@ function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
                 className="data-[disabled=true]:pointer-events-auto"
                 onSelect={() => toggle(option.value)}
               >
-                <span
-                  aria-hidden="true"
-                  data-checked={checked || undefined}
-                  className="flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border border-input text-primary-foreground transition-colors duration-150 data-checked:border-primary data-checked:bg-primary"
-                >
+                <span aria-hidden="true" data-checked={checked || undefined} className={CHECK}>
                   {checked ? <Check className="size-2.5" /> : null}
                 </span>
                 <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center">
@@ -90,6 +94,46 @@ function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
             )
           })}
         </CommandGroup>
+      </CommandList>
+    </Command>
+  )
+}
+
+/** Parent filter: "No parent", then chosen tasks the search does not list (another page, a deleted task), then search results. */
+function TaskValue({ condition, options, onChange }: FilterValuePickerProps) {
+  const [query, setQuery] = useState('')
+  const selected = listValue(condition)
+  const full = selected.length >= MAX_FILTER_VALUES
+  const { candidates, loading } = useTaskCandidates({ query, excludeIds: [], excludeDuplicates: false, statuses: options.statuses })
+  const toggle = (value: string) => {
+    if (selected.includes(value)) onChange({ ...condition, value: selected.filter((item) => item !== value) })
+    else if (!full) onChange({ ...condition, value: [...selected, value] })
+  }
+  const listed = new Set(candidates.map((task) => task.id))
+  const rows = [
+    { value: NO_PARENT, label: 'No parent', identifier: null as string | null },
+    ...selected.filter((value) => value !== NO_PARENT && !listed.has(value)).map((value) => ({ value, label: taskValueLabel(value, options), identifier: null })),
+    ...candidates.map((task) => ({ value: task.id, label: task.title || 'Untitled', identifier: task.identifier })),
+  ]
+  return (
+    <Command shouldFilter={false} label="Search tasks" className="w-80 rounded-lg! bg-transparent">
+      <CommandInput autoFocus aria-label="Search tasks" placeholder="Search tasks…" value={query} onValueChange={setQuery} />
+      <CommandList>
+        <CommandGroup>
+          {rows.map((row) => {
+            const checked = selected.includes(row.value)
+            const capped = full && !checked
+            return (
+              <CommandItem key={row.value} value={row.value} aria-checked={checked} disabled={capped} title={capped ? VALUES_FULL_TITLE : undefined}
+                className="data-[disabled=true]:pointer-events-auto" onSelect={() => toggle(row.value)}>
+                <span aria-hidden="true" data-checked={checked || undefined} className={CHECK}>{checked ? <Check className="size-2.5" /> : null}</span>
+                {row.identifier ? <span className="w-[72px] shrink-0 text-xs text-muted-foreground/70 tabular-nums">{row.identifier}</span> : null}
+                <span className="min-w-0 flex-1 truncate">{row.label}</span>
+              </CommandItem>
+            )
+          })}
+        </CommandGroup>
+        {loading ? <div role="status" className="px-2 py-2 text-xs text-muted-foreground">Searching…</div> : null}
       </CommandList>
     </Command>
   )

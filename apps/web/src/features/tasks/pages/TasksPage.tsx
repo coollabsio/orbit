@@ -44,6 +44,7 @@ import { useTimelineZoom } from '@/features/tasks/timeline/useTimelineZoom'
 import { taskRedirect } from '@/features/tasks/taskNavigation'
 import { useTaskQuery } from '@/features/views/api/taskQuery'
 import { useSavedView, useViewPreference } from '@/features/views/api/views'
+import { useFilterTaskRefs } from '@/features/views/useFilterTaskRefs'
 import { createDefaultsFromFilter, type GroupContext } from '@/features/views/grouping'
 import { groupCreateFields, type GroupValues } from '@/features/views/layoutGroups'
 import { AdvancedFilterDialog } from '@/features/views/components/AdvancedFilterDialog'
@@ -116,6 +117,7 @@ function WorkspaceTasksPage() {
   const { display } = viewState.state
   const layout = display.layout
   const tasksQuery = useTaskQuery(workspace.id, viewState.effective, display, !viewState.isLoading && !viewUnavailable)
+  const taskRefs = useFilterTaskRefs(workspace.id, viewState.state.filter)
 
   // Quick search is local and never saved (spec §3); another preset or view starts with an empty box.
   const [search, setSearch] = useState('')
@@ -170,6 +172,7 @@ function WorkspaceTasksPage() {
     labels: labelsQuery.data ?? [],
     projects,
     currentUserId: currentUser.data?.id ?? '',
+    taskRefs,
   }
   const presetLabel = source.kind === 'page' && source.preset ? PRESET_LABEL[source.preset] : null
   const state = {
