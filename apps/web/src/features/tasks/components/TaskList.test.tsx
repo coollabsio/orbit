@@ -762,3 +762,20 @@ test('Remove parent detaches only the selected tasks that have one', async () =>
   await waitFor(() => expect(success.mock.calls[0]?.[0]).toBe('2 tasks are no longer sub-issues'))
   success.mockRestore()
 }, 20000)
+
+test('nested, manual order: beside a root row only the insertion line shows, not the group outline', () => {
+  const view = renderList([task(1), { ...task(2), parentTaskId: 'task-1' }, task(3)], { statuses: [status, doingStatus] })
+  fireEvent.dragStart(rowOf(view, 'Task 3'), { dataTransfer })
+  // a root row's edge is not the row's own drop: it bubbles to the group zone, which draws the insertion line
+  overAt(rowOf(view, 'Task 1'), 1)
+  expect(view.container.querySelectorAll('[data-drop-edge]')).toHaveLength(1)
+  expect(zoneOf(view, 'Todo').hasAttribute('data-drop-over')).toBe(false)
+})
+
+test('a drop into another group with no insertion line keeps the group outline', () => {
+  const view = renderList([task(1), { ...task(2), statusId: 'doing' }], { statuses: [status, doingStatus], display: { order_by: 'created' } })
+  fireEvent.dragStart(rowOf(view, 'Task 1'), { dataTransfer })
+  overAt(zoneOf(view, 'Doing'), 0)
+  expect(view.container.querySelectorAll('[data-drop-edge]')).toHaveLength(0)
+  expect(zoneOf(view, 'Doing').hasAttribute('data-drop-over')).toBe(true)
+})

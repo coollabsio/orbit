@@ -147,6 +147,17 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     )
   }
 
+  /**
+   * Group zone props with one drop indicator at a time: while an insertion line marks the slot (manual order, rows in
+   * view), the group shows no outline or header tint, as in Linear. Drops with no line (another group without manual
+   * order, a collapsed or empty group) keep the outline.
+   */
+  const dropZoneProps = (zone: Parameters<typeof zoneProps>[0]) => {
+    const props = zoneProps(zone)
+    const lineShown = drop?.zone === zone.id && drop.index !== null && zone.itemsShown && zone.tasks.some((task) => task.id !== drag?.taskId)
+    return lineShown ? { ...props, 'data-drop-over': undefined } : props
+  }
+
   const renderRows = (zone: string, values: GroupValues, zoneTasks: Task[]) => {
     // the dragged row stays mounted (faded): unmounting the drag source cancels the browser drag
     const others = drag ? zoneTasks.filter((task) => task.id !== drag.taskId) : zoneTasks
@@ -227,12 +238,12 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
         const values = valuesOf(group)
         const zone = zoneIdOf(values)
         if (group.field === 'none') {
-          return <section key={zone} className={ZONE} {...zoneProps({ id: zone, values, tasks: group.tasks, itemsShown: true })}>{renderRows(zone, values, group.tasks)}</section>
+          return <section key={zone} className={ZONE} {...dropZoneProps({ id: zone, values, tasks: group.tasks, itemsShown: true })}>{renderRows(zone, values, group.tasks)}</section>
         }
         const isCollapsed = collapsed.includes(zone)
         if (!subGroups) {
           return (
-            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps({ id: zone, values, tasks: group.tasks, itemsShown: !isCollapsed })}>
+            <section key={group.key} className={cn('group/section', ZONE)} {...dropZoneProps({ id: zone, values, tasks: group.tasks, itemsShown: !isCollapsed })}>
               {renderHeader(group, zone, values, 'group')}
               {isCollapsed ? null : renderRows(zone, values, group.tasks)}
             </section>
@@ -242,7 +253,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           // the sub-groups are hidden, so the collapsed group itself takes drops: only the group field changes
           // (a hidden sub-group value must never be written) and the task goes to the group's end
           return (
-            <section key={group.key} className={cn('group/section', ZONE)} {...zoneProps({ id: zone, values, tasks: group.tasks, itemsShown: false })}>
+            <section key={group.key} className={cn('group/section', ZONE)} {...dropZoneProps({ id: zone, values, tasks: group.tasks, itemsShown: false })}>
               {renderHeader(group, zone, values, 'group')}
             </section>
           )
@@ -255,7 +266,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
               const subZone = zoneIdOf(subValues)
               const subCollapsed = collapsed.includes(subZone)
               return (
-                <section key={sub.key} className={cn('group/sub', ZONE)} {...zoneProps({ id: subZone, values: subValues, tasks: sub.tasks, itemsShown: !subCollapsed })}>
+                <section key={sub.key} className={cn('group/sub', ZONE)} {...dropZoneProps({ id: subZone, values: subValues, tasks: sub.tasks, itemsShown: !subCollapsed })}>
                   {renderHeader(sub, subZone, subValues, 'sub')}
                   {subCollapsed ? null : renderRows(subZone, subValues, sub.tasks)}
                 </section>
