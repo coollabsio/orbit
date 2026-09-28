@@ -694,6 +694,10 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     if operation_id == "query_tasks" {
         add_code(responses, "422", "invalid_filter");
     }
+    if matches!(operation_id, "create_task" | "update_task" | "bulk_tasks") {
+        add_code(responses, "422", "parent_cycle");
+        add_code(responses, "422", "parent_invalid");
+    }
     if matches!(
         operation_id,
         "create_project"

@@ -13110,6 +13110,14 @@
             }
           },
           {
+            "name": "parent_task_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
@@ -13364,7 +13372,7 @@
             }
           },
           "422": {
-            "description": "validation_failed",
+            "description": "validation_failed, parent_cycle, parent_invalid",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13442,7 +13450,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_TaskRecord"
+                  "$ref": "#/components/schemas/TaskBulkResponse"
                 }
               }
             }
@@ -13508,7 +13516,7 @@
             }
           },
           "422": {
-            "description": "validation_failed",
+            "description": "validation_failed, parent_cycle, parent_invalid",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14266,7 +14274,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskRecord"
+                  "$ref": "#/components/schemas/TaskUpdateResponse"
                 }
               }
             }
@@ -14332,7 +14340,7 @@
             }
           },
           "422": {
-            "description": "validation_failed",
+            "description": "validation_failed, parent_cycle, parent_invalid",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19681,6 +19689,22 @@
           }
         }
       },
+      "AutoClosed": {
+        "type": "object",
+        "description": "A task the automation changed in the same request (`auto_closed` in PATCH and bulk responses).",
+        "required": [
+          "id",
+          "status_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status_id": {
+            "type": "string"
+          }
+        }
+      },
       "BackupCreated": {
         "type": "object",
         "required": [
@@ -19766,6 +19790,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "parent_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged. A task id: make this task its sub-issue. `null`: detach."
           },
           "position": {
             "type": [
@@ -20108,6 +20139,13 @@
               "type": "string"
             }
           },
+          "parent_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Create the task as a sub-issue of this task."
+          },
           "position": {
             "type": [
               "integer",
@@ -20254,6 +20292,10 @@
           },
           "sub_group_by": {
             "$ref": "#/components/schemas/GroupBy"
+          },
+          "sub_issues": {
+            "$ref": "#/components/schemas/SubIssuesDisplay",
+            "description": "Optional in stored and received states (default `nested`)."
           }
         },
         "additionalProperties": false
@@ -20281,7 +20323,9 @@
           "due_date",
           "created_at",
           "updated_at",
-          "text"
+          "text",
+          "parent",
+          "sub_issues"
         ]
       },
       "FilterGroup": {
@@ -22590,11 +22634,21 @@
                 "name",
                 "key",
                 "color",
+                "auto_close_parent",
+                "auto_close_sub_issues",
                 "version",
                 "created_at",
                 "updated_at"
               ],
               "properties": {
+                "auto_close_parent": {
+                  "type": "boolean",
+                  "description": "Close a task automatically when all its sub-issues are done (rule A)."
+                },
+                "auto_close_sub_issues": {
+                  "type": "boolean",
+                  "description": "Close open sub-issues when their parent closes (rule B)."
+                },
                 "color": {
                   "type": "string"
                 },
@@ -22729,9 +22783,23 @@
                 "created_at",
                 "updated_at",
                 "duplicate_of",
-                "blocked"
+                "blocked",
+                "parent_task_id",
+                "parent",
+                "sub_issue_count",
+                "sub_issue_closed_count"
               ],
               "properties": {
+                "ancestors": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/TaskRef"
+                  },
+                  "description": "`GET /tasks/{id}` only: visible ancestors, root first."
+                },
                 "assignee_ids": {
                   "type": "array",
                   "items": {
@@ -22808,6 +22876,24 @@
                     "type": "string"
                   }
                 },
+                "parent": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TaskRef",
+                      "description": "The parent while it is visible (live, in a live project); null otherwise."
+                    }
+                  ]
+                },
+                "parent_task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The direct parent; null for top-level tasks."
+                },
                 "position": {
                   "type": "integer",
                   "format": "int64"
@@ -22827,8 +22913,26 @@
                 "status_id": {
                   "type": "string"
                 },
+                "sub_issue_closed_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Direct live children in a completed, cancelled or duplicate status."
+                },
+                "sub_issue_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Direct live children (sub-issues)."
+                },
                 "title": {
                   "type": "string"
+                },
+                "trashed_descendant_count": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64",
+                  "description": "Task trash only: descendants trashed together with this task (restored with it)."
                 },
                 "updated_at": {
                   "type": "string",
@@ -22956,11 +23060,21 @@
           "name",
           "key",
           "color",
+          "auto_close_parent",
+          "auto_close_sub_issues",
           "version",
           "created_at",
           "updated_at"
         ],
         "properties": {
+          "auto_close_parent": {
+            "type": "boolean",
+            "description": "Close a task automatically when all its sub-issues are done (rule A)."
+          },
+          "auto_close_sub_issues": {
+            "type": "boolean",
+            "description": "Close open sub-issues when their parent closes (rule B)."
+          },
           "color": {
             "type": "string"
           },
@@ -23007,6 +23121,20 @@
           "expected_version"
         ],
         "properties": {
+          "auto_close_parent": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Absent: unchanged."
+          },
+          "auto_close_sub_issues": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Absent: unchanged."
+          },
           "color": {
             "type": "string"
           },
@@ -23600,6 +23728,15 @@
         },
         "additionalProperties": false
       },
+      "SubIssuesDisplay": {
+        "type": "string",
+        "description": "How a view shows sub-issues. `nested` and `flat` only change the client; `hidden` lists\ntop-level tasks only (`POST /tasks/query` `sub_issues`).",
+        "enum": [
+          "nested",
+          "flat",
+          "hidden"
+        ]
+      },
       "SuspensionBody": {
         "type": "object",
         "required": [
@@ -23611,6 +23748,34 @@
           }
         },
         "additionalProperties": false
+      },
+      "TaskBulkResponse": {
+        "type": "object",
+        "description": "`POST /tasks/bulk`: the updated tasks (no further pages) plus the automation's changes.",
+        "required": [
+          "items",
+          "auto_closed"
+        ],
+        "properties": {
+          "auto_closed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutoClosed"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskRecord"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "TaskConflict": {
         "type": "object",
@@ -23703,7 +23868,8 @@
           "due_date",
           "labels",
           "created",
-          "updated"
+          "updated",
+          "sub_issue_progress"
         ]
       },
       "TaskQueryBody": {
@@ -23740,8 +23906,19 @@
             "$ref": "#/components/schemas/OrderDirection",
             "description": "Ignored when `order_by` is `manual`."
           },
+          "parent_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only direct children of this task."
+          },
           "show_completed": {
             "$ref": "#/components/schemas/ShowCompleted"
+          },
+          "sub_issues": {
+            "$ref": "#/components/schemas/SubIssuesDisplay",
+            "description": "The view's sub-issue display; `hidden` returns top-level tasks only (default `nested`)."
           }
         },
         "additionalProperties": false
@@ -23763,9 +23940,23 @@
           "created_at",
           "updated_at",
           "duplicate_of",
-          "blocked"
+          "blocked",
+          "parent_task_id",
+          "parent",
+          "sub_issue_count",
+          "sub_issue_closed_count"
         ],
         "properties": {
+          "ancestors": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TaskRef"
+            },
+            "description": "`GET /tasks/{id}` only: visible ancestors, root first."
+          },
           "assignee_ids": {
             "type": "array",
             "items": {
@@ -23842,6 +24033,24 @@
               "type": "string"
             }
           },
+          "parent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRef",
+                "description": "The parent while it is visible (live, in a live project); null otherwise."
+              }
+            ]
+          },
+          "parent_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The direct parent; null for top-level tasks."
+          },
           "position": {
             "type": "integer",
             "format": "int64"
@@ -23861,8 +24070,26 @@
           "status_id": {
             "type": "string"
           },
+          "sub_issue_closed_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Direct live children in a completed, cancelled or duplicate status."
+          },
+          "sub_issue_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Direct live children (sub-issues)."
+          },
           "title": {
             "type": "string"
+          },
+          "trashed_descendant_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Task trash only: descendants trashed together with this task (restored with it)."
           },
           "updated_at": {
             "type": "string",
@@ -23884,6 +24111,7 @@
         "required": [
           "id",
           "project_id",
+          "project_key",
           "title"
         ],
         "properties": {
@@ -23892,6 +24120,10 @@
           },
           "project_id": {
             "type": "string"
+          },
+          "project_key": {
+            "type": "string",
+            "description": "The key of the task's (live) project, e.g. `ORB`."
           },
           "title": {
             "type": "string"
@@ -24014,6 +24246,13 @@
               "type": "string"
             }
           },
+          "parent_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged. A task id: make this task its sub-issue. `null`: detach."
+          },
           "position": {
             "type": [
               "integer",
@@ -24053,6 +24292,28 @@
           }
         },
         "additionalProperties": false
+      },
+      "TaskUpdateResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TaskRecord"
+          },
+          {
+            "type": "object",
+            "required": [
+              "auto_closed"
+            ],
+            "properties": {
+              "auto_closed": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AutoClosed"
+                }
+              }
+            }
+          }
+        ],
+        "description": "`PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation changed."
       },
       "Teamspace": {
         "type": "object",

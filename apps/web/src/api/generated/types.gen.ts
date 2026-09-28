@@ -107,6 +107,14 @@ export type AuthenticatedUser = {
     id: string;
 };
 
+/**
+ * A task the automation changed in the same request (`auto_closed` in PATCH and bulk responses).
+ */
+export type AutoClosed = {
+    id: string;
+    status_id: string;
+};
+
 export type BackupCreated = {
     id: string;
 };
@@ -127,6 +135,10 @@ export type BulkItem = {
     expected_version: number;
     id: string;
     label_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
+     */
+    parent_task_id?: string | null;
     position?: number | null;
     priority?: string | null;
     project_id?: string | null;
@@ -241,6 +253,10 @@ export type CreateTaskBody = {
     due_at?: string | null;
     due_start_at?: string | null;
     label_ids?: Array<string>;
+    /**
+     * Create the task as a sub-issue of this task.
+     */
+    parent_task_id?: string | null;
     position?: number | null;
     priority?: string;
     project_id: string;
@@ -284,6 +300,10 @@ export type DisplayOptions = {
     show_completed: ShowCompleted;
     show_empty_groups: boolean;
     sub_group_by: GroupBy;
+    /**
+     * Optional in stored and received states (default `nested`).
+     */
+    sub_issues?: SubIssuesDisplay;
 };
 
 export type DuplicatePageBody = {
@@ -293,7 +313,7 @@ export type DuplicatePageBody = {
     include_children?: boolean;
 };
 
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text';
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues';
 
 /**
  * An AND/OR group. An empty group matches every task.
@@ -1139,6 +1159,14 @@ export type PageNotificationRecord = {
 
 export type PageProjectRecord = {
     items: Array<{
+        /**
+         * Close a task automatically when all its sub-issues are done (rule A).
+         */
+        auto_close_parent: boolean;
+        /**
+         * Close open sub-issues when their parent closes (rule B).
+         */
+        auto_close_sub_issues: boolean;
         color: string;
         created_at: string;
         deleted_at?: string | null;
@@ -1169,6 +1197,10 @@ export type PageStatusRecord = {
 
 export type PageTaskRecord = {
     items: Array<{
+        /**
+         * `GET /tasks/{id}` only: visible ancestors, root first.
+         */
+        ancestors?: Array<TaskRef> | null;
         assignee_ids: Array<string>;
         /**
          * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
@@ -1185,12 +1217,29 @@ export type PageTaskRecord = {
         duplicate_of: null | TaskRef;
         id: string;
         label_ids: Array<string>;
+        parent: null | TaskRef;
+        /**
+         * The direct parent; null for top-level tasks.
+         */
+        parent_task_id: string | null;
         position: number;
         priority: string;
         project_id: string;
         source_url?: string | null;
         status_id: string;
+        /**
+         * Direct live children in a completed, cancelled or duplicate status.
+         */
+        sub_issue_closed_count: number;
+        /**
+         * Direct live children (sub-issues).
+         */
+        sub_issue_count: number;
         title: string;
+        /**
+         * Task trash only: descendants trashed together with this task (restored with it).
+         */
+        trashed_descendant_count?: number | null;
         updated_at: string;
         version: number;
         workspace_id: string;
@@ -1226,6 +1275,14 @@ export type ProjectBody = {
 };
 
 export type ProjectRecord = {
+    /**
+     * Close a task automatically when all its sub-issues are done (rule A).
+     */
+    auto_close_parent: boolean;
+    /**
+     * Close open sub-issues when their parent closes (rule B).
+     */
+    auto_close_sub_issues: boolean;
     color: string;
     created_at: string;
     deleted_at?: string | null;
@@ -1238,6 +1295,14 @@ export type ProjectRecord = {
 };
 
 export type ProjectUpdateBody = {
+    /**
+     * Absent: unchanged.
+     */
+    auto_close_parent?: boolean | null;
+    /**
+     * Absent: unchanged.
+     */
+    auto_close_sub_issues?: boolean | null;
     color: string;
     expected_version: number;
     key: string;
@@ -1429,8 +1494,23 @@ export type StatusUpdateBody = {
     position: number;
 };
 
+/**
+ * How a view shows sub-issues. `nested` and `flat` only change the client; `hidden` lists
+ * top-level tasks only (`POST /tasks/query` `sub_issues`).
+ */
+export type SubIssuesDisplay = 'nested' | 'flat' | 'hidden';
+
 export type SuspensionBody = {
     suspended: boolean;
+};
+
+/**
+ * `POST /tasks/bulk`: the updated tasks (no further pages) plus the automation's changes.
+ */
+export type TaskBulkResponse = {
+    auto_closed: Array<AutoClosed>;
+    items: Array<TaskRecord>;
+    next_cursor?: string | null;
 };
 
 export type TaskConflict = {
@@ -1456,7 +1536,7 @@ export type TaskProblem = {
     type: string;
 };
 
-export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated';
+export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress';
 
 export type TaskQueryBody = {
     cursor?: string | null;
@@ -1473,10 +1553,22 @@ export type TaskQueryBody = {
      * Ignored when `order_by` is `manual`.
      */
     order_direction: OrderDirection;
+    /**
+     * Only direct children of this task.
+     */
+    parent_task_id?: string | null;
     show_completed: ShowCompleted;
+    /**
+     * The view's sub-issue display; `hidden` returns top-level tasks only (default `nested`).
+     */
+    sub_issues?: SubIssuesDisplay;
 };
 
 export type TaskRecord = {
+    /**
+     * `GET /tasks/{id}` only: visible ancestors, root first.
+     */
+    ancestors?: Array<TaskRef> | null;
     assignee_ids: Array<string>;
     /**
      * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
@@ -1493,12 +1585,29 @@ export type TaskRecord = {
     duplicate_of: null | TaskRef;
     id: string;
     label_ids: Array<string>;
+    parent: null | TaskRef;
+    /**
+     * The direct parent; null for top-level tasks.
+     */
+    parent_task_id: string | null;
     position: number;
     priority: string;
     project_id: string;
     source_url?: string | null;
     status_id: string;
+    /**
+     * Direct live children in a completed, cancelled or duplicate status.
+     */
+    sub_issue_closed_count: number;
+    /**
+     * Direct live children (sub-issues).
+     */
+    sub_issue_count: number;
     title: string;
+    /**
+     * Task trash only: descendants trashed together with this task (restored with it).
+     */
+    trashed_descendant_count?: number | null;
     updated_at: string;
     version: number;
     workspace_id: string;
@@ -1510,6 +1619,10 @@ export type TaskRecord = {
 export type TaskRef = {
     id: string;
     project_id: string;
+    /**
+     * The key of the task's (live) project, e.g. `ORB`.
+     */
+    project_key: string;
     title: string;
 };
 
@@ -1544,12 +1657,23 @@ export type TaskUpdateBody = {
     duplicate_of_id?: string | null;
     expected_version: number;
     label_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
+     */
+    parent_task_id?: string | null;
     position?: number | null;
     priority?: string | null;
     project_id?: string | null;
     source_url?: string | null;
     status_id?: string | null;
     title?: string | null;
+};
+
+/**
+ * `PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation changed.
+ */
+export type TaskUpdateResponse = TaskRecord & {
+    auto_closed: Array<AutoClosed>;
 };
 
 export type Teamspace = {
@@ -7515,6 +7639,7 @@ export type ListTasksData = {
         priority?: string;
         search?: string;
         view?: string;
+        parent_task_id?: string;
         sort?: string;
         order?: string;
         cursor?: string;
@@ -7607,7 +7732,7 @@ export type CreateTaskErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed
+     * validation_failed, parent_cycle, parent_invalid
      */
     422: TaskProblem;
     /**
@@ -7669,7 +7794,7 @@ export type BulkTasksErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed
+     * validation_failed, parent_cycle, parent_invalid
      */
     422: TaskProblem;
     /**
@@ -7685,7 +7810,7 @@ export type BulkTasksErrors = {
 export type BulkTasksError = BulkTasksErrors[keyof BulkTasksErrors];
 
 export type BulkTasksResponses = {
-    200: PageTaskRecord;
+    200: TaskBulkResponse;
 };
 
 export type BulkTasksResponse = BulkTasksResponses[keyof BulkTasksResponses];
@@ -8029,7 +8154,7 @@ export type UpdateTaskErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed
+     * validation_failed, parent_cycle, parent_invalid
      */
     422: TaskProblem;
     /**
@@ -8045,7 +8170,7 @@ export type UpdateTaskErrors = {
 export type UpdateTaskError = UpdateTaskErrors[keyof UpdateTaskErrors];
 
 export type UpdateTaskResponses = {
-    200: TaskRecord;
+    200: TaskUpdateResponse;
 };
 
 export type UpdateTaskResponse = UpdateTaskResponses[keyof UpdateTaskResponses];
