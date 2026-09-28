@@ -5187,3 +5187,222 @@ async fn sub_issue_ancestors_are_listed_root_first_on_the_task_endpoint() {
         json!([])
     );
 }
+
+#[tokio::test]
+async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trashed_with_it() {
+    let fixture = Fixture::new().await;
+    let pool = fixture.database.pool();
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let child = create_sub_issue(&fixture, "Child", Some(id_of(&parent))).await;
+    let grandchild = create_sub_issue(&fixture, "Grandchild", Some(id_of(&child))).await;
+    let earlier = create_sub_issue(&fixture, "Earlier", Some(id_of(&parent))).await;
+    // Earlier goes to the trash on its own, strictly before its parent.
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&earlier))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    sqlx::query("UPDATE tasks SET deleted_at = deleted_at - 1000 WHERE id = ?")
+        .bind(id_of(&earlier))
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&parent))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let stamps: Vec<Option<i64>> =
+        sqlx::query_scalar("SELECT deleted_at FROM tasks WHERE id IN (?, ?, ?)")
+            .bind(id_of(&parent))
+            .bind(id_of(&child))
+            .bind(id_of(&grandchild))
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(stamps.len(), 3);
+    assert!(
+        stamps[0].is_some() && stamps.iter().all(|stamp| *stamp == stamps[0]),
+        "{stamps:?}"
+    );
+    let deleted_audits: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.deleted' AND resource_id IN (?, ?, ?)",
+    )
+    .bind(id_of(&parent))
+    .bind(id_of(&child))
+    .bind(id_of(&grandchild))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(deleted_audits, 3);
+
+    let (status, trash) = call(
+        &fixture,
+        "GET",
+        &format!("/api/v1/workspaces/{}/tasks/trash", fixture.workspace_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{trash}");
+    let descendants = |id: &str| {
+        trash["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|task| task["id"] == id)
+            .unwrap()["trashed_descendant_count"]
+            .clone()
+    };
+    assert_eq!(descendants(id_of(&parent)), 2);
+    assert_eq!(descendants(id_of(&child)), 1);
+    assert_eq!(descendants(id_of(&earlier)), 0);
+
+    let (status, restored) = call(
+        &fixture,
+        "POST",
+        &format!("{}/restore", task_uri(&fixture, id_of(&parent))),
+        Some(json!({"expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["deleted_at"], Value::Null);
+    assert_eq!(restored["sub_issue_count"], 1);
+    assert_eq!(
+        fetch_task(&fixture, id_of(&child)).await["deleted_at"],
+        Value::Null
+    );
+    assert_eq!(
+        fetch_task(&fixture, id_of(&grandchild)).await["parent_task_id"],
+        id_of(&child)
+    );
+    let earlier_stamp: Option<i64> =
+        sqlx::query_scalar("SELECT deleted_at FROM tasks WHERE id = ?")
+            .bind(id_of(&earlier))
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(
+        earlier_stamp.is_some(),
+        "a child trashed earlier stays in the trash"
+    );
+    let restored_audits: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.restored' AND resource_id IN (?, ?, ?)",
+    )
+    .bind(id_of(&parent))
+    .bind(id_of(&child))
+    .bind(id_of(&grandchild))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(restored_audits, 3);
+}
+
+#[tokio::test]
+async fn sub_issue_restored_without_its_trashed_parent_becomes_top_level() {
+    let fixture = Fixture::new().await;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let child = create_sub_issue(&fixture, "Child", Some(id_of(&parent))).await;
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&parent))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, restored) = call(
+        &fixture,
+        "POST",
+        &format!("{}/restore", task_uri(&fixture, id_of(&child))),
+        Some(json!({"expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["parent_task_id"], Value::Null);
+    assert_eq!(restored["parent"], Value::Null);
+    let metadata: String = sqlx::query_scalar(
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = ?",
+    )
+    .bind(id_of(&child))
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    let metadata = serde_json::from_str::<Value>(&metadata).unwrap();
+    assert_eq!(metadata["from"], json!(id_of(&parent)));
+    assert_eq!(metadata["to"], Value::Null);
+    assert!(metadata["from_project_id"].is_string());
+    assert_eq!(metadata["to_project_id"], Value::Null);
+
+    // Restoring the parent afterwards does not pull the child back under it.
+    let (status, parent) = call(
+        &fixture,
+        "POST",
+        &format!("{}/restore", task_uri(&fixture, id_of(&parent))),
+        Some(json!({"expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{parent}");
+    assert_eq!(parent["sub_issue_count"], 0);
+}
+
+#[tokio::test]
+async fn sub_issue_retention_purges_trashed_subtrees_and_detaches_survivors() {
+    let fixture = Fixture::new().await;
+    let pool = fixture.database.pool();
+    let expired = TimestampMillis::now().as_millis() - 31 * 24 * 60 * 60 * 1_000;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let child = create_sub_issue(&fixture, "Child", Some(id_of(&parent))).await;
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&parent))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id IN (?, ?)")
+        .bind(expired)
+        .bind(id_of(&parent))
+        .bind(id_of(&child))
+        .execute(pool)
+        .await
+        .unwrap();
+    // A live task whose parent sits in a project that expires from the trash.
+    let old_project = create_project(&fixture, "OLD").await;
+    let old_parent = create_task_in(&fixture, &old_project, "Old parent", None).await;
+    let survivor = create_sub_issue(&fixture, "Survivor", Some(id_of(&old_parent))).await;
+    sqlx::query("UPDATE projects SET deleted_at = ? WHERE id = ?")
+        .bind(expired)
+        .bind(&old_project)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    WorkspaceRepository::new((*fixture.database).clone())
+        .purge_retention(TimestampMillis::now())
+        .await
+        .unwrap();
+
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE id IN (?, ?, ?)")
+        .bind(id_of(&parent))
+        .bind(id_of(&child))
+        .bind(id_of(&old_parent))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
+    assert_eq!(parent_of(&fixture, id_of(&survivor)).await, None);
+    let violations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pragma_foreign_key_check")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(violations, 0);
+}

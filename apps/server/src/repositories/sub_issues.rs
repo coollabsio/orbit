@@ -112,3 +112,66 @@ pub(super) async fn ancestors(pool: &SqlitePool, task_id: Id) -> Result<Vec<Task
         })
         .collect()
 }
+
+/// The recursive "every descendant of `root`" CTE shared by `live_descendants` and
+/// `trashed_with` (Task 4's auto-close cascade reuses it too, per ruling D2, instead of
+/// duplicating the walk). `predicate` is a SQL fragment tested against `tasks.deleted_at` in
+/// both the seed and recursive branches, e.g. `"IS NULL"` or `"= ?"`.
+pub(super) fn descendants_sql(predicate: &str) -> String {
+    format!(
+        "WITH RECURSIVE subtree(id) AS ( \
+             SELECT id FROM tasks WHERE parent_task_id = ? AND deleted_at {predicate} \
+             UNION \
+             SELECT tasks.id FROM tasks JOIN subtree ON tasks.parent_task_id = subtree.id \
+             WHERE tasks.deleted_at {predicate} \
+         ) \
+         SELECT id FROM subtree ORDER BY id"
+    )
+}
+
+/// Live descendants of `root` at every depth (not `root` itself).
+pub(super) async fn live_descendants<'e, E>(executor: E, root: Id) -> Result<Vec<Id>, TaskError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar::<_, String>(&descendants_sql("IS NULL"))
+        .bind(root.to_string())
+        .fetch_all(executor)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect()
+}
+
+/// Descendants of `root` trashed together with it: the walk only passes through tasks whose
+/// `deleted_at` equals `deleted_at`, so a subtree trashed earlier on its own is left out.
+pub(super) async fn trashed_with<'e, E>(
+    executor: E,
+    root: Id,
+    deleted_at: i64,
+) -> Result<Vec<Id>, TaskError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar::<_, String>(&descendants_sql("= ?"))
+        .bind(root.to_string())
+        .bind(deleted_at)
+        .bind(deleted_at)
+        .fetch_all(executor)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect()
+}
+
+pub(super) async fn task_is_live_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    task_id: Id,
+) -> Result<bool, TaskError> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ? AND deleted_at IS NULL)",
+    )
+    .bind(task_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?)
+}

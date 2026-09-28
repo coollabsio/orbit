@@ -112,6 +112,9 @@ pub struct TaskRecord {
     /// `GET /tasks/{id}` only: visible ancestors, root first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ancestors: Option<Vec<TaskRef>>,
+    /// Task trash only: descendants trashed together with this task (restored with it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trashed_descendant_count: Option<i64>,
 }
 
 /// A task reference small enough to embed; clients build the display identifier themselves.
@@ -1718,19 +1721,30 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
         check_version(expected_version, current.version, &current)?;
+        let descendants = sub_issues::live_descendants(&mut *tx, task_id).await?;
         sqlx::query("UPDATE tasks SET deleted_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
             .bind(now.as_millis()).bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
-        record_mutation(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            "task.deleted",
-            "task",
-            task_id,
-            request_id,
-            now,
-        )
-        .await?;
+        for id in &descendants {
+            sqlx::query("UPDATE tasks SET deleted_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
+                .bind(now.as_millis())
+                .bind(now.as_millis())
+                .bind(id.to_string())
+                .execute(&mut *tx)
+                .await?;
+        }
+        for id in std::iter::once(task_id).chain(descendants.iter().copied()) {
+            record_mutation(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                "task.deleted",
+                "task",
+                id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
         tx.commit().await?;
         Ok(())
     }
@@ -1755,26 +1769,71 @@ impl TaskRepository {
         check_version(expected_version, current.version, &current)?;
         validate_project_status(&mut tx, workspace_id, current.project_id, current.status_id)
             .await?;
-        sqlx::query("UPDATE tasks SET deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NOT NULL AND version = ?")
-            .bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
-        record_mutation(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            "task.restored",
-            "task",
-            task_id,
-            request_id,
-            now,
-        )
-        .await?;
+        let deleted_at = current
+            .deleted_at
+            .map(TimestampMillis::as_millis)
+            .ok_or(TaskError::NotFound)?;
+        let descendants = sub_issues::trashed_with(&mut *tx, task_id, deleted_at).await?;
+        // A task restored while its parent is still in the trash comes back top-level.
+        let parent_task_id = match current.parent_task_id {
+            Some(parent_id) => sub_issues::task_is_live_in_tx(&mut tx, parent_id)
+                .await?
+                .then_some(parent_id),
+            None => None,
+        };
+        sqlx::query("UPDATE tasks SET deleted_at = NULL, parent_task_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NOT NULL AND version = ?")
+            .bind(parent_task_id.map(|id| id.to_string())).bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        for id in &descendants {
+            sqlx::query("UPDATE tasks SET deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at = ?")
+                .bind(now.as_millis())
+                .bind(id.to_string())
+                .bind(deleted_at)
+                .execute(&mut *tx)
+                .await?;
+        }
+        for id in std::iter::once(task_id).chain(descendants.iter().copied()) {
+            record_mutation(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                "task.restored",
+                "task",
+                id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
+        if parent_task_id != current.parent_task_id {
+            // The trashed parent's project, so the activity feed can build its identifier even
+            // though the parent itself is not visible.
+            let from_project_id: Option<String> =
+                sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
+                    .bind(current.parent_task_id.map(|id| id.to_string()))
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            audit::record(
+                &mut tx,
+                workspace_id,
+                Some(actor_id),
+                "task.parent_changed",
+                AuditOutcome::Success,
+                "task",
+                Some(task_id),
+                request_id,
+                json!({
+                    "from": current.parent_task_id,
+                    "to": Value::Null,
+                    "from_project_id": from_project_id,
+                    "to_project_id": Value::Null,
+                }),
+                now,
+            )
+            .await?;
+        }
+        let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
         tx.commit().await?;
-        Ok(TaskRecord {
-            version: current.version + 1,
-            deleted_at: None,
-            updated_at: now,
-            ..current
-        })
+        Ok(task)
     }
 
     pub async fn task_trash(
@@ -1814,7 +1873,14 @@ impl TaskRepository {
         let rows = query.build().fetch_all(self.database.pool()).await?;
         let mut items = Vec::with_capacity(rows.len());
         for row in rows {
-            items.push(task_from_row(self.database.pool(), row).await?);
+            let mut task = task_from_row(self.database.pool(), row).await?;
+            if let Some(deleted_at) = task.deleted_at {
+                let together =
+                    sub_issues::trashed_with(self.database.pool(), task.id, deleted_at.as_millis())
+                        .await?;
+                task.trashed_descendant_count = Some(together.len() as i64);
+            }
+            items.push(task);
         }
         finish_page(items, limit, &fingerprint, |task| {
             vec![
@@ -3208,6 +3274,7 @@ fn task_record_from_row(
         sub_issue_count: row.get("sub_issue_count"),
         sub_issue_closed_count: row.get("sub_issue_closed_count"),
         ancestors: None,
+        trashed_descendant_count: None,
     })
 }
 
