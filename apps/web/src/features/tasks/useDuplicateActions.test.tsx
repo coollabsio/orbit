@@ -131,3 +131,34 @@ test('bulk Undo gives each task back its own earlier state, unmarking canonicals
   ] })
   success.mockRestore()
 })
+
+/** The marked task is the last open sub-issue of ORB-0012: the server closes the parent in the same request. */
+const closedParent = [{ id: 'task-0012', status_id: 'done' }]
+const child = (id: string, version: number, duplicateOf: string | null) =>
+  ({ ...record(id, version, duplicateOf), parent_task_id: 'task-0012', parent: { id: 'task-0012', title: 'Checkout redesign', project_key: 'ORB' } })
+
+test('marking the last open sub-issue as a duplicate announces the parent the server closed', async () => {
+  const calls: Call[] = []
+  captureApi(calls, (call) => Response.json({ ...child(call.path.split('/').at(-1)!, 2, 'task-91c0'), auto_closed: closedParent }))
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  try {
+    const view = renderActions()
+    await act(async () => { await view.result.current.markOne({ id: 'task-0031', version: 1 }, target) })
+    expect(success.mock.calls.map((call) => call[0])).toEqual(['Closed parent ORB-0012', 'Marked as duplicate of ORB-91C0'])
+  } finally {
+    success.mockRestore()
+  }
+})
+
+test('bulk marking announces the parent the server closed', async () => {
+  const calls: Call[] = []
+  captureApi(calls, () => Response.json({ items: [child('task-0031', 2, 'task-91c0'), child('task-0032', 2, 'task-91c0')], next_cursor: null, auto_closed: closedParent }))
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  try {
+    const view = renderActions()
+    await act(async () => { await view.result.current.markMany([{ id: 'task-0031', version: 1 }, { id: 'task-0032', version: 1 }], target) })
+    expect(success.mock.calls.map((call) => call[0])).toEqual(['Closed parent ORB-0012', 'Marked 2 tasks as duplicate of ORB-91C0'])
+  } finally {
+    success.mockRestore()
+  }
+})

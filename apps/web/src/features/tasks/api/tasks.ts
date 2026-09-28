@@ -46,7 +46,7 @@ import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed } from './autoClosed'
 import { isTaskVersionConflict } from './conflicts'
 import { commentUploadMode } from './commentUpload'
-import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, type WorkspaceTaskSnapshot } from './optimistic'
+import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, snapshotTasks, type WorkspaceTaskSnapshot } from './optimistic'
 import { PartialUploadError, uploadFiles } from './uploadQueue'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -316,9 +316,10 @@ export function useUpdateTask(workspaceId: string) {
       if (snapshot) restoreWorkspaceTasks(queryClient, snapshot)
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
     },
-    onSuccess: (record) => {
+    onSuccess: (record, _input, snapshot) => {
       reconcileWorkspaceTask(queryClient, workspaceId, record)
-      announceAutoClosed(queryClient, workspaceId, [record], record)
+      // the pre-patch record too: a drag to root level clears parent_task_id, and a closed old parent is still a parent
+      announceAutoClosed(queryClient, workspaceId, [record, ...snapshotTasks(snapshot, [record.id])], record)
     },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
   })
@@ -353,9 +354,9 @@ export function useBulkTasks(workspaceId: string) {
       if (snapshot) restoreWorkspaceTasks(queryClient, snapshot)
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }))
     },
-    onSuccess: (page) => {
+    onSuccess: (page, _updates, snapshot) => {
       page.items.forEach((record) => reconcileWorkspaceTask(queryClient, workspaceId, record))
-      announceAutoClosed(queryClient, workspaceId, page.items, page)
+      announceAutoClosed(queryClient, workspaceId, [...page.items, ...snapshotTasks(snapshot, page.items.map((record) => record.id))], page)
     },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
   })

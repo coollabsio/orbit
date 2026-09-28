@@ -73,6 +73,24 @@ function findTaskData(data: unknown, taskId: string): TaskRecord | undefined {
   return undefined
 }
 
+/**
+ * The records of `taskIds` as they were before an optimistic patch (one per task, from the snapshot `onMutate`
+ * took): a write that clears `parent_task_id` still knows the old parent, so an auto-closed one reads as a parent.
+ */
+export function snapshotTasks(snapshot: WorkspaceTaskSnapshot | undefined, taskIds: readonly string[]): TaskRecord[] {
+  const found: TaskRecord[] = []
+  for (const taskId of taskIds) {
+    for (const [, data] of snapshot?.entries ?? []) {
+      const record = findTaskData(data, taskId)
+      if (record) {
+        found.push(record)
+        break
+      }
+    }
+  }
+  return found
+}
+
 /** The first cached record of a task in any task query of the workspace (list, board, detail, sub-issues). */
 export function findCachedTask(queryClient: QueryClient, workspaceId: string, taskId: string): TaskRecord | undefined {
   for (const [, data] of queryClient.getQueriesData({ queryKey: queryKeys.tasks.all(workspaceId) })) {

@@ -135,3 +135,66 @@ test('removing the last open sub-issue announces the parent the server closed', 
     success.mockRestore()
   }
 })
+
+/** POST /tasks answers only when released, in order; everything else goes to `api`. */
+function heldCreates(calls: Call[], fail = false) {
+  const children: Array<ReturnType<typeof child>> = []
+  api(calls, children)
+  const base = globalThis.fetch
+  const held: Array<() => void> = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method !== 'POST') return base(input)
+    const body = await request.json() as { title: string }
+    calls.push({ method: 'POST', path: new URL(request.url).pathname, search: '', body })
+    await new Promise<void>((resolve) => held.push(resolve))
+    if (fail) return Response.json({ type: 'about:blank', title: 'Nope', status: 500, detail: 'x', code: 'boom', instance: '/', request_id: 'r' }, { status: 500, headers: { 'content-type': 'application/problem+json' } })
+    const created = child(`task-9${children.length}00`, body.title)
+    children.push(created)
+    return Response.json(created, { status: 201 })
+  }) as unknown as typeof fetch
+  return { release: () => held.shift()?.() }
+}
+
+test('the composer clears on Enter, so typing the next title while a create is in flight keeps it', async () => {
+  const calls: Call[] = []
+  const { release } = heldCreates(calls)
+  const view = renderSection({ composing: true })
+  const input = view.getByRole('textbox', { name: 'Sub-issue title' }) as HTMLInputElement
+  await userEvent.type(input, 'Card entry{Enter}')
+  expect(input.value).toBe('')
+  await userEvent.type(input, 'Receipt')
+  await waitFor(() => expect(writes(calls)).toHaveLength(1))
+  release()
+  expect(await view.findByText('Card entry')).toBeTruthy()
+  expect(input.value).toBe('Receipt')
+})
+
+test('Enter while a create is in flight queues the next sub-issue instead of dropping it', async () => {
+  const calls: Call[] = []
+  const { release } = heldCreates(calls)
+  const view = renderSection({ composing: true })
+  const input = view.getByRole('textbox', { name: 'Sub-issue title' })
+  await userEvent.type(input, 'Card entry{Enter}')
+  await userEvent.type(input, 'Receipt{Enter}')
+  await waitFor(() => expect(writes(calls)).toHaveLength(1))
+  release()
+  await waitFor(() => expect(writes(calls)).toHaveLength(2))
+  release()
+  expect(await view.findByText('Receipt')).toBeTruthy()
+  // created in the order they were typed
+  expect(writes(calls).map((call) => (call.body as { title: string }).title)).toEqual(['Card entry', 'Receipt'])
+})
+
+test('a failed create puts its title back when the field is still empty', async () => {
+  const calls: Call[] = []
+  const { release } = heldCreates(calls, true)
+  const view = renderSection({ composing: true })
+  const input = view.getByRole('textbox', { name: 'Sub-issue title' }) as HTMLInputElement
+  await userEvent.type(input, 'Card entry{Enter}')
+  expect(input.value).toBe('')
+  await waitFor(() => expect(writes(calls)).toHaveLength(1))
+  release()
+  expect(await view.findByRole('alert')).toBeTruthy()
+  expect(input.value).toBe('Card entry')
+})

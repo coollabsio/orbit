@@ -1,10 +1,11 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { queryKeys } from '@/api/queryKeys'
 import type { PageTaskRecord, TaskRecord, TaskRelationRecord } from '@/api/generated/types.gen'
-import { useAddTaskRelation, useBulkTasks, useCreateTaskComment, useRemoveTaskRelation, useTaskRelations, useTasks, useUploadTaskAttachments } from './tasks'
+import { useAddTaskRelation, useBulkTasks, useCreateTaskComment, useRemoveTaskRelation, useTaskRelations, useTasks, useUpdateTask, useUploadTaskAttachments } from './tasks'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -207,4 +208,42 @@ test('task relations load, add and remove through the relation endpoints and inv
     { method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/task-1/relations', body: { type: 'blocked_by', task_id: 'task-2' } },
     { method: 'DELETE', path: '/api/v1/workspaces/workspace-1/tasks/task-1/relations/rel-1', body: undefined },
   ])
+})
+
+/** A nested row dragged to root level: `parent_task_id: null` merged into a status/position write (useGroupDrop). */
+function detachFixture() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const parent = { id: 'task-0012', title: 'Checkout redesign', project_key: 'ORB' }
+  const child = { ...task('task-0031', 0), parent_task_id: 'task-0012', parent }
+  client.setQueryData(queryKeys.tasks.list('workspace-1', {}), { pages: [{ items: [task('task-0012', 1), child], next_cursor: null }], pageParams: [undefined] })
+  const detached = { ...child, parent_task_id: null, parent: null, version: 2 }
+  const closed = [{ id: 'task-0012', status_id: 'done' }]
+  globalThis.fetch = (async (request: Request) => new URL(request.url).pathname.endsWith('/tasks/bulk')
+    ? Response.json({ items: [detached], next_cursor: null, auto_closed: closed })
+    : Response.json({ ...detached, auto_closed: closed })) as unknown as typeof fetch
+  return client
+}
+
+test('a drag that detaches the last open sub-issue names the parent the server closed', async () => {
+  const client = detachFixture()
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  try {
+    const view = renderHook(() => useUpdateTask('workspace-1'), { wrapper: withClient(client) })
+    await act(async () => { await view.result.current.mutateAsync({ taskId: 'task-0031', body: { expected_version: 1, parent_task_id: null } }) })
+    expect(success.mock.calls.map((call) => call[0])).toEqual(['Closed parent ORB-0012'])
+  } finally {
+    success.mockRestore()
+  }
+})
+
+test('a bulk move that detaches the last open sub-issue names the parent the server closed', async () => {
+  const client = detachFixture()
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  try {
+    const view = renderHook(() => useBulkTasks('workspace-1'), { wrapper: withClient(client) })
+    await act(async () => { await view.result.current.mutateAsync([{ id: 'task-0031', expected_version: 1, position: 3, parent_task_id: null }]) })
+    expect(success.mock.calls.map((call) => call[0])).toEqual(['Closed parent ORB-0012'])
+  } finally {
+    success.mockRestore()
+  }
 })

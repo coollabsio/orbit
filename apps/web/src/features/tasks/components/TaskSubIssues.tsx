@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Add as Plus, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
@@ -202,26 +202,41 @@ function SubIssueComposer({ parent, siblings, statuses, currentUserId, onCreated
   const queryClient = useQueryClient()
   const createTask = useCreateTask(workspace.id)
   const [title, setTitle] = useState('')
-  const submit = async () => {
+  // the field's live value, read after an await (a failed create only refills an empty field)
+  const titleRef = useRef('')
+  const changeTitle = (value: string) => {
+    titleRef.current = value
+    setTitle(value)
+  }
+  // creates run one after another, so rapid entries keep the order they were typed in
+  const queue = useRef<Promise<void>>(Promise.resolve())
+  const create = async (text: string) => {
     const defaults = subIssueDefaults(parent, { statuses, currentUserId, siblings })
-    if (!title.trim() || !defaults || createTask.isPending) return
+    if (!defaults) return
     try {
-      const record = await createTask.mutateAsync({ ...defaults, title: title.trim() })
+      const record = await createTask.mutateAsync({ ...defaults, title: text })
       // show it at once; the refetch that follows every create confirms the list
       queryClient.setQueryData<PageTaskRecord>(subIssuesQuery(workspace.id, parent.id).queryKey, (page) =>
         page && !page.items.some((item) => item.id === record.id) ? { ...page, items: [...page.items, record] } : page)
-      setTitle('')
       onCreated(record.id)
     } catch {
-      // the alert below reports it; the title stays for another try
+      // the alert below reports it; the title comes back unless the next one is already being typed
+      if (titleRef.current === '') changeTitle(text)
     }
+  }
+  const submit = () => {
+    const text = title.trim()
+    if (!text || !subIssueDefaults(parent, { statuses, currentUserId, siblings })) return
+    // clear at once: the next title can be typed while this one is created
+    changeTitle('')
+    queue.current = queue.current.then(() => create(text))
   }
   return (
     <form
       className="mt-px flex min-h-8 items-center gap-1.5 rounded-md bg-muted/50 pr-2 ring-1 ring-transparent focus-within:ring-ring/50"
       onSubmit={(event) => {
         event.preventDefault()
-        void submit()
+        submit()
       }}
     >
       {/* the gutter's width at depth 0, so the status icon lines up with the rows above */}
@@ -234,7 +249,7 @@ function SubIssueComposer({ parent, siblings, statuses, currentUserId, onCreated
         aria-label="Sub-issue title"
         placeholder="Sub-issue title"
         value={title}
-        onChange={(event) => setTitle(event.target.value)}
+        onChange={(event) => changeTitle(event.target.value)}
         onKeyDown={(event) => {
           // the task page closes on a document-level Esc: this Esc belongs to the composer only
           if (event.key !== 'Escape') return

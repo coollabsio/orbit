@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { apiClient } from '@/api/client'
 import type { TaskRecord } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
+import { announceAutoClosed } from '@/features/tasks/api/autoClosed'
 import { reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'
 import { bulkSetTaskDuplicateOf, bulkTaskDuplicateUpdates, setTaskDuplicateOf, type VersionedTask } from '@/features/tasks/api/tasks'
 import { duplicateErrorMessage, duplicateToastMessage } from '@/features/tasks/relationsLib'
@@ -22,7 +23,9 @@ export type DuplicateSource = VersionedTask & { duplicateOf?: { id: string } | n
  */
 export function useDuplicateActions(workspaceId: string) {
   const queryClient = useQueryClient()
-  const settle = (records: TaskRecord[]) => {
+  /** `response` (raw PATCH/bulk body): a duplicate counts as closed, so the server may auto-close a parent (rule A). */
+  const settle = (records: TaskRecord[], response?: unknown) => {
+    announceAutoClosed(queryClient, workspaceId, records, response)
     for (const record of records) reconcileWorkspaceTask(queryClient, workspaceId, record)
     void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
   }
@@ -30,7 +33,7 @@ export function useDuplicateActions(workspaceId: string) {
   const unmarkOne = async (task: VersionedTask): Promise<TaskRecord | undefined> => {
     try {
       const record = await setTaskDuplicateOf(apiClient, workspaceId, task, null)
-      settle([record])
+      settle([record], record)
       return record
     } catch (error) {
       settle([])
@@ -46,9 +49,13 @@ export function useDuplicateActions(workspaceId: string) {
       const updates = records
         .map((record) => ({ id: record.id, expected_version: record.version, duplicate_of_id: previous.get(record.id) ?? null }))
         .sort((a, b) => Number(a.duplicate_of_id !== null) - Number(b.duplicate_of_id !== null))
-      settle(updates.length === 1
-        ? [await setTaskDuplicateOf(apiClient, workspaceId, records[0]!, updates[0]!.duplicate_of_id)]
-        : (await bulkTaskDuplicateUpdates(apiClient, workspaceId, updates)).items)
+      if (updates.length === 1) {
+        const record = await setTaskDuplicateOf(apiClient, workspaceId, records[0]!, updates[0]!.duplicate_of_id)
+        settle([record], record)
+      } else {
+        const page = await bulkTaskDuplicateUpdates(apiClient, workspaceId, updates)
+        settle(page.items, page)
+      }
     } catch (error) {
       settle([])
       toast.error(duplicateErrorMessage('unmark', error))
@@ -59,7 +66,7 @@ export function useDuplicateActions(workspaceId: string) {
   const markOne = async (task: DuplicateSource, target: DuplicateTarget): Promise<TaskRecord | undefined> => {
     try {
       const record = await setTaskDuplicateOf(apiClient, workspaceId, task, target.id)
-      settle([record])
+      settle([record], record)
       toast.success(duplicateToastMessage(1, target.identifier), {
         action: { label: 'Undo', onClick: () => void restore([record], previousTargets([task])) },
       })
@@ -74,7 +81,7 @@ export function useDuplicateActions(workspaceId: string) {
   const markMany = async (tasks: DuplicateSource[], target: DuplicateTarget): Promise<void> => {
     try {
       const page = await bulkSetTaskDuplicateOf(apiClient, workspaceId, tasks, target.id)
-      settle(page.items)
+      settle(page.items, page)
       toast.success(duplicateToastMessage(tasks.length, target.identifier), {
         action: { label: 'Undo', onClick: () => void restore(page.items, previousTargets(tasks)) },
       })
