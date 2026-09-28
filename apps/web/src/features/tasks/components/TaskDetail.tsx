@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowLeft, Calendar, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
+import { ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,16 +21,21 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
-import type { Project, Task, TaskViewState } from '@/features/tasks/api/models'
+import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
+import { cachedDescendantIds } from '@/features/tasks/api/optimistic'
 import { useProjects } from '@/features/tasks/api/projects'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
-  useTaskGithubLinks, useTaskRelations, useUpdateTask, useUploadTaskAttachments,
+  useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask, useUploadTaskAttachments,
 } from '@/features/tasks/api/tasks'
 import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
+import { useParentActions } from '@/features/tasks/useParentActions'
+import { parentPickerTitle } from '@/features/tasks/subIssuesLib'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { AddRelationMenu, DuplicateBanner, TaskRelationsSection } from './TaskRelations'
+import { TaskBreadcrumb } from './TaskBreadcrumb'
+import { SubIssuesSection } from './TaskSubIssues'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
@@ -98,6 +104,11 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
   const [picker, setPicker] = useState<RelationKind | null>(null)
   const [newRelationId, setNewRelationId] = useState<string | null>(null)
   const [unmarking, setUnmarking] = useState(false)
+  const queryClient = useQueryClient()
+  const parentActions = useParentActions(workspace.id)
+  const [composingSubIssue, setComposingSubIssue] = useState(false)
+  const [parentPicker, setParentPicker] = useState<'set' | 'add' | null>(null)
+  const childIds = (useSubIssues(workspace.id, task?.id).data?.items ?? []).map((record) => record.id)
   // the banner animates only when the task becomes a duplicate while open, never on page load;
   // captured once the task has loaded, so a cold load does not count as a change
   const [initialDuplicate, setInitialDuplicate] = useState<{ taskId: string; duplicateOfId: string | null } | null>(null)
@@ -135,11 +146,11 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 min-[900px]:hidden" onClick={onBack} aria-label="Back to tasks">
           <ArrowLeft className="size-4" />
         </Button>
-        <span className="text-xs text-muted-foreground/70">{task?.identifier ?? 'Task'}</span>
+        <TaskBreadcrumb ancestors={task?.ancestors ?? []} identifier={task?.identifier ?? 'Task'} onOpen={openTask} />
         {githubSyncPaused ? <Badge variant="secondary">GitHub sync paused</Badge> : null}
         <div className="flex-1" />
         {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
-          if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
+          if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: task.subIssueCount ? 'Its sub-issues move to trash with it. You can restore them from trash later.' : 'You can restore this task from trash later.', confirmLabel: 'Move to trash', danger: true })) return
           void deleteAndClose({ taskId: task.id, version: task.version })
         }}>Delete</Button> : null}
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
@@ -186,6 +197,12 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                   Attach
                 </Button>
                 <AddRelationMenu onChoose={setPicker} />
+                {(task.subIssueCount ?? 0) === 0 && childIds.length === 0 && !composingSubIssue ? (
+                  <Button variant="ghost" className="text-xs text-muted-foreground/70" onClick={() => setComposingSubIssue(true)}>
+                    <Hierarchy2 className="size-3.5" aria-hidden="true" />
+                    Add sub-issue
+                  </Button>
+                ) : null}
                 {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70">Uploading {uploadAttachments.progress}%</span> : null}
                 {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{uploadAttachments.remainingCount} file(s) remain. <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
               </div>
@@ -208,6 +225,17 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                 </a>)}
               </div>
             </section> : null}
+            <SubIssuesSection
+              parent={task}
+              projects={projects}
+              statuses={state.statuses}
+              users={users}
+              currentUserId={state.currentUserId}
+              composing={composingSubIssue}
+              onComposingChange={setComposingSubIssue}
+              onAddExisting={() => setParentPicker('add')}
+              onOpen={openTask}
+            />
             <TaskRelationsSection
               relations={relations}
               statuses={state.statuses}
@@ -311,6 +339,27 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {task.parent ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={
+                    <Button variant="ghost" className={`${SIDE_PROP} max-w-full`} aria-label={`Parent: ${refIdentifier(task.parent)} ${task.parent.title}`}>
+                      <Hierarchy2 className="size-3.5" aria-hidden="true" />
+                      <span className="shrink-0 text-muted-foreground tabular-nums">{refIdentifier(task.parent)}</span>
+                      <span className="truncate">{task.parent.title || 'Untitled'}</span>
+                    </Button>
+                  } />
+                  <DropdownMenuContent className={MENU}>
+                    <DropdownMenuItem className={OPTION} onClick={() => openTask(task.parent!.id)}>Open parent</DropdownMenuItem>
+                    <DropdownMenuItem className={OPTION} onClick={() => setParentPicker('set')}>Change parent…</DropdownMenuItem>
+                    <DropdownMenuItem className={OPTION} onClick={() => void parentActions.setParent([task], null)}>Remove parent</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button variant="ghost" className={`${SIDE_PROP} text-muted-foreground`} onClick={() => setParentPicker('set')}>
+                  <Hierarchy2 className="size-3.5" aria-hidden="true" />
+                  Set parent
+                </Button>
+              )}
             </div>
 
             <div className={SIDE_GROUP}>
@@ -411,6 +460,22 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
               excludeIds={picker === 'duplicate' ? [task.id] : [task.id, ...relatedTaskIds(relations)]}
               excludeDuplicates={picker === 'duplicate'}
               onSelect={choose}
+            />
+          ) : null}
+          {parentPicker ? (
+            <TaskPickerDialog
+              open
+              onOpenChange={(open) => { if (!open) setParentPicker(null) }}
+              title={parentPicker === 'set' ? parentPickerTitle(task.identifier) : `Add a sub-issue to ${task.identifier}…`}
+              statuses={state.statuses}
+              // set: never itself or anything below it that is loaded (deeper ones: the server's parent_cycle toast);
+              // add: never itself, an ancestor, or a sub-issue it already has
+              excludeIds={parentPicker === 'set'
+                ? [task.id, ...cachedDescendantIds(queryClient, workspace.id, task.id)]
+                : [task.id, ...(task.ancestors ?? []).map((ref) => ref.id), ...childIds]}
+              onSelect={(target) => void (parentPicker === 'set'
+                ? parentActions.setParent([task], { id: target.id, identifier: target.identifier })
+                : parentActions.setParent([target], { id: task.id, identifier: task.identifier }))}
             />
           ) : null}
         </div>

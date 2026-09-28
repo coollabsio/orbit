@@ -45,7 +45,8 @@ function api(calls: Call[], relations: unknown[] = []) {
     if (request.method === 'DELETE') return new Response(null, { status: 204 })
     if (path.endsWith('/github-links')) return Response.json([])
     if (path.endsWith('/projects')) return Response.json({ items: [project], next_cursor: null })
-    if (path.endsWith('/tasks')) return Response.json({ items: [record('task-3f2a', "Can't log in on iPad"), record('task-77aa', 'Auth token refresh')], next_cursor: null })
+    // the picker's task list; the detail's sub-issues list (parent_task_id) stays empty
+    if (path.endsWith('/tasks') && !new URL(request.url).searchParams.has('parent_task_id')) return Response.json({ items: [record('task-3f2a', "Can't log in on iPad"), record('task-77aa', 'Auth token refresh')], next_cursor: null })
     if (request.method === 'PATCH') return Response.json({ ...record('task-3f2a', "Can't log in on iPad"), version: 2 })
     return Response.json({ items: [], next_cursor: null })
   }) as unknown as typeof fetch

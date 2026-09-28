@@ -30,6 +30,7 @@ import {
   useTaskComments,
   useTaskGithubLinks,
   useTaskRelations,
+  useSubIssues,
 } from '@/features/tasks/api/tasks'
 import { TaskBoard } from '@/features/tasks/components/TaskBoard'
 import { TaskDetail } from '@/features/tasks/components/TaskDetail'
@@ -152,8 +153,9 @@ function WorkspaceTasksPage() {
   // (GitHub links decide whether the title and description are editable)
   const githubLinksQuery = useTaskGithubLinks(workspace.id, taskId)
   const relationsQuery = useTaskRelations(workspace.id, taskId)
+  const subIssuesQuery = useSubIssues(workspace.id, taskId)
   const detailPending = detailQuery.isPending || activityQuery.isPending || commentsQuery.isPending || attachmentsQuery.isPending
-    || commentAttachments.isPending || githubLinksQuery.isPending || relationsQuery.isPending
+    || commentAttachments.isPending || githubLinksQuery.isPending || relationsQuery.isPending || subIssuesQuery.isPending
   // wait only for the first paint: a new comment adds a pending attachments query, which must not blank the open task
   const [shownTaskId, setShownTaskId] = useState<string>()
   if (taskId && !detailPending && shownTaskId !== taskId) setShownTaskId(taskId)
