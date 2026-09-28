@@ -176,7 +176,8 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
             {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} /> : null}
           </div>
         ) : null}
-        {nest.nestAt?.id === task.id && nest.nestAt.zone === 'inside' ? <NestChip className="top-2 right-2" /> : null}
+        {/* bottom-right, clear of the header's assignee and priority that identify the drop target */}
+        {nest.nestAt?.id === task.id && nest.nestAt.zone === 'inside' ? <NestChip className="right-2 bottom-2" /> : null}
       </article>
     )
   }

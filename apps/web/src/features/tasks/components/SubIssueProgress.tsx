@@ -21,7 +21,8 @@ export function SubIssueProgress({ closed, total, color, className }: { closed: 
       className={cn('inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full border border-border px-1.5 text-xs leading-none font-medium text-muted-foreground tabular-nums', className)}
     >
       <svg aria-hidden width="14" height="14" viewBox="0 0 14 14" fill="none" className="-rotate-90">
-        <circle cx="7" cy="7" r={RADIUS} stroke="var(--border)" strokeWidth="1.5" />
+        {/* muted-foreground/35, not --border: the border token is too close to white for an empty ring in light mode */}
+        <circle data-slot="progress-track" cx="7" cy="7" r={RADIUS} strokeWidth="1.5" className="stroke-muted-foreground/35" />
         <circle
           data-slot="progress-arc"
           cx="7" cy="7" r={RADIUS} stroke={color} strokeWidth="1.5" strokeLinecap={ratio > 0 ? 'round' : 'butt'}
