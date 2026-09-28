@@ -5,6 +5,7 @@ import { taskFromRecord, taskIdentifier } from './models'
 const project: ProjectRecord = {
   id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'LCH', color: '#123456',
   created_at: '2026-09-04T09:00:00Z', updated_at: '2026-09-04T09:00:00Z', version: 2,
+  auto_close_parent: true, auto_close_sub_issues: true,
 }
 const record: TaskRecord = {
   id: '01HZYTASK000000000000001', workspace_id: 'workspace-1', project_id: project.id,
@@ -12,6 +13,7 @@ const record: TaskRecord = {
   assignee_ids: ['user-1'], creator_id: 'user-1', label_ids: ['label-1'],
   due_at: '2030-01-02T12:30:00.000Z',
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', duplicate_of: null, blocked: false, version: 7,
+  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,
 }
 const comment: CommentRecord = {
   id: 'comment-1', workspace_id: 'workspace-1', task_id: record.id, author_id: 'user-1',
@@ -67,7 +69,7 @@ test('service account audit metadata becomes the task activity actor', () => {
 test('duplicate target and blocked flag reach the task view model', () => {
   const duplicate = taskFromRecord({
     ...record,
-    duplicate_of: { id: 'task-91c0', project_id: project.id, title: 'Login fails on Safari' },
+    duplicate_of: { id: 'task-91c0', project_id: project.id, project_key: 'LCH', title: 'Login fails on Safari' },
     blocked: true,
   }, project)
   expect(duplicate.duplicateOf).toEqual({ id: 'task-91c0', projectId: project.id, title: 'Login fails on Safari' })

@@ -15,6 +15,7 @@ const member = (id: string, name: string): User => ({
 const label = (id: string, name: string): LabelRecord => ({ id, name, color: '#888888', version: 1, workspace_id: 'workspace-1' })
 const project = (id: string, name: string): ProjectRecord => ({
   id, name, key: name.slice(0, 3).toUpperCase(), color: '#888888', created_at: '', updated_at: '', version: 1, workspace_id: 'workspace-1',
+  auto_close_parent: true, auto_close_sub_issues: true,
 })
 function task(id: string, overrides: Partial<Task> = {}): Task {
   return {
