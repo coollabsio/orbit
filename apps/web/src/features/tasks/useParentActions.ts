@@ -52,6 +52,19 @@ export function useParentActions(workspaceId: string) {
     }
   }
   /**
+   * Success toast for tasks whose parent changed (`changed`, as they were before the write) with an Undo that puts
+   * them back under their previous parent. `records` are the write's results (their versions feed the Undo); other
+   * records (siblings whose positions moved) are ignored. Also used by writes made elsewhere, like a nested list drop
+   * at root level that detaches a row together with its group change.
+   */
+  const announce = (changed: Task[], parent: ParentTarget | null, records: TaskRecord[]) => {
+    if (changed.length === 0) return
+    const previous = new Map(changed.map((task) => [task.id, task.parentTaskId ?? null]))
+    toast.success(parentToastMessage(changed.map((task) => task.identifier), parent?.identifier ?? null), {
+      action: { label: 'Undo', onClick: () => void restore(records.filter((record) => previous.has(record.id)), previous) },
+    })
+  }
+  /**
    * `parent` null detaches (only the tasks that have a parent are written). `placement` (one task, manual order) also
    * moves it among its new siblings; a reorder among the same siblings writes positions only, with no toast.
    */
@@ -65,18 +78,14 @@ export function useParentActions(workspaceId: string) {
       ? placementUpdates(moving[0]!, options.placement.siblings, options.placement.index, changed.length > 0 ? patch : {})
       : changed.map((task) => ({ id: task.id, expected_version: task.version, ...patch }))
     if (updates.length === 0) return
-    const previous = new Map(changed.map((task) => [task.id, task.parentTaskId ?? null]))
     try {
       const { records, response } = await write(updates)
       settle(records, response)
-      if (changed.length === 0) return
-      toast.success(parentToastMessage(changed.map((task) => task.identifier), parent?.identifier ?? null), {
-        action: { label: 'Undo', onClick: () => void restore(records.filter((record) => previous.has(record.id)), previous) },
-      })
+      announce(changed, parent, records)
     } catch (error) {
       settle([])
       toast.error(parentErrorMessage(error))
     }
   }
-  return { setParent }
+  return { setParent, announce }
 }

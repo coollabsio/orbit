@@ -85,6 +85,19 @@ export function groupTasks(tasks: Task[], groupBy: GroupBy, ctx: GroupContext): 
     .filter((group) => groupBy === 'none' || ctx.showEmpty || group.tasks.length > 0)
 }
 
+/**
+ * The group `task` itself is in for `field`: `preferred` (the zone's value) when the task is in that group (a task
+ * with several labels or assignees is in several), else its first group in display order.
+ */
+export function taskGroupValue(task: Task, field: GroupBy, ctx: GroupContext, preferred: string | null): string | null {
+  const buckets = bucketsFor(field, ctx)
+  const known = new Set(buckets.flatMap((bucket) => (bucket.value === null ? [] : [bucket.value])))
+  const statusKeys = new Map(ctx.statuses.map((status) => [status.id, statusKeyOf(status)]))
+  const values = valuesOf(task, field, statusKeys, known)
+  if (values.includes(preferred)) return preferred
+  return buckets.find((bucket) => values.includes(bucket.value))?.value ?? null
+}
+
 function swapValue(current: string[], from: string | null, to: string | null): string[] | null {
   const next = current.filter((id) => id !== from)
   if (to !== null && !next.includes(to)) next.push(to)

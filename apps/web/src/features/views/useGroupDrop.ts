@@ -1,5 +1,6 @@
 import { useState, type DragEvent } from 'react'
 import { toast } from 'sonner'
+import type { TaskRecord } from '@/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
 import { useBulkTasks, useUpdateTask } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -35,7 +36,7 @@ function indexAt(zone: HTMLElement, itemSelector: string, clientY: number) {
  * zone, and the drop → write mapping. A drop plans every changed group field at once (`planDrop`), so a
  * board drop into another column and lane is one write. Every move error goes through `reportMoveError`.
  */
-export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDuplicate, detach }: {
+export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDuplicate, detach, onDetached }: {
   tasks: Task[]
   manual: boolean
   groupContext: GroupContext
@@ -45,6 +46,8 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
   onDuplicate: (task: Task) => void
   /** Nested list: a drop at root level (a group zone) detaches a nested row. */
   detach?: (task: Task) => boolean
+  /** After a write that detached `task` (as it was before the drop); `records` are the write's results. */
+  onDetached?: (task: Task, records: TaskRecord[]) => void
 }) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
@@ -69,14 +72,18 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
     // merged into every write: a nested row dropped at root level leaves its parent
     const extra: TaskPatch = detach?.(task) ? { parent_task_id: null } : {}
     const hasExtra = Object.keys(extra).length > 0
-    const patchOnly = () => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...extra } }, { onError: reportMoveError })
+    // a detach gets the same toast and Undo as a nest drop
+    const announce = (records: TaskRecord[]) => { if (hasExtra) onDetached?.(task, records) }
+    const single = { onError: reportMoveError, onSuccess: (record: TaskRecord) => announce([record]) }
+    const bulk = { onError: reportMoveError, onSuccess: (page: { items: TaskRecord[] }) => announce(page.items) }
+    const patchOnly = () => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...extra } }, single)
     if (zoneIdOf(current.from) === zone.id) {
       if (index === null) {
         if (hasExtra) patchOnly()
         return
       }
       const updates = placementUpdates(task, zone.tasks, index, extra)
-      if (updates.length > 0) moveTasks.mutate(updates, { onError: reportMoveError })
+      if (updates.length > 0) moveTasks.mutate(updates, bulk)
       return
     }
     const plan = planDrop(task, current.from, zone.values, groupContext)
@@ -84,10 +91,10 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
     else if (plan.kind === 'error') toast.error(plan.message)
     else if (plan.kind === 'update') {
       const patch = { ...plan.patch, ...extra }
-      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, patch), { onError: reportMoveError })
-      else updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...patch } }, { onError: reportMoveError })
+      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, patch), bulk)
+      else updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...patch } }, single)
     } else if (hasExtra) {
-      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, extra), { onError: reportMoveError })
+      if (index !== null) moveTasks.mutate(placementUpdates(task, zone.tasks, index, extra), bulk)
       else patchOnly()
     }
   }

@@ -22,7 +22,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 import { CHEVRON, GroupIcon } from '@/features/views/components/GroupIcon'
 import { groupTasks, type GroupContext, type TaskGroup } from '@/features/views/grouping'
-import { canDrag, listSections, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
+import { canDrag, listSections, ownGroupValues, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
 import { useCollapsedGroups } from '@/features/views/useCollapsedGroups'
 import { useCollapsedTasks } from '@/features/views/useCollapsedTasks'
 import { buildTaskTree, descendantIds, flattenTree, subtreeSize, type TreeRow } from '@/features/views/taskTree'
@@ -104,6 +104,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     onDuplicate: (task) => setDuplicatePicker([task]),
     // nested: a group zone is the root level, so a sub-issue dropped there leaves its parent
     detach: nested ? (task) => tree.nested.has(task.id) : undefined,
+    onDetached: (task, records) => parentActions.announce([task], null, records),
   })
   const nest = useNestDrop({
     tasks,
@@ -178,7 +179,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           dropEdge={nestEdge ?? dropEdge}
           onOpen={onOpen}
           onToggleSelect={toggleSelect}
-          onDragStart={(taskId) => startDrag(taskId, values)}
+          // a nested row shows in its root's group but moves from its own (status, label, assignee…)
+          onDragStart={(taskId) => startDrag(taskId, depth > 0 ? ownGroupValues(task, values, groupContext) : values)}
           onDragEnd={endDrag}
           onRequestDuplicate={(rowTask) => setDuplicatePicker([rowTask])}
           tree={nested ? { depth, hasChildren, expanded: !taskTree.collapsed.has(task.id), onToggle: () => taskTree.toggle(task.id) } : null}

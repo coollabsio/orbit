@@ -1,7 +1,7 @@
 import type { BulkItem, CreateTaskBody, TaskUpdateBody } from '@/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
 import { statusKeyOf } from '@/features/tasks/taskMeta'
-import { dropUpdate, groupTasks, type GroupContext, type TaskGroup } from './grouping'
+import { dropUpdate, groupTasks, taskGroupValue, type GroupContext, type TaskGroup } from './grouping'
 import type { DisplayOptions, GroupBy } from './viewState'
 
 /** Layout glue between display options, `groupTasks` and the task mutations. Pure: no React, no fetch. */
@@ -19,6 +19,14 @@ export function valuesOf(...groups: Array<Pick<TaskGroup, 'field' | 'value'>>): 
   const values: GroupValues = []
   for (const group of groups) if (group.field !== 'none') values.push({ field: group.field, value: group.value })
   return values
+}
+
+/**
+ * `task`'s own values for the fields of `zone`. A nested subtree shows in its root's group (spec §7.2), but a drag
+ * moves the dragged row from its own groups: its status, priority, and the label / assignee it actually has.
+ */
+export function ownGroupValues(task: Task, zone: GroupValues, ctx: GroupContext): GroupValues {
+  return zone.map(({ field, value }) => ({ field, value: taskGroupValue(task, field, ctx, value) }))
 }
 
 /** Stable id of a drop zone / collapsible group: `status=unstarted:todo/priority=urgent`. */

@@ -652,6 +652,36 @@ test('nested: dropping a sub-issue on another group detaches it there, in one wr
   expect(writes(calls)[0]).toEqual({ method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-2', body: { expected_version: 1, status_id: 'doing', parent_task_id: null } })
 })
 
+test('nested: a sub-issue dropped into its root\'s group moves from its own group there', async () => {
+  const calls: Call[] = []
+  relationsApi(calls)
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  const view = renderList(
+    [task(1), { ...task(2), parentTaskId: 'task-1', statusId: 'doing' }],
+    { statuses: [status, doingStatus], display: { order_by: 'created' } },
+  )
+  fireEvent.dragStart(rowOf(view, 'Task 2'), { dataTransfer })
+  dropAt(zoneOf(view, 'Todo'), 0)
+  await waitFor(() => expect(writes(calls)).toHaveLength(1))
+  expect(writes(calls)[0]).toEqual({ method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-2', body: { expected_version: 1, status_id: 'todo', parent_task_id: null } })
+  success.mockRestore()
+})
+
+test('nested: a root-level detach drop shows a toast whose Undo restores the parent', async () => {
+  const calls: Call[] = []
+  relationsApi(calls)
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  const view = renderList([task(1), { ...task(2), parentTaskId: 'task-1' }], { display: { order_by: 'created' } })
+  fireEvent.dragStart(rowOf(view, 'Task 2'), { dataTransfer })
+  dropAt(zoneOf(view, 'Todo'), 0)
+  await waitFor(() => expect(success).toHaveBeenCalledTimes(1))
+  expect(success.mock.calls[0]![0]).toBe('ORB-2 is no longer a sub-issue')
+  ;(success.mock.calls[0]![1] as unknown as { action: { onClick: () => void } }).action.onClick()
+  await waitFor(() => expect(writes(calls)).toHaveLength(2))
+  expect(writes(calls)[1]).toEqual({ method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-2', body: { expected_version: 2, parent_task_id: 'task-1' } })
+  success.mockRestore()
+}, 20000)
+
 test('nested, manual order: a drop below a sub-issue places the task after it among the siblings', async () => {
   const calls: Call[] = []
   relationsApi(calls)

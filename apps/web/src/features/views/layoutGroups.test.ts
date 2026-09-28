@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from './grouping'
 import {
-  ALL_TASKS_KEY, acceptsDrop, boardGrid, canDrag, cellTasks, groupAccent, groupCreateFields, listSections, placementUpdates, planDrop, valuesOf, zoneIdOf,
+  ALL_TASKS_KEY, acceptsDrop, boardGrid, canDrag, cellTasks, groupAccent, groupCreateFields, listSections, ownGroupValues, placementUpdates, planDrop, valuesOf, zoneIdOf,
 } from './layoutGroups'
 import { DEFAULT_DISPLAY, type DisplayOptions } from './viewState'
 
@@ -182,4 +182,29 @@ test('group accents come from the project, label or status colour, else muted', 
   expect(groupAccent({ field: 'status', value: 'unstarted:todo' }, withLabel)).toBe('#888')
   expect(groupAccent({ field: 'priority', value: 'urgent' }, withLabel)).toBe('var(--muted-foreground)')
   expect(groupAccent({ field: 'label', value: null }, withLabel)).toBe('var(--muted-foreground)')
+})
+
+describe('ownGroupValues', () => {
+  const labelled: GroupContext = {
+    ...ctx,
+    labels: [{ id: 'ui', name: 'UI' }, { id: 'bug', name: 'Bug' }, { id: 'docs', name: 'Docs' }] as GroupContext['labels'],
+  }
+
+  test('a nested row drags from its own groups, not its root\'s', () => {
+    const zone = valuesOf({ field: 'status', value: 'unstarted:todo' }, { field: 'label', value: 'ui' })
+    const child = task('c', { statusId: 'doing', labels: ['bug'] })
+    expect(ownGroupValues(child, zone, labelled)).toEqual([{ field: 'status', value: 'started:doing' }, { field: 'label', value: 'bug' }])
+  })
+
+  test('a row that is in the zone\'s label or assignee group keeps that value; none known is the "No …" group', () => {
+    const zone = valuesOf({ field: 'label', value: 'ui' })
+    expect(ownGroupValues(task('c', { labels: ['bug', 'ui'] }), zone, labelled)).toEqual([{ field: 'label', value: 'ui' }])
+    expect(ownGroupValues(task('c', { labels: ['gone'] }), zone, labelled)).toEqual([{ field: 'label', value: null }])
+  })
+
+  test('with label grouping the drop swaps the row\'s own label, not the root\'s', () => {
+    const child = task('c', { labels: ['bug'] })
+    const from = ownGroupValues(child, [{ field: 'label', value: 'ui' }], labelled)
+    expect(planDrop(child, from, [{ field: 'label', value: 'docs' }], labelled)).toEqual({ kind: 'update', patch: { label_ids: ['docs'] } })
+  })
 })
