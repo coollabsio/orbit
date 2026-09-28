@@ -16,14 +16,15 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
+use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
     self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, OrderBy,
     OrderDirection, ShowCompleted,
 };
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
-    CreateTask, NotificationRecord, Page, SortOrder, TaskChanges, TaskError, TaskFilter,
-    TaskRecord, TaskRepository, TaskSort, TaskUpdate,
+    CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
+    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate,
 };
 use crate::repositories::views::ViewRepository;
 
@@ -266,6 +267,10 @@ struct ProjectUpdateBody {
     key: String,
     color: String,
     expected_version: u64,
+    /// Absent: unchanged.
+    auto_close_parent: Option<bool>,
+    /// Absent: unchanged.
+    auto_close_sub_issues: Option<bool>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -347,6 +352,10 @@ async fn update_project(
             name,
             key,
             color,
+            ProjectAutomationPatch {
+                auto_close_parent: body.auto_close_parent,
+                auto_close_sub_issues: body.auto_close_sub_issues,
+            },
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -1135,6 +1144,22 @@ async fn get_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+/// `PATCH /tasks/{id}`: the task plus the tasks the sub-issue automation changed.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct TaskUpdateResponse {
+    #[serde(flatten)]
+    task: TaskRecord,
+    auto_closed: Vec<AutoClosed>,
+}
+
+/// `POST /tasks/bulk`: the updated tasks (no further pages) plus the automation's changes.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct TaskBulkResponse {
+    items: Vec<TaskRecord>,
+    next_cursor: Option<String>,
+    auto_closed: Vec<AutoClosed>,
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct GithubLink {
     kind: String,
@@ -1340,14 +1365,14 @@ async fn create_task(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = TaskUpdateBody, responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = TaskUpdateBody, responses((status = 200, body = TaskUpdateResponse)))]
 async fn update_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<TaskUpdateBody>,
-) -> Result<Json<TaskRecord>, ApiError> {
+) -> Result<Json<TaskUpdateResponse>, ApiError> {
     let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
@@ -1362,18 +1387,23 @@ async fn update_task(
             TimestampMillis::now(),
         )
         .await
-        .map(Json)
+        .map(|outcome| {
+            Json(TaskUpdateResponse {
+                task: outcome.task,
+                auto_closed: outcome.auto_closed,
+            })
+        })
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/bulk", params(("workspace_id" = String, Path)), request_body = BulkBody, responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/bulk", params(("workspace_id" = String, Path)), request_body = BulkBody, responses((status = 200, body = TaskBulkResponse)))]
 async fn bulk_tasks(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<BulkBody>,
-) -> Result<Json<Page<TaskRecord>>, ApiError> {
+) -> Result<Json<TaskBulkResponse>, ApiError> {
     let instance = format!("/api/v1/workspaces/{workspace}/tasks/bulk");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
@@ -1423,10 +1453,11 @@ async fn bulk_tasks(
             TimestampMillis::now(),
         )
         .await
-        .map(|items| {
-            Json(Page {
-                items,
+        .map(|outcome| {
+            Json(TaskBulkResponse {
+                items: outcome.tasks,
                 next_cursor: None,
+                auto_closed: outcome.auto_closed,
             })
         })
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))

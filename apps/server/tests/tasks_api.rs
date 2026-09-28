@@ -5406,3 +5406,413 @@ async fn sub_issue_retention_purges_trashed_subtrees_and_detaches_survivors() {
         .unwrap();
     assert_eq!(violations, 0);
 }
+
+async fn status_of(fixture: &Fixture, task_id: &str) -> String {
+    sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
+        .bind(task_id)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap()
+}
+
+async fn auto_closed_metadata(fixture: &Fixture, task_id: &str) -> Value {
+    let metadata: String = sqlx::query_scalar(
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = ?",
+    )
+    .bind(task_id)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    serde_json::from_str(&metadata).unwrap()
+}
+
+fn sorted_by_id(value: &Value) -> Vec<Value> {
+    let mut items = value.as_array().unwrap().clone();
+    items.sort_by_key(|item| item["id"].as_str().unwrap().to_owned());
+    items
+}
+
+#[tokio::test]
+async fn sub_issue_project_flags_default_on_and_patch_independently() {
+    let fixture = Fixture::new().await;
+    let (status, project) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/projects", fixture.workspace_id),
+        Some(json!({"name": "Flags", "key": "FLG", "color": "#123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{project}");
+    assert_eq!(
+        (
+            project["auto_close_parent"].clone(),
+            project["auto_close_sub_issues"].clone()
+        ),
+        (json!(true), json!(true))
+    );
+    let uri = format!(
+        "/api/v1/workspaces/{}/projects/{}",
+        fixture.workspace_id,
+        id_of(&project)
+    );
+    let (status, patched) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"name": "Flags", "key": "FLG", "color": "#123456", "expected_version": 0, "auto_close_parent": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+    assert_eq!(
+        (
+            patched["auto_close_parent"].clone(),
+            patched["auto_close_sub_issues"].clone()
+        ),
+        (json!(false), json!(true))
+    );
+    // Omitting the flags keeps them.
+    let (status, renamed) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"name": "Flags renamed", "key": "FLG", "color": "#123456", "expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["auto_close_parent"], false);
+    let (_, listed) = call(
+        &fixture,
+        "GET",
+        &format!("/api/v1/workspaces/{}/projects", fixture.workspace_id),
+        None,
+    )
+    .await;
+    let listed = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == id_of(&project))
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (
+            listed["auto_close_parent"].clone(),
+            listed["auto_close_sub_issues"].clone()
+        ),
+        (json!(false), json!(true))
+    );
+}
+
+#[tokio::test]
+async fn sub_issue_closing_every_child_closes_the_parent_chain() {
+    let fixture = Fixture::new().await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let backlog = fixture.status_id.clone();
+    let grandparent = create_sub_issue(&fixture, "Grandparent", None).await;
+    let parent = create_sub_issue(&fixture, "Parent", Some(id_of(&grandparent))).await;
+    let first = create_sub_issue(&fixture, "First", Some(id_of(&parent))).await;
+    let second = create_sub_issue(&fixture, "Second", Some(id_of(&parent))).await;
+
+    let (status, closed_first) =
+        patch_current(&fixture, id_of(&first), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK, "{closed_first}");
+    assert_eq!(closed_first["auto_closed"], json!([]));
+    assert_eq!(status_of(&fixture, id_of(&parent)).await, backlog);
+
+    let (status, closed_second) =
+        patch_current(&fixture, id_of(&second), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK, "{closed_second}");
+    assert_eq!(closed_second["id"], id_of(&second));
+    assert_eq!(
+        closed_second["auto_closed"],
+        json!([
+            {"id": id_of(&parent), "status_id": done},
+            {"id": id_of(&grandparent), "status_id": done}
+        ])
+    );
+    assert_eq!(status_of(&fixture, id_of(&grandparent)).await, done);
+    let (completed_at, updated_at) = task_timestamps(&fixture, id_of(&parent)).await;
+    assert_eq!(completed_at, Some(updated_at));
+
+    // Auto-closed tasks bump their version, so a write based on the old version conflicts.
+    assert_eq!(fetch_task(&fixture, id_of(&parent)).await["version"], 1);
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&parent)),
+        Some(json!({"expected_version": 0, "title": "Stale"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    assert_eq!(
+        auto_closed_metadata(&fixture, id_of(&parent)).await,
+        json!({"source_task_id": id_of(&second), "source_project_id": second["project_id"], "from_status_id": backlog, "to_status_id": done, "reason": "sub_issues_done"})
+    );
+    assert_eq!(
+        auto_closed_metadata(&fixture, id_of(&grandparent)).await["source_task_id"],
+        id_of(&parent)
+    );
+    let actor: Option<String> = sqlx::query_scalar(
+        "SELECT actor_id FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = ?",
+    )
+    .bind(id_of(&parent))
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(actor, Some(fixture.owner_id.to_string()));
+
+    // Re-opening a child never re-opens its parent.
+    let (status, reopened) =
+        patch_current(&fixture, id_of(&first), json!({"status_id": backlog})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reopened["auto_closed"], json!([]));
+    assert_eq!(status_of(&fixture, id_of(&parent)).await, done);
+}
+
+#[tokio::test]
+async fn sub_issue_parent_stays_open_when_every_child_is_cancelled() {
+    let fixture = Fixture::new().await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let cancelled = status_id_by_category(&fixture, &fixture.project_id, "cancelled").await;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let first = create_sub_issue(&fixture, "First", Some(id_of(&parent))).await;
+    let second = create_sub_issue(&fixture, "Second", Some(id_of(&parent))).await;
+    for task in [&first, &second] {
+        let (status, closed) =
+            patch_current(&fixture, id_of(task), json!({"status_id": cancelled})).await;
+        assert_eq!(status, StatusCode::OK, "{closed}");
+        assert_eq!(closed["auto_closed"], json!([]));
+    }
+    assert_eq!(status_of(&fixture, id_of(&parent)).await, fixture.status_id);
+
+    // One completed child among cancelled ones is enough.
+    let third = create_sub_issue(&fixture, "Third", Some(id_of(&parent))).await;
+    let (status, closed) = patch_current(&fixture, id_of(&third), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        closed["auto_closed"],
+        json!([{"id": id_of(&parent), "status_id": done}])
+    );
+}
+
+#[tokio::test]
+async fn sub_issue_closing_a_parent_closes_open_descendants_with_their_own_project_statuses() {
+    let fixture = Fixture::new().await;
+    let other_project = create_project(&fixture, "OTH").await;
+    // OTH gets a second completed status that sorts first; the automation must pick it.
+    let shipped = Id::new_v7().to_string();
+    sqlx::query(
+        "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) \
+         VALUES (?, ?, ?, 'Shipped', '', '#4cb782', 'completed', -1, 0, 0, 0)",
+    )
+    .bind(&shipped)
+    .bind(&fixture.workspace_id)
+    .bind(&other_project)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let cancelled = status_id_by_category(&fixture, &fixture.project_id, "cancelled").await;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let remote = create_task_in(
+        &fixture,
+        &other_project,
+        "Remote child",
+        Some(id_of(&parent)),
+    )
+    .await;
+    let grandchild = create_sub_issue(&fixture, "Grandchild", Some(id_of(&remote))).await;
+    let already = create_sub_issue(&fixture, "Already cancelled", Some(id_of(&parent))).await;
+    let (status, _) =
+        patch_current(&fixture, id_of(&already), json!({"status_id": cancelled})).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, closed) =
+        patch_current(&fixture, id_of(&parent), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    let mut expected = vec![
+        json!({"id": id_of(&remote), "status_id": shipped}),
+        json!({"id": id_of(&grandchild), "status_id": done}),
+    ];
+    expected.sort_by_key(|item| item["id"].as_str().unwrap().to_owned());
+    assert_eq!(sorted_by_id(&closed["auto_closed"]), expected);
+    assert_eq!(status_of(&fixture, id_of(&already)).await, cancelled);
+    assert_eq!(closed["sub_issue_closed_count"], 2);
+    let metadata = auto_closed_metadata(&fixture, id_of(&remote)).await;
+    assert_eq!(metadata["reason"], "parent_closed");
+    assert_eq!(metadata["source_task_id"], id_of(&parent));
+
+    // Cancelling a parent cancels its open sub-issues.
+    let cancelled_parent = create_sub_issue(&fixture, "Cancelled parent", None).await;
+    let open_child = create_sub_issue(&fixture, "Open child", Some(id_of(&cancelled_parent))).await;
+    let (status, closed) = patch_current(
+        &fixture,
+        id_of(&cancelled_parent),
+        json!({"status_id": cancelled}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        closed["auto_closed"],
+        json!([{"id": id_of(&open_child), "status_id": cancelled}])
+    );
+}
+
+#[tokio::test]
+async fn sub_issue_automation_skips_tasks_whose_project_has_no_target_status() {
+    let fixture = Fixture::new().await;
+    let bare = create_project(&fixture, "NOS").await;
+    sqlx::query("DELETE FROM task_statuses WHERE project_id = ? AND category = 'completed'")
+        .bind(&bare)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+
+    // Rule B: the child in NOS has no completed status and stays open.
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let bare_child = create_task_in(&fixture, &bare, "Bare child", Some(id_of(&parent))).await;
+    let local_child = create_sub_issue(&fixture, "Local child", Some(id_of(&parent))).await;
+    let (status, closed) =
+        patch_current(&fixture, id_of(&parent), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        closed["auto_closed"],
+        json!([{"id": id_of(&local_child), "status_id": done}])
+    );
+    assert_eq!(
+        status_of(&fixture, id_of(&bare_child)).await,
+        status_id_by_category(&fixture, &bare, "unstarted").await
+    );
+
+    // Rule A: a parent in NOS cannot be completed, so it stays open without an error.
+    let bare_parent = create_task_in(&fixture, &bare, "Bare parent", None).await;
+    let child = create_sub_issue(&fixture, "Child of bare", Some(id_of(&bare_parent))).await;
+    let (status, closed) = patch_current(&fixture, id_of(&child), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["auto_closed"], json!([]));
+}
+
+#[tokio::test]
+async fn sub_issue_automation_follows_each_projects_flags() {
+    let fixture = Fixture::new().await;
+    sqlx::query(
+        "UPDATE projects SET auto_close_parent = 0, auto_close_sub_issues = 0 WHERE id = ?",
+    )
+    .bind(&fixture.project_id)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let only = create_sub_issue(&fixture, "Only child", Some(id_of(&parent))).await;
+    let (status, closed) = patch_current(&fixture, id_of(&only), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(closed["auto_closed"], json!([]));
+    assert_eq!(status_of(&fixture, id_of(&parent)).await, fixture.status_id);
+    let open_child = create_sub_issue(&fixture, "Open child", Some(id_of(&parent))).await;
+    let (status, closed) =
+        patch_current(&fixture, id_of(&parent), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(closed["auto_closed"], json!([]));
+    assert_eq!(
+        status_of(&fixture, id_of(&open_child)).await,
+        fixture.status_id
+    );
+
+    // Rule A reads the parent's project, not the child's.
+    let on = create_project(&fixture, "ONN").await;
+    let on_done = status_id_by_category(&fixture, &on, "completed").await;
+    let on_parent = create_task_in(&fixture, &on, "On parent", None).await;
+    let off_child = create_sub_issue(&fixture, "Off child", Some(id_of(&on_parent))).await;
+    let (status, closed) =
+        patch_current(&fixture, id_of(&off_child), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        closed["auto_closed"],
+        json!([{"id": id_of(&on_parent), "status_id": on_done}])
+    );
+}
+
+#[tokio::test]
+async fn sub_issue_bulk_delete_and_detach_run_the_parent_automation() {
+    let fixture = Fixture::new().await;
+    let done = status_id_by_category(&fixture, &fixture.project_id, "completed").await;
+
+    // Bulk closing every child reports the parent once.
+    let parent = create_sub_issue(&fixture, "Parent", None).await;
+    let a = create_sub_issue(&fixture, "A", Some(id_of(&parent))).await;
+    let b = create_sub_issue(&fixture, "B", Some(id_of(&parent))).await;
+    let (status, bulk) = call(
+        &fixture,
+        "POST",
+        &bulk_uri(&fixture),
+        Some(json!({"updates": [
+            {"id": id_of(&a), "expected_version": 0, "status_id": done},
+            {"id": id_of(&b), "expected_version": 0, "status_id": done}
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bulk}");
+    assert_eq!(
+        bulk["auto_closed"],
+        json!([{"id": id_of(&parent), "status_id": done}])
+    );
+    assert_eq!(bulk["items"].as_array().unwrap().len(), 2);
+    assert_eq!(bulk["next_cursor"], Value::Null);
+
+    // Closing a parent and one child in the same request does not go stale on rule B.
+    let q = create_sub_issue(&fixture, "Q", None).await;
+    let d1 = create_sub_issue(&fixture, "D1", Some(id_of(&q))).await;
+    let d2 = create_sub_issue(&fixture, "D2", Some(id_of(&q))).await;
+    let (status, bulk) = call(
+        &fixture,
+        "POST",
+        &bulk_uri(&fixture),
+        Some(json!({"updates": [
+            {"id": id_of(&q), "expected_version": 0, "status_id": done},
+            {"id": id_of(&d1), "expected_version": 0, "status_id": done}
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bulk}");
+    assert_eq!(
+        bulk["auto_closed"],
+        json!([{"id": id_of(&d2), "status_id": done}])
+    );
+
+    // Deleting the last open child closes the parent.
+    let r = create_sub_issue(&fixture, "R", None).await;
+    let e1 = create_sub_issue(&fixture, "E1", Some(id_of(&r))).await;
+    let e2 = create_sub_issue(&fixture, "E2", Some(id_of(&r))).await;
+    let (status, _) = patch_current(&fixture, id_of(&e1), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}?expected_version=0", task_uri(&fixture, id_of(&e2))),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status_of(&fixture, id_of(&r)).await, done);
+    assert_eq!(
+        auto_closed_metadata(&fixture, id_of(&r)).await["source_task_id"],
+        id_of(&e2)
+    );
+
+    // Detaching the last open child closes the parent too.
+    let s = create_sub_issue(&fixture, "S", None).await;
+    let f1 = create_sub_issue(&fixture, "F1", Some(id_of(&s))).await;
+    let f2 = create_sub_issue(&fixture, "F2", Some(id_of(&s))).await;
+    let (status, _) = patch_current(&fixture, id_of(&f1), json!({"status_id": done})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, detached) =
+        patch_current(&fixture, id_of(&f2), json!({"parent_task_id": null})).await;
+    assert_eq!(status, StatusCode::OK, "{detached}");
+    assert_eq!(
+        detached["auto_closed"],
+        json!([{"id": id_of(&s), "status_id": done}])
+    );
+}

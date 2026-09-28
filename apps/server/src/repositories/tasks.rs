@@ -7,7 +7,7 @@ use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use super::sub_issues;
+use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
@@ -23,6 +23,10 @@ pub struct ProjectRecord {
     pub name: String,
     pub key: String,
     pub color: String,
+    /// Close a task automatically when all its sub-issues are done (rule A).
+    pub auto_close_parent: bool,
+    /// Close open sub-issues when their parent closes (rule B).
+    pub auto_close_sub_issues: bool,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
@@ -184,6 +188,13 @@ pub struct NotificationRecord {
     pub created_at: TimestampMillis,
 }
 
+/// Project PATCH switches; `None` keeps the stored value.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProjectAutomationPatch {
+    pub auto_close_parent: Option<bool>,
+    pub auto_close_sub_issues: Option<bool>,
+}
+
 #[derive(Clone, Debug)]
 pub struct CreateTask {
     pub project_id: Id,
@@ -246,6 +257,20 @@ pub struct TaskUpdate {
     pub id: Id,
     pub expected_version: u64,
     pub changes: TaskChanges,
+}
+
+/// A PATCH result: the task as stored after the request, plus what the automation changed.
+#[derive(Clone, Debug)]
+pub struct TaskUpdateOutcome {
+    pub task: TaskRecord,
+    pub auto_closed: Vec<AutoClosed>,
+}
+
+/// A bulk result: the updated tasks in request order, plus what the automation changed.
+#[derive(Clone, Debug)]
+pub struct BulkUpdateOutcome {
+    pub tasks: Vec<TaskRecord>,
+    pub auto_closed: Vec<AutoClosed>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -409,7 +434,7 @@ impl TaskRepository {
         let fingerprint = format!("projects:{workspace_id}");
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
              FROM projects WHERE workspace_id = ",
         );
         query
@@ -491,6 +516,8 @@ impl TaskRepository {
             name,
             key,
             color,
+            auto_close_parent: true,
+            auto_close_sub_issues: true,
             version: 0,
             deleted_at: None,
             created_at: now,
@@ -507,6 +534,7 @@ impl TaskRepository {
         name: String,
         key: String,
         color: String,
+        automation: ProjectAutomationPatch,
         expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
@@ -516,12 +544,17 @@ impl TaskRepository {
         let current = project_in_tx(&mut tx, workspace_id, project_id, false).await?;
         check_version(expected_version, current.version, &current)?;
         let updated = sqlx::query(
-            "UPDATE projects SET name = ?, project_key = ?, color = ?, version = version + 1, updated_at = ? \
+            "UPDATE projects SET name = ?, project_key = ?, color = ?, \
+             auto_close_parent = COALESCE(?, auto_close_parent), \
+             auto_close_sub_issues = COALESCE(?, auto_close_sub_issues), \
+             version = version + 1, updated_at = ? \
              WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
         )
         .bind(&name)
         .bind(&key)
         .bind(&color)
+        .bind(automation.auto_close_parent)
+        .bind(automation.auto_close_sub_issues)
         .bind(now.as_millis())
         .bind(project_id.to_string())
         .bind(workspace_id.to_string())
@@ -550,6 +583,12 @@ impl TaskRepository {
             name,
             key,
             color,
+            auto_close_parent: automation
+                .auto_close_parent
+                .unwrap_or(current.auto_close_parent),
+            auto_close_sub_issues: automation
+                .auto_close_sub_issues
+                .unwrap_or(current.auto_close_sub_issues),
             version: current.version + 1,
             updated_at: now,
             ..current
@@ -679,7 +718,7 @@ impl TaskRepository {
         let fingerprint = format!("project-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
              FROM projects WHERE workspace_id = ",
         );
         query
@@ -1607,11 +1646,11 @@ impl TaskRepository {
         update: &TaskUpdate,
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<TaskRecord, TaskError> {
+    ) -> Result<TaskUpdateOutcome, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let task =
-            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+        let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
+        update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1623,8 +1662,21 @@ impl TaskRepository {
             now,
         )
         .await?;
+        let mut auto_closed = Vec::new();
+        if let Some(before) = before {
+            let actor = sub_issues::AutomationActor {
+                workspace_id,
+                actor_id,
+                request_id,
+                now,
+            };
+            sub_issues::run_automation_in_tx(&mut tx, actor, update.id, &before, &mut auto_closed)
+                .await?;
+        }
+        // Re-read: the automation may have changed this task's sub-issue counts.
+        let task = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         tx.commit().await?;
-        Ok(task)
+        Ok(TaskUpdateOutcome { task, auto_closed })
     }
 
     pub async fn bulk_update_tasks(
@@ -1634,7 +1686,7 @@ impl TaskRepository {
         updates: &[TaskUpdate],
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<Vec<TaskRecord>, TaskError> {
+    ) -> Result<BulkUpdateOutcome, TaskError> {
         self.update_many_tasks(
             workspace_id,
             actor_id,
@@ -1654,14 +1706,13 @@ impl TaskRepository {
         action: &str,
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<Vec<TaskRecord>, TaskError> {
+    ) -> Result<BulkUpdateOutcome, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let mut records = Vec::with_capacity(updates.len());
+        let mut before = Vec::with_capacity(updates.len());
         for update in updates {
-            records.push(
-                update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?,
-            );
+            before.push(sub_issues::snapshot_in_tx(&mut tx, update.id).await?);
+            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
         }
         record_mutation(
             &mut tx,
@@ -1674,8 +1725,33 @@ impl TaskRepository {
             now,
         )
         .await?;
+        // Every item is written before the automation runs, so closing a parent together with
+        // its children never leaves a later item with a stale version.
+        let actor = sub_issues::AutomationActor {
+            workspace_id,
+            actor_id,
+            request_id,
+            now,
+        };
+        let mut auto_closed = Vec::new();
+        for (update, before) in updates.iter().zip(&before) {
+            if let Some(before) = before {
+                sub_issues::run_automation_in_tx(
+                    &mut tx,
+                    actor,
+                    update.id,
+                    before,
+                    &mut auto_closed,
+                )
+                .await?;
+            }
+        }
+        let mut tasks = Vec::with_capacity(updates.len());
+        for update in updates {
+            tasks.push(task_in_tx(&mut tx, workspace_id, update.id, false).await?);
+        }
         tx.commit().await?;
-        Ok(records)
+        Ok(BulkUpdateOutcome { tasks, auto_closed })
     }
 
     pub async fn reorder_tasks(
@@ -1706,6 +1782,7 @@ impl TaskRepository {
             now,
         )
         .await
+        .map(|outcome| outcome.tasks)
     }
 
     pub async fn delete_task(
@@ -1744,6 +1821,19 @@ impl TaskRepository {
                 now,
             )
             .await?;
+        }
+        // Rule A: trashing the last open child may complete the parent. DELETE answers 204, so
+        // the auto-closed list is not returned.
+        if let Some(parent_id) = current.parent_task_id {
+            let actor = sub_issues::AutomationActor {
+                workspace_id,
+                actor_id,
+                request_id,
+                now,
+            };
+            let mut auto_closed = Vec::new();
+            sub_issues::close_ancestors_in_tx(&mut tx, actor, parent_id, task_id, &mut auto_closed)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -2996,7 +3086,7 @@ async fn project_in_tx(
     deleted: bool,
 ) -> Result<ProjectRecord, TaskError> {
     let row = sqlx::query(
-        "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, version, deleted_at, created_at, updated_at \
+        "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
          FROM projects WHERE id = ? AND workspace_id = ? AND ((? = 1 AND deleted_at IS NOT NULL) OR (? = 0 AND deleted_at IS NULL))",
     )
     .bind(project_id.to_string()).bind(workspace_id.to_string()).bind(i64::from(deleted)).bind(i64::from(deleted))
@@ -3066,6 +3156,8 @@ fn project_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ProjectRecord, TaskE
         name: row.get("name"),
         key: row.get("project_key"),
         color: row.get("color"),
+        auto_close_parent: row.get("auto_close_parent"),
+        auto_close_sub_issues: row.get("auto_close_sub_issues"),
         version: parse_version(row.get("version"))?,
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")

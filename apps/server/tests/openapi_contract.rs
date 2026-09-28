@@ -341,7 +341,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         (
             "/api/v1/workspaces/{workspace_id}/tasks/bulk",
             "post",
-            "Page_TaskRecord",
+            "TaskBulkResponse",
         ),
     ] {
         assert_eq!(

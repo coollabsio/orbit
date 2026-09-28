@@ -1,10 +1,16 @@
 //! Sub-issues (spec `2026-09-27-sub-issues-design.md`): parent validation and tree reads. Every
 //! `_in_tx` function runs inside the caller's write transaction.
 
-use orbit_platform::Id;
+use std::collections::BTreeMap;
+
+use orbit_platform::{Id, TimestampMillis};
+use serde::Serialize;
+use serde_json::json;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use utoipa::ToSchema;
 
 use super::tasks::{TaskError, TaskRef, parse_id, parse_task_ref};
+use crate::audit::{self, AuditOutcome};
 
 /// Upper bound for walks over `parent_task_id`. The repository never lets a cycle in; the bound
 /// only keeps a corrupt database from looping.
@@ -114,8 +120,8 @@ pub(super) async fn ancestors(pool: &SqlitePool, task_id: Id) -> Result<Vec<Task
 }
 
 /// The recursive "every descendant of `root`" CTE shared by `live_descendants` and
-/// `trashed_with` (Task 4's auto-close cascade reuses it too, per ruling D2, instead of
-/// duplicating the walk). `predicate` is a SQL fragment tested against `tasks.deleted_at` in
+/// `trashed_with` (the auto-close cascade reuses `live_descendants` instead of duplicating the
+/// walk). `predicate` is a SQL fragment tested against `tasks.deleted_at` in
 /// both the seed and recursive branches, e.g. `"IS NULL"` or `"= ?"`.
 pub(super) fn descendants_sql(predicate: &str) -> String {
     format!(
@@ -174,4 +180,285 @@ pub(super) async fn task_is_live_in_tx(
     .bind(task_id.to_string())
     .fetch_one(&mut **tx)
     .await?)
+}
+
+/// A task the automation changed in the same request (`auto_closed` in PATCH and bulk responses).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
+pub struct AutoClosed {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = String)]
+    pub status_id: Id,
+}
+
+/// Who and when, for the audit rows the automation writes.
+#[derive(Clone, Copy)]
+pub(super) struct AutomationActor<'a> {
+    pub(super) workspace_id: Id,
+    pub(super) actor_id: Id,
+    pub(super) request_id: &'a str,
+    pub(super) now: TimestampMillis,
+}
+
+/// The fields the automation compares before and after a write.
+#[derive(Clone, Debug)]
+pub(super) struct TaskSnapshot {
+    category: String,
+    parent_task_id: Option<Id>,
+    project_id: Id,
+}
+
+/// Closed for the automation: the codebase's done categories (`completed`, `cancelled`,
+/// `duplicate`).
+fn is_closed(category: &str) -> bool {
+    matches!(category, "completed" | "cancelled" | "duplicate")
+}
+
+pub(super) async fn snapshot_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    task_id: Id,
+) -> Result<Option<TaskSnapshot>, TaskError> {
+    let Some(row) = sqlx::query(
+        "SELECT tasks.project_id, tasks.parent_task_id, task_statuses.category FROM tasks \
+         JOIN task_statuses ON task_statuses.id = tasks.status_id WHERE tasks.id = ?",
+    )
+    .bind(task_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(TaskSnapshot {
+        category: row.get("category"),
+        parent_task_id: row
+            .get::<Option<String>, _>("parent_task_id")
+            .map(parse_id)
+            .transpose()?,
+        project_id: parse_id(row.get("project_id"))?,
+    }))
+}
+
+/// Runs rules B then A for `task_id`, which the caller changed from `before` (spec §4).
+pub(super) async fn run_automation_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: AutomationActor<'_>,
+    task_id: Id,
+    before: &TaskSnapshot,
+    auto_closed: &mut Vec<AutoClosed>,
+) -> Result<(), TaskError> {
+    let Some(after) = snapshot_in_tx(tx, task_id).await? else {
+        return Ok(());
+    };
+    let became_closed = !is_closed(&before.category) && is_closed(&after.category);
+    if became_closed
+        && matches!(after.category.as_str(), "completed" | "cancelled")
+        && closes_sub_issues_in_tx(tx, after.project_id).await?
+    {
+        close_descendants_in_tx(tx, actor, task_id, &after.category, auto_closed).await?;
+    }
+    if became_closed && let Some(parent_id) = after.parent_task_id {
+        close_ancestors_in_tx(tx, actor, parent_id, task_id, auto_closed).await?;
+    }
+    if before.parent_task_id != after.parent_task_id
+        && let Some(old_parent) = before.parent_task_id
+    {
+        close_ancestors_in_tx(tx, actor, old_parent, task_id, auto_closed).await?;
+    }
+    Ok(())
+}
+
+async fn closes_sub_issues_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    project_id: Id,
+) -> Result<bool, TaskError> {
+    Ok(
+        sqlx::query_scalar::<_, bool>("SELECT auto_close_sub_issues FROM projects WHERE id = ?")
+            .bind(project_id.to_string())
+            .fetch_optional(&mut **tx)
+            .await?
+            .unwrap_or(false),
+    )
+}
+
+/// The project's first status of `category` (lowest position, then id), if it has one.
+async fn first_status_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    project_id: Id,
+    category: &str,
+) -> Result<Option<Id>, TaskError> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT id FROM task_statuses WHERE project_id = ? AND category = ? ORDER BY position, id LIMIT 1",
+    )
+    .bind(project_id.to_string())
+    .bind(category)
+    .fetch_optional(&mut **tx)
+    .await?
+    .map(parse_id)
+    .transpose()
+}
+
+/// Rule B: every open live descendant of `root` (at every depth, walking through closed ones)
+/// moves to its own project's first status of `category` (`completed` or `cancelled`); tasks in
+/// trashed projects and projects without such a status are skipped.
+async fn close_descendants_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: AutomationActor<'_>,
+    root: Id,
+    category: &str,
+    auto_closed: &mut Vec<AutoClosed>,
+) -> Result<(), TaskError> {
+    let mut targets: BTreeMap<Id, Option<Id>> = BTreeMap::new();
+    for id in live_descendants(&mut **tx, root).await? {
+        let Some(row) = sqlx::query(
+            "SELECT tasks.project_id, tasks.status_id FROM tasks \
+             JOIN projects ON projects.id = tasks.project_id \
+             JOIN task_statuses ON task_statuses.id = tasks.status_id \
+             WHERE tasks.id = ? AND projects.deleted_at IS NULL \
+             AND task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate')",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?
+        else {
+            continue;
+        };
+        let project_id = parse_id(row.get("project_id"))?;
+        let from = parse_id(row.get("status_id"))?;
+        let target = match targets.get(&project_id) {
+            Some(target) => *target,
+            None => {
+                let target = first_status_in_tx(tx, project_id, category).await?;
+                targets.insert(project_id, target);
+                target
+            }
+        };
+        if let Some(to) = target {
+            close_in_tx(tx, actor, id, from, to, root, "parent_closed", auto_closed).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Rule A for `parent_id`, then upward: an open parent whose live direct children are all closed
+/// with at least one completed moves to its project's first completed status.
+pub(super) async fn close_ancestors_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: AutomationActor<'_>,
+    parent_id: Id,
+    source_id: Id,
+    auto_closed: &mut Vec<AutoClosed>,
+) -> Result<(), TaskError> {
+    let (mut parent_id, mut source_id) = (parent_id, source_id);
+    for _ in 0..MAX_DEPTH {
+        let Some(row) = sqlx::query(
+            "SELECT tasks.status_id, tasks.project_id, tasks.parent_task_id, task_statuses.category, \
+             projects.auto_close_parent FROM tasks \
+             JOIN projects ON projects.id = tasks.project_id \
+             JOIN task_statuses ON task_statuses.id = tasks.status_id \
+             WHERE tasks.id = ? AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
+        )
+        .bind(parent_id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?
+        else {
+            return Ok(());
+        };
+        let category: String = row.get("category");
+        if !row.get::<bool, _>("auto_close_parent") || is_closed(&category) {
+            return Ok(());
+        }
+        let (total, open, completed): (i64, i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), \
+             COALESCE(SUM(task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate')), 0), \
+             COALESCE(SUM(task_statuses.category = 'completed'), 0) \
+             FROM tasks JOIN projects ON projects.id = tasks.project_id \
+             JOIN task_statuses ON task_statuses.id = tasks.status_id \
+             WHERE tasks.parent_task_id = ? AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
+        )
+        .bind(parent_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+        if total == 0 || open > 0 || completed == 0 {
+            return Ok(());
+        }
+        let project_id = parse_id(row.get("project_id"))?;
+        let Some(target) = first_status_in_tx(tx, project_id, "completed").await? else {
+            return Ok(());
+        };
+        let from = parse_id(row.get("status_id"))?;
+        close_in_tx(
+            tx,
+            actor,
+            parent_id,
+            from,
+            target,
+            source_id,
+            "sub_issues_done",
+            auto_closed,
+        )
+        .await?;
+        match row
+            .get::<Option<String>, _>("parent_task_id")
+            .map(parse_id)
+            .transpose()?
+        {
+            Some(next) => {
+                source_id = parent_id;
+                parent_id = next;
+            }
+            None => return Ok(()),
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn close_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: AutomationActor<'_>,
+    task_id: Id,
+    from: Id,
+    to: Id,
+    source_id: Id,
+    reason: &str,
+    auto_closed: &mut Vec<AutoClosed>,
+) -> Result<(), TaskError> {
+    // updated_at drives the completed_at trigger from 0033.
+    sqlx::query(
+        "UPDATE tasks SET status_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+    )
+    .bind(to.to_string())
+    .bind(actor.now.as_millis())
+    .bind(task_id.to_string())
+    .execute(&mut **tx)
+    .await?;
+    // The source's project lets the activity feed build its identifier (ORB-91C0).
+    let source_project_id: String = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
+        .bind(source_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+    audit::record(
+        tx,
+        actor.workspace_id,
+        Some(actor.actor_id),
+        "task.auto_closed",
+        AuditOutcome::Success,
+        "task",
+        Some(task_id),
+        actor.request_id,
+        json!({
+            "source_task_id": source_id,
+            "source_project_id": source_project_id,
+            "from_status_id": from,
+            "to_status_id": to,
+            "reason": reason,
+        }),
+        actor.now,
+    )
+    .await?;
+    auto_closed.push(AutoClosed {
+        id: task_id,
+        status_id: to,
+    });
+    Ok(())
 }
