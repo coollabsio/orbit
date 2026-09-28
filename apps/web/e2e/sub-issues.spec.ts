@@ -99,7 +99,10 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
       ], next_cursor: null }
     }
     if (path.endsWith('/tasks/trash')) {
-      const trashed = tasks.filter((task) => task.deleted_at && tasks.find((item) => item.id === task.parent_task_id)?.deleted_at !== task.deleted_at)
+      // ruling F7: the real server lists every trashed row (parent AND its trashed sub-issues), each with its own
+      // trashed_descendant_count — see apps/server/tests/tasks_api.rs ~5250-5269 (parent, child, earlier-trashed task
+      // are three separate items). The web only shows a "+N sub-issues" label on rows that have one.
+      const trashed = tasks.filter((task) => task.deleted_at)
       body = { items: trashed.map((task) => ({ ...view(tasks, task), trashed_descendant_count: descendants(tasks, task.id).filter((item) => item.deleted_at === task.deleted_at).length })), next_cursor: null }
     } else if (path.endsWith('/tasks') || path.endsWith('/tasks/query')) {
       const parentId = url.searchParams.get('parent_task_id')
@@ -173,11 +176,15 @@ test('deleting a parent moves its subtree to trash; restoring brings the subtree
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await page.getByRole('button', { name: 'Move to trash', exact: true }).click()
   await page.goto('/tasks-trash?workspace=alpha')
-  await expect(page.getByText('Checkout redesign')).toBeVisible()
-  await expect(page.getByText('+2 sub-issues')).toBeVisible()
-  await expect(page.getByText('Payment form')).toHaveCount(0)
+  // ruling F7: the mocked trash endpoint lists every trashed row (parent AND its trashed sub-issues), exactly like
+  // the real server (apps/server/tests/tasks_api.rs ~5250-5269) — only the parent's row carries the "+N sub-issues"
+  // annotation, and restoring it must bring the whole subtree back with it.
+  await expect(page.getByText('Payment form')).toBeVisible()
+  await expect(page.getByText('Receipt email')).toBeVisible()
+  const parentRow = page.locator('div').filter({ hasText: 'Checkout redesign' }).filter({ hasText: '+2 sub-issues' }).last()
+  await expect(parentRow.getByText('+2 sub-issues')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Restore', exact: true }).click()
+  await parentRow.getByRole('button', { name: 'Restore', exact: true }).click()
   await expect(page.getByText('Trash is empty')).toBeVisible()
   await page.goto('/tasks?workspace=alpha')
   await expect(page.locator('[data-task-row][data-depth="1"]')).toHaveCount(2)
