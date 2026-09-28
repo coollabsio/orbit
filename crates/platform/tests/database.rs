@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        33
+        34
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 33
+            binary_version: 34
         }
     ));
 }
@@ -1642,4 +1642,130 @@ async fn views_migration_backfills_completed_at_and_creates_view_tables() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("CHECK constraint failed"), "{error}");
+}
+
+#[tokio::test]
+async fn sub_issues_migration_links_parents_in_one_workspace_and_adds_project_flags() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 33)
+        .run(&database)
+        .await
+        .unwrap();
+
+    let [user, workspace, membership, project]: [Id; 4] = std::array::from_fn(|_| Id::new_v7());
+    let [other_workspace, other_membership, other_project]: [Id; 3] =
+        std::array::from_fn(|_| Id::new_v7());
+    let [todo, other_todo, parent, child, foreign]: [Id; 5] = std::array::from_fn(|_| Id::new_v7());
+    let seed = format!(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'Orbit', 0, '{membership}', 1, 1),
+                ('{other_workspace}', 'Other', 0, '{other_membership}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{membership}', '{workspace}', '{user}', 'owner', 0, 1, 1),
+                ('{other_membership}', '{other_workspace}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at)
+         VALUES ('{project}', '{workspace}', 'Live', 'LIVE', '#000000', 0, NULL, 1, 1),
+                ('{other_project}', '{other_workspace}', 'Other', 'OTH', '#000000', 0, NULL, 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at)
+         VALUES ('{todo}', '{workspace}', '{project}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1),
+                ('{other_todo}', '{other_workspace}', '{other_project}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at)
+         VALUES ('{parent}', '{workspace}', '{project}', '{todo}', 'Parent', '{user}', 1, 1),
+                ('{child}', '{workspace}', '{project}', '{todo}', 'Child', '{user}', 1, 1),
+                ('{foreign}', '{other_workspace}', '{other_project}', '{other_todo}', 'Foreign', '{user}', 1, 1);"
+    );
+    let mut transaction = database.transaction().await.unwrap();
+    sqlx::raw_sql(&seed)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    // Existing projects start with both automations on; existing tasks are top-level.
+    assert_eq!(
+        database
+            .scalar::<i64>(&format!(
+                "SELECT auto_close_parent + auto_close_sub_issues FROM projects WHERE id = '{project}'"
+            ))
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM tasks WHERE parent_task_id IS NOT NULL")
+            .await
+            .unwrap(),
+        0
+    );
+
+    database
+        .execute(&format!(
+            "UPDATE tasks SET parent_task_id = '{parent}' WHERE id = '{child}'"
+        ))
+        .await
+        .unwrap();
+    for statement in [
+        format!("UPDATE tasks SET parent_task_id = id WHERE id = '{parent}'"),
+        format!("UPDATE tasks SET parent_task_id = '{foreign}' WHERE id = '{parent}'"),
+        format!(
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, parent_task_id, created_at, updated_at) \
+             VALUES ('{}', '{workspace}', '{project}', '{todo}', 'Stray', '{user}', '{foreign}', 1, 1)",
+            Id::new_v7()
+        ),
+    ] {
+        let error = database.execute(&statement).await.unwrap_err().to_string();
+        assert!(
+            error.contains("task parent must be another task in the same workspace"),
+            "{statement}: {error}"
+        );
+    }
+    let error = database
+        .execute(&format!(
+            "UPDATE projects SET auto_close_parent = 2 WHERE id = '{project}'"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("CHECK constraint failed"), "{error}");
+
+    // Hard-deleting a parent (retention purge) detaches its children; the SET NULL update
+    // must not trip the parent triggers.
+    database
+        .execute(&format!("DELETE FROM tasks WHERE id = '{parent}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        database
+            .scalar::<i64>(&format!(
+                "SELECT COUNT(*) FROM tasks WHERE id = '{child}' AND parent_task_id IS NULL"
+            ))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        database
+            .scalar::<String>("PRAGMA integrity_check")
+            .await
+            .unwrap(),
+        "ok"
+    );
 }
