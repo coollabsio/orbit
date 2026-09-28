@@ -26,8 +26,12 @@ const testClient = () => new QueryClient({ defaultOptions: { queries: { retry: f
 
 test('the query body carries the effective filter and the display ordering', () => {
   expect(taskQueryBody(PRESET_FILTERS.mine, { ...DEFAULT_DISPLAY, order_by: 'due_date', order_direction: 'desc', show_completed: 'past_week' })).toEqual({
-    filter: PRESET_FILTERS.mine, order_by: 'due_date', order_direction: 'desc', show_completed: 'past_week',
+    filter: PRESET_FILTERS.mine, order_by: 'due_date', order_direction: 'desc', show_completed: 'past_week', sub_issues: 'nested',
   })
+})
+
+test('hidden sub-issues travel in the query body', () => {
+  expect(taskQueryBody(emptyFilter(), { ...DEFAULT_DISPLAY, sub_issues: 'hidden' }).sub_issues).toBe('hidden')
 })
 
 test('task queries POST every page until the cursor runs out', async () => {

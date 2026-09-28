@@ -21,6 +21,7 @@ export function taskQueryBody(filter: FilterGroup, display: DisplayOptions): Tas
     order_by: display.order_by,
     order_direction: display.order_direction,
     show_completed: display.show_completed,
+    sub_issues: display.sub_issues,
   }
 }
 

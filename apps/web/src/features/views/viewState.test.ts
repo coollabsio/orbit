@@ -29,8 +29,8 @@ const high: Condition = { field: 'priority', operator: 'is', value: ['high'] }
 test('the default display matches the spec and every default is a fresh copy', () => {
   expect(DEFAULT_DISPLAY).toEqual({
     layout: 'list', group_by: 'status', sub_group_by: 'none', order_by: 'manual', order_direction: 'asc',
-    properties: ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels'],
-    show_completed: 'all', show_empty_groups: false,
+    properties: ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels', 'sub_issue_progress'],
+    show_completed: 'all', show_empty_groups: false, sub_issues: 'nested',
   })
   const edited = defaultViewState()
   edited.display.properties.push('created')
@@ -72,6 +72,13 @@ test('normalizeDisplay coerces board grouping, repeated sub-grouping and propert
 test('normalizeViewState fills display keys missing from stored state', () => {
   const stored = { filter: { op: 'and', children: [high] }, display: { layout: 'board' } } as unknown as ViewState
   expect(normalizeViewState(stored)).toEqual({ filter: { op: 'and', children: [high] }, display: { ...DEFAULT_DISPLAY, layout: 'board' } })
+})
+
+test('a stored display without sub_issues opens nested; the progress property sorts last', () => {
+  const { sub_issues: _mode, ...legacy } = DEFAULT_DISPLAY
+  const state = normalizeViewState({ filter: emptyFilter(), display: { ...legacy, properties: ['sub_issue_progress', 'id'] } as never })
+  expect(state.display.sub_issues).toBe('nested')
+  expect(state.display.properties).toEqual(['id', 'sub_issue_progress'])
 })
 
 test('viewStatesEqual ignores property and multi-value order but not the tree', () => {

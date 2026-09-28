@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { AttachmentRecord, AuditEvent, CommentRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
-import { taskFromRecord, taskIdentifier } from './models'
+import { refIdentifier, taskFromRecord, taskIdentifier } from './models'
 
 const project: ProjectRecord = {
   id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'LCH', color: '#123456',
@@ -118,4 +118,29 @@ test('cross-project relation events use the other project key; missing metadata 
     relationEvent('task.updated', {}),
   ], [project, api])
   expect(task.activity.map((item) => item.text)).toEqual(['Added blocker API-91C0', 'Added relation', 'Updated task'])
+})
+
+test('parent, ancestors and sub-issue counts reach the task view model', () => {
+  const task = taskFromRecord({
+    ...record,
+    parent_task_id: '01HZYPARENT0000000000012',
+    parent: { id: '01HZYPARENT0000000000012', title: 'Checkout redesign', project_key: 'ORB' },
+    sub_issue_count: 5,
+    sub_issue_closed_count: 2,
+    ancestors: [
+      { id: '01HZYROOT00000000000009A', title: 'Q4 launch', project_key: 'ORB' },
+      { id: '01HZYPARENT0000000000012', title: 'Checkout redesign', project_key: 'ORB' },
+    ],
+  } as TaskRecord, project)
+  expect(task).toMatchObject({
+    parentTaskId: '01HZYPARENT0000000000012',
+    parent: { id: '01HZYPARENT0000000000012', title: 'Checkout redesign', projectKey: 'ORB' },
+    subIssueCount: 5,
+    subIssueClosedCount: 2,
+  })
+  expect(task.ancestors!.map((ref) => refIdentifier(ref))).toEqual(['ORB-009A', 'ORB-0012'])
+})
+
+test('records without sub-issue fields have no parent, no ancestors and no sub-issues', () => {
+  expect(taskFromRecord(record, project)).toMatchObject({ parentTaskId: null, parent: null, subIssueCount: 0, subIssueClosedCount: 0, ancestors: [] })
 })

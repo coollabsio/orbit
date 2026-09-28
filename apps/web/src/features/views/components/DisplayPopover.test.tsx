@@ -100,3 +100,17 @@ test('ordering hides on timeline, where rows always follow dates', async () => {
   await userEvent.click(view.getByRole('button', { name: 'List' }))
   expect(view.getAllByRole('combobox', { name: 'Ordering' })).toHaveLength(1)
 })
+
+test('sub-issues: nested by default, flat or hidden, plus a progress property', async () => {
+  const view = render(<Harness />)
+  open(view)
+  const select = await view.findByRole('combobox', { name: 'Sub-issues' })
+  expect(select.textContent).toContain('Nested')
+  fireEvent.click(select)
+  const options = await view.findAllByRole('option')
+  expect(options.map((option) => option.textContent)).toEqual(['Nested', 'Flat', 'Hidden'])
+  await userEvent.click(view.getByRole('option', { name: 'Hidden' }))
+  expect(read(view).sub_issues).toBe('hidden')
+  await userEvent.click(view.getByRole('button', { name: 'Sub-issue progress' }))
+  expect(read(view).properties).not.toContain('sub_issue_progress')
+})

@@ -72,3 +72,7 @@ test('duplicate calls go through the task PATCH and the atomic bulk endpoint', a
     { method: 'POST', path: '/api/v1/workspaces/workspace-1/tasks/bulk', body: { updates: [{ id: 'a', expected_version: 2, duplicate_of_id: null }] } },
   ])
 })
+
+test('the optimistic patch applies a detached parent at once', () => {
+  expect(optimisticTaskPatch({ parent_task_id: null })).toEqual({ parent_task_id: null })
+})

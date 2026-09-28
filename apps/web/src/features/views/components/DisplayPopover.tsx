@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { shouldIgnoreShortcut } from '../shortcuts'
-import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type TaskProperty } from '../viewState'
+import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS } from '../displayMeta'
 import { POPOVER_MOTION } from './motion'
 
@@ -43,8 +43,12 @@ const PROPERTY_LABEL: Record<TaskProperty, string> = {
   labels: 'Labels',
   created: 'Created',
   updated: 'Updated',
+  sub_issue_progress: 'Sub-issue progress',
 }
-const PROPERTY_ORDER: TaskProperty[] = ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels', 'created', 'updated']
+const PROPERTY_ORDER: TaskProperty[] = ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels', 'created', 'updated', 'sub_issue_progress']
+
+const SUB_ISSUE_LABEL: Record<SubIssuesMode, string> = { nested: 'Nested', flat: 'Flat', hidden: 'Hidden' }
+const SUB_ISSUE_OPTIONS: SubIssuesMode[] = ['nested', 'flat', 'hidden']
 
 /**
  * Pressed chips take the pink accent as a tint. `aria-pressed:` (not `data-[pressed]:`) so tailwind-merge replaces the
@@ -189,6 +193,14 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
                 </div>
               </Row>
             )}
+            <Row label="Sub-issues">
+              <OptionSelect
+                label="Sub-issues"
+                value={display.sub_issues}
+                items={SUB_ISSUE_OPTIONS.map((mode) => ({ value: mode, label: SUB_ISSUE_LABEL[mode] }))}
+                onChange={(sub_issues) => onChange({ sub_issues })}
+              />
+            </Row>
             <Row label="Completed tasks">
               <OptionSelect
                 label="Completed tasks"

@@ -82,6 +82,16 @@ export interface Task {
   duplicateOf?: TaskRef | null
   /** At least one open task (not completed, cancelled or duplicate) blocks this one. */
   blocked?: boolean
+  /** Parent task id; null at the top level. */
+  parentTaskId?: string | null
+  /** The parent, for the "Parent title ›" label. */
+  parent?: TaskKeyRef | null
+  /** Direct live sub-issues. */
+  subIssueCount?: number
+  /** Direct sub-issues that are completed or cancelled. */
+  subIssueClosedCount?: number
+  /** Root first; only the detail endpoint sends it. */
+  ancestors?: TaskKeyRef[]
   version: number
 }
 
@@ -140,6 +150,29 @@ export function taskIdentifier(taskId: string, project: Pick<ProjectRecord, 'key
   return `${project?.key ?? 'TASK'}-${taskId.slice(-4).toUpperCase()}`
 }
 
+/** A task named by id, title and project key: the "Parent title ›" label and the detail breadcrumb. */
+export interface TaskKeyRef {
+  id: string
+  title: string
+  projectKey: string
+}
+
+/** Identifier of a `TaskKeyRef`, same rule as `taskIdentifier`: ORB-91C0. */
+export function refIdentifier(ref: Pick<TaskKeyRef, 'id' | 'projectKey'>): string {
+  return `${ref.projectKey}-${ref.id.slice(-4).toUpperCase()}`
+}
+
+type WireRef = { id: string; title: string; project_key: string }
+/** Sub-issue fields as the API sends them (`ancestors`: GET /tasks/{id} only). Read structurally. */
+export type SubIssueWire = {
+  parent_task_id?: string | null
+  parent?: WireRef | null
+  sub_issue_count?: number
+  sub_issue_closed_count?: number
+  ancestors?: WireRef[]
+}
+const keyRef = (ref: WireRef): TaskKeyRef => ({ id: ref.id, title: ref.title, projectKey: ref.project_key })
+
 export function taskFromRecord(
   record: TaskRecord,
   project: ProjectRecord | undefined,
@@ -164,6 +197,7 @@ export function taskFromRecord(
   const priority: TaskPriority = ['none', 'low', 'medium', 'high', 'urgent'].includes(record.priority)
     ? record.priority as TaskPriority
     : 'none'
+  const wire = record as TaskRecord & SubIssueWire
   return {
     id: record.id,
     identifier: taskIdentifier(record.id, project),
@@ -213,6 +247,11 @@ export function taskFromRecord(
       ? { id: record.duplicate_of.id, projectId: record.duplicate_of.project_id, title: record.duplicate_of.title }
       : null,
     blocked: record.blocked ?? false,
+    parentTaskId: wire.parent_task_id ?? null,
+    parent: wire.parent ? keyRef(wire.parent) : null,
+    subIssueCount: wire.sub_issue_count ?? 0,
+    subIssueClosedCount: wire.sub_issue_closed_count ?? 0,
+    ancestors: (wire.ancestors ?? []).map(keyRef),
     version: record.version,
   }
 }
