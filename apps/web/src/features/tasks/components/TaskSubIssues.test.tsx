@@ -1,8 +1,9 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { SubIssuesSection, type SubIssuesSectionProps } from './TaskSubIssues'
@@ -111,4 +112,26 @@ test('rows list sub-issues in creation order with progress; × removes one from 
   fireEvent.click(view.getByRole('button', { name: 'Remove ORB-0031 from parent' }))
   await waitFor(() => expect(writes(calls)).toHaveLength(1))
   expect(writes(calls)[0]).toMatchObject({ method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-0031', body: { expected_version: 1, parent_task_id: null } })
+})
+
+test('removing the last open sub-issue announces the parent the server closed', async () => {
+  const calls: Call[] = []
+  const embedded = { id: 'task-0012', title: 'Checkout redesign', project_key: 'ORB' }
+  api(calls, [{ ...child('task-0031', 'Payment form', 'done'), parent: embedded } as never, { ...child('task-0032', 'Receipt email'), parent: embedded } as never])
+  const detach = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method !== 'PATCH') return detach(input)
+    calls.push({ method: 'PATCH', path: new URL(request.url).pathname, search: '', body: await request.json() })
+    return Response.json({ ...child('task-0032', 'Receipt email'), parent_task_id: null, version: 2, auto_closed: [{ id: 'task-0012', status_id: 'done' }] })
+  }) as unknown as typeof fetch
+  const success = spyOn(toast, 'success').mockImplementation(() => 0)
+  try {
+    const view = renderSection()
+    fireEvent.click(await view.findByRole('button', { name: 'Remove ORB-0032 from parent' }))
+    await waitFor(() => expect(success.mock.calls.map((call) => call[0])).toContain('Closed parent ORB-0012'))
+    expect(success.mock.calls.map((call) => call[0])).toContain('ORB-0032 is no longer a sub-issue')
+  } finally {
+    success.mockRestore()
+  }
 })
