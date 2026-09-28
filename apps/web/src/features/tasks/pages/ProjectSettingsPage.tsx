@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -252,6 +253,8 @@ export function ProjectSettingsPage() {
 
               <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
 
+              <SubIssueSettingsCard project={project} />
+
               <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
                 <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
                   Delete project
@@ -371,6 +374,43 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
       </SettingsCard>
       {updateProject.isError ? <p role="alert" className="text-destructive">Project update failed. <Button variant="ghost" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</Button></p> : null}
     </>
+  )
+}
+
+const SUB_ISSUE_SETTINGS = [
+  { field: 'auto_close_parent', label: 'Close parent when all sub-issues are done', description: 'When every sub-issue is closed and at least one is done, the parent moves to its first done status.' },
+  { field: 'auto_close_sub_issues', label: 'Close open sub-issues when parent is closed', description: 'Open sub-issues at every level move to done, or to cancelled when the parent is cancelled.' },
+] as const
+
+/** Saves on toggle (no draft): each switch is one decision. The body repeats name/key/color, which the PATCH requires. */
+function SubIssueSettingsCard({ project }: { project: Project }) {
+  const { workspace } = useWorkspace()
+  const updateProject = useUpdateProject(workspace.id, project.id)
+  const pending = updateProject.isPending ? updateProject.variables : undefined
+  const value = (field: (typeof SUB_ISSUE_SETTINGS)[number]['field']) => pending?.[field] ?? project[field] ?? true
+  const save = (field: (typeof SUB_ISSUE_SETTINGS)[number]['field'], checked: boolean) => updateProject.mutate({
+    name: project.name, key: project.key, color: project.color, expected_version: project.version,
+    auto_close_parent: value('auto_close_parent'), auto_close_sub_issues: value('auto_close_sub_issues'), [field]: checked,
+  })
+  return (
+    <SettingsCard title="Sub-issues" description="Automations that run when a task or its sub-issues close.">
+      <div className="flex flex-col divide-y divide-border">
+        {SUB_ISSUE_SETTINGS.map((setting) => (
+          <div key={setting.field} className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-sm font-medium text-foreground">{setting.label}</span>
+              <span className="text-xs text-muted-foreground">{setting.description}</span>
+            </div>
+            <Switch aria-label={setting.label} checked={value(setting.field)} disabled={updateProject.isPending} onCheckedChange={(checked: boolean) => save(setting.field, checked)} />
+          </div>
+        ))}
+      </div>
+      {updateProject.isError ? (
+        <p role="alert" className="mt-2 text-xs text-destructive">
+          Couldn’t save the sub-issue settings. <Button variant="ghost" size="xs" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</Button>
+        </p>
+      ) : null}
+    </SettingsCard>
   )
 }
 
