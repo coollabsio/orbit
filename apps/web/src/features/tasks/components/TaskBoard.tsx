@@ -42,13 +42,15 @@ export interface TaskBoardProps {
 
 const COLUMN_WIDTH = 320
 const ZONE_RING = 'data-[drop-over]:ring-1 data-[drop-over]:ring-primary/40 data-[drop-over]:ring-inset'
-const PLACEHOLDER = 'min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10'
+/** Held (a card owns the hover): hidden but keeps its space, so the cards under the pointer do not shift. */
+const PLACEHOLDER = 'min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10 data-[held]:invisible'
 /**
  * Lift only where hover is real and motion is welcome; transition named properties, never `all`. While a drop would
- * nest into the card: tint + inset ring (the chip names the action).
+ * nest into the card: tint + inset ring (the chip names the action). The hover styles skip a nest target: `hover-fine`
+ * is emitted after `data-*` at equal specificity, so they must be mutually exclusive (.ai/lessons.md).
  */
 const CARD =
-  'relative flex cursor-pointer flex-col gap-[7px] rounded-md border border-border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out hover-fine:hover:border-foreground/20 hover-fine:hover:bg-accent hover-fine:hover:shadow-md motion-safe:hover-fine:hover:-translate-y-px data-[dragging]:border-dashed data-[dragging]:opacity-35 data-[active]:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-[nest=inside]:border-primary/40 data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset'
+  'relative flex cursor-pointer flex-col gap-[7px] rounded-md border border-border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out not-data-[nest=inside]:hover-fine:hover:border-foreground/20 not-data-[nest=inside]:hover-fine:hover:bg-accent not-data-[nest=inside]:hover-fine:hover:shadow-md motion-safe:not-data-[nest=inside]:hover-fine:hover:-translate-y-px data-[dragging]:border-dashed data-[dragging]:opacity-35 data-[active]:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-[nest=inside]:border-primary/40 data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset'
 /**
  * Column headers are 12px padding + 38px tall; lane headers stick right under them. A collapsed lane is a
  * drop zone itself, tinted like a list group header while a card is over it.
@@ -69,7 +71,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
   const [duplicateTask, setDuplicateTask] = useState<Task | null>(null)
   const [collapsed, toggle] = useCollapsedGroups(`orbit:task_board_lanes_collapsed:${workspace.id}:${collapseScope}`)
   const manual = display.order_by === 'manual'
-  const { drag, drop, startDrag, endDrag, clearDrop, zoneProps, saving } = useGroupDrop({
+  const { drag, drop, startDrag, endDrag, holdDrop, zoneProps, saving } = useGroupDrop({
     tasks,
     manual,
     groupContext,
@@ -83,7 +85,8 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     tree: null,
     manual,
     dragId: drag?.taskId ?? null,
-    onTakeOver: clearDrop,
+    // hold, not clear: removing the in-flow placeholder would shift the cards under the pointer (flicker)
+    onTakeOver: holdDrop,
     endDrag,
     onNest: (plan, dragId) => {
       const moving = tasks.find((task) => task.id === dragId)
@@ -182,7 +185,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const placeholderIndex = drop?.zone === zone ? drop.index : null
     // the dragged card stays mounted (faded): unmounting the drag source cancels the browser drag
     const others = drag ? cell.filter((task) => task.id !== drag.taskId) : cell
-    const placeholder = <div className={PLACEHOLDER} style={{ height: dragHeight }} />
+    const placeholder = <div data-board-placeholder data-held={(drop?.zone === zone && drop.held) || undefined} className={PLACEHOLDER} style={{ height: dragHeight }} />
     return (
       <>
         {cell.map((task) => {

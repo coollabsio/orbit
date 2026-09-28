@@ -8,8 +8,11 @@ import { acceptsDrop, placementUpdates, planDrop, zoneIdOf, type GroupValues, ty
 import { reportMoveError } from './moveErrors'
 
 type GroupDrag = { taskId: string; from: GroupValues }
-/** `index` = insertion slot among the zone's other items; null when the order is not manual. */
-type GroupDrop = { zone: string; index: number | null }
+/**
+ * `index` = insertion slot among the zone's other items; null when the order is not manual. `held`: an item under the
+ * pointer took the hover over (`holdDrop`); the slot keeps its place but the zone shows no target.
+ */
+type GroupDrop = { zone: string; index: number | null; held?: boolean }
 /**
  * Where a drop lands: a list group section, a board column or cell, or a collapsed group / swim lane.
  * A collapsed zone carries its own values only (a hidden value must never be written). `itemsShown` is
@@ -97,7 +100,7 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
       return indexAt(element, itemSelector, clientY)
     }
     return {
-      'data-drop-over': drop?.zone === zone.id || undefined,
+      'data-drop-over': (drop?.zone === zone.id && !drop.held) || undefined,
       onDragOver: (event: DragEvent<HTMLElement>) => {
         if (!drag || !acceptsDrop(drag.from, zone.values)) return
         // same zone without manual order: nothing would change (unless a nested row detaches), so no drop target
@@ -106,7 +109,7 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
         event.stopPropagation()
         event.dataTransfer.dropEffect = 'move'
         const index = indexFor(event.currentTarget, event.clientY)
-        if (drop?.zone !== zone.id || drop.index !== index) setDrop({ zone: zone.id, index })
+        if (drop?.zone !== zone.id || drop.index !== index || drop.held) setDrop({ zone: zone.id, index })
       },
       onDragLeave: (event: DragEvent<HTMLElement>) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null) && drop?.zone === zone.id) setDrop(null)
@@ -122,6 +125,11 @@ export function useGroupDrop({ tasks, manual, groupContext, itemSelector, onDupl
 
   /** A row took the hover over (`useNestDrop`): hide the zone's insertion line. */
   const clearDrop = () => setDrop(null)
+  /**
+   * A card took the hover over: keep the slot (its placeholder keeps its space, hidden) so nothing below shifts
+   * under the pointer. The zone's next dragover releases it.
+   */
+  const holdDrop = () => setDrop((current) => (current && !current.held ? { ...current, held: true } : current))
 
-  return { drag, drop, startDrag, endDrag, clearDrop, zoneProps, saving: moveTasks.isPending || updateTask.isPending }
+  return { drag, drop, startDrag, endDrag, clearDrop, holdDrop, zoneProps, saving: moveTasks.isPending || updateTask.isPending }
 }
