@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { ApiProblem } from '@/api/problem'
-import { parentErrorMessage, parentPickerTitle, parentToastMessage } from './subIssuesLib'
+import type { TaskStatusDef } from '@/features/tasks/api/models'
+import { breadcrumbParts, parentErrorMessage, parentPickerTitle, parentToastMessage, subIssueDefaults, trashedSubIssuesLabel } from './subIssuesLib'
 
 const problem = (code: string) => new ApiProblem({ type: 'about:blank', title: 'Unprocessable', status: 422, detail: 'x', code, instance: '/', request_id: 'r' } as never)
 
@@ -20,4 +21,36 @@ test('server refusals explain themselves', () => {
 test('the parent picker title names the task or the count', () => {
   expect(parentPickerTitle('ORB-31')).toBe('Set parent of ORB-31…')
   expect(parentPickerTitle(3)).toBe('Set parent of 3 tasks…')
+})
+
+const statuses: TaskStatusDef[] = [
+  { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#888', category: 'unstarted', position: 0, version: 1 },
+  { id: 'done', projectId: 'project-1', name: 'Done', description: '', color: '#4cb782', category: 'completed', position: 1, version: 1 },
+]
+const parent = { id: 'task-0012', projectId: 'project-1', priority: 'high' as const, assigneeIds: ['user-2'] }
+
+test('a new sub-issue takes the parent\'s project, priority and parent, the default status, and no labels', () => {
+  expect(subIssueDefaults(parent, { statuses, currentUserId: 'user-1', siblings: [] })).toEqual({
+    project_id: 'project-1', status_id: 'todo', priority: 'high', assignee_ids: [], parent_task_id: 'task-0012',
+  })
+  expect(subIssueDefaults({ ...parent, projectId: 'project-9' }, { statuses, currentUserId: 'user-1', siblings: [] })).toBeNull()
+})
+
+test('the parent\'s assignee is copied only for its own assignee or when every sub-issue shares it', () => {
+  const defaults = (currentUserId: string, siblings: Array<{ assigneeIds: string[] }>) =>
+    subIssueDefaults(parent, { statuses, currentUserId, siblings })!.assignee_ids
+  expect(defaults('user-2', [])).toEqual(['user-2'])
+  expect(defaults('user-1', [{ assigneeIds: ['user-2'] }, { assigneeIds: ['user-2'] }])).toEqual(['user-2'])
+  expect(defaults('user-1', [{ assigneeIds: ['user-2'] }, { assigneeIds: [] }])).toEqual([])
+})
+
+test('more than three ancestors collapse the middle ones', () => {
+  expect(breadcrumbParts(['a', 'b', 'c'])).toEqual({ head: ['a', 'b', 'c'], hidden: [], tail: [] })
+  expect(breadcrumbParts(['a', 'b', 'c', 'd', 'e'])).toEqual({ head: ['a'], hidden: ['b', 'c', 'd'], tail: ['e'] })
+})
+
+test('trash rows count the sub-issues trashed with a parent', () => {
+  expect(trashedSubIssuesLabel(0)).toBeNull()
+  expect(trashedSubIssuesLabel(1)).toBe('+1 sub-issue')
+  expect(trashedSubIssuesLabel(3)).toBe('+3 sub-issues')
 })

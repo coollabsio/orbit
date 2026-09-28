@@ -145,6 +145,36 @@ function relationActivity(
   }
 }
 
+/**
+ * Parent and automation events (spec §6). The other task's key comes from the record's parent/ancestors, else from
+ * the `*_project_id` metadata the server sends, else the task's own project.
+ */
+function subIssueActivity(
+  action: string,
+  metadata: Record<string, unknown>,
+  identifierOf: (taskId: string, projectId: string | undefined) => string,
+): Pick<TaskActivity, 'text' | 'related' | 'statusId'> | null {
+  const text = (key: string) => (typeof metadata[key] === 'string' ? metadata[key] as string : undefined)
+  // `to` → `to_project_id`, `source_task_id` → `source_project_id`
+  const link = (key: string) => {
+    const taskId = text(key)
+    return taskId ? { taskId, identifier: identifierOf(taskId, text(`${key.replace(/_task_id$/, '')}_project_id`)) } : undefined
+  }
+  if (action === 'task.parent_changed') {
+    const to = link('to')
+    if (to) return { text: `Set parent to ${to.identifier}`, related: to }
+    const from = link('from')
+    return from ? { text: `Removed parent ${from.identifier}`, related: from } : { text: 'Changed parent' }
+  }
+  if (action === 'task.auto_closed') {
+    const statusId = text('to_status_id')
+    const source = link('source_task_id')
+    if (metadata.reason === 'parent_closed' && source) return { text: `Closed automatically because ${source.identifier} was closed`, related: source, statusId }
+    return { text: 'Closed automatically because all sub-issues were done', statusId }
+  }
+  return null
+}
+
 /** Human task id: project key + last four id characters, e.g. ORB-91C0. */
 export function taskIdentifier(taskId: string, project: Pick<ProjectRecord, 'key'> | undefined): string {
   return `${project?.key ?? 'TASK'}-${taskId.slice(-4).toUpperCase()}`
@@ -198,6 +228,12 @@ export function taskFromRecord(
     ? record.priority as TaskPriority
     : 'none'
   const wire = record as TaskRecord & SubIssueWire
+  // tasks named in activity: the parent and ancestors carry their own project key
+  const knownRefs = [...(wire.parent ? [wire.parent] : []), ...(wire.ancestors ?? [])]
+  const identifierOf = (taskId: string, projectId: string | undefined) => {
+    const ref = knownRefs.find((item) => item.id === taskId)
+    return ref ? refIdentifier(keyRef(ref)) : taskIdentifier(taskId, projectFor(projectId))
+  }
   return {
     id: record.id,
     identifier: taskIdentifier(record.id, project),
@@ -232,14 +268,16 @@ export function taskFromRecord(
     })),
     activity: activity.map((event) => {
       const metadata = (event.metadata ?? {}) as Record<string, unknown>
-      const relation = relationActivity(event.action, metadata, (taskId, projectId) => taskIdentifier(taskId, projectFor(projectId)))
+      const sentence: Pick<TaskActivity, 'text' | 'related' | 'statusId'> | null =
+        relationActivity(event.action, metadata, identifierOf) ?? subIssueActivity(event.action, metadata, identifierOf)
       return {
         id: event.id,
         actorId: event.actor_id ?? '',
         actorName: typeof metadata.actor_service_account_name === 'string' ? metadata.actor_service_account_name : undefined,
         actorServiceAccountId: typeof metadata.actor_service_account_id === 'string' ? metadata.actor_service_account_id : undefined,
-        text: relation?.text ?? genericActivityText(event.action),
-        related: relation?.related,
+        text: sentence?.text ?? genericActivityText(event.action),
+        related: sentence?.related,
+        statusId: sentence?.statusId,
         createdAt: event.occurred_at,
       }
     }),

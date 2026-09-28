@@ -5,7 +5,8 @@ import { updateTask } from '@/api/generated/sdk.gen'
 import type { BulkItem, TaskRecord } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import type { Task } from '@/features/tasks/api/models'
-import { reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'
+import { announceAutoClosed, autoClosedOf } from '@/features/tasks/api/autoClosed'
+import { findCachedTask, reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'
 import { bulkTaskDuplicateUpdates } from '@/features/tasks/api/tasks'
 import { parentErrorMessage, parentToastMessage } from '@/features/tasks/subIssuesLib'
 import { placementUpdates } from '@/features/views/layoutGroups'
@@ -19,7 +20,13 @@ export type ParentTarget = { id: string; identifier: string }
  */
 export function useParentActions(workspaceId: string) {
   const queryClient = useQueryClient()
-  const settle = (records: TaskRecord[]) => {
+  /** `response` (raw PATCH/bulk body) names tasks the server auto-closed: a detach can close the old parent (rule A). */
+  const settle = (records: TaskRecord[], response?: unknown) => {
+    if (autoClosedOf(response).length > 0) {
+      // before reconciling: the cache still has the old parents, so a closed former parent reads as a parent
+      const before = records.flatMap((record) => findCachedTask(queryClient, workspaceId, record.id) ?? [])
+      announceAutoClosed(queryClient, workspaceId, [...records, ...before], response)
+    }
     for (const record of records) reconcileWorkspaceTask(queryClient, workspaceId, record)
     void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
   }
@@ -37,8 +44,8 @@ export function useParentActions(workspaceId: string) {
   /** Undo: every task goes back to its parent before the change (`null` = it was top-level). */
   const restore = async (records: TaskRecord[], previous: ReadonlyMap<string, string | null>) => {
     try {
-      const { records: restored } = await write(records.map((record) => ({ id: record.id, expected_version: record.version, parent_task_id: previous.get(record.id) ?? null })))
-      settle(restored)
+      const { records: restored, response } = await write(records.map((record) => ({ id: record.id, expected_version: record.version, parent_task_id: previous.get(record.id) ?? null })))
+      settle(restored, response)
     } catch (error) {
       settle([])
       toast.error(parentErrorMessage(error))
@@ -60,8 +67,8 @@ export function useParentActions(workspaceId: string) {
     if (updates.length === 0) return
     const previous = new Map(changed.map((task) => [task.id, task.parentTaskId ?? null]))
     try {
-      const { records } = await write(updates)
-      settle(records)
+      const { records, response } = await write(updates)
+      settle(records, response)
       if (changed.length === 0) return
       toast.success(parentToastMessage(changed.map((task) => task.identifier), parent?.identifier ?? null), {
         action: { label: 'Undo', onClick: () => void restore(records.filter((record) => previous.has(record.id)), previous) },

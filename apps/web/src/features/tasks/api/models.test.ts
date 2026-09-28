@@ -144,3 +144,25 @@ test('parent, ancestors and sub-issue counts reach the task view model', () => {
 test('records without sub-issue fields have no parent, no ancestors and no sub-issues', () => {
   expect(taskFromRecord(record, project)).toMatchObject({ parentTaskId: null, parent: null, subIssueCount: 0, subIssueClosedCount: 0, ancestors: [] })
 })
+
+test('parent changes and automatic closes read as sentences that link the other task', () => {
+  const event = (action: string, metadata: Record<string, unknown>): AuditEvent => ({ ...activity, id: action, action, metadata })
+  const task = taskFromRecord({
+    ...record,
+    parent_task_id: '01HZYPARENT0000000000012',
+    parent: { id: '01HZYPARENT0000000000012', title: 'Checkout redesign', project_key: 'ORB' },
+  } as TaskRecord, project, [], [], [
+    event('task.parent_changed', { from: null, to: '01HZYPARENT0000000000012' }),
+    event('task.parent_changed', { from: '01HZYOTHER00000000000099', to: null }),
+    event('task.auto_closed', { source_task_id: '01HZYPARENT0000000000012', from_status_id: 'status-1', to_status_id: 'status-done', reason: 'parent_closed' }),
+    event('task.auto_closed', { source_task_id: '01HZYCHILD00000000000031', from_status_id: 'status-1', to_status_id: 'status-done', reason: 'sub_issues_done' }),
+  ])
+  expect(task.activity.map((item) => item.text)).toEqual([
+    'Set parent to ORB-0012',
+    'Removed parent LCH-0099',
+    'Closed automatically because ORB-0012 was closed',
+    'Closed automatically because all sub-issues were done',
+  ])
+  expect(task.activity[0]!.related).toEqual({ taskId: '01HZYPARENT0000000000012', identifier: 'ORB-0012' })
+  expect(task.activity[2]!.statusId).toBe('status-done')
+})
