@@ -41,7 +41,7 @@ function captureWrites(writes: Write[]) {
   }) as unknown as typeof fetch
 }
 
-function renderBoard(tasks: Task[], options: { statuses?: TaskStatusDef[]; display?: Partial<DisplayOptions>; scope?: string } = {}) {
+function renderBoard(tasks: Task[], options: { statuses?: TaskStatusDef[]; display?: Partial<DisplayOptions>; scope?: string; onOpen?: (taskId: string) => void } = {}) {
   const statuses = options.statuses ?? [todo, doing]
   const groupContext: GroupContext = { statuses, members: [], labels: [], projects: [launch, docs], currentUserId: 'user-1', showEmpty: false }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -54,7 +54,7 @@ function renderBoard(tasks: Task[], options: { statuses?: TaskStatusDef[]; displ
     <TaskBoard
       tasks={tasks} users={[]} labels={[]} statuses={statuses} projects={[launch, docs]}
       display={{ ...DEFAULT_DISPLAY, layout: 'board', ...options.display }} groupContext={groupContext}
-      collapseScope={options.scope ?? 'all'} activeTaskId={null} onOpen={() => {}}
+      collapseScope={options.scope ?? 'all'} activeTaskId={null} onOpen={options.onOpen ?? (() => {})}
     />,
     { wrapper },
   )
@@ -242,4 +242,15 @@ test('the dragged card stays mounted while dragging', () => {
   fireEvent.dragStart(card, { dataTransfer })
   expect(card.isConnected).toBe(true)
   expect(card.getAttribute('data-dragging')).toBe('true')
+})
+
+test('cards show the parent above the title and sub-issue progress', () => {
+  const opened: string[] = []
+  const view = renderBoard([
+    { ...task('child', 'todo', 1), parentTaskId: 'parent', parent: { id: 'parent', title: 'Checkout redesign', projectKey: 'ORB' } },
+    { ...task('parent', 'todo', 2), subIssueCount: 3, subIssueClosedCount: 1 },
+  ], { onOpen: (id) => opened.push(id) })
+  fireEvent.click(within(cardOf(view, 'child')).getByRole('button', { name: 'Checkout redesign' }))
+  expect(opened).toEqual(['parent'])
+  expect(within(cardOf(view, 'parent')).getByRole('img', { name: '1 of 3 sub-issues closed' })).toBeTruthy()
 })

@@ -15,7 +15,7 @@ import {
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { BlockedIndicator } from './BlockedIndicator'
 import { projectStatuses } from '@/features/tasks/taskMeta'
-import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { refIdentifier, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { LabelRecord } from '@/api/generated/types.gen'
 import type { TaskProperty } from '@/features/views/viewState'
@@ -24,6 +24,8 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { PriorityPicker } from './PriorityPicker'
 import { LinkifiedText } from './LinkifiedText'
 import { DateStamp, DueDateChip, ProjectChip } from './TaskPropertyChips'
+import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
+import { TreeGutter } from './TreeGutter'
 
 const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
 const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
@@ -36,6 +38,14 @@ const HEADING = 'px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-fo
 /** 2px insertion line on the row edge while a manual-order drag hovers it; absolute, so nothing shifts. */
 const DROP_LINE =
   'data-[drop-edge]:before:pointer-events-none data-[drop-edge]:before:absolute data-[drop-edge]:before:inset-x-0 data-[drop-edge]:before:z-[1] data-[drop-edge]:before:h-0.5 data-[drop-edge]:before:bg-primary data-[drop-edge=top]:before:-top-px data-[drop-edge=bottom]:before:-bottom-px'
+
+/** A row's place in the nested list's tree. */
+export interface TaskRowTree {
+  depth: number
+  hasChildren: boolean
+  expanded: boolean
+  onToggle: () => void
+}
 
 interface TaskRowProps {
   task: Task
@@ -58,10 +68,14 @@ interface TaskRowProps {
   onDragEnd: () => void
   /** Duplicate needs a canonical task: the list opens its picker. */
   onRequestDuplicate: (task: Task) => void
+  /** Nested list only: indentation, guides and the chevron slot. Null in flat lists. */
+  tree: TaskRowTree | null
+  /** Muted "Parent title ›" before the title: flat lists, and nested roots whose parent is not in the result. */
+  showParent: boolean
 }
 
-/** List row: [checkbox] priority · id · status · title … labels · project · due · assignee · created · updated. */
-export function TaskRow({ task, statuses, labels, users, assignees, project, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate }: TaskRowProps) {
+/** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title · progress … labels · project · due · assignee · created · updated. */
+export function TaskRow({ task, statuses, labels, users, assignees, project, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent }: TaskRowProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
@@ -74,6 +88,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
         DROP_LINE,
       )}
       data-task-row
+      data-depth={tree?.depth ?? 0}
       data-selected={selected || undefined}
       data-dragging={dragging || undefined}
       data-drop-edge={dropEdge ?? undefined}
@@ -108,6 +123,17 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
           {task.blocked ? <BlockedIndicator /> : null}
         </span>
       ) : null}
+      {/* only the status + title area indents; the checkbox, priority and id columns stay aligned */}
+      {tree ? (
+        <TreeGutter
+          depth={tree.depth}
+          hasChildren={tree.hasChildren}
+          expanded={tree.expanded}
+          onToggle={tree.onToggle}
+          identifier={task.identifier}
+          className="-my-1.5"
+        />
+      ) : null}
       {has('status') ? (
         <div onClick={(e) => e.stopPropagation()}>
           <DropdownMenu>
@@ -137,7 +163,28 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
         </div>
       ) : null}
       {!has('id') && task.blocked ? <BlockedIndicator /> : null}
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
+      {showParent && task.parent ? (
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
+          <button
+            type="button"
+            title={`Open ${refIdentifier(task.parent)}`}
+            className="max-w-[40%] shrink-0 cursor-pointer truncate rounded-sm text-muted-foreground outline-none transition-colors duration-150 hover-fine:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpen(task.parent!.id)
+            }}
+          >
+            {task.parent.title || 'Untitled'}
+          </button>
+          <span aria-hidden className="shrink-0 text-muted-foreground/50">›</span>
+          <span className="min-w-0 flex-1 truncate font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
+      )}
+      {has('sub_issue_progress') && (task.subIssueCount ?? 0) > 0 ? (
+        <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} className="max-[640px]:hidden" />
+      ) : null}
       {has('labels') && task.labels.length > 0 ? (
         <span className="flex shrink-0 gap-1 max-[1099px]:hidden">
           {task.labels.map((labelId) => {

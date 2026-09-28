@@ -17,6 +17,7 @@ import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { BlockedIndicator } from './BlockedIndicator'
 import { PriorityPicker } from './PriorityPicker'
+import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { LabelPill } from './TaskLabels'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { DateStamp, DueDateChip, ProjectChip } from './TaskPropertyChips'
@@ -84,7 +85,8 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const status = statusById.get(task.statusId)
     const cardLabels = has('labels') ? task.labels.flatMap((id) => labelById.get(id) ?? []) : []
     const showTop = has('status') || has('id') || Boolean(task.blocked) || (has('assignee') && assignees.length > 0) || has('priority')
-    const showMeta = has('project') || (has('due_date') && Boolean(task.dueAt)) || has('created') || has('updated')
+    const showProgress = has('sub_issue_progress') && (task.subIssueCount ?? 0) > 0
+    const showMeta = showProgress || has('project') || (has('due_date') && Boolean(task.dueAt)) || has('created') || has('updated')
     return (
       <article
         data-board-card
@@ -119,6 +121,20 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
             </span>
           </div>
         ) : null}
+        {/* the board always renders Nested as Flat: a sub-issue names its parent above its title */}
+        {task.parent ? (
+          <button
+            type="button"
+            className="-mb-1 flex max-w-full min-w-0 cursor-pointer items-center gap-1 self-start rounded-sm text-left text-[11px] text-muted-foreground/70 outline-none transition-colors duration-150 hover-fine:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpen(task.parent!.id)
+            }}
+          >
+            <span className="truncate">{task.parent.title || 'Untitled'}</span>
+            <span aria-hidden className="shrink-0 text-muted-foreground/50">›</span>
+          </button>
+        ) : null}
         <h3 className="text-[13px] leading-[18px] font-medium text-foreground">{task.title || 'Untitled'}</h3>
         {cardLabels.length > 0 ? (
           <div className="flex flex-wrap gap-1">
@@ -127,6 +143,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
         ) : null}
         {showMeta ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/70">
+            {showProgress ? <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} /> : null}
             {has('project') ? <ProjectChip project={projectById.get(task.projectId)} /> : null}
             {has('due_date') ? <DueDateChip task={task} status={status} /> : null}
             {has('created') ? <DateStamp property="created" iso={task.createdAt} /> : null}

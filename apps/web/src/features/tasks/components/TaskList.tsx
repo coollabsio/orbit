@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Copy, Danger, Flag, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
@@ -24,6 +24,8 @@ import { CHEVRON, GroupIcon } from '@/features/views/components/GroupIcon'
 import { groupTasks, type GroupContext, type TaskGroup } from '@/features/views/grouping'
 import { canDrag, listSections, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
 import { useCollapsedGroups } from '@/features/views/useCollapsedGroups'
+import { useCollapsedTasks } from '@/features/views/useCollapsedTasks'
+import { buildTaskTree, flattenTree, subtreeSize, type TreeRow } from '@/features/views/taskTree'
 import { useGroupDrop } from '@/features/views/useGroupDrop'
 import type { DisplayOptions } from '@/features/views/viewState'
 import { TaskRow } from './TaskRow'
@@ -85,12 +87,20 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     tasks,
     manual: display.order_by === 'manual',
     groupContext,
-    itemSelector: '[data-task-row]',
+    // the insertion slot counts root rows only: a subtree moves with its root
+    itemSelector: '[data-task-row][data-depth="0"]',
     onDuplicate: (task) => setDuplicatePicker([task]),
   })
 
+  const nested = display.sub_issues === 'nested'
+  // built in every mode: the bulk "Set parent…" picker excludes descendants from it (Task 9)
+  const tree = useMemo(() => buildTaskTree(tasks), [tasks])
+  const taskTree = useCollapsedTasks(workspace.id)
+  // a subtree stays in its root's group (spec §7.2), so only roots are grouped; counts include nested rows
+  const rowCount = (zoneTasks: Task[]) => nested ? zoneTasks.reduce((total, task) => total + 1 + subtreeSize(tree, task.id), 0) : zoneTasks.length
+
   const dragEnabled = canDrag(display)
-  const sections = listSections(tasks, display, groupContext)
+  const sections = listSections(nested ? tree.roots : tasks, display, groupContext)
   const projectById = new Map(projects.map((project) => [project.id, project]))
   const statusOptions = groupTasks([], 'status', { ...groupContext, showEmpty: true })
     .filter((group) => !group.value?.startsWith('duplicate:'))
@@ -115,11 +125,16 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     // the dragged row stays mounted (faded): unmounting the drag source cancels the browser drag
     const others = drag ? zoneTasks.filter((task) => task.id !== drag.taskId) : zoneTasks
     const index = drop?.zone === zone ? drop.index : null
-    return zoneTasks.map((task) => {
-      const slot = others.indexOf(task)
-      const dropEdge = index === null || slot === -1
-        ? null
-        : slot === index ? 'top' : index === others.length && slot === others.length - 1 ? 'bottom' : null
+    const rows: TreeRow[] = nested
+      ? flattenTree(tree, zoneTasks, taskTree.collapsed)
+      : zoneTasks.map((task) => ({ task, depth: 0, indent: 0, hasChildren: false }))
+    // the end-of-zone line sits under the zone's last row, which may be a sub-issue of the last root
+    const lastRowId = rows.filter((row) => row.task.id !== drag?.taskId).at(-1)?.task.id
+    return rows.map(({ task, depth, hasChildren }) => {
+      const slot = depth === 0 ? others.indexOf(task) : -1
+      const dropEdge = index === null ? null
+        : slot !== -1 && slot === index ? 'top'
+          : index === others.length && task.id === lastRowId ? 'bottom' : null
       return (
         <TaskRow
           key={task.id}
@@ -139,6 +154,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           onDragStart={(taskId) => startDrag(taskId, values)}
           onDragEnd={endDrag}
           onRequestDuplicate={(rowTask) => setDuplicatePicker([rowTask])}
+          tree={nested ? { depth, hasChildren, expanded: !taskTree.collapsed.has(task.id), onToggle: () => taskTree.toggle(task.id) } : null}
+          showParent={!nested || !tree.nested.has(task.id)}
         />
       )
     })
@@ -163,7 +180,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
         </Button>
         <GroupIcon group={group} context={groupContext} />
         <span className="truncate">{group.label}</span>
-        <span className="font-normal text-muted-foreground/70 tabular-nums">{group.tasks.length}</span>
+        <span className="font-normal text-muted-foreground/70 tabular-nums">{rowCount(group.tasks)}</span>
         <div className="flex-1" />
         {canAdd ? (
           <Button type="button" variant="ghost" size="icon-xs" className={ADD} aria-label={`New task in ${group.label}`} title="New task" onClick={() => onAdd(values)}>

@@ -131,7 +131,8 @@ test('bulk toolbar rejects more than 100 selected tasks without a server request
   expect((await view.findByRole('alert', {}, { timeout: 5000 })).textContent).toContain('Select 100 or fewer')
   expect(requests).toBe(0)
   expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
-}, 20000)
+  // each of the 101 checkbox clicks re-renders every row (~170ms apiece under happy-dom)
+}, 30000)
 
 test('bulk toolbar retry repeats the original valid atomic payload', async () => {
   const bodies: unknown[] = []
@@ -528,3 +529,53 @@ test('the bulk bar hides the Duplicate status and marks the selection in one cal
   expect(success.mock.calls[0]![0]).toBe('Marked 2 tasks as duplicate of ORB-91C0')
   success.mockRestore()
 }, 20000)
+
+const childOf = (child: Task, parent: Task): Task => ({
+  ...child, parentTaskId: parent.id, parent: { id: parent.id, title: parent.title, projectKey: 'ORB' },
+})
+
+test('nested: sub-issues sit under their parent with a chevron; an orphan shows its parent before the title', () => {
+  const opened: string[] = []
+  const orphan = { ...task(3), parentTaskId: 'task-99', parent: { id: 'task-99', title: 'Launch plan', projectKey: 'ORB' } }
+  const view = renderList([task(1), childOf(task(2), task(1)), orphan], { onOpen: (id) => opened.push(id) })
+  const rows = Array.from(view.container.querySelectorAll<HTMLElement>('[data-task-row]'))
+  expect(rows.map((row) => row.getAttribute('data-depth'))).toEqual(['0', '1', '0'])
+  expect(within(rows[0]!).getByRole('button', { name: 'Collapse sub-issues of ORB-1' }).getAttribute('aria-expanded')).toBe('true')
+  expect(within(rows[1]!).queryAllByRole('button', { name: 'Task 1' })).toHaveLength(0)
+  fireEvent.click(within(rows[2]!).getByRole('button', { name: 'Launch plan' }))
+  expect(opened).toEqual(['task-99'])
+})
+
+test('nested: a sub-issue stays in its root\'s group and the group count includes it', () => {
+  const view = renderList([task(1), { ...childOf(task(2), task(1)), statusId: 'doing' }], { statuses: [status, doingStatus] })
+  const header = view.getByRole('button', { name: 'Collapse Todo' }).parentElement!
+  expect(header.querySelector('.tabular-nums')!.textContent).toBe('2')
+  expect(view.queryAllByRole('button', { name: 'Collapse Doing' })).toHaveLength(0)
+  expect(within(zoneOf(view, 'Todo')).getByText('Task 2')).toBeTruthy()
+})
+
+test('collapsing a parent hides its sub-issues and is remembered for the workspace', () => {
+  const tasks = [task(1), childOf(task(2), task(1))]
+  const view = renderList(tasks)
+  fireEvent.click(view.getByRole('button', { name: 'Collapse sub-issues of ORB-1' }))
+  expect(view.queryAllByText('Task 2')).toHaveLength(0)
+  expect(window.localStorage.getItem('orbit:task_tree_collapsed:workspace-1')).toBe('["task-1"]')
+  view.unmount()
+  const again = renderList(tasks, { scope: 'project:project-1' })
+  expect(again.getByRole('button', { name: 'Expand sub-issues of ORB-1' }).getAttribute('aria-expanded')).toBe('false')
+})
+
+test('flat: every sub-issue shows its parent before the title and no row has a chevron', () => {
+  const view = renderList([task(1), childOf(task(2), task(1))], { display: { sub_issues: 'flat' } })
+  expect(within(rowOf(view, 'Task 2') as HTMLElement).getByRole('button', { name: 'Task 1' })).toBeTruthy()
+  expect(view.queryAllByRole('button', { name: /sub-issues of/ })).toHaveLength(0)
+})
+
+test('a parent row shows sub-issue progress while the property is on', () => {
+  const parent = { ...task(1), subIssueCount: 5, subIssueClosedCount: 2 }
+  const view = renderList([parent])
+  expect(view.getByRole('img', { name: '2 of 5 sub-issues closed' }).textContent).toBe('2/5')
+  view.unmount()
+  const off = renderList([parent], { display: { properties: ['id', 'status'] } })
+  expect(off.queryAllByRole('img', { name: /sub-issues closed/ })).toHaveLength(0)
+})

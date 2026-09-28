@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function readIds(storageKey: string): string[] {
+export function readIds(storageKey: string): string[] {
   try {
     const value = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
     return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
