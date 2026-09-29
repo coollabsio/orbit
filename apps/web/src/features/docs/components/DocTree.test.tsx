@@ -414,8 +414,10 @@ test('a page opened before the tree loads is revealed once it arrives; favorites
   await view.findByRole('group', { name: 'General' })
   setActive('details', deepTree)
   await view.findByRole('group', { name: 'Favorites' })
-  expect(pageRow(view, 'details')).toBeTruthy()
   expect(pageRow(view, 'details').hasAttribute('data-section')).toBeFalse()
+  // The section opened: its rows are mounted either way, but only an open section leaves them out of `inert`.
+  expect(row(view, 'teamspace:t1').getAttribute('aria-expanded')).toBe('true')
+  expect(pageRow(view, 'details').closest('[inert]')).toBeNull()
   // The favorite row of the ancestor stays collapsed: Favorites has its own expansion state.
   expect(favoriteRow(view, 'roadmap').getAttribute('aria-expanded')).toBe('false')
 })

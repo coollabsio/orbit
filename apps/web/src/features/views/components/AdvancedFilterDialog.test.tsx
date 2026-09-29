@@ -138,3 +138,20 @@ for (const [how, close] of [
     }
   })
 }
+
+test('a server reply during the exit animation never applies, and reopening starts from the current filter', async () => {
+  const check = deferred<FilterIssue | null>()
+  const applied: FilterGroup[] = []
+  const props = { onOpenChange: () => {}, filter: { op: 'and', children: [HIGH] } as FilterGroup, options: FILTER_OPTIONS, onApply: (next: FilterGroup) => applied.push(next), validate: () => check.promise }
+  const view = render(<AdvancedFilterDialog open {...props} />)
+  fireEvent.click(view.getByRole('button', { name: 'Delete condition 1' }))
+  fireEvent.click(view.getByRole('button', { name: 'Apply filter' }))
+  view.rerender(<AdvancedFilterDialog open={false} {...props} />)
+  await act(async () => {
+    check.resolve(null)
+    await check.promise
+  })
+  expect(applied).toEqual([])
+  view.rerender(<AdvancedFilterDialog open {...props} />)
+  expect(view.getAllByRole('group', { name: /^Condition/, hidden: true }).length).toBe(1)
+})

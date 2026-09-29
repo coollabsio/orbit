@@ -125,6 +125,8 @@ export function DocTree({
   const scrollRef = useRef<HTMLDivElement>(null)
   /** The last active page made visible in its space; later collapses by the user are left alone until it changes. */
   const [revealedId, setRevealedId] = useState<string | null>(null)
+  /** Whether revealing `revealedId` opened its collapsed section (so its height transition is worth waiting for). */
+  const [revealOpened, setRevealOpened] = useState(false)
   const favoritesQuery = usePageFavorites(workspaceId)
   const toggleFavorite = useToggleFavorite(workspaceId)
   const moveFavorite = useMoveFavorite(workspaceId)
@@ -172,6 +174,7 @@ export function DocTree({
     const reveal = revealPage(pages, activeId, (id) => overrides.get(id) === true)
     if (reveal) {
       setRevealedId(activeId)
+      setRevealOpened(collapsed.has(reveal.space))
       if (reveal.expand.length > 0) {
         const next = new Map(overrides)
         for (const id of reveal.expand) next.set(id, true)
@@ -188,14 +191,27 @@ export function DocTree({
     const row = scrollRef.current?.querySelector<HTMLElement>(`[data-page-id="${CSS.escape(revealedId)}"]:not([data-section])`)
     if (!row) return
     row.scrollIntoView?.({ block: 'nearest' })
-    // A section opened for it grows to its height over a short transition; scroll again once it has settled.
+    // A section opened for it grows to its height over a short transition; scroll again once, when it has settled
+    // (later user collapses/expands of that section must not scroll).
     const pages = row.closest<HTMLElement>('[data-slot="space-pages"]')
-    const settle = (event: TransitionEvent) => {
-      if (event.target === pages && event.propertyName === 'grid-template-rows') row.scrollIntoView?.({ block: 'nearest' })
+    if (!revealOpened || !pages) return
+    const detach = () => {
+      pages.removeEventListener('transitionend', settle)
+      pages.removeEventListener('transitioncancel', cancel)
     }
-    pages?.addEventListener('transitionend', settle)
-    return () => pages?.removeEventListener('transitionend', settle)
-  }, [revealedId, loading])
+    const isOwn = (event: TransitionEvent) => event.target === pages && event.propertyName === 'grid-template-rows'
+    const settle = (event: TransitionEvent) => {
+      if (!isOwn(event)) return
+      detach()
+      row.scrollIntoView?.({ block: 'nearest' })
+    }
+    const cancel = (event: TransitionEvent) => {
+      if (isOwn(event)) detach()
+    }
+    pages.addEventListener('transitionend', settle)
+    pages.addEventListener('transitioncancel', cancel)
+    return detach
+  }, [revealedId, revealOpened, loading])
 
   /** A sub-page (`parentId`), a root page of `space`, or (neither) a root page of the default teamspace. */
   const handleCreate = (parentId: string | null, space?: SpaceKey) => {

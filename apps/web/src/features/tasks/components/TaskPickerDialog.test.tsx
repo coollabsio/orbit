@@ -74,6 +74,14 @@ test('picking a task reports it and closes the picker', async () => {
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
 })
 
+test('a second click during the exit animation does not pick again', async () => {
+  const { view, onSelect } = renderPicker()
+  const option = await view.findByRole('option', { name: /Login fails on Safari/ })
+  fireEvent.click(option)
+  fireEvent.click(option)
+  expect(onSelect).toHaveBeenCalledTimes(1)
+})
+
 test('text that matches nothing shows the empty state', async () => {
   const { view } = renderPicker()
   await userEvent.type(await view.findByPlaceholderText('Search tasks…'), 'zzzz')

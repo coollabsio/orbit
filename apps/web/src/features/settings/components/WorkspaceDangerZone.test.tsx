@@ -7,6 +7,7 @@ import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { waitForAbsence } from '@/test/waitForAbsence'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -46,7 +47,7 @@ test('only owners can delete and cancellation sends no request', async () => {
   await userEvent.type(dialog.getByLabelText('Confirm workspace name'), 'wrong')
   expect((dialog.getByRole('button', { name: 'Delete workspace' }) as HTMLButtonElement).disabled).toBe(true)
   fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
-  expect(view.queryByRole('dialog')).toBeNull()
+  await waitForAbsence(() => view.queryByRole('dialog'))
   expect(calls).toBe(0)
 })
 
@@ -103,7 +104,9 @@ test('pending deletion blocks duplicate requests and dialog dismissal', async ()
   fireEvent.submit(input.closest('form')!)
   fireEvent.keyDown(document, { key: 'Escape' })
   fireEvent.click(dialog.getByRole('button', { name: 'Close' }))
-  expect(view.getByRole('dialog')).toBeTruthy()
+  // give a dismiss time to play its exit: the dialog must still be open
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  expect(view.getByRole('dialog').hasAttribute('data-open')).toBe(true)
   expect(calls).toBe(1)
   finish(new Response(null, { status: 204 }))
   await view.findByText('Beta', { selector: 'output' })

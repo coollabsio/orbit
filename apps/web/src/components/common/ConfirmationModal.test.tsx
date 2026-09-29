@@ -59,6 +59,33 @@ test('concurrent requests are shown in order and unmount cancels pending request
   expect(await confirmAction({ title: 'No host' })).toBe(false)
 })
 
+test('a request arriving during the exit opens only after it, with focus on Cancel', async () => {
+  const view = render(<ConfirmationModalHost />)
+  let first!: Promise<boolean>
+  let second!: Promise<boolean>
+  act(() => {
+    first = confirmAction({ title: 'First?' })
+  })
+  await waitFor(() => {
+    if (document.activeElement !== view.getByRole('button', { name: 'Cancel' })) throw new Error('Cancel is not focused yet.')
+  })
+  fireEvent.click(view.getByRole('button', { name: 'Confirm' }))
+  act(() => {
+    second = confirmAction({ title: 'Second?' })
+  })
+  // the first dialog is still playing its exit and keeps its own text
+  expect(view.getByRole('dialog', { name: 'First?' })).toBeTruthy()
+  expect(view.queryByRole('dialog', { name: 'Second?' })).toBeNull()
+  fireEvent.click(view.getByRole('button', { name: 'Confirm' }))
+  expect(await first).toBe(true)
+  await view.findByRole('dialog', { name: 'Second?' })
+  await waitFor(() => {
+    if (document.activeElement !== view.getByRole('button', { name: 'Cancel' })) throw new Error('Cancel is not focused yet.')
+  })
+  fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
+  expect(await second).toBe(false)
+})
+
 test('custom labels and neutral styling work in Strict Mode', async () => {
   const { StrictMode } = await import('react')
   const view = render(

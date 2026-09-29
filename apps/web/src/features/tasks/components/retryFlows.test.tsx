@@ -118,7 +118,13 @@ test('task deletion retry returns to the task list after success', async () => {
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
   expect(calls).toBe(0)
   fireEvent.click(view.getByRole('button', { name: 'Delete' }))
-  fireEvent.click(view.getByRole('button', { name: 'Move to trash' }))
+  // the second confirmation opens once the first one has finished its exit (clicks on the closing one are ignored)
+  const confirm = await waitFor(() => {
+    const button = view.getByRole('button', { name: 'Move to trash' })
+    expect(Boolean(button.closest('[data-open]'))).toBe(true)
+    return button
+  })
+  fireEvent.click(confirm)
   await view.findByRole('alert')
   fireEvent.click(view.getByRole('button', { name: 'Retry' }))
 

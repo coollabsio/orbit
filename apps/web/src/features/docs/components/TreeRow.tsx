@@ -11,7 +11,7 @@ export function TreeRowActions({ className, onClick, ...props }: ComponentProps<
     <span
       data-slot="tree-row-actions"
       className={cn(
-        'relative z-20 flex shrink-0 items-center gap-0.5 transition-opacity duration-150 ease-out group-focus-within/row:opacity-100 has-data-[popup-open]:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100',
+        'relative z-20 flex shrink-0 items-center gap-0.5 transition-opacity duration-150 ease-out hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100 hover-fine:group-focus-within/row:opacity-100 hover-fine:has-data-[popup-open]:opacity-100',
         className,
       )}
       onClick={(event) => {

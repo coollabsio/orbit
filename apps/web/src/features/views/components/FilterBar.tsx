@@ -44,11 +44,16 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
   const [draft, setDraft] = useState<Condition | null>(null)
   // the tree before the draft joined it; undoing the draft restores it exactly (appendCondition may wrap the root)
   const [base, setBase] = useState<FilterGroup | null>(null)
-  const close = () => {
-    onOpenChange(false)
-    setDraft(null)
-    setBase(null)
+  // each open starts at the field list; the draft stays while closing, so the exit animation keeps the value picker
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setDraft(null)
+      setBase(null)
+    }
   }
+  const close = () => onOpenChange(false)
   const pickField = (field: FilterField) => {
     const operator = FIELD_META[field].defaultOperator
     setDraft({ field, operator, value: defaultValue(field, operator) })

@@ -8,18 +8,22 @@ interface ModalProps {
   onClose: () => void
   children: ReactNode
   className?: string
+  /** When false, Escape, backdrop and × do nothing (e.g. while a request the dialog started is pending). */
+  dismissible?: boolean
 }
 
 /** App modal built on the shadcn Dialog. Callers mount it while open; a dismiss (Escape, backdrop, ×)
     plays the exit first and calls `onClose` once it has finished. Base UI handles focus trap, Escape,
     scroll lock and backdrop dismiss. */
-export function Modal({ title, description, onClose, children, className }: ModalProps) {
+export function Modal({ title, description, onClose, children, className, dismissible = true }: ModalProps) {
   const [open, setOpen] = useState(true)
   return (
     <Dialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next) setOpen(false)
+      onOpenChange={(next, details) => {
+        if (next) return
+        if (dismissible) setOpen(false)
+        else details.cancel()
       }}
       onOpenChangeComplete={(next) => {
         if (!next) onClose()

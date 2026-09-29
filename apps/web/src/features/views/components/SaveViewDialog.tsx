@@ -11,6 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useCurrentUser } from '@/features/auth/api'
 import { ColorSwatch } from '@/components/common/ColorSwatch'
 import { useCreateView, useUpdateView, type SavedView } from '../api/views'
+import { useOpenKey } from '../useOpenKey'
 import { defaultViewState, type ViewState } from '../viewState'
 import { VIEW_COLORS, VIEW_ICONS, VIEW_ICON_NAMES, ViewIcon } from './ViewIcon'
 
@@ -41,10 +42,23 @@ const DESCRIPTION: Record<SaveViewMode, string> = {
 }
 
 export function SaveViewDialog({ open, onOpenChange, instant = false, ...form }: SaveViewDialogProps) {
+  // callers clear their dialog state on close: the exit animation keeps showing the form it closed with
+  const [closingForm, setClosingForm] = useState<typeof form | null>(null)
+  const openKey = useOpenKey(open)
+  const close = () => {
+    setClosingForm(form)
+    onOpenChange(false)
+  }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => (next ? onOpenChange(true) : close())}
+      onOpenChangeComplete={(next) => {
+        if (!next) setClosingForm(null)
+      }}
+    >
       <DialogContent instant={instant} className="sm:max-w-md">
-        <SaveViewForm {...form} onClose={() => onOpenChange(false)} />
+        <SaveViewForm key={openKey} {...(open ? form : (closingForm ?? form))} onClose={close} />
       </DialogContent>
     </Dialog>
   )

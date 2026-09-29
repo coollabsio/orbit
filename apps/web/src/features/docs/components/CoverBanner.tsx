@@ -112,8 +112,9 @@ export function CoverBanner({
       />
 
       {readOnly ? null : <div
-        className="absolute top-2 right-2 z-[5] flex gap-1 transition-opacity duration-150 ease-out focus-within:opacity-100 data-[open]:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/cover:opacity-100"
+        className="absolute top-2 right-2 z-[5] flex gap-1 transition-opacity duration-150 ease-out hover-fine:opacity-0 hover-fine:group-hover/cover:opacity-100 hover-fine:focus-within:opacity-100 hover-fine:data-[open]:opacity-100"
         data-cover-actions=""
+        data-print-hide=""
         data-open={repositioning || sourceOpen || undefined}
       >
         {repositioning ? (

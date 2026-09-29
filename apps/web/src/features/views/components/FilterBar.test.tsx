@@ -136,3 +136,16 @@ test('unticking a just-added value restores an OR root exactly', async () => {
   await userEvent.click(await view.findByRole('option', { name: 'Bug' }))
   expect(readFilter(view)).toEqual(nested)
 })
+
+test('closing keeps the value picker through the exit, and the next open starts at the field list', async () => {
+  const view = render(<Harness initial={EMPTY} />)
+  const trigger = view.getByRole('button', { name: 'Filter tasks' })
+  fireEvent.click(trigger)
+  await userEvent.click(await view.findByRole('option', { name: 'Text' }))
+  fireEvent.keyDown(await view.findByRole('textbox', { name: 'Title or description contains' }), { key: 'Escape' })
+  expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  // the closing popup must not swap to the "Filter by…" list (its autofocused input) during the exit animation
+  expect(view.queryAllByRole('combobox', { name: 'Filter by', hidden: true }).length).toBe(0)
+  fireEvent.click(trigger)
+  expect(await view.findByRole('combobox', { name: 'Filter by' })).toBeTruthy()
+})

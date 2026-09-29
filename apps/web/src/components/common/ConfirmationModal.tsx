@@ -10,12 +10,14 @@ interface ConfirmationRequest extends ConfirmationOptions {
 
 /** Mount once at the app root. Queue requests so simultaneous errors don't lose a choice.
     A choice resolves at once; the dialog keeps showing that request while it plays its exit,
-    then the next queued request opens. */
+    then the next queued request opens in a fresh dialog (focus starts on Cancel again). */
 export function ConfirmationModalHost() {
   const queue = useRef<ConfirmationRequest[]>([])
   const nextId = useRef(0)
   const [request, setRequest] = useState<ConfirmationRequest>()
   const [open, setOpen] = useState(false)
+  // True from a request opening until its exit has finished; requests arriving meanwhile only queue.
+  const showing = useRef(false)
 
   useEffect(() => {
     const pendingRequests = queue.current
@@ -24,7 +26,8 @@ export function ConfirmationModalHost() {
         new Promise<boolean>((resolve) => {
           const pending = { ...options, id: nextId.current++, resolve }
           pendingRequests.push(pending)
-          if (pendingRequests.length === 1) {
+          if (!showing.current) {
+            showing.current = true
             setRequest(pending)
             setOpen(true)
           }
@@ -47,6 +50,7 @@ export function ConfirmationModalHost() {
   // After the exit: show the next queued request, or unmount.
   const exitComplete = () => {
     const next = queue.current[0]
+    showing.current = next !== undefined
     setRequest(next)
     setOpen(next !== undefined)
   }
@@ -55,6 +59,7 @@ export function ConfirmationModalHost() {
 
   return (
     <Dialog
+      key={request.id}
       open={open}
       onOpenChange={(next) => {
         if (!next) cancel()

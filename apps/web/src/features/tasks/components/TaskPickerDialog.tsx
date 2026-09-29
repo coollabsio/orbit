@@ -55,6 +55,8 @@ export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeI
                   value={task.id}
                   className="h-9 gap-2.5 px-2.5 text-[13px]"
                   onSelect={() => {
+                    // the popup stays clickable through its exit animation: a second click must not pick again
+                    if (closing) return
                     onSelect(task)
                     setClosing(true)
                   }}

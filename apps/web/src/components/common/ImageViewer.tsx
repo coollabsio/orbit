@@ -3,7 +3,7 @@ import { useRef, useState, type ComponentProps, type KeyboardEvent, type TouchEv
 import { Download, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import type { Attachment } from '@/mock/types'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 
 const MIN_ZOOM = 0.5
@@ -110,9 +110,17 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
             <div className="text-xs font-semibold text-white/55 tabular-nums">{Math.round(zoom * 100)}%</div>
           </div>
           <div className="flex items-center gap-2">
-            <ViewerBarButton nativeButton={false} render={<a href={attachment.url} download={attachment.fileName} />} title="Download image" aria-label="Download image" onClick={(e) => e.stopPropagation()}>
+            <a
+              data-slot="image-viewer-button"
+              href={attachment.url}
+              download={attachment.fileName}
+              className={cn(buttonVariants({ variant: 'ghost', size: 'icon-lg' }), 'bg-white/10 text-white hover:bg-white/15 hover:text-white dark:hover:bg-white/15')}
+              title="Download image"
+              aria-label="Download image"
+              onClick={(e) => e.stopPropagation()}
+            >
               <Download className="size-4" />
-            </ViewerBarButton>
+            </a>
             <ViewerBarButton className="text-lg font-bold" title="Zoom out" aria-label="Zoom out" onClick={() => setZoom(zoom - 0.25)}>
               −
             </ViewerBarButton>

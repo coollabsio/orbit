@@ -19,6 +19,7 @@ import {
   type FilterIssue,
   type NodePath,
 } from '../filterTree'
+import { useOpenKey } from '../useOpenKey'
 import { countConditions, emptyFilter, isGroup, type Condition, type FilterField, type FilterGroup, type FilterNode, type FilterOperator } from '../viewState'
 import { FilterValuePicker } from './FilterValuePicker'
 
@@ -51,16 +52,18 @@ function useKeyboardInput(): boolean {
 
 export function AdvancedFilterDialog({ open, onOpenChange, filter, options, onApply, validate }: AdvancedFilterDialogProps) {
   const keyboard = useKeyboardInput()
+  const openKey = useOpenKey(open)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent instant={keyboard} className="gap-0 p-0 sm:max-w-2xl">
-        <TreeEditor filter={filter} options={options} onApply={onApply} validate={validate} onClose={() => onOpenChange(false)} />
+        <TreeEditor key={openKey} open={open} filter={filter} options={options} onApply={onApply} validate={validate} onClose={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   )
 }
 
 interface TreeEditorProps {
+  open: boolean
   filter: FilterGroup
   options: FilterOptions
   onApply: (filter: FilterGroup) => void
@@ -74,18 +77,19 @@ function nodeAt(root: FilterGroup, path: NodePath): FilterNode | undefined {
   return node
 }
 
-function TreeEditor({ filter, options, onApply, validate, onClose }: TreeEditorProps) {
+function TreeEditor({ open, filter, options, onApply, validate, onClose }: TreeEditorProps) {
   const [draft, setDraft] = useState<FilterGroup>(() => structuredClone(filter))
   const [issue, setIssue] = useState<FilterIssue | null>(null)
   const [checking, setChecking] = useState(false)
-  // closing the dialog (Cancel, Escape, backdrop) mid-check unmounts the editor: the pending check must then do nothing
-  const mounted = useRef(true)
+  // closing the dialog (Cancel, Escape, backdrop) mid-check must make the pending check do nothing; the editor stays
+  // mounted through the exit animation, so this follows `open` as well as unmount
+  const active = useRef(open)
   useEffect(() => {
-    mounted.current = true
+    active.current = open
     return () => {
-      mounted.current = false
+      active.current = false
     }
-  }, [])
+  }, [open])
   const parsed = issue ? parseIssuePath(issue.path) : null
   // an issue that names no node in the tree shows above it, so Apply never fails silently
   const issueNode = parsed && parsed.length > 0 && nodeAt(draft, parsed) ? parsed : null
@@ -109,7 +113,7 @@ function TreeEditor({ filter, options, onApply, validate, onClose }: TreeEditorP
       } catch {
         serverIssue = { path: 'filter', message: "Orbit couldn't check this filter. Try again." }
       }
-      if (!mounted.current) return
+      if (!active.current) return
       setChecking(false)
       if (serverIssue) {
         setIssue(serverIssue)

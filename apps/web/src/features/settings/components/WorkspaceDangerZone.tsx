@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Modal } from '@/components/common/Modal'
 import { Button } from '@/components/ui/button'
@@ -16,10 +16,8 @@ export function WorkspaceDangerZone() {
   const [open, setOpen] = useState(false)
   const [confirmation, setConfirmation] = useState('')
   const inputId = useId()
+  // Blocks a second submit before `deletion.isPending` has rendered.
   const deleting = useRef(false)
-  const close = useCallback(() => {
-    if (!deleting.current) setOpen(false)
-  }, [])
 
   if (workspace.role !== 'owner') return null
 
@@ -43,7 +41,7 @@ export function WorkspaceDangerZone() {
       <Button type="button" variant="destructive" onClick={() => { setConfirmation(''); deletion.reset(); setOpen(true) }}>Delete workspace</Button>
     </SettingsCard>
     {open ? (
-      <Modal title="Delete workspace?" description={`Deleting "${workspace.name}" removes access to its projects and tasks for everyone.`} onClose={close} className="sm:max-w-120">
+      <Modal title="Delete workspace?" description={`Deleting "${workspace.name}" removes access to its projects and tasks for everyone.`} onClose={() => setOpen(false)} dismissible={!deletion.isPending} className="sm:max-w-120">
         <form onSubmit={(event) => { event.preventDefault(); void deleteConfirmed() }}>
           {workspaces.length === 1 ? <p className="my-3 text-[13px] text-destructive">This is your last workspace. After deletion, you will have no workspace access.</p> : null}
           <Field>

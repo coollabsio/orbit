@@ -3,9 +3,23 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'cn'
 
 /** A modal panel that slides in from a screen edge (mobile nav drawer, member list, thread pane).
-    Base UI gives it Escape, focus trap, scroll lock, backdrop dismiss and keeps it mounted through the exit. */
-function SideSheet(props: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="side-sheet" {...props} />
+    Base UI gives it Escape, focus trap, scroll lock, backdrop dismiss and keeps it mounted through the exit.
+    Escape in a text field, or one an inner control already handled (cancel an edit, close a mention list), stays with it. */
+function SideSheet({ onOpenChange, ...props }: DialogPrimitive.Root.Props) {
+  return (
+    <DialogPrimitive.Root
+      data-slot="side-sheet"
+      onOpenChange={(open, details) => {
+        if (details.reason === 'escape-key') {
+          const target = details.event.target
+          const editable = target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+          if (editable || details.event.defaultPrevented) return details.cancel()
+        }
+        onOpenChange?.(open, details)
+      }}
+      {...props}
+    />
+  )
 }
 
 // At rest there is no transform, so fixed overlays inside the sheet are not trapped in a containing block.
