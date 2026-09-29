@@ -7,7 +7,7 @@ import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from '@/features/views/grouping'
-import type { GroupBy } from '@/features/views/viewState'
+import { DEFAULT_DISPLAY, type GroupBy, type TaskProperty } from '@/features/views/viewState'
 import { TaskTimeline } from './TaskTimeline'
 import { computeRange, dayIndex, rowDates } from './timelineLib'
 
@@ -44,11 +44,11 @@ const labels = [
 ]
 const context: GroupContext = { statuses, members: [], labels, projects, currentUserId: 'u1', showEmpty: false }
 
-type Extra = { onOpen?: (id: string) => void; groupBy?: GroupBy; pxPerDay?: number }
+type Extra = { onOpen?: (id: string) => void; groupBy?: GroupBy; pxPerDay?: number; properties?: TaskProperty[] }
 
 function timelineElement(tasks: Task[], extra: Extra = {}) {
   return (
-    <TaskTimeline tasks={tasks} projects={projects} statuses={statuses} users={[]} groupBy={extra.groupBy ?? 'project'} groupContext={context}
+    <TaskTimeline tasks={tasks} projects={projects} statuses={statuses} users={[]} groupBy={extra.groupBy ?? 'project'} properties={extra.properties ?? DEFAULT_DISPLAY.properties} groupContext={context}
       pxPerDay={extra.pxPerDay ?? 10} onZoomChange={() => {}} onOpen={extra.onOpen ?? (() => {})} today={today} />
   )
 }
@@ -234,7 +234,7 @@ test('ctrl+wheel zooms in and plain wheel does not', () => {
   const view = render(
     <QueryClientProvider client={client}>
       <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
-        <TaskTimeline tasks={[ranged]} projects={projects} statuses={statuses} users={[]} groupBy="project" groupContext={context} pxPerDay={10} onZoomChange={(px) => zooms.push(px)} onOpen={() => {}} today={today} />
+        <TaskTimeline tasks={[ranged]} projects={projects} statuses={statuses} users={[]} groupBy="project" properties={DEFAULT_DISPLAY.properties} groupContext={context} pxPerDay={10} onZoomChange={(px) => zooms.push(px)} onOpen={() => {}} today={today} />
       </WorkspaceContext.Provider>
     </QueryClientProvider>,
   )
@@ -452,4 +452,18 @@ test('collapsing a group hides its rows', () => {
   const view = renderTimeline([ranged], { groupBy: 'project' })
   fireEvent.click(view.getByRole('button', { name: /^Web/ }))
   expect(view.container.querySelector('[data-timeline-bar="a"]')).toBeNull()
+})
+
+test('rows and bars show only the chosen display properties', () => {
+  const urgent = { ...ranged, priority: 'urgent' as const }
+  const icons = (view: ReturnType<typeof renderTimeline>, name: string) => view.container.querySelectorAll(`svg[aria-label="${name}"]`).length
+  const all = renderTimeline([urgent])
+  expect(all.getByText('WEB-a')).toBeTruthy()
+  expect(icons(all, 'Unstarted')).toBe(2) // row + bar
+  expect(icons(all, 'Urgent')).toBe(1)
+  all.unmount()
+  const none = renderTimeline([urgent], { properties: [] })
+  expect(none.queryByText('WEB-a')).toBeNull()
+  expect(icons(none, 'Unstarted')).toBe(0)
+  expect(icons(none, 'Urgent')).toBe(0)
 })

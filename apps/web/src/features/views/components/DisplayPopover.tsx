@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { shouldIgnoreShortcut } from '../shortcuts'
 import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
-import { GROUP_LABEL, LAYOUTS } from '../displayMeta'
+import { GROUP_LABEL, LAYOUTS, TIMELINE_PROPERTIES } from '../displayMeta'
 
 export interface DisplayPopoverProps {
   display: DisplayOptions
@@ -113,6 +113,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
   const flatOnly = display.layout !== 'list' && display.sub_issues === 'nested'
   const manual = display.order_by === 'manual'
   const ascending = display.order_direction === 'asc'
+  const shownProperties = timeline ? PROPERTY_ORDER.filter((property) => TIMELINE_PROPERTIES.includes(property)) : PROPERTY_ORDER
 
   return (
     <Popover
@@ -227,9 +228,11 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
             spacing={1}
             className="flex-wrap justify-start"
             value={display.properties}
-            onValueChange={(value: string[]) => onChange({ properties: PROPERTY_ORDER.filter((property) => value.includes(property)) })}
+            // a chip hidden on this layout keeps its value
+            onValueChange={(value: string[]) =>
+              onChange({ properties: PROPERTY_ORDER.filter((property) => (shownProperties.includes(property) ? value.includes(property) : display.properties.includes(property))) })}
           >
-            {PROPERTY_ORDER.map((property) => (
+            {shownProperties.map((property) => (
               <ToggleGroupItem key={property} value={property} className="h-6 min-w-0 px-2 text-xs font-normal text-muted-foreground aria-pressed:text-foreground">
                 {PROPERTY_LABEL[property]}
               </ToggleGroupItem>

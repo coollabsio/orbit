@@ -11,7 +11,7 @@ import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import { groupAccent } from '@/features/views/layoutGroups'
-import type { GroupBy } from '@/features/views/viewState'
+import type { GroupBy, TaskProperty } from '@/features/views/viewState'
 import { TimelineBar } from './TimelineBar'
 import { TimelineHeader } from './TimelineHeader'
 import { TimelineRowLabel } from './TimelineRowLabel'
@@ -37,6 +37,8 @@ export interface TaskTimelineProps {
   users: User[]
   /** Sections follow the view's grouping; 'none' is one flat list. Sub-grouping does not apply here. */
   groupBy: GroupBy
+  /** `display.properties`; rows show the ones in TIMELINE_PROPERTIES. */
+  properties: TaskProperty[]
   groupContext: GroupContext
   pxPerDay: number
   onZoomChange: (px: number) => void
@@ -46,7 +48,7 @@ export interface TaskTimelineProps {
 }
 
 /** Roadmap timeline: one row per task, bars span due_start_at → due_at. */
-export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupContext, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
+export function TaskTimeline({ tasks, projects, statuses, users, groupBy, properties, groupContext, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
   const [today] = useState(() => todayProp ?? new Date())
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -270,6 +272,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupC
                 row={row}
                 status={status}
                 assignee={assignee}
+                properties={properties}
                 groupContext={groupContext}
                 onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}
                 onOpen={onOpen}
@@ -311,6 +314,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupC
                     color={projectById.get(row.task.projectId)?.color ?? 'var(--muted-foreground)'}
                     status={status}
                     assignee={assignee}
+                    properties={properties}
                     overdueDays={!preview && isOverdue(row.task, status?.category, today) ? dayIndex(range, today) - dayIndex(range, span.end) : 0}
                     dragging={live !== null}
                     onPointerDown={(event, mode) => begin(event, row.task.id, mode)}

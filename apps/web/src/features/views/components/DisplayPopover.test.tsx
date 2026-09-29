@@ -127,3 +127,12 @@ test('on board and timeline, Nested sub-issues say they show flat there', async 
   expect(view.getByText('Timeline shows sub-issues flat')).toBeTruthy()
   expect(read(view).sub_issues).toBe('nested')
 })
+
+test('timeline offers only the properties it shows and keeps the others', async () => {
+  const view = render(<Harness initial={{ ...DEFAULT_DISPLAY, layout: 'timeline' }} />)
+  open(view)
+  const group = await view.findByRole('group', { name: 'Display properties' })
+  expect([...group.querySelectorAll('button')].map((chip) => chip.textContent)).toEqual(['ID', 'Status', 'Assignee', 'Priority'])
+  await userEvent.click(view.getByRole('button', { name: 'ID' }))
+  expect(read(view).properties).toEqual(DEFAULT_DISPLAY.properties.filter((property) => property !== 'id'))
+})

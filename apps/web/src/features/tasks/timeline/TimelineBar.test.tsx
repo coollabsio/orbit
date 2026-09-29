@@ -16,7 +16,7 @@ function renderBar(overrides: Partial<Task> = {}, status: TaskStatusDef = duplic
   return render(
     <div className="relative">
       <TimelineBar task={{ ...task, ...overrides }} span={span} range={range} pxPerDay={10} color="#e0457b" status={status}
-        assignee={undefined} overdueDays={0} dragging={false} onPointerDown={() => {}} onClick={() => {}} onKeyDown={() => {}} />
+        assignee={undefined} properties={['status']} overdueDays={0} dragging={false} onPointerDown={() => {}} onClick={() => {}} onKeyDown={() => {}} />
     </div>,
   )
 }

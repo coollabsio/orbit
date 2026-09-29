@@ -6,15 +6,18 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
 import type { GroupContext } from '@/features/views/grouping'
+import type { TaskProperty } from '@/features/views/viewState'
 import type { User } from '@/features/workspaces/models'
+import { PriorityIcon } from '../components/PriorityIcon'
 import { TaskStatusIcon } from '../components/TaskStatusIcon'
 import type { TimelineRow } from './timelineLib'
 
 /** Left-pane cell for a timeline row: group header, "No dates" toggle, or task. */
-export function TimelineRowLabel({ row, status, assignee, groupContext, onToggle, onOpen, onReveal }: {
+export function TimelineRowLabel({ row, status, assignee, properties, groupContext, onToggle, onOpen, onReveal }: {
   row: TimelineRow
   status?: TaskStatusDef
   assignee?: User
+  properties: TaskProperty[]
   groupContext: GroupContext
   onToggle: (key: string, open: boolean) => void
   onOpen: (taskId: string) => void
@@ -43,14 +46,16 @@ export function TimelineRowLabel({ row, status, assignee, groupContext, onToggle
       </LabelCell>
     )
   }
+  const has = (property: TaskProperty) => properties.includes(property)
   // on phones a dated task is labelled by its bar; only undated tasks need the chip
   return (
     <LabelCell fill="row" className={cn(row.span && 'max-[899px]:hidden')}>
       <CellButton className="pr-3 pl-6 text-foreground" onClick={() => onOpen(row.task.id)}>
-        <TaskStatusIcon status={status} />
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{row.task.identifier}</span>
+        {has('priority') ? <PriorityIcon priority={row.task.priority} /> : null}
+        {has('status') ? <TaskStatusIcon status={status} /> : null}
+        {has('id') ? <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{row.task.identifier}</span> : null}
         <span className="min-w-0 flex-1 truncate">{row.task.title || 'Untitled'}</span>
-        {assignee ? <UserAvatar user={assignee} size={18} /> : null}
+        {has('assignee') && assignee ? <UserAvatar user={assignee} size={18} /> : null}
       </CellButton>
       {onReveal ? (
         // overlays the row end on hover, so it never costs the title any width

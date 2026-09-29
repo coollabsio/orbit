@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { isClosedCategory } from '@/features/tasks/taskMeta'
+import type { TaskProperty } from '@/features/views/viewState'
 import type { User } from '@/features/workspaces/models'
 import { TaskStatusIcon } from '../components/TaskStatusIcon'
 import { BlockedIndicator } from '../components/BlockedIndicator'
@@ -34,6 +35,8 @@ export interface TimelineBarProps {
   color: string
   status: TaskStatusDef | undefined
   assignee: User | undefined
+  /** `display.properties`: status and assignee follow it. */
+  properties: TaskProperty[]
   overdueDays: number
   dragging: boolean
   onPointerDown: (event: PointerEvent, mode: DragMode) => void
@@ -42,7 +45,7 @@ export interface TimelineBarProps {
 }
 
 /** A task on the timeline: a bar for a date range, a diamond for a due date only, plus an overdue tail. */
-export function TimelineBar({ task, span, range, pxPerDay, color, status, assignee, overdueDays, dragging, onPointerDown, onClick, onKeyDown }: TimelineBarProps) {
+export function TimelineBar({ task, span, range, pxPerDay, color, status, assignee, properties, overdueDays, dragging, onPointerDown, onClick, onKeyDown }: TimelineBarProps) {
   const closed = isClosedCategory(status?.category)
   const left = xOf(range, span.start, pxPerDay)
   const width = (dayIndex(range, span.end) - dayIndex(range, span.start) + 1) * pxPerDay
@@ -50,7 +53,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
   const tailEnd = tailStart + overdueDays * pxPerDay
   const label = (
     <>
-      <TaskStatusIcon status={status} size={13} />
+      {properties.includes('status') ? <TaskStatusIcon status={status} size={13} /> : null}
       <span className="truncate">{task.title || 'Untitled'}</span>
       {task.blocked ? <BlockedIndicator /> : null}
     </>
@@ -135,7 +138,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
             {/* the label follows the visible edge when the bar starts left of the view */}
             <span className="sticky left-[calc(var(--timeline-left)+8px)] flex min-w-0 items-center gap-1.5">{label}</span>
             <span className="flex-1" />
-            {assignee ? <UserAvatar user={assignee} size={16} /> : null}
+            {assignee && properties.includes('assignee') ? <UserAvatar user={assignee} size={16} /> : null}
           </>
         )}
         <ResizeHandle side="end" onPointerDown={(event) => onPointerDown(event, 'end')} />
