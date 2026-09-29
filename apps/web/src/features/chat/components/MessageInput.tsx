@@ -182,7 +182,7 @@ useEffect(() => {
   return (
     <div ref={composerRef} className="relative shrink-0 px-3 pb-2">
       {attachments.length > 0 ? (
-        <div className="rounded-t-lg border border-b-0 border-border bg-muted/25 p-2">
+        <div className="rounded-t-lg border border-b-0 border-border bg-muted/25 p-2 animate-view-bar-enter motion-reduce:animate-none">
           <div className="grid grid-cols-2 gap-1 min-[900px]:grid-cols-4">
             {attachments.map((a) => (
               <div key={a.id} className="flex items-center gap-2 rounded-lg bg-background p-2 transition-colors hover:bg-muted">
@@ -197,7 +197,7 @@ useEffect(() => {
         </div>
       ) : null}
       {replyTarget ? (
-        <div className="rounded-t-lg border border-b-0 border-border bg-muted/25 px-3 py-2">
+        <div className="rounded-t-lg border border-b-0 border-border bg-muted/25 px-3 py-2 animate-view-bar-enter motion-reduce:animate-none">
           <div className="flex min-w-0 items-center gap-2">
             <Reply className="size-4 shrink-0 text-primary" />
             <div className="min-w-0 flex-1">

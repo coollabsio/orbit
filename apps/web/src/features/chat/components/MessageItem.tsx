@@ -514,7 +514,7 @@ function Reactions({ message, currentUserId }: { message: ChatMessage; currentUs
           key={r.emoji}
           type="button"
           variant="ghost"
-          className="h-auto w-max cursor-pointer gap-1 rounded-full bg-muted px-2.5 py-0.5 ring-1 ring-border ring-inset hover:bg-muted/80 dark:hover:bg-muted/80 data-[mine=true]:bg-primary/10 data-[mine=true]:ring-primary/40 data-[mine=true]:hover:bg-primary/20 dark:data-[mine=true]:hover:bg-primary/20"
+          className="h-auto w-max cursor-pointer gap-1 rounded-full bg-muted px-2.5 py-0.5 tabular-nums ring-1 ring-border ring-inset hover:bg-muted/80 dark:hover:bg-muted/80 data-[mine=true]:bg-primary/10 data-[mine=true]:ring-primary/40 data-[mine=true]:hover:bg-primary/20 dark:data-[mine=true]:hover:bg-primary/20"
           data-mine={r.userIds.includes(currentUserId) ? 'true' : undefined}
           onClick={() => toggleReaction(message.id, r.emoji)}
         >

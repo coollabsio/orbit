@@ -264,7 +264,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupC
             <div
               key={row.key}
               // the group band is opaque so the sticky left cell (TimelineRowLabel) matches it
-              className={cn('group/row relative flex h-8', row.kind === 'group' ? 'bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]' : 'hover:bg-foreground/[0.03]')}
+              className={cn('group/row relative flex h-8 transition-colors duration-150 ease-out', row.kind === 'group' ? 'bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]' : 'hover:bg-foreground/[0.03]')}
             >
               <TimelineRowLabel
                 row={row}

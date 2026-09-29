@@ -98,6 +98,8 @@ function setup({
 
 const row = (view: ReturnType<typeof render>, space: string) => view.container.querySelector(`[data-space="${space}"]`) as HTMLElement
 const pageRow = (view: ReturnType<typeof render>, id: string) => view.container.querySelector(`[data-page-id="${id}"]`) as HTMLElement
+/** Text the user can reach: a collapsed section keeps its pages mounted (for the height transition) but inert. */
+const shownText = (view: ReturnType<typeof render>, text: string) => view.queryAllByText(text).find((element) => !element.closest('[inert]')) ?? null
 
 test('the sidebar groups pages into teamspace sections and a Private section; empty sections say so', async () => {
   const { view } = setup()
@@ -114,7 +116,7 @@ test('the sidebar groups pages into teamspace sections and a Private section; em
 
   // Collapsing a section hides its pages and persists per workspace.
   fireEvent.click(row(view, 'teamspace:t1'))
-  expect(view.queryByText('Roadmap')).toBeNull()
+  expect(shownText(view, 'Roadmap')).toBeNull()
   expect(JSON.parse(window.localStorage.getItem('orbit:docs_collapsed_spaces:workspace-1') ?? '[]')).toEqual(['teamspace:t1'])
 })
 
@@ -356,6 +358,20 @@ function trackScrolls() {
   return { scrolled, restore: () => void (Element.prototype.scrollIntoView = original) }
 }
 
+test('section headers are focusable and toggle on Enter/Space; keys from their buttons stay theirs', async () => {
+  const { view } = setup()
+  await view.findByRole('group', { name: 'General' })
+  const header = row(view, 'teamspace:t1')
+  expect(header.tabIndex).toBe(0)
+  expect(pageRow(view, 'roadmap').tabIndex).toBe(0)
+  fireEvent.keyDown(header, { key: 'Enter' })
+  expect(header.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.keyDown(header, { key: ' ' })
+  expect(header.getAttribute('aria-expanded')).toBe('true')
+  fireEvent.keyDown(within(header).getByRole('button', { name: 'Add page to General' }), { key: 'Enter' })
+  expect(header.getAttribute('aria-expanded')).toBe('true')
+})
+
 test('navigating to a page opens its collapsed section and ancestors, then scrolls it into view', async () => {
   const scrolls = trackScrolls()
   try {
@@ -366,7 +382,7 @@ test('navigating to a page opens its collapsed section and ancestors, then scrol
     fireEvent.click(row(view, 'teamspace:t1'))
     fireEvent.click(within(pageRow(view, 'other')).getByRole('button', { name: 'Expand' }))
     fireEvent.click(row(view, 'teamspace:t1'))
-    expect(view.queryByText('Roadmap')).toBeNull()
+    expect(shownText(view, 'Roadmap')).toBeNull()
 
     setActive('details')
     expect(row(view, 'teamspace:t1').getAttribute('aria-expanded')).toBe('true')

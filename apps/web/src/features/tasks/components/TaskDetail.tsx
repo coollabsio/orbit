@@ -205,7 +205,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                     Add sub-issue
                   </Button>
                 ) : null}
-                {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70">Uploading {uploadAttachments.progress}%</span> : null}
+                {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70 tabular-nums">Uploading {uploadAttachments.progress}%</span> : null}
                 {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{uploadAttachments.remainingCount} file(s) remain. <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
               </div>
             </TaskTextFields>
@@ -220,7 +220,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
             {githubPullRequests.length > 0 ? <section aria-label="GitHub links" className="mt-6 border-t pt-4">
               <h3 className="mb-2 text-xs font-semibold text-muted-foreground">GitHub</h3>
               <div className="grid gap-1">
-                {githubPullRequests.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground hover:bg-muted">
+                {githubPullRequests.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground transition-colors duration-150 ease-out hover:bg-muted">
                   <Link2 className="size-4 shrink-0 text-muted-foreground" />
                   <span className="truncate">{link.title}</span>
                   <span className="ml-auto shrink-0 text-muted-foreground">{link.state === 'paused' ? 'Paused PR' : link.state === 'merged' ? 'Merged PR' : link.state === 'closed' ? 'Closed PR' : 'Open PR'}</span>

@@ -46,7 +46,7 @@ function HomeCard({
   children: React.ReactNode
 }) {
   return (
-    <section className="flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)] transition-shadow duration-200 hover:shadow-[0_0_0_1px_var(--border),0_8px_24px_rgba(0,0,0,0.08)]">
+    <section className="flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
       <header className="flex min-h-12 items-center gap-2 py-2 pr-2 pl-4 text-sm font-medium text-muted-foreground">
         {title}
         <span className="flex-1" />

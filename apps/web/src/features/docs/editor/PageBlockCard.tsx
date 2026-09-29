@@ -18,7 +18,7 @@ export function PageBlockCard({ pageId }: { pageId: string }) {
       data-state={state.kind}
       aria-disabled={disabled || undefined}
       className={cn(
-        'group/pagecard flex w-full min-w-0 items-center gap-[9px] rounded-md px-1.5 py-1 text-left font-medium text-foreground outline-none select-none',
+        'group/pagecard flex w-full min-w-0 items-center gap-[9px] rounded-md px-1.5 py-1 text-left font-medium text-foreground transition-colors duration-150 ease-out outline-none select-none',
         'focus-visible:ring-2 focus-visible:ring-ring/50',
         disabled ? 'cursor-default text-muted-foreground' : 'cursor-pointer hover:bg-foreground/[0.04]',
       )}

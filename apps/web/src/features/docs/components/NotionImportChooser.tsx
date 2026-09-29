@@ -123,7 +123,7 @@ export function NotionImportChooser({ workspaceId, item, tree, teamspaces, pages
           />
         </InputGroup>
         <span className="flex-1" />
-        <span className="text-xs text-muted-foreground" data-testid="selected-count">
+        <span className="text-xs text-muted-foreground tabular-nums" data-testid="selected-count">
           {count} {count === 1 ? 'page' : 'pages'} selected
         </span>
         <Button type="button" variant="ghost" size="sm" onClick={() => setSelected(selectAll(index))}>
@@ -153,7 +153,7 @@ export function NotionImportChooser({ workspaceId, item, tree, teamspaces, pages
                 aria-level={row.depth + 1}
                 aria-selected={state === 'checked'}
                 aria-expanded={row.hasChildren ? row.expanded : undefined}
-                className="flex h-8 min-w-0 items-center gap-1.5 rounded-md pr-2 text-[13px] hover:bg-sidebar-accent/50"
+                className="flex h-8 min-w-0 items-center gap-1.5 rounded-md pr-2 text-[13px] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
                 style={{ paddingLeft: 4 + row.depth * 18 }}
               >
                 {row.hasChildren && !query.trim() ? (
@@ -261,7 +261,7 @@ export function NotionImportChooser({ workspaceId, item, tree, teamspaces, pages
               {notionImportErrorMessage(start.error)}
             </p>
           ) : null}
-          <Button type="button" disabled={count === 0 || start.isPending} onClick={submit}>
+          <Button type="button" className="tabular-nums" disabled={count === 0 || start.isPending} onClick={submit}>
             Import {count} {count === 1 ? 'page' : 'pages'}
           </Button>
         </div>

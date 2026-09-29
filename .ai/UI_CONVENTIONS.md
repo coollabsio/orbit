@@ -36,6 +36,10 @@
 - Do not animate the entire multi-pane Chat/DM page; it caused screen shake. Animate internal rows/panels instead.
 - Do not apply transforms that permanently create containing blocks for fixed overlays.
 - `prefers-reduced-motion` must disable practical motion.
+- Curves: `ease-out` (enter/exit, strong curve from `index.css`), `ease-in-out` (on-screen movement), `ease-drawer` (sheets). Popovers/menus 150ms in / 100ms out, dialogs 200ms / 150ms, tooltips 400ms first delay then instant.
+- Keyboard-opened, Escape-closed and shortcut-opened popups do not animate: Base UI sets `data-instant`; set it yourself only when true (`{...(instant && { 'data-instant': '' })}`), and use `DialogContent instant` for keyboard dialogs such as the command palette.
+- Keep popups mounted through their exit: never wrap `*Content` in `{open ? … : null}`; Cancel buttons are `DialogClose`, so `Modal` plays its exit before `onClose`.
+- Name transition properties (`transition-[color,background-color]`, `transition-opacity`), never `transition-all`. Hover-revealed controls use `hover-fine:opacity-0 hover-fine:group-hover:opacity-100` so touch devices still see them.
 
 ## Chat conventions
 

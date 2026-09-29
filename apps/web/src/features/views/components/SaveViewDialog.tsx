@@ -43,11 +43,9 @@ const DESCRIPTION: Record<SaveViewMode, string> = {
 export function SaveViewDialog({ open, onOpenChange, instant = false, ...form }: SaveViewDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {open ? (
-        <DialogContent data-instant={instant || undefined} className="sm:max-w-md data-instant:animate-none">
-          <SaveViewForm {...form} onClose={() => onOpenChange(false)} />
-        </DialogContent>
-      ) : null}
+      <DialogContent instant={instant} className="sm:max-w-md">
+        <SaveViewForm {...form} onClose={() => onOpenChange(false)} />
+      </DialogContent>
     </Dialog>
   )
 }

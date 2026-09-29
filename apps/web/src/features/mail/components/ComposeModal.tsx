@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DialogFooter } from '@/components/ui/dialog'
+import { DialogClose, DialogFooter } from '@/components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Textarea } from '@/components/ui/textarea'
 import { Modal } from '@/components/common/Modal'
@@ -68,9 +68,9 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
           />
         </Field>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <DialogClose render={<Button variant="ghost" />}>
             Discard
-          </Button>
+          </DialogClose>
           <Button disabled={!canSend} onClick={send}>
             Send
           </Button>

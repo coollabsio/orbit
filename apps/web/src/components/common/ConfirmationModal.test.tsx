@@ -35,7 +35,10 @@ for (const dismissal of ['Cancel', 'Close', 'Escape']) {
     if (dismissal === 'Escape') fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
     else fireEvent.click(view.getByRole('button', { name: dismissal }))
     expect(await result).toBe(false)
-    await waitFor(() => expect(document.activeElement).toBe(trigger))
+    // focus comes back once the dialog has played its exit (no toBe(): a failed poll would format the whole DOM)
+    await waitFor(() => {
+      if (document.activeElement !== trigger) throw new Error('Focus is not back on the trigger yet.')
+    })
   })
 }
 

@@ -59,6 +59,7 @@ function CommandDialog({
           className
         )}
         showCloseButton={showCloseButton}
+        instant
       >
         {children}
       </DialogContent>

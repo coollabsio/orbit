@@ -28,7 +28,7 @@ export function TypingIndicator({ state, channelId }: { state: AppState; channel
   }
 
   return (
-    <div className="absolute bottom-full left-4 pb-1">
+    <div className="absolute bottom-full left-4 pb-1 animate-in fade-in duration-150 ease-out motion-reduce:animate-none">
       <div className="flex h-3 items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
         <div className="flex gap-0.5">
           <span className="inline-block size-1 rounded-full bg-muted-foreground motion-safe:animate-bounce [animation-delay:-0.3s]" />

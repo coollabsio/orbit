@@ -186,7 +186,15 @@ export function DocTree({
   useEffect(() => {
     if (!revealedId || loading) return
     const row = scrollRef.current?.querySelector<HTMLElement>(`[data-page-id="${CSS.escape(revealedId)}"]:not([data-section])`)
-    row?.scrollIntoView?.({ block: 'nearest' })
+    if (!row) return
+    row.scrollIntoView?.({ block: 'nearest' })
+    // A section opened for it grows to its height over a short transition; scroll again once it has settled.
+    const pages = row.closest<HTMLElement>('[data-slot="space-pages"]')
+    const settle = (event: TransitionEvent) => {
+      if (event.target === pages && event.propertyName === 'grid-template-rows') row.scrollIntoView?.({ block: 'nearest' })
+    }
+    pages?.addEventListener('transitionend', settle)
+    return () => pages?.removeEventListener('transitionend', settle)
   }, [revealedId, loading])
 
   /** A sub-page (`parentId`), a root page of `space`, or (neither) a root page of the default teamspace. */
@@ -555,8 +563,8 @@ export function DocTree({
                   dropProps={favoritesHeaderDropProps}
                   action={null}
                 />
-                {favoritesOpen
-                  ? favoriteIds.map((id) => (
+                <SpacePages open={favoritesOpen}>
+                  {favoriteIds.map((id) => (
                       <DocTreeItem
                         key={id}
                         page={pageById.get(id)!}
@@ -573,8 +581,8 @@ export function DocTree({
                         reorderOnly
                         section={FAVORITES_SECTION}
                       />
-                    ))
-                  : null}
+                    ))}
+                </SpacePages>
               </div>
             ) : null}
             <SectionLabel
@@ -651,7 +659,7 @@ export function DocTree({
                       </TreeIconButton>
                     </TreeRowActions>
                   </SpaceRow>
-                  {open ? renderPages(space, 1) : null}
+                  <SpacePages open={open}>{renderPages(space, 1)}</SpacePages>
                 </div>
               )
             })}
@@ -669,7 +677,7 @@ export function DocTree({
                   </TreeIconButton>
                 }
               />
-              {collapsed.has(PRIVATE_SPACE) ? null : renderPages(PRIVATE_SPACE, 0)}
+              <SpacePages open={!collapsed.has(PRIVATE_SPACE)}>{renderPages(PRIVATE_SPACE, 0)}</SpacePages>
             </div>
           </nav>
         )}
@@ -763,18 +771,51 @@ function SectionLabel({
   )
 }
 
-/** Header row of a space: a drop target ("move to the end of this space") that collapses its pages. */
-function SpaceRow({ className, ...props }: ComponentProps<'div'>) {
+/**
+ * Header row of a space: a drop target ("move to the end of this space") that collapses its pages. As a treeitem it is
+ * focusable and toggles on Enter/Space (keys from its own buttons and inputs are theirs).
+ */
+function SpaceRow({ className, onKeyDown, ...props }: ComponentProps<'div'>) {
+  const interactive = props.role === 'treeitem'
   return (
     <div
       data-slot="space-row"
+      tabIndex={interactive ? 0 : undefined}
       className={cn(
-        'group/row relative flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md whitespace-nowrap transition-colors select-none hover:bg-sidebar-accent/50',
+        'group/row relative flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md whitespace-nowrap transition-colors outline-none select-none hover:bg-sidebar-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset',
         'data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset',
         className,
       )}
+      onKeyDown={(event) => {
+        onKeyDown?.(event)
+        if (!interactive || event.defaultPrevented || event.target !== event.currentTarget) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          event.currentTarget.click()
+        }
+      }}
       {...props}
     />
+  )
+}
+
+/**
+ * The pages under a section header. They stay mounted so collapsing animates the height; while collapsed they are
+ * inert (not focusable, not in the accessibility tree). The clip margin keeps the first/last row's drop line whole.
+ */
+function SpacePages({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div
+      data-slot="space-pages"
+      className={cn(
+        'grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none',
+        open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+      )}
+    >
+      <div className={cn('flex min-h-0 flex-col gap-px overflow-clip', open && '[overflow-clip-margin:2px]')} inert={!open}>
+        {children}
+      </div>
+    </div>
   )
 }
 

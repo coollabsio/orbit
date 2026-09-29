@@ -8,14 +8,15 @@ import { ImageViewer } from './ImageViewer'
 import { Button } from '@/components/ui/button'
 import { cn } from 'cn'
 
-/** Dark round × over an attachment; shows on hover or keyboard focus. */
+/** Dark round × over an attachment. With a mouse it shows on hover or keyboard focus; on touch it is always visible.
+    `after:` grows the 22px circle to a 30px hit area. */
 function RemoveAttachmentButton({ attachment, onRemove }: { attachment: Attachment; onRemove: (attachmentId: string) => void }) {
   return (
     <Button
       data-slot="attachment-remove"
       variant="ghost"
       size="icon-xs"
-      className="absolute top-1.5 right-1.5 z-[2] size-[22px] rounded-full bg-black/60 text-white opacity-0 transition-[opacity,background-color] group-hover:opacity-100 hover:bg-destructive hover:text-white focus-visible:opacity-100 dark:hover:bg-destructive"
+      className="absolute top-1.5 right-1.5 z-[2] size-[22px] rounded-full bg-black/60 text-white transition-[opacity,background-color] duration-150 after:absolute after:-inset-1 hover:bg-destructive hover:text-white focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 dark:hover:bg-destructive"
       aria-label={`Remove ${attachment.fileName}`}
       title="Remove"
       onClick={() => onRemove(attachment.id)}
@@ -92,7 +93,7 @@ export function Attachments({
                   <span className="truncate text-sm font-medium text-foreground">{att.fileName}</span>
                   <span className="text-xs text-muted-foreground">{formatSize(att.fileSize)}</span>
                 </span>
-                <span className="opacity-0 transition-opacity group-hover/card:opacity-100">
+                <span className="transition-opacity duration-150 group-focus-visible/card:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/card:opacity-100">
                   <Download className="size-5" />
                 </span>
               </a>

@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DialogFooter } from '@/components/ui/dialog'
+import { DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Modal } from '@/components/common/Modal'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -35,7 +35,7 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
         </Field>
         {createProject.isError ? <p role="alert" className="text-xs text-destructive">Project creation failed. Try again.</p> : null}
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={createProject.isPending} onClick={onClose}>Cancel</Button>
+          <DialogClose render={<Button type="button" variant="outline" disabled={createProject.isPending} />}>Cancel</DialogClose>
           <Button type="submit" disabled={!name.trim() || createProject.isPending}>
             {createProject.isPending ? 'Creating…' : 'Create project'}
           </Button>

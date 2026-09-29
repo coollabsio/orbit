@@ -42,6 +42,9 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 })
   const [gesturing, setGesturing] = useState(false)
   const gesture = useRef<Gesture | null>(null)
+  // Closing plays the dialog's exit first; the caller unmounts the viewer once it has finished.
+  const [open, setOpen] = useState(true)
+  const close = () => setOpen(false)
 
   // Back at 100% or less there is nothing to pan to, so the image goes back to the center.
   function setZoom(value: number, nextPan: Point = pan) {
@@ -87,9 +90,12 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
 
   return (
     <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose()
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setOpen(false)
+      }}
+      onOpenChangeComplete={(next) => {
+        if (!next) onClose()
       }}
     >
       <DialogContent
@@ -101,7 +107,7 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
         <div className="flex h-14 shrink-0 items-center justify-between gap-3 overflow-x-auto border-b border-white/10 px-4 duration-200 animate-in slide-in-from-top-2 motion-reduce:animate-none">
           <div className="min-w-0">
             <div className="truncate text-sm font-bold">{attachment.fileName}</div>
-            <div className="text-xs font-semibold text-white/55">{Math.round(zoom * 100)}%</div>
+            <div className="text-xs font-semibold text-white/55 tabular-nums">{Math.round(zoom * 100)}%</div>
           </div>
           <div className="flex items-center gap-2">
             <ViewerBarButton nativeButton={false} render={<a href={attachment.url} download={attachment.fileName} />} title="Download image" aria-label="Download image" onClick={(e) => e.stopPropagation()}>
@@ -116,14 +122,14 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
             <ViewerBarButton className="text-lg font-bold" title="Zoom in" aria-label="Zoom in" onClick={() => setZoom(zoom + 0.25)}>
               +
             </ViewerBarButton>
-            <ViewerBarButton title="Close image viewer" aria-label="Close image viewer" onClick={onClose}>
+            <ViewerBarButton title="Close image viewer" aria-label="Close image viewer" onClick={close}>
               <X className="size-4" />
             </ViewerBarButton>
           </div>
         </div>
         <Button type="button" variant="ghost" className="flex h-auto min-h-0 w-full flex-1 shrink! cursor-zoom-out items-center justify-center overflow-auto rounded-none border-0 p-2 font-normal whitespace-normal select-auto hover:bg-transparent touch-none sm:p-6 dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0"
           title="Close image viewer"
-          onClick={onClose}
+          onClick={close}
           onTouchStart={startGesture}
           onTouchMove={moveGesture}
           onTouchEnd={endGesture}

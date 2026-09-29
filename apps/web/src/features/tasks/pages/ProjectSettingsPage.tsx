@@ -198,7 +198,7 @@ export function ProjectSettingsPage() {
                               <DropdownMenu>
                                 <DropdownMenuTrigger
                                   render={
-                                    <Button variant="ghost" size="icon-sm" className="size-[30px] rounded-full bg-muted opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100" aria-label={`${status.name} actions`} title="Actions">
+                                    <Button variant="ghost" size="icon-sm" className="size-[30px] rounded-full bg-muted transition-opacity duration-150 ease-out focus-visible:opacity-100 aria-expanded:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100" aria-label={`${status.name} actions`} title="Actions">
                                       <MoreHorizontal className="size-4" />
                                     </Button>
                                   }

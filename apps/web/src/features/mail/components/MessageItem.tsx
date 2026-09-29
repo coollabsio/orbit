@@ -22,12 +22,14 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
       data-expanded={expanded ? 'true' : undefined}
     >
       <div
-        className="-m-1 flex cursor-pointer items-center gap-2.5 rounded-md p-1 transition-colors hover:bg-muted/45"
+        className="-m-1 flex cursor-pointer items-center gap-2.5 rounded-md p-1 transition-colors outline-none hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
         role="button"
         tabIndex={0}
         onClick={onToggle}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && e.target === e.currentTarget) onToggle()
+          if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+          e.preventDefault()
+          onToggle()
         }}
       >
         <UserAvatar user={null} name={message.from.name} size={32} />
@@ -41,7 +43,7 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
         </span>
       </div>
       {expanded ? (
-        <>
+        <div className="animate-relation-enter motion-reduce:animate-none">
           <div className="mt-3 text-sm leading-[1.6] whitespace-pre-wrap text-foreground">{message.body}</div>
           {message.attachments && message.attachments.length > 0 ? (
             <Attachments attachments={message.attachments} hasTextContent={!!message.body.trim()} />
@@ -56,7 +58,7 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
               Forward
             </Button>
           </div>
-        </>
+        </div>
       ) : (
         <div className="mt-1.5 truncate pl-[42px] text-[13px] text-muted-foreground">{firstLine(message.body)}</div>
       )}

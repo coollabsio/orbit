@@ -1,4 +1,4 @@
-// Port of the chat reference MessageList (grouping, date separators, jump-to-present, enter animation)
+// Port of the chat reference MessageList (grouping, date separators, jump-to-present, new-message enter animation)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Message as MessageSquare, Trash as Trash2 } from 'reicon-react'
@@ -53,6 +53,9 @@ export function MessageList({
     () => messages.filter((m) => m.pinned && m.pinnedAt && !m.pinNoticeHidden).map((m) => ({ message: m, at: m.pinnedAt! })),
     [messages],
   )
+  // Only messages that arrive after mount rise in. ChatArea remounts the list per channel, so the newest
+  // message at mount is the watermark: rows at or before it (initial history, older pages) render still.
+  const [enterAfter] = useState(() => messages.at(-1)?.createdAt ?? '')
   const noticesBefore = (index: number) => {
     const current = messages[index]
     const next = messages[index + 1]
@@ -132,8 +135,8 @@ export function MessageList({
                 key={msg.id}
                 data-message-created-at={new Date(msg.createdAt).getTime()}
                 data-message-index={i}
-                className="duration-[120ms] animate-in fade-in slide-in-from-bottom-0.5 fill-mode-both motion-reduce:animate-none"
-                style={{ animationDelay: `${Math.min(i, 8) * 8}ms` }}
+                data-new={msg.createdAt > enterAfter ? 'true' : undefined}
+                className="data-[new=true]:animate-view-bar-enter motion-reduce:animate-none"
               >
                 {startsNewDay ? <DateSeparator iso={msg.createdAt} /> : null}
                 <MessageItem

@@ -20,17 +20,23 @@ export interface TaskPickerDialogProps {
 
 /**
  * Pick another task (duplicate target, blocker, related). Same data pattern as the command palette; the title is
- * rendered inside the popup so it names the dialog. Mount only while open: the queries start on mount.
+ * rendered inside the popup so it names the dialog. Mount only while open: the queries start on mount. Closing
+ * plays the exit animation first and reports `onOpenChange(false)` once it has finished, so the caller unmounts it then.
  */
 export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeIds = [], excludeDuplicates = false, onSelect }: TaskPickerDialogProps) {
   const { workspace } = useWorkspace()
   const projects = useProjects(workspace.id)
   const [query, setQuery] = useState('')
+  const [closing, setClosing] = useState(false)
   const { candidates, loading } = useTaskCandidates({ query, excludeIds, excludeDuplicates, statuses })
   const projectName = (projectId: string) => projects.data?.find((project) => project.id === projectId)?.name
 
   return (
-    <Dialog open={open} onOpenChange={(next) => onOpenChange(next)}>
+    <Dialog
+      open={open && !closing}
+      onOpenChange={(next) => { if (!next) setClosing(true) }}
+      onOpenChangeComplete={(next) => { if (!next) onOpenChange(false) }}
+    >
       <DialogContent
         showCloseButton={false}
         className="top-[12vh] max-h-[min(60vh,28rem)] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-[576px]"
@@ -50,7 +56,7 @@ export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeI
                   className="h-9 gap-2.5 px-2.5 text-[13px]"
                   onSelect={() => {
                     onSelect(task)
-                    onOpenChange(false)
+                    setClosing(true)
                   }}
                 >
                   <TaskStatusIcon status={statuses.find((status) => status.id === task.statusId)} />

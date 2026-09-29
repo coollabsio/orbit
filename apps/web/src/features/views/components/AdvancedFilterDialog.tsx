@@ -53,11 +53,9 @@ export function AdvancedFilterDialog({ open, onOpenChange, filter, options, onAp
   const keyboard = useKeyboardInput()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {open ? (
-        <DialogContent data-instant={keyboard || undefined} className="gap-0 p-0 sm:max-w-2xl data-instant:animate-none">
-          <TreeEditor filter={filter} options={options} onApply={onApply} validate={validate} onClose={() => onOpenChange(false)} />
-        </DialogContent>
-      ) : null}
+      <DialogContent instant={keyboard} className="gap-0 p-0 sm:max-w-2xl">
+        <TreeEditor filter={filter} options={options} onApply={onApply} validate={validate} onClose={() => onOpenChange(false)} />
+      </DialogContent>
     </Dialog>
   )
 }

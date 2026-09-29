@@ -4,7 +4,7 @@ import { useId, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { SmileCircle as Smile } from 'reicon-react'
 import { Button } from '@/components/ui/button'
-import { DialogFooter } from '@/components/ui/dialog'
+import { DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -158,9 +158,9 @@ function CreateChannelModal({ categoryId, categoryName, onClose }: { categoryId:
           <EmojiSelect value={emoji} onChange={setEmoji} label="Channel emoji" />
         </FieldGroup>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <DialogClose render={<Button type="button" variant="outline" />}>
             Cancel
-          </Button>
+          </DialogClose>
           <Button type="submit" disabled={!name.trim()}>
             Create Channel
           </Button>
@@ -194,9 +194,9 @@ function CreateCategoryModal({ onClose }: { onClose: () => void }) {
           <EmojiSelect value={emoji} onChange={setEmoji} label="Category emoji" />
         </FieldGroup>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <DialogClose render={<Button type="button" variant="outline" />}>
             Cancel
-          </Button>
+          </DialogClose>
           <Button type="submit" disabled={!name.trim()}>
             Create Category
           </Button>
@@ -238,9 +238,9 @@ function EditChannelModal({ channel, onClose }: { channel: Channel; onClose: () 
           <EmojiSelect value={emoji} onChange={setEmoji} label="Channel emoji" />
         </FieldGroup>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <DialogClose render={<Button type="button" variant="outline" />}>
             Cancel
-          </Button>
+          </DialogClose>
           <Button type="submit" disabled={!name.trim()}>
             Save Changes
           </Button>
@@ -274,9 +274,9 @@ function EditCategoryModal({ category, onClose }: { category: ChatCategory; onCl
           <EmojiSelect value={emoji} onChange={setEmoji} label="Category emoji" />
         </FieldGroup>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <DialogClose render={<Button type="button" variant="outline" />}>
             Cancel
-          </Button>
+          </DialogClose>
           <Button type="submit" disabled={!name.trim()}>
             Save Changes
           </Button>

@@ -19,7 +19,7 @@ export function SettingsCard({
   return (
     <section
       className={cn(
-        'm-0 flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)] transition-shadow duration-200 hover:shadow-[0_0_0_1px_var(--border),0_8px_24px_rgba(0,0,0,0.08)]',
+        'm-0 flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]',
         className,
       )}
     >

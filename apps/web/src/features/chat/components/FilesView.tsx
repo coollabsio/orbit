@@ -173,7 +173,7 @@ export function FilesView({ state, channel, onBack }: { state: AppState; channel
                           </span>
                         )}
                       </RowButton>
-                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <div className="absolute top-2 right-2 flex items-center gap-1 transition-opacity duration-150 focus-within:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100">
                         <MediaCardAction nativeButton={false} render={<a href={file.url} download={file.fileName} />} title="Download file" aria-label="Download file" onClick={(e) => e.stopPropagation()}>
                           <Download className="size-3.5" />
                         </MediaCardAction>

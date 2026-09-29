@@ -112,7 +112,7 @@ export function CoverBanner({
       />
 
       {readOnly ? null : <div
-        className="absolute top-2 right-2 z-[5] hidden gap-1 group-hover/cover:flex data-[open]:flex"
+        className="absolute top-2 right-2 z-[5] flex gap-1 transition-opacity duration-150 ease-out focus-within:opacity-100 data-[open]:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/cover:opacity-100"
         data-cover-actions=""
         data-open={repositioning || sourceOpen || undefined}
       >
@@ -142,7 +142,7 @@ export function CoverBanner({
 
       {sourceOpen && !repositioning ? (
         <div
-          className="absolute inset-x-2 top-[44px] z-[6] mx-auto max-w-[420px] rounded-lg border border-border bg-background/95 p-3 shadow-md backdrop-blur-[6px]"
+          className="absolute inset-x-2 top-[44px] z-[6] mx-auto max-w-[420px] origin-top animate-in rounded-lg border border-border bg-background/95 p-3 shadow-md backdrop-blur-[6px] duration-150 ease-out fade-in zoom-in-[0.97] slide-in-from-top-1 motion-reduce:animate-none"
           data-cover-actions=""
         >
           <CoverSourcePanel

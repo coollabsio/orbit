@@ -19,7 +19,8 @@ const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-foreground
     },
     mode: {
       read: 'whitespace-pre-wrap [overflow-wrap:anywhere]',
-      preview: 'cursor-text whitespace-pre-wrap [overflow-wrap:anywhere] data-muted:text-muted-foreground',
+      // the text sits flush (p-0), so the keyboard focus ring goes outside the box rather than over the glyphs
+      preview: 'cursor-text rounded-sm whitespace-pre-wrap [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring/50 data-muted:text-muted-foreground',
       edit: 'h-auto rounded-none focus-visible:ring-0 dark:bg-transparent',
     },
   },

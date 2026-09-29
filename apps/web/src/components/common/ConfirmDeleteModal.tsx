@@ -1,7 +1,7 @@
 // Generic destructive-confirm dialog (the chat reference ConfirmDelete modal) used across features.
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
-import { DialogFooter } from '@/components/ui/dialog'
+import { DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Modal } from './Modal'
 
 export function ConfirmDeleteModal({
@@ -24,9 +24,9 @@ export function ConfirmDeleteModal({
     <Modal title={title} onClose={onClose} className="sm:max-w-sm">
       <p className="text-sm leading-5 text-muted-foreground">{description}</p>
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onClose}>
+        <DialogClose render={<Button type="button" variant="outline" />}>
           Cancel
-        </Button>
+        </DialogClose>
         <Button
           type="button"
           variant="destructive"

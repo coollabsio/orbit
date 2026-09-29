@@ -131,119 +131,117 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
           </Button>
         }
       />
-      {open ? (
-        <PopoverContent align="end" data-instant={instant || undefined} className="w-80 gap-0 p-0 data-instant:animate-none">
-          <div className="p-3">
-            <ToggleGroup
-              aria-label="Layout"
-              variant="outline"
-              className="w-full"
-              value={[display.layout]}
-              onValueChange={(value: string[]) => {
-                const next = value[0]
-                if (next === 'list' || next === 'board' || next === 'timeline') setLayout(next)
-              }}
-            >
-              {LAYOUTS.map(({ value, label, icon: Icon }) => (
-                <ToggleGroupItem key={value} value={value} className="flex-1 gap-1.5 font-normal text-muted-foreground aria-pressed:text-foreground">
-                  <Icon className="size-3.5" aria-hidden="true" />
-                  {label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
-          <div className="flex flex-col gap-1 border-t p-3">
-            <Row label="Grouping">
-              <OptionSelect label="Grouping" value={display.group_by} items={groupItems} onChange={setGroup} />
+      <PopoverContent align="end" {...(instant && { 'data-instant': '' })} className="w-80 gap-0 p-0 data-instant:animate-none">
+        <div className="p-3">
+          <ToggleGroup
+            aria-label="Layout"
+            variant="outline"
+            className="w-full"
+            value={[display.layout]}
+            onValueChange={(value: string[]) => {
+              const next = value[0]
+              if (next === 'list' || next === 'board' || next === 'timeline') setLayout(next)
+            }}
+          >
+            {LAYOUTS.map(({ value, label, icon: Icon }) => (
+              <ToggleGroupItem key={value} value={value} className="flex-1 gap-1.5 font-normal text-muted-foreground aria-pressed:text-foreground">
+                <Icon className="size-3.5" aria-hidden="true" />
+                {label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+        <div className="flex flex-col gap-1 border-t p-3">
+          <Row label="Grouping">
+            <OptionSelect label="Grouping" value={display.group_by} items={groupItems} onChange={setGroup} />
+          </Row>
+          {!timeline && display.group_by !== 'none' ? (
+            <Row label="Sub-grouping">
+              <OptionSelect label="Sub-grouping" value={display.sub_group_by} items={subItems} onChange={(sub_group_by) => onChange({ sub_group_by })} />
             </Row>
-            {!timeline && display.group_by !== 'none' ? (
-              <Row label="Sub-grouping">
-                <OptionSelect label="Sub-grouping" value={display.sub_group_by} items={subItems} onChange={(sub_group_by) => onChange({ sub_group_by })} />
-              </Row>
-            ) : null}
-            {/* Timeline rows always follow their dates, so an ordering would do nothing there. */}
-            {timeline ? null : (
-              <Row label="Ordering">
-                <div className="flex items-center gap-1">
-                  <OptionSelect
-                    label="Ordering"
-                    value={display.order_by}
-                    items={ORDER_OPTIONS.map((order) => ({ value: order, label: ORDER_LABEL[order] }))}
-                    onChange={(order_by) => onChange({ order_by })}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label={ascending ? 'Ascending' : 'Descending'}
-                    disabled={manual}
-                    title={manual ? 'Manual order has no direction' : undefined}
-                    onClick={() => onChange({ order_direction: ascending ? 'desc' : 'asc' })}
-                  >
-                    {ascending ? <ArrowUp /> : <ArrowDown />}
-                  </Button>
-                </div>
-              </Row>
-            )}
-            <Row label="Sub-issues">
-              <OptionSelect
-                label="Sub-issues"
-                value={display.sub_issues}
-                items={SUB_ISSUE_OPTIONS.map((mode) => ({ value: mode, label: SUB_ISSUE_LABEL[mode] }))}
-                onChange={(sub_issues) => onChange({ sub_issues })}
-                describedBy={flatOnly ? 'display-sub-issues-hint' : undefined}
-              />
+          ) : null}
+          {/* Timeline rows always follow their dates, so an ordering would do nothing there. */}
+          {timeline ? null : (
+            <Row label="Ordering">
+              <div className="flex items-center gap-1">
+                <OptionSelect
+                  label="Ordering"
+                  value={display.order_by}
+                  items={ORDER_OPTIONS.map((order) => ({ value: order, label: ORDER_LABEL[order] }))}
+                  onChange={(order_by) => onChange({ order_by })}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={ascending ? 'Ascending' : 'Descending'}
+                  disabled={manual}
+                  title={manual ? 'Manual order has no direction' : undefined}
+                  onClick={() => onChange({ order_direction: ascending ? 'desc' : 'asc' })}
+                >
+                  {ascending ? <ArrowUp /> : <ArrowDown />}
+                </Button>
+              </div>
             </Row>
-            {/* Board and timeline render Nested as Flat (spec §7.1): the value stays (it is saved with the view for the list) */}
-            {flatOnly ? (
-              <p id="display-sub-issues-hint" className="-mt-1 mb-1 w-40 self-end text-xs text-muted-foreground">
-                {timeline ? 'Timeline' : 'Board'} shows sub-issues flat
-              </p>
-            ) : null}
-            <Row label="Completed tasks">
-              <OptionSelect
-                label="Completed tasks"
-                value={display.show_completed}
-                items={COMPLETED_OPTIONS.map((option) => ({ value: option, label: COMPLETED_LABEL[option] }))}
-                onChange={(show_completed) => onChange({ show_completed })}
-              />
-            </Row>
-            <Row label="Show empty groups">
-              {/* the thumb snaps: nothing in this everyday panel moves except the entrance */}
-              <Switch
-                aria-label="Show empty groups"
-                className="[&_[data-slot=switch-thumb]]:transition-none"
-                checked={display.show_empty_groups}
-                onCheckedChange={(checked: boolean) => onChange({ show_empty_groups: checked })}
-              />
-            </Row>
-          </div>
-          <div className="flex flex-col gap-2 border-t p-3">
-            <span className="text-xs font-medium text-muted-foreground">Display properties</span>
-            <ToggleGroup
-              aria-label="Display properties"
-              multiple
-              variant="outline"
-              size="sm"
-              spacing={1}
-              className="flex-wrap justify-start"
-              value={display.properties}
-              onValueChange={(value: string[]) => onChange({ properties: PROPERTY_ORDER.filter((property) => value.includes(property)) })}
-            >
-              {PROPERTY_ORDER.map((property) => (
-                <ToggleGroupItem key={property} value={property} className="h-6 min-w-0 px-2 text-xs font-normal text-muted-foreground aria-pressed:text-foreground">
-                  {PROPERTY_LABEL[property]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
-          <div className="flex justify-end border-t p-2">
-            <Button type="button" variant="ghost" size="sm" disabled={sameDisplay(display, defaultDisplay)} onClick={() => onChange(defaultDisplay)}>
-              Reset to default
-            </Button>
-          </div>
-        </PopoverContent>
-      ) : null}
+          )}
+          <Row label="Sub-issues">
+            <OptionSelect
+              label="Sub-issues"
+              value={display.sub_issues}
+              items={SUB_ISSUE_OPTIONS.map((mode) => ({ value: mode, label: SUB_ISSUE_LABEL[mode] }))}
+              onChange={(sub_issues) => onChange({ sub_issues })}
+              describedBy={flatOnly ? 'display-sub-issues-hint' : undefined}
+            />
+          </Row>
+          {/* Board and timeline render Nested as Flat (spec §7.1): the value stays (it is saved with the view for the list) */}
+          {flatOnly ? (
+            <p id="display-sub-issues-hint" className="-mt-1 mb-1 w-40 self-end text-xs text-muted-foreground">
+              {timeline ? 'Timeline' : 'Board'} shows sub-issues flat
+            </p>
+          ) : null}
+          <Row label="Completed tasks">
+            <OptionSelect
+              label="Completed tasks"
+              value={display.show_completed}
+              items={COMPLETED_OPTIONS.map((option) => ({ value: option, label: COMPLETED_LABEL[option] }))}
+              onChange={(show_completed) => onChange({ show_completed })}
+            />
+          </Row>
+          <Row label="Show empty groups">
+            {/* the thumb snaps: nothing in this everyday panel moves except the entrance */}
+            <Switch
+              aria-label="Show empty groups"
+              className="[&_[data-slot=switch-thumb]]:transition-none"
+              checked={display.show_empty_groups}
+              onCheckedChange={(checked: boolean) => onChange({ show_empty_groups: checked })}
+            />
+          </Row>
+        </div>
+        <div className="flex flex-col gap-2 border-t p-3">
+          <span className="text-xs font-medium text-muted-foreground">Display properties</span>
+          <ToggleGroup
+            aria-label="Display properties"
+            multiple
+            variant="outline"
+            size="sm"
+            spacing={1}
+            className="flex-wrap justify-start"
+            value={display.properties}
+            onValueChange={(value: string[]) => onChange({ properties: PROPERTY_ORDER.filter((property) => value.includes(property)) })}
+          >
+            {PROPERTY_ORDER.map((property) => (
+              <ToggleGroupItem key={property} value={property} className="h-6 min-w-0 px-2 text-xs font-normal text-muted-foreground aria-pressed:text-foreground">
+                {PROPERTY_LABEL[property]}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+        <div className="flex justify-end border-t p-2">
+          <Button type="button" variant="ghost" size="sm" disabled={sameDisplay(display, defaultDisplay)} onClick={() => onChange(defaultDisplay)}>
+            Reset to default
+          </Button>
+        </div>
+      </PopoverContent>
     </Popover>
   )
 }

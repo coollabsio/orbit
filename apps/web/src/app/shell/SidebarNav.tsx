@@ -47,8 +47,10 @@ function SidebarNavItem({
   'aria-label': ariaLabel = label,
   active,
   size,
+  className,
   ...props
 }: Omit<LinkProps, 'className' | 'children' | 'title'> & VariantProps<typeof sidebarNavItemVariants> & {
+  className?: string
   end?: boolean
   icon: SidebarNavIcon
   label: string
@@ -64,7 +66,7 @@ function SidebarNavItem({
       aria-current={isActive ? 'page' : undefined}
       aria-label={ariaLabel}
       title={collapsed ? ariaLabel : undefined}
-      className={sidebarNavItemVariants({ size })}
+      className={cn(sidebarNavItemVariants({ size }), className)}
       to={to}
       {...props}
     >
@@ -152,7 +154,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
             </>
           ) : null}
         </Button>
-        <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto', collapsed ? 'gap-1' : 'gap-0.5')}>
+        <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain', collapsed ? 'gap-1' : 'gap-0.5')}>
           <SidebarSection label="Workspace" collapsed={collapsed} first />
           {WORKSPACE_LINKS.map((link) => link.enabled ? (
             <Fragment key={link.to}>
@@ -165,7 +167,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
               />
               {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps */}
               {link.to === '/tasks' && inTasks ? (
-                <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" onClick={onNavigate} />
+                <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" className="animate-relation-enter motion-reduce:animate-none" onClick={onNavigate} />
               ) : null}
             </Fragment>
           ) : (

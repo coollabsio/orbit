@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
@@ -70,7 +70,8 @@ test('picking a task reports it and closes the picker', async () => {
   const { view, onSelect, onOpenChange } = renderPicker()
   fireEvent.click(await view.findByRole('option', { name: /Login fails on Safari/ }))
   expect(onSelect.mock.calls[0]![0].id).toBe('task-91c0')
-  expect(onOpenChange).toHaveBeenCalledWith(false)
+  // reported once the exit animation has finished, so the caller unmounts it after the popup has closed
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
 })
 
 test('text that matches nothing shows the empty state', async () => {

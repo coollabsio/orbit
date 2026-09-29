@@ -72,7 +72,7 @@ function PinnedPanel({ state, channel, onClose, searchRef }: PinnedMessagesProps
           <InputGroupInput ref={searchRef} value={query} placeholder="Search pinned messages" aria-label="Search pinned messages" onChange={(e) => setQuery(e.target.value)} />
         </InputGroup>
       </div>
-      <div className="min-h-0 overflow-y-auto p-4 max-[899px]:p-1.5">
+      <div className="min-h-0 overflow-y-auto overscroll-contain p-4 max-[899px]:p-1.5">
         {pins.length === 0 ? (
           <Empty>
             <EmptyHeader>

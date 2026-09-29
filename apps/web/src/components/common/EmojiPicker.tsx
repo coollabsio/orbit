@@ -96,7 +96,7 @@ export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => v
           onChange={(e) => setQuery(e.target.value)}
         />
       </InputGroup>
-      <div className="max-h-72 overflow-y-auto pr-0.5">
+      <div className="max-h-72 overflow-y-auto overscroll-contain pr-0.5">
         {customEmojis.filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase())).length > 0 ? (
           <EmojiGroup label="Custom">
             {customEmojis

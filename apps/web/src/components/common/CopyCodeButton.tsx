@@ -1,4 +1,5 @@
-// Copy button for code blocks (chat messages, docs editor). It is hidden until the parent `group` is hovered.
+// Copy button for code blocks (chat messages, docs editor). With a mouse it is hidden until the parent `group` is
+// hovered or the button has keyboard focus; on touch it is always visible.
 import { useState } from 'react'
 import { Copy } from 'reicon-react'
 import { Button } from '@/components/ui/button'
@@ -44,7 +45,7 @@ export function CopyCodeButton({ getText, className }: { getText: () => string; 
       type="button"
       variant="outline"
       className={cn(
-        'h-7 gap-1 bg-background/90 px-2 text-[11px] font-semibold text-muted-foreground opacity-0 shadow-sm transition-[opacity,background-color,color,transform] group-hover:opacity-100 focus:opacity-100 active:scale-95 active:not-aria-[haspopup]:translate-y-0 data-[state=copied]:bg-primary/10 data-[state=copied]:text-primary data-[state=failed]:bg-destructive/10 data-[state=failed]:text-destructive dark:bg-background/90 dark:data-[state=copied]:bg-primary/10 dark:data-[state=failed]:bg-destructive/10',
+        'h-7 gap-1 bg-background/90 px-2 text-[11px] font-semibold text-muted-foreground shadow-sm transition-[opacity,background-color,color,transform] duration-150 focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 active:scale-95 active:not-aria-[haspopup]:translate-y-0 data-[state=copied]:bg-primary/10 data-[state=copied]:text-primary data-[state=failed]:bg-destructive/10 data-[state=failed]:text-destructive dark:bg-background/90 dark:data-[state=copied]:bg-primary/10 dark:data-[state=failed]:bg-destructive/10',
         className,
       )}
       data-state={copyState}

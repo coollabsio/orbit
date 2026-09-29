@@ -111,7 +111,7 @@ function SubIssueNode({ task, depth, context }: { task: Task; depth: number; con
   return (
     <li>
       <SubIssueRow task={task} depth={depth} context={context} />
-      {/* each level loads its own children when shown; no height animation, rows simply mount */}
+      {/* each level loads its own children when shown; no height animation, the rows fade in with a 4px drop */}
       {(task.subIssueCount ?? 0) > 0 && expanded ? <SubIssueChildren parentId={task.id} depth={depth + 1} context={context} /> : null}
     </li>
   )
@@ -121,7 +121,7 @@ function SubIssueChildren({ parentId, depth, context }: { parentId: string; dept
   const children = useChildren(parentId, context.projects)
   if (children.length === 0) return null
   return (
-    <ul aria-label="Sub-issues" className="m-0 mt-px flex list-none flex-col gap-px p-0">
+    <ul aria-label="Sub-issues" className="m-0 mt-px flex animate-relation-enter list-none flex-col gap-px p-0 motion-reduce:animate-none">
       {children.map((task) => <SubIssueNode key={task.id} task={task} depth={depth} context={context} />)}
     </ul>
   )

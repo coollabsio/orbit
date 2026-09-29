@@ -44,7 +44,7 @@ export function CalloutView({ block, editor, contentRef }: CalloutViewProps) {
             <button
               type="button"
               contentEditable={false}
-              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-[18px] leading-none select-none hover:bg-foreground/8 focus-visible:outline-2 focus-visible:outline-ring/50 in-[.bn-editor[contenteditable=false]]:pointer-events-none in-[.bn-editor[contenteditable=false]]:cursor-default"
+              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-[18px] leading-none transition-colors duration-150 ease-out select-none hover:bg-foreground/8 focus-visible:outline-2 focus-visible:outline-ring/50 in-[.bn-editor[contenteditable=false]]:pointer-events-none in-[.bn-editor[contenteditable=false]]:cursor-default"
               aria-label="Change callout icon"
               onMouseDown={(event) => {
                 // Keep ProseMirror from turning the click into a selection change or a drag start.
@@ -55,11 +55,9 @@ export function CalloutView({ block, editor, contentRef }: CalloutViewProps) {
         >
           <Emoji value={emoji} size={20} />
         </PopoverTrigger>
-        {open ? (
-          <PopoverContent align="start" className="w-auto gap-0 p-0">
-            <EmojiPicker onPick={pick} />
-          </PopoverContent>
-        ) : null}
+        <PopoverContent align="start" className="w-auto gap-0 p-0">
+          <EmojiPicker onPick={pick} />
+        </PopoverContent>
       </Popover>
       <div ref={contentRef} className="min-w-0 flex-1 py-px" />
     </div>

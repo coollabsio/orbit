@@ -57,7 +57,7 @@ export function TaskLabels({ workspaceId, labelIds, labels, onChange }: { worksp
       ))}
       <Popover>
         <PopoverTrigger render={<Button variant="outline" size="xs" className="h-5 rounded-full border-dashed text-muted-foreground" aria-label="Add label"><Plus />{labelIds.length === 0 ? 'Add label' : null}</Button>} />
-        <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-45 gap-px overflow-y-auto p-1">
+        <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-45 gap-px overflow-y-auto overscroll-contain p-1">
           <div className="px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase">Labels</div>
           {labels.length === 0 ? <div className="px-2.5 py-2 text-xs text-muted-foreground/70">No labels yet.</div> : null}
           {labels.map((label) => {

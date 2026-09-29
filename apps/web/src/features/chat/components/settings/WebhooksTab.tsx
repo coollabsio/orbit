@@ -138,8 +138,12 @@ export function WebhooksTab() {
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/55 transition-transform data-[open]:rotate-90" data-open={isExpanded || undefined} />
                 </RowButton>
 
-                {isExpanded ? (
-                  <>
+                {/* stays mounted so the body can animate grid rows 0fr -> 1fr; inert keeps collapsed fields out of focus */}
+                <div
+                  className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-200 ease-out data-[open=true]:grid-rows-[1fr] motion-reduce:transition-none"
+                  data-open={isExpanded ? 'true' : undefined}
+                >
+                  <div className="min-h-0 overflow-hidden" inert={!isExpanded}>
                     <Separator className="mx-4 data-horizontal:w-auto" />
                     <div className="grid grid-cols-[104px_minmax(0,1fr)] gap-5 p-4 max-[599px]:grid-cols-[minmax(0,1fr)]">
                       <div>
@@ -217,8 +221,8 @@ export function WebhooksTab() {
                         </div>
                       </div>
                     </div>
-                  </>
-                ) : null}
+                  </div>
+                </div>
               </div>
             )
           })}

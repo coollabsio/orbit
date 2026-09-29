@@ -32,7 +32,7 @@ export function CommentsPanel({
       aria-label="Comments"
       data-comments-panel=""
       data-print-hide=""
-      className="flex w-[340px] shrink-0 flex-col border-l border-border bg-background max-[1099px]:absolute max-[1099px]:inset-y-0 max-[1099px]:right-0 max-[1099px]:z-20 max-[1099px]:shadow-xl max-[599px]:w-full"
+      className="flex w-[340px] shrink-0 animate-in flex-col border-l border-border bg-background duration-150 ease-out fade-in max-[1099px]:absolute max-[1099px]:inset-y-0 max-[1099px]:right-0 max-[1099px]:z-20 max-[1099px]:shadow-xl max-[1099px]:duration-200 max-[1099px]:slide-in-from-right-4 max-[599px]:w-full motion-reduce:animate-none"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border pr-2 pl-3">
         <span className="text-[13px] font-semibold text-foreground">Comments</span>
@@ -63,7 +63,7 @@ export function CommentsPanel({
           })}
         </TabsList>
       </Tabs>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-2">
         {empty ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 pb-16 text-center" data-comments-empty={filter}>
             <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">

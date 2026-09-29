@@ -245,7 +245,7 @@ export function PageHistoryPane({ workspaceId, pageId, readCurrent, resolvePage,
   return (
     <aside
       aria-label="Version history"
-      className="flex h-full min-h-0 w-[min(720px,50%)] shrink-0 flex-col border-l border-border bg-background max-[899px]:fixed max-[899px]:inset-0 max-[899px]:z-40 max-[899px]:w-full max-[899px]:border-l-0"
+      className="flex h-full min-h-0 w-[min(720px,50%)] shrink-0 animate-in flex-col border-l border-border bg-background duration-150 ease-out fade-in max-[899px]:fixed max-[899px]:inset-0 max-[899px]:z-40 max-[899px]:w-full max-[899px]:border-l-0 max-[899px]:duration-200 max-[899px]:slide-in-from-bottom-2 motion-reduce:animate-none"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation()

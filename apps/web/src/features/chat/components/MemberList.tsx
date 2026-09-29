@@ -107,14 +107,8 @@ export function MemberList({
     </div>
   )
 
-  if (isMobile) {
-    return (
-      <>
-        <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
-        <div className="fixed top-0 right-0 bottom-0 z-50 duration-200 animate-in slide-in-from-right motion-reduce:animate-none">{content}</div>
-      </>
-    )
-  }
+  // On mobile the caller puts the list in a SideSheet.
+  if (isMobile) return content
 
   return <div className="flex max-[1279px]:hidden">{content}</div>
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Hashtag as Hash } from 'reicon-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { EmptyState } from '@/components/common/EmptyState'
+import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
 import { useAppState } from '@/mock/store'
 import type { ChatMessage } from '@/mock/types'
 import { ChannelSidebar } from '@/features/chat/components/ChannelSidebar'
@@ -28,6 +29,8 @@ export function ChatPage() {
     const rootId = searchParams.get('thread')
     return channelId && rootId ? { channelId, kind: 'thread', rootId } : null
   })
+  // On mobile the thread is a sheet: closing marks it here so its content stays while the sheet slides out.
+  const [closingThread, setClosingThread] = useState<ThreadView | null>(null)
   const navigate = useNavigate()
   const firstChannel = state.channels[0] ?? null
   const mobile = isMobileViewport()
@@ -37,6 +40,11 @@ export function ChatPage() {
   const toggleMembers = () => {
     if (isMobileViewport()) setMobileMembersOpen((o) => !o)
     else setMembersOpen((o) => !o)
+  }
+
+  const closeThread = () => {
+    if (mobile) setClosingThread(threadView)
+    else setThreadView(null)
   }
 
   const activeThread = channel && threadView?.channelId === channel.id ? threadView : null
@@ -51,11 +59,11 @@ export function ChatPage() {
         <NewThreadPanel
           state={state}
           channel={channel}
-          onClose={() => setThreadView(null)}
+          onClose={closeThread}
           onCreated={(rootId) => setThreadView({ channelId: channel.id, kind: 'thread', rootId })}
         />
       ) : threadRoot ? (
-        <ThreadPanel state={state} channel={channel} root={threadRoot} onClose={() => setThreadView(null)} isMobile={mobile} />
+        <ThreadPanel state={state} channel={channel} root={threadRoot} onClose={closeThread} isMobile={mobile} />
       ) : null
     ) : null
 
@@ -88,19 +96,30 @@ export function ChatPage() {
             onNewThread={() => setThreadView({ channelId: channel.id, kind: 'new' })}
             rightPanel={membersOpen && !threadPane && !mobile ? <MemberList state={state} /> : undefined}
           />
-          {threadPane ? (
-            mobile ? (
-              <>
-                <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setThreadView(null)} />
-                <div className="fixed top-0 right-0 bottom-0 z-50 w-[min(320px,100vw)] duration-200 animate-in slide-in-from-right motion-reduce:animate-none">{threadPane}</div>
-              </>
-            ) : (
-              threadPane
-            )
-          ) : null}
-          {mobileMembersOpen ? (
-            <MemberList state={state} isMobile onClose={() => setMobileMembersOpen(false)} />
-          ) : null}
+          {mobile ? (
+            <SideSheet
+              open={threadPane !== null && threadView !== closingThread}
+              onOpenChange={(open) => {
+                if (!open) closeThread()
+              }}
+              onOpenChangeComplete={(open) => {
+                if (open) return
+                setThreadView((current) => (current === closingThread ? null : current))
+                setClosingThread(null)
+              }}
+            >
+              <SideSheetContent side="right" aria-label="Thread" className="w-[min(320px,100vw)]">
+                {threadPane}
+              </SideSheetContent>
+            </SideSheet>
+          ) : (
+            threadPane
+          )}
+          <SideSheet open={mobileMembersOpen} onOpenChange={setMobileMembersOpen}>
+            <SideSheetContent side="right" aria-label="Members">
+              <MemberList state={state} isMobile onClose={() => setMobileMembersOpen(false)} />
+            </SideSheetContent>
+          </SideSheet>
         </>
       ) : (
         <div className="relative flex min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=list]/chat:hidden">

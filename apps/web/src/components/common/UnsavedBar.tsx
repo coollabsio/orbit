@@ -40,8 +40,9 @@ export function UnsavedBar({ onReset, onSave, saving }: { onReset: () => void; o
       ref={barRef}
       role="status"
       className={cn(
-        'absolute bottom-5 left-1/2 z-40 flex w-[min(720px,calc(100%-48px))] -translate-x-1/2 items-center gap-3 rounded-lg border bg-popover py-2.5 pr-2.5 pl-4 shadow-md',
-        mobile && 'fixed top-[calc(12px+env(safe-area-inset-top,0px))] bottom-auto w-[calc(100%-24px)]',
+        // enters with a 4px rise at the bottom of the pane; the mobile bar sits at the top, so it drops in instead
+        'absolute bottom-5 left-1/2 z-40 flex w-[min(720px,calc(100%-48px))] -translate-x-1/2 animate-view-bar-enter items-center gap-3 rounded-lg border bg-popover py-2.5 pr-2.5 pl-4 shadow-md motion-reduce:animate-none',
+        mobile && 'fixed top-[calc(12px+env(safe-area-inset-top,0px))] bottom-auto w-[calc(100%-24px)] animate-relation-enter',
       )}
     >
       <span className="min-w-0 flex-1 text-[13px] font-medium">You have unsaved changes.</span>

@@ -74,7 +74,7 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
               return (
                 <li
                   key={relation.id}
-                  className={cn('group/relation col-span-full grid min-h-8 grid-cols-subgrid items-center rounded-md hover:bg-muted', relation.id === newRelationId && 'animate-relation-enter')}
+                  className={cn('group/relation col-span-full grid min-h-8 grid-cols-subgrid items-center rounded-md transition-colors duration-150 ease-out hover:bg-muted', relation.id === newRelationId && 'animate-relation-enter')}
                 >
                   {/* raw: one hit area across four subgrid columns, the row's hover fill already covers it */}
                   <button

@@ -168,7 +168,7 @@ function RecentImports({ imports, isPending }: { imports: NotionImport[] | undef
           <Link
             key={item.id}
             to={`/docs/import/${item.id}`}
-            className="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-1 py-1.5 text-[13px] hover:bg-sidebar-accent/50"
+            className="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-1 py-1.5 text-[13px] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
           >
             <span className="min-w-0 flex-1 truncate text-foreground">{item.notion_workspace_name || 'Notion'}</span>
             {item.progress.total > 0 ? (
@@ -362,7 +362,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
             <ul className="flex flex-col border-t border-border">
               {roots.slice(0, 50).map((id) => (
                 <li key={id} className="border-b border-border">
-                  <Link to={`/docs/${id}`} className="flex h-9 items-center gap-2 px-1 text-[13px] text-foreground hover:bg-sidebar-accent/50">
+                  <Link to={`/docs/${id}`} className="flex h-9 items-center gap-2 px-1 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50">
                     <FileText className="size-[15px] shrink-0 text-muted-foreground/70" />
                     <span className="truncate">{titles.has(id) ? pageTitle(titles.get(id)) : 'Imported page'}</span>
                   </Link>

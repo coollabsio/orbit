@@ -66,49 +66,47 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
   return (
     <Popover open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())} modal={false}>
       <PopoverTrigger render={trigger} />
-      {open ? (
-        <PopoverContent align="start" data-instant={instant || undefined} className="w-auto gap-0 p-0 data-instant:animate-none">
-          {draft ? (
-            <FilterValuePicker condition={draft} options={options} onChange={change} onDone={close} />
-          ) : (
-            <Command label="Filter by" className="w-60">
-              <CommandInput autoFocus aria-label="Filter by" placeholder="Filter by…" />
-              <CommandList>
-                <CommandEmpty className="py-4 text-xs text-muted-foreground">No matching fields</CommandEmpty>
-                <CommandGroup>
-                  {FIELD_ORDER.map((field) => {
-                    const Icon = FIELD_META[field].icon
-                    return (
-                      <CommandItem key={field} value={field} keywords={[FIELD_META[field].label]} onSelect={() => pickField(field)}>
-                        <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
-                        {FIELD_META[field].label}
-                      </CommandItem>
-                    )
-                  })}
-                </CommandGroup>
-                {onOpenAdvanced ? (
-                  <>
-                    <CommandSeparator />
-                    <CommandGroup>
-                      <CommandItem
-                        value="advanced"
-                        keywords={['Advanced filter']}
-                        onSelect={() => {
-                          close()
-                          onOpenAdvanced()
-                        }}
-                      >
-                        <Hierarchy className="size-3.5 text-muted-foreground" aria-hidden="true" />
-                        Advanced filter
-                      </CommandItem>
-                    </CommandGroup>
-                  </>
-                ) : null}
-              </CommandList>
-            </Command>
-          )}
-        </PopoverContent>
-      ) : null}
+      <PopoverContent align="start" {...(instant && { 'data-instant': '' })} className="w-auto gap-0 p-0 data-instant:animate-none">
+        {draft ? (
+          <FilterValuePicker condition={draft} options={options} onChange={change} onDone={close} />
+        ) : (
+          <Command label="Filter by" className="w-60">
+            <CommandInput autoFocus aria-label="Filter by" placeholder="Filter by…" />
+            <CommandList>
+              <CommandEmpty className="py-4 text-xs text-muted-foreground">No matching fields</CommandEmpty>
+              <CommandGroup>
+                {FIELD_ORDER.map((field) => {
+                  const Icon = FIELD_META[field].icon
+                  return (
+                    <CommandItem key={field} value={field} keywords={[FIELD_META[field].label]} onSelect={() => pickField(field)}>
+                      <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                      {FIELD_META[field].label}
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
+              {onOpenAdvanced ? (
+                <>
+                  <CommandSeparator />
+                  <CommandGroup>
+                    <CommandItem
+                      value="advanced"
+                      keywords={['Advanced filter']}
+                      onSelect={() => {
+                        close()
+                        onOpenAdvanced()
+                      }}
+                    >
+                      <Hierarchy className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                      Advanced filter
+                    </CommandItem>
+                  </CommandGroup>
+                </>
+              ) : null}
+            </CommandList>
+          </Command>
+        )}
+      </PopoverContent>
     </Popover>
   )
 }

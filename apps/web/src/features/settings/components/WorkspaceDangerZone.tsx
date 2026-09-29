@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { Modal } from '@/components/common/Modal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DialogFooter } from '@/components/ui/dialog'
+import { DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { useDeleteWorkspace } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -53,7 +53,7 @@ export function WorkspaceDangerZone() {
           </Field>
           {deletion.isError ? <p role="alert" className="my-3 text-[13px] text-destructive">Workspace deletion failed. Try again, or refresh the page if the workspace has changed.</p> : null}
           <DialogFooter className="mt-4">
-            <Button type="button" variant="ghost" disabled={deletion.isPending} onClick={close}>Cancel</Button>
+            <DialogClose render={<Button type="button" variant="ghost" disabled={deletion.isPending} />}>Cancel</DialogClose>
             <Button type="submit" variant="destructive" className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50" disabled={confirmation !== workspace.name} aria-disabled={deletion.isPending || undefined}>{deletion.isPending ? 'Deleting…' : 'Delete workspace'}</Button>
           </DialogFooter>
         </form>

@@ -42,7 +42,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
   return (
     <div className="relative grid gap-2" onDrop={(event) => { event.preventDefault(); setFiles((current) => [...current, ...event.dataTransfer.files]) }} onDragOver={(event) => event.preventDefault()}>
       {suggestions.length > 0 ? (
-        <div className="absolute bottom-full right-0 left-0 z-[5] mb-1.5 flex max-h-[200px] flex-col gap-px overflow-auto rounded-lg border bg-popover p-1 shadow-lg" role="listbox" aria-label="Mention member">
+        <div className="absolute bottom-full right-0 left-0 z-[5] mb-1.5 flex max-h-[200px] flex-col gap-px overflow-auto overscroll-contain rounded-lg border bg-popover p-1 shadow-lg" role="listbox" aria-label="Mention member">
           {suggestions.map((member) => (
             <Button variant="ghost" key={member.id} type="button" className="w-full justify-start font-normal" onMouseDown={(event) => { event.preventDefault(); insertMention(member) }}>
               @{member.name}
@@ -73,7 +73,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
       <div className="flex flex-wrap items-center gap-2">
         <input ref={input} type="file" multiple hidden aria-label="Attach comment files" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
         <Button variant="ghost" type="button" onClick={() => input.current?.click()}><Paperclip className="size-3.5" />Attach</Button>
-        {progress !== undefined && (pending || error) ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70">Uploading {progress}%</span> : null}
+        {progress !== undefined && (pending || error) ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70 tabular-nums">Uploading {progress}%</span> : null}
         <span className="flex-1" />
         <Button type="button" disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}>{pending ? 'Sending…' : error ? 'Retry' : 'Send'}</Button>
       </div>

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { fireEvent, render } from '@testing-library/react'
+import { waitForAbsence } from '@/test/waitForAbsence'
 import type { Attachment } from '@/mock/types'
 import { Attachments } from './Attachments'
 
@@ -11,7 +12,7 @@ const image: Attachment = {
   url: 'data:image/png;base64,AA==',
 }
 
-test('opens an image in a modal and closes it from the backdrop', () => {
+test('opens an image in a modal and closes it from the backdrop', async () => {
   const view = render(<Attachments attachments={[image]} />)
 
   fireEvent.click(view.getByRole('button', { name: 'Open image diagram.png' }))
@@ -19,7 +20,8 @@ test('opens an image in a modal and closes it from the backdrop', () => {
   const dialog = view.getByRole('dialog', { name: 'diagram.png' })
   expect(dialog.querySelector('img')?.getAttribute('src')).toBe(image.url)
   fireEvent.click(view.getByRole('button', { name: 'Close image viewer' }))
-  expect(view.queryByRole('dialog')).toBeNull()
+  // the viewer unmounts after its exit animation
+  await waitForAbsence(() => view.queryByRole('dialog'))
 })
 
 test('the image viewer uses the usable screen height on a phone', () => {
@@ -35,11 +37,11 @@ test('the image viewer uses the usable screen height on a phone', () => {
   expect(img?.className).not.toContain('100vh')
 })
 
-test('closes the image modal with Escape', () => {
+test('closes the image modal with Escape', async () => {
   const view = render(<Attachments attachments={[image]} />)
   fireEvent.click(view.getByRole('button', { name: 'Open image diagram.png' }))
 
   fireEvent.keyDown(document, { key: 'Escape' })
 
-  expect(view.queryByRole('dialog')).toBeNull()
+  await waitForAbsence(() => view.queryByRole('dialog'))
 })

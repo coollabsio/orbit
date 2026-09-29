@@ -3,6 +3,7 @@ import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { Outlet } from 'react-router'
 import { SidebarLeft as PanelLeft } from 'reicon-react'
 import { cn } from 'cn'
+import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
 import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
@@ -69,7 +70,7 @@ export function AppShell() {
     <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
       {!live ? (
         <div
-          className="pointer-events-none fixed right-3 bottom-16 z-50 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground"
+          className="pointer-events-none fixed right-3 bottom-16 z-50 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground duration-200 animate-in fade-in fill-mode-both delay-1000"
           role="status"
         >
           Connecting to live updates…
@@ -119,20 +120,21 @@ export function AppShell() {
         <MobileDock />
       </div>
 
-      {drawerOpen ? (
-        <>
-          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setDrawerOpen(false)} />
-          <aside className="fixed top-0 bottom-0 left-0 z-[41] flex w-[min(280px,84vw)] flex-col overflow-hidden border-r border-border bg-sidebar px-3 pt-[env(safe-area-inset-top,0px)] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground duration-200 animate-in fade-in slide-in-from-left-6">
-            <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
-              <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
-            </div>
-            <SidebarNav onNavigate={() => setDrawerOpen(false)} />
-            <div className="flex shrink-0 items-center gap-2 border-t border-border pt-2">
-              <UserMenu />
-            </div>
-          </aside>
-        </>
-      ) : null}
+      <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <SideSheetContent
+          side="left"
+          aria-label="Navigation"
+          className="z-[41] w-[min(280px,84vw)] overflow-hidden border-r border-border bg-sidebar px-3 pt-[env(safe-area-inset-top,0px)] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground"
+        >
+          <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
+            <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
+          </div>
+          <SidebarNav onNavigate={() => setDrawerOpen(false)} />
+          <div className="flex shrink-0 items-center gap-2 border-t border-border pt-2">
+            <UserMenu />
+          </div>
+        </SideSheetContent>
+      </SideSheet>
 
       {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
     </div>

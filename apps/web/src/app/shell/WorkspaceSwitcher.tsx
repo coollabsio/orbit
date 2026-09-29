@@ -26,11 +26,10 @@ export function WorkspaceSwitcher({ collapsed = false, onSelect }: { collapsed?:
         <span className="truncate text-[17px] font-bold tracking-[-0.02em] text-foreground">{collapsed ? workspace.name.charAt(0) : workspace.name}</span>
         {!collapsed ? <ChevronDown className="size-[13px] shrink-0 text-muted-foreground/70" /> : null}
       </PopoverTrigger>
-      {open ? (
-        <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-[13rem] overflow-y-auto p-1">
-          <WorkspaceMenu createWorkspace={createWorkspace} onSelect={() => { setOpen(false); onSelect?.() }} />
-        </PopoverContent>
-      ) : null}
+      {/* Base UI unmounts the panel after its exit, so the create form resets each time it closes. */}
+      <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-[13rem] overflow-y-auto overscroll-contain p-1">
+        <WorkspaceMenu createWorkspace={createWorkspace} onSelect={() => { setOpen(false); onSelect?.() }} />
+      </PopoverContent>
     </Popover>
   )
 }

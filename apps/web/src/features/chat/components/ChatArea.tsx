@@ -215,7 +215,7 @@ export function ChatArea({
           onDrop={handleDrop}
         >
           {draggingFiles ? (
-            <div className="pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-xl border-2 border-dashed border-primary/70 bg-background/80 backdrop-blur-sm">
+            <div className="pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-xl border-2 border-dashed border-primary/70 bg-background/80 backdrop-blur-sm animate-in fade-in duration-150 ease-out motion-reduce:animate-none">
               <div className="flex items-center gap-3 rounded-xl border border-border bg-popover px-4 py-3 text-sm font-bold text-foreground shadow-xl [&>svg]:text-primary">
                 <Paperclip className="size-5" />
                 Drop files to upload
@@ -235,7 +235,16 @@ export function ChatArea({
             />
           </div>
         </div>
-        {searchOpen ? <SearchPanel state={state} query={searchQuery} onClose={() => setSearchOpen(false)} /> : rightPanel}
+        {searchOpen || rightPanel ? (
+          // Opacity-only fade via @starting-style: a tw-animate `animate-in` would put a transform on this wrapper
+          // mid-animation, re-parenting the mobile SearchPanel (position: fixed) to it. Keyed so swapping panels re-fades.
+          <div
+            key={searchOpen ? 'search' : 'panel'}
+            className="flex min-h-0 transition-opacity duration-150 ease-out starting:opacity-0 motion-reduce:transition-none"
+          >
+            {searchOpen ? <SearchPanel state={state} query={searchQuery} onClose={() => setSearchOpen(false)} /> : rightPanel}
+          </div>
+        ) : null}
         </>
       )}
       </div>

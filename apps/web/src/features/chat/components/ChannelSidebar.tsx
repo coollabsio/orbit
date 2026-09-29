@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router'
 import { ChevronDown, FolderAdd as FolderPlus, Hashtag as Hash, Edit as Pencil, Add as Plus, Setting2 as Settings, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { DialogFooter } from '@/components/ui/dialog'
+import { DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -386,7 +386,7 @@ export function ChannelSidebar({
                       <ChevronDown className="ml-0.5 size-2 shrink-0 transition-transform group-data-[collapsed=true]/toggle:-rotate-90" />
                     </RowButton>
                     <RowButton
-                      className="w-auto justify-center text-muted-foreground opacity-0 transition hover:text-foreground group-hover:opacity-100"
+                      className="w-auto justify-center text-muted-foreground transition-[opacity,color] duration-150 hover:text-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100"
                       title="Create Channel"
                       aria-label="Create Channel"
                       onClick={() => setModal({ kind: 'create-channel', categoryId: cat.id, categoryName: cat.name })}
@@ -396,8 +396,12 @@ export function ChannelSidebar({
                   </ContextMenuTrigger>
                   <ContextMenuContent className="min-w-44">{categoryMenuItems(cat)}</ContextMenuContent>
                 </ContextMenu>
-                {!isCollapsed ? (
-                  <div className="flex flex-col gap-0.5">
+                {/* stays mounted so collapse can animate grid rows 1fr -> 0fr; inert keeps hidden rows out of focus */}
+                <div
+                  className="grid grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-out data-[collapsed=true]:grid-rows-[0fr] motion-reduce:transition-none"
+                  data-collapsed={isCollapsed ? 'true' : undefined}
+                >
+                  <div className="flex min-h-0 flex-col gap-0.5 overflow-hidden" inert={isCollapsed}>
                     {channels.map((ch) => {
                       const isActive = ch.id === activeChannelId && !activeThreadId
                       const threads = threadsForChannel(ch.id)
@@ -407,7 +411,7 @@ export function ChannelSidebar({
                           <ContextMenuTrigger
                             render={
                               <RowButton
-                                className="relative cursor-pointer rounded-md px-2 py-1.5 text-sm leading-5 font-semibold text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground data-[unread=true]:font-medium data-[unread=true]:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[dragging=true]:bg-sidebar-accent data-[dragging=true]:text-foreground [&>svg]:size-4"
+                                className="relative cursor-pointer rounded-md px-2 py-1.5 text-sm leading-5 font-medium text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground focus-visible:ring-inset data-[unread=true]:font-semibold data-[unread=true]:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[dragging=true]:bg-sidebar-accent data-[dragging=true]:text-foreground [&>svg]:size-4"
                                 data-channel-drop-id={ch.id}
                                 data-channel-category-id={cat.id}
                                 data-active={isActive ? 'true' : undefined}
@@ -443,7 +447,7 @@ export function ChannelSidebar({
                                   <ContextMenuTrigger
                                     render={
                                       <RowButton
-                                        className="group/row relative gap-0 rounded-md py-1 pr-2 pl-6 text-xs leading-5 font-semibold text-muted-foreground hover:text-foreground data-[active=true]:text-foreground"
+                                        className="group/row relative gap-0 rounded-md py-1 pr-2 pl-6 text-xs leading-5 font-semibold text-muted-foreground hover:text-foreground focus-visible:ring-inset data-[active=true]:text-foreground"
                                         data-active={isThreadActive ? 'true' : undefined}
                                         onClick={() => onOpenThread?.(ch.id, thread.id)}
                                       />
@@ -463,7 +467,7 @@ export function ChannelSidebar({
                       )
                     })}
                   </div>
-                ) : null}
+                </div>
               </div>
             )
           })}
@@ -497,9 +501,9 @@ export function ChannelSidebar({
             />
           </Field>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setRenamingThread(null)}>
+            <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
-            </Button>
+            </DialogClose>
             <Button type="button" disabled={!threadNameDraft.trim()} onClick={commitThreadRename}>
               Save
             </Button>

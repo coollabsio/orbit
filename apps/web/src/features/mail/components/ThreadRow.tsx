@@ -19,7 +19,7 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
   const [dragging, setDragging] = useState(false)
   return (
     <div
-      className="group/row flex min-h-16 w-full min-w-0 cursor-pointer items-start gap-2 border-b px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.02] data-active:bg-muted data-dragging:bg-muted data-dragging:text-foreground"
+      className="group/row flex min-h-16 w-full min-w-0 cursor-pointer items-start gap-2 border-b px-3 py-2.5 text-left transition-colors outline-none hover:bg-foreground/[0.02] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-active:bg-muted data-dragging:bg-muted data-dragging:text-foreground"
       data-active={active ? 'true' : undefined}
       data-unread={thread.unread ? 'true' : undefined}
       data-dragging={dragging || undefined}

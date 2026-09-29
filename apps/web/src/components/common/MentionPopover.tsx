@@ -25,7 +25,7 @@ export function MentionPopover({
   return (
     <div
       className={cn(
-        'absolute z-50 max-h-80 overflow-y-auto border border-border bg-popover py-2 shadow-xl',
+        'absolute z-50 max-h-80 overflow-y-auto overscroll-contain border border-border bg-popover py-2 shadow-xl',
         placement === 'below' ? 'top-[calc(100%+6px)] left-[30px] w-[min(340px,calc(100vw-48px))] rounded-[10px]' : 'right-0 bottom-full left-0 mb-3 rounded-lg',
       )}
       data-placement={placement}
