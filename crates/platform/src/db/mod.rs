@@ -96,7 +96,7 @@ impl Database {
             })?;
         }
 
-        let ownership_lock = OpenOptions::new()
+        let database_file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
@@ -106,11 +106,21 @@ impl Database {
                 path: config.path.clone(),
                 source,
             })?;
-        ownership_lock
-            .try_lock_exclusive()
-            .map_err(|_| DatabaseError::AlreadyOwned {
-                path: config.path.clone(),
+        let lock_path = ownership_lock_path(&config.path, &database_file)?;
+        let ownership_lock = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|source| DatabaseError::OpenOwnershipLock {
+                path: lock_path,
+                source,
             })?;
+        FileExt::try_lock_exclusive(&ownership_lock).map_err(|_| DatabaseError::AlreadyOwned {
+            path: config.path.clone(),
+        })?;
+        drop(database_file);
 
         let options = SqliteConnectOptions::new()
             .filename(&config.path)
@@ -210,4 +220,31 @@ impl Database {
             .iter()
             .find_map(|extension| Arc::clone(extension).downcast::<T>().ok())
     }
+}
+
+#[cfg(unix)]
+fn ownership_lock_path(
+    database_path: &Path,
+    database_file: &File,
+) -> Result<PathBuf, DatabaseError> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = database_file
+        .metadata()
+        .map_err(|source| DatabaseError::OpenOwnershipLock {
+            path: database_path.to_owned(),
+            source,
+        })?;
+    let name = format!(".orbit-{:x}-{:x}.lock", metadata.dev(), metadata.ino());
+    Ok(database_path.with_file_name(name))
+}
+
+#[cfg(not(unix))]
+fn ownership_lock_path(
+    database_path: &Path,
+    _database_file: &File,
+) -> Result<PathBuf, DatabaseError> {
+    let mut path = database_path.as_os_str().to_owned();
+    path.push(".lock");
+    Ok(PathBuf::from(path))
 }
