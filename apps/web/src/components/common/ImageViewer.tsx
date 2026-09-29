@@ -1,6 +1,7 @@
 // Port of the chat reference ImageViewer: full-screen overlay with filename, zoom %, download, ± / reset / close.
-import { useRef, useState, type KeyboardEvent, type TouchEvent } from 'react'
+import { useRef, useState, type ComponentProps, type KeyboardEvent, type TouchEvent } from 'react'
 import { Download, Xmark as X } from 'reicon-react'
+import { cn } from 'cn'
 import type { Attachment } from '@/mock/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -21,6 +22,19 @@ function touchCenter(touches: TouchEvent['touches']): Point {
 
 function touchDistance(touches: TouchEvent['touches']): number {
   return touches.length < 2 ? 0 : Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
+}
+
+/** A light-on-dark control in the viewer's top bar. */
+function ViewerBarButton({ className, size = 'icon-lg', ...props }: ComponentProps<typeof Button>) {
+  return (
+    <Button
+      data-slot="image-viewer-button"
+      variant="ghost"
+      size={size}
+      className={cn('bg-white/10 text-white hover:bg-white/15 hover:text-white dark:hover:bg-white/15', className)}
+      {...props}
+    />
+  )
 }
 
 export function ImageViewer({ attachment, onClose }: { attachment: Attachment; onClose: () => void }) {
@@ -71,9 +85,6 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
     if (event.key === '0') setZoom(1)
   }
 
-  const barButton = 'grid size-9 place-items-center rounded-md bg-white/10 text-white transition-colors hover:bg-white/15'
-  const barButtonClass = 'size-9 rounded-md border-0 bg-white/10 text-white transition-colors hover:bg-white/15 hover:text-white dark:hover:bg-white/15'
-
   return (
     <Dialog
       open
@@ -93,21 +104,21 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
             <div className="text-xs font-semibold text-white/55">{Math.round(zoom * 100)}%</div>
           </div>
           <div className="flex items-center gap-2">
-            <a href={attachment.url} download={attachment.fileName} className={barButton} title="Download image" aria-label="Download image" onClick={(e) => e.stopPropagation()}>
+            <ViewerBarButton nativeButton={false} render={<a href={attachment.url} download={attachment.fileName} />} title="Download image" aria-label="Download image" onClick={(e) => e.stopPropagation()}>
               <Download className="size-4" />
-            </a>
-            <Button type="button" variant="ghost" size="icon-lg" className={`${barButtonClass} text-lg font-bold`} title="Zoom out" aria-label="Zoom out" onClick={() => setZoom(zoom - 0.25)}>
+            </ViewerBarButton>
+            <ViewerBarButton className="text-lg font-bold" title="Zoom out" aria-label="Zoom out" onClick={() => setZoom(zoom - 0.25)}>
               −
-            </Button>
-            <Button type="button" variant="ghost" size="lg" className="h-9 rounded-md border-0 bg-white/10 px-3 text-xs font-bold text-white transition-colors hover:bg-white/15 hover:text-white dark:hover:bg-white/15" title="Reset zoom" onClick={() => setZoom(1)}>
+            </ViewerBarButton>
+            <ViewerBarButton size="lg" className="px-3 text-xs font-bold" title="Reset zoom" onClick={() => setZoom(1)}>
               Reset
-            </Button>
-            <Button type="button" variant="ghost" size="icon-lg" className={`${barButtonClass} text-lg font-bold`} title="Zoom in" aria-label="Zoom in" onClick={() => setZoom(zoom + 0.25)}>
+            </ViewerBarButton>
+            <ViewerBarButton className="text-lg font-bold" title="Zoom in" aria-label="Zoom in" onClick={() => setZoom(zoom + 0.25)}>
               +
-            </Button>
-            <Button type="button" variant="ghost" size="icon-lg" className={barButtonClass} title="Close image viewer" aria-label="Close image viewer" onClick={onClose}>
+            </ViewerBarButton>
+            <ViewerBarButton title="Close image viewer" aria-label="Close image viewer" onClick={onClose}>
               <X className="size-4" />
-            </Button>
+            </ViewerBarButton>
           </div>
         </div>
         <Button type="button" variant="ghost" className="flex h-auto min-h-0 w-full flex-1 shrink! cursor-zoom-out items-center justify-center overflow-auto rounded-none border-0 p-2 font-normal whitespace-normal select-auto hover:bg-transparent touch-none sm:p-6 dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0"
@@ -122,9 +133,12 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
             src={attachment.url}
             alt={attachment.fileName}
             draggable={false}
-            className="max-h-full max-w-full origin-center rounded-md object-contain shadow-[0_25px_50px_-12px_rgba(0,0,0,0.6)] select-none duration-200 animate-in fade-in zoom-in-95 motion-reduce:animate-none"
-            // No transition while a finger moves the image: it must follow the finger without lag.
-            style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transition: gesturing ? 'none' : 'transform 200ms' }}
+            className={cn(
+              'max-h-full max-w-full origin-center rounded-md object-contain shadow-[0_25px_50px_-12px_rgba(0,0,0,0.6)] select-none duration-200 animate-in fade-in zoom-in-95 motion-reduce:animate-none',
+              // No transition while a finger moves the image: it must follow the finger without lag.
+              gesturing ? 'transition-none' : 'transition-transform',
+            )}
+            style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
             onClick={(e) => e.stopPropagation()}
           />
         </Button>

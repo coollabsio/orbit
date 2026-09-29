@@ -86,8 +86,9 @@ test('task description preview renders checklists, nested lists, tables, striket
   const description = '- [x] Done\n  - Child\n- [ ] Next\n\n| Item | State |\n| --- | --- |\n| One | ~~Old~~ |\n\n---'
   const view = render(<TaskTextFields task={task(1, 'Preview', description)} onUpdate={() => {}} readOnly />)
 
-  expect((view.getByRole('checkbox', { name: 'Done' }) as HTMLInputElement).checked).toBe(true)
-  expect((view.getByRole('checkbox', { name: 'Next' }) as HTMLInputElement).checked).toBe(false)
+  // the checklist box is the shadcn Checkbox (role="checkbox" + aria-checked), not a native input
+  expect(view.getByRole('checkbox', { name: 'Done' }).getAttribute('aria-checked')).toBe('true')
+  expect(view.getByRole('checkbox', { name: 'Next' }).getAttribute('aria-checked')).toBe('false')
   expect(view.getByText('Child').closest('ul')?.parentElement?.textContent).toContain('Done')
   expect(view.getByRole('table').querySelectorAll('tbody tr')).toHaveLength(1)
   expect(view.getByText('Old').tagName).toBe('DEL')

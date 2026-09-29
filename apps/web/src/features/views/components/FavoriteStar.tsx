@@ -2,7 +2,6 @@ import { Star } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { useSetFavorite, type SavedView } from '../api/views'
-import { PRESS_MOTION } from './motion'
 
 export interface FavoriteStarProps {
   workspaceId: string
@@ -26,7 +25,7 @@ export function FavoriteStar({ workspaceId, view, named = false, className }: Fa
       size="icon-xs"
       aria-label={label}
       aria-pressed={on}
-      className={cn('text-muted-foreground aria-pressed:text-primary', PRESS_MOTION, className)}
+      className={cn('text-muted-foreground aria-pressed:text-primary', className)}
       onClick={() => setFavorite.mutate({ viewId: view.id, favorite: !on })}
     >
       <Star weight={on ? 'Filled' : 'Outline'} />

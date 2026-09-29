@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
+import { cn } from 'cn'
 import { format, parseISO } from 'date-fns'
 import type { DateRange } from 'react-day-picker'
 import { Check } from 'reicon-react'
@@ -6,7 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { ColorDot } from '@/components/common/ColorDot'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { useTaskCandidates } from '@/features/tasks/useTaskCandidates'
@@ -38,7 +41,7 @@ export function ValueGlyph({ glyph, size = 14 }: { glyph: Glyph; size?: number }
     case 'priority':
       return <PriorityIcon priority={glyph.priority} size={size} />
     case 'dot':
-      return <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: glyph.color }} />
+      return <ColorDot color={glyph.color} className="size-2" />
     case 'member':
       return <UserAvatar user={glyph.member} name={glyph.name} size={size + 2} />
     case 'icon': {
@@ -50,7 +53,19 @@ export function ValueGlyph({ glyph, size = 14 }: { glyph: Glyph; size?: number }
 
 const VALUES_FULL_TITLE = `Up to ${MAX_FILTER_VALUES} values per filter`
 
-const CHECK = 'flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border border-input text-primary-foreground transition-colors duration-150 data-checked:border-primary data-checked:bg-primary'
+/** Checkbox look for a multi-select command row; the row itself carries `aria-checked`. */
+function CheckMark({ checked }: { checked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="check-mark"
+      data-checked={checked || undefined}
+      className="flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border border-input text-primary-foreground transition-colors duration-150 data-checked:border-primary data-checked:bg-primary"
+    >
+      {checked ? <Check className="size-2.5" /> : null}
+    </span>
+  )
+}
 
 function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
   const selected = listValue(condition)
@@ -63,7 +78,7 @@ function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
   // chosen values the list lacks (a member picked by ID, a deleted label) come first, so they can be unchecked
   const rows = [...unlistedOptions(condition, options), ...valueOptions(condition.field, options)]
   return (
-    <Command label={`Search ${meta.plural}`} className="w-64 rounded-lg! bg-transparent">
+    <Command label={`Search ${meta.plural}`} className="w-64">
       <CommandInput autoFocus aria-label={`Search ${meta.plural}`} placeholder={`Search ${meta.plural}…`} />
       <CommandList>
         <CommandEmpty className="py-4 text-xs text-muted-foreground">No {meta.plural} match</CommandEmpty>
@@ -83,9 +98,7 @@ function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
                 className="data-[disabled=true]:pointer-events-auto"
                 onSelect={() => toggle(option.value)}
               >
-                <span aria-hidden="true" data-checked={checked || undefined} className={CHECK}>
-                  {checked ? <Check className="size-2.5" /> : null}
-                </span>
+                <CheckMark checked={checked} />
                 <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center">
                   <ValueGlyph glyph={option.glyph} />
                 </span>
@@ -116,7 +129,7 @@ function TaskValue({ condition, options, onChange }: FilterValuePickerProps) {
     ...candidates.map((task) => ({ value: task.id, label: task.title || 'Untitled', identifier: task.identifier })),
   ]
   return (
-    <Command shouldFilter={false} label="Search tasks" className="w-80 rounded-lg! bg-transparent">
+    <Command shouldFilter={false} label="Search tasks" className="w-80">
       <CommandInput autoFocus aria-label="Search tasks" placeholder="Search tasks…" value={query} onValueChange={setQuery} />
       <CommandList>
         <CommandGroup>
@@ -126,7 +139,7 @@ function TaskValue({ condition, options, onChange }: FilterValuePickerProps) {
             return (
               <CommandItem key={row.value} value={row.value} aria-checked={checked} disabled={capped} title={capped ? VALUES_FULL_TITLE : undefined}
                 className="data-[disabled=true]:pointer-events-auto" onSelect={() => toggle(row.value)}>
-                <span aria-hidden="true" data-checked={checked || undefined} className={CHECK}>{checked ? <Check className="size-2.5" /> : null}</span>
+                <CheckMark checked={checked} />
                 {row.identifier ? <span className="w-[72px] shrink-0 text-xs text-muted-foreground/70 tabular-nums">{row.identifier}</span> : null}
                 <span className="min-w-0 flex-1 truncate">{row.label}</span>
               </CommandItem>
@@ -138,9 +151,6 @@ function TaskValue({ condition, options, onChange }: FilterValuePickerProps) {
     </Command>
   )
 }
-
-const PRESET =
-  'flex h-7 w-full items-center rounded-md px-2 text-left text-sm text-foreground outline-none hover-fine:hover:bg-muted focus-visible:bg-muted aria-pressed:font-medium'
 
 const SINGLE_PRESETS: Array<{ label: string; value: DateValue }> = [
   { label: 'Today', value: { relative: 'today' } },
@@ -162,6 +172,11 @@ const RANGE_PRESETS: Array<{ label: string; value: [DateValue, DateValue] }> = [
 const toAbsolute = (day: Date): DateValue => ({ absolute: format(day, 'yyyy-MM-dd') })
 const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
+/** A date preset row: full-width ghost button; `aria-pressed` marks the current value. */
+function PresetButton({ className, ...props }: ComponentProps<typeof Button>) {
+  return <Button type="button" variant="ghost" size="sm" className={cn('w-full justify-start text-sm font-normal aria-pressed:font-medium', className)} {...props} />
+}
+
 function DateValuePicker({ condition, onChange, onDone }: FilterValuePickerProps) {
   const range = condition.operator === 'between'
   const [draftRange, setDraftRange] = useState<DateRange | undefined>(undefined)
@@ -175,25 +190,23 @@ function DateValuePicker({ condition, onChange, onDone }: FilterValuePickerProps
     <div className="flex w-[17.5rem] flex-col">
       <div role="group" aria-label="Date presets" className="flex flex-col gap-px p-1">
         {presets.map((preset) => (
-          <button
+          <PresetButton
             key={preset.label}
-            type="button"
-            className={PRESET}
             aria-pressed={sameValue(preset.value, condition.value)}
             onClick={() => commit({ field: condition.field, operator: condition.operator, value: preset.value })}
           >
             {preset.label}
-          </button>
+          </PresetButton>
         ))}
         {condition.field === 'due_date' ? (
           <>
-            <div className="my-1 h-px bg-border" />
-            <button type="button" className={PRESET} onClick={() => commit({ field: 'due_date', operator: 'is_empty' })}>No due date</button>
-            <button type="button" className={PRESET} onClick={() => commit({ field: 'due_date', operator: 'is_not_empty' })}>Has a due date</button>
+            <Separator className="my-1" />
+            <PresetButton onClick={() => commit({ field: 'due_date', operator: 'is_empty' })}>No due date</PresetButton>
+            <PresetButton onClick={() => commit({ field: 'due_date', operator: 'is_not_empty' })}>Has a due date</PresetButton>
           </>
         ) : null}
       </div>
-      <div className="border-t border-border">
+      <div className="border-t">
         {range ? (
           <Calendar
             mode="range"

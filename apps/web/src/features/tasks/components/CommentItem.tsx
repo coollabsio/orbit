@@ -45,7 +45,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
       <article
         className={cn(
           'group/comment flex gap-2.5 px-3.5 py-3 transition-colors hover:bg-muted/40 focus-within:bg-muted/40',
-          reply && 'border-t border-border pl-[52px] max-[899px]:pl-10',
+          reply && 'border-t pl-[52px] max-[899px]:pl-10',
         )}
         data-reply={reply || undefined}
       >
@@ -140,7 +140,7 @@ function EditingTextarea({
     <div className="mt-1.5">
       <Textarea
         ref={ref}
-        className="inline-block field-sizing-fixed min-h-[52px] w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-[13px] leading-5 md:text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+        className="field-sizing-fixed min-h-[52px] resize-y text-[13px] leading-5 md:text-[13px]"
         value={value}
         rows={2}
         aria-label="Edit comment"

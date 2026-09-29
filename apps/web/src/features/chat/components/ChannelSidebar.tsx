@@ -4,11 +4,13 @@ import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { ChevronDown, FolderAdd as FolderPlus, Hashtag as Hash, Edit as Pencil, Add as Plus, Setting2 as Settings, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { DialogFooter } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Modal } from '@/components/common/Modal'
+import { PaneTitle } from '@/components/common/Pane'
 import { deleteChatMessage, followThread, markChannelRead, renameThread, reorderChannels, reorderChatCategories } from '@/mock/actions'
 import { Emoji } from '@/components/common/Emoji'
 import { FollowIcon } from '@/components/common/icons/FollowIcon'
@@ -16,20 +18,14 @@ import { threadTitleOf } from '@/lib/messagePreview'
 import type { AppState, Channel, ChatCategory, ChatMessage } from '@/mock/types'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { ChannelModals, type ChannelModalState } from './ChannelModals'
+import { ChatContextMenuItem, ChatDropdownMenuItem } from './ChatMenuItem'
+import { RowButton } from './RowButton'
 
 const WIDTH_KEY = 'orbit:channel_sidebar_width'
 const COLLAPSE_KEY = 'orbit:category_collapsed'
 const MIN_WIDTH = 220
 const MAX_WIDTH = 420
 const DEFAULT_WIDTH = 240
-
-const menuClass = 'rounded-lg border border-border bg-popover p-1.5 shadow-xl ring-0'
-// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
-const menuItemClass =
-  'w-full gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors focus:bg-accent focus:text-accent-foreground data-[danger=true]:text-destructive data-[danger=true]:focus:bg-destructive/10 data-[danger=true]:focus:text-destructive [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground data-[danger=true]:[&>svg]:text-destructive'
-/** Resets the shadcn Button box so list rows keep their own layout (no fixed height, padding, radius or press nudge). */
-const rowButtonClass =
-  'h-auto justify-start rounded-none border-0 p-0 whitespace-normal hover:bg-transparent dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0'
 
 function clampWidth(width: number) {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width))
@@ -263,12 +259,11 @@ export function ChannelSidebar({
   function threadMenuItems(thread: ChatMessage) {
     return (
       <>
-        <ContextMenuItem className={menuItemClass} onClick={() => followThread(thread.id, !thread.threadFollowed)}>
+        <ChatContextMenuItem onClick={() => followThread(thread.id, !thread.threadFollowed)}>
           <FollowIcon size={16} />
           {thread.threadFollowed ? 'Unfollow Thread' : 'Follow Thread'}
-        </ContextMenuItem>
-        <ContextMenuItem
-          className={menuItemClass}
+        </ChatContextMenuItem>
+        <ChatContextMenuItem
           onClick={() => {
             setRenamingThread(thread)
             setThreadNameDraft(threadTitleOf(thread))
@@ -276,11 +271,11 @@ export function ChannelSidebar({
         >
           <Pencil size={16} />
           Rename Thread
-        </ContextMenuItem>
-        <ContextMenuItem className={menuItemClass} data-danger="true" onClick={() => setDeleteThread(thread)}>
+        </ChatContextMenuItem>
+        <ChatContextMenuItem danger onClick={() => setDeleteThread(thread)}>
           <Trash2 size={16} />
           Delete Thread
-        </ContextMenuItem>
+        </ChatContextMenuItem>
       </>
     )
   }
@@ -288,14 +283,14 @@ export function ChannelSidebar({
   function channelMenuItems(channel: Channel) {
     return (
       <>
-        <ContextMenuItem className={menuItemClass} onClick={() => setModal({ kind: 'edit-channel', channel })}>
+        <ChatContextMenuItem onClick={() => setModal({ kind: 'edit-channel', channel })}>
           <Pencil size={16} />
           Edit Channel
-        </ContextMenuItem>
-        <ContextMenuItem className={menuItemClass} data-danger="true" onClick={() => setModal({ kind: 'delete-channel', channel })}>
+        </ChatContextMenuItem>
+        <ChatContextMenuItem danger onClick={() => setModal({ kind: 'delete-channel', channel })}>
           <Trash2 size={16} />
           Delete Channel
-        </ContextMenuItem>
+        </ChatContextMenuItem>
       </>
     )
   }
@@ -303,25 +298,23 @@ export function ChannelSidebar({
   function categoryMenuItems(category: ChatCategory) {
     return (
       <>
-        <ContextMenuItem className={menuItemClass} onClick={() => setModal({ kind: 'edit-category', category })}>
+        <ChatContextMenuItem onClick={() => setModal({ kind: 'edit-category', category })}>
           <Pencil size={16} />
           Edit Category
-        </ContextMenuItem>
-        <ContextMenuItem
-          className={menuItemClass}
+        </ChatContextMenuItem>
+        <ChatContextMenuItem
           onClick={() => setModal({ kind: 'create-channel', categoryId: category.id, categoryName: category.name })}
         >
           <Plus size={16} />
           Create Channel
-        </ContextMenuItem>
-        <ContextMenuItem
-          className={menuItemClass}
-          data-danger="true"
+        </ChatContextMenuItem>
+        <ChatContextMenuItem
+          danger
           onClick={() => setModal({ kind: 'delete-category', id: category.id, name: category.name })}
         >
           <Trash2 size={16} />
           Delete Category
-        </ContextMenuItem>
+        </ChatContextMenuItem>
       </>
     )
   }
@@ -332,20 +325,12 @@ export function ChannelSidebar({
 
       {/* server header + dropdown */}
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              className="relative flex h-12 w-full items-center justify-between gap-1 rounded-none border-0 border-b border-border px-3 font-semibold text-foreground/80 transition-colors hover:bg-transparent hover:text-foreground aria-expanded:bg-transparent dark:hover:bg-transparent"
-            />
-          }
-        >
-          <span className="truncate text-[13px] font-semibold text-foreground">Chat</span>
+        <DropdownMenuTrigger render={<RowButton className="relative h-12 shrink-0 justify-between gap-1 border-b border-border px-3 font-semibold text-foreground/80 hover:text-foreground" />}>
+          <PaneTitle>Chat</PaneTitle>
           <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={0} alignOffset={8} className={`w-[calc(var(--anchor-width)-1rem)] ${menuClass}`}>
-          <DropdownMenuItem
-            className={menuItemClass}
+        <DropdownMenuContent sideOffset={0} alignOffset={8} className="w-[calc(var(--anchor-width)-1rem)]">
+          <ChatDropdownMenuItem
             onClick={() => {
               const first = state.chatCategories[0]
               if (first) setModal({ kind: 'create-channel', categoryId: first.id, categoryName: first.name })
@@ -353,16 +338,16 @@ export function ChannelSidebar({
           >
             <Plus size={16} />
             Create channel
-          </DropdownMenuItem>
-          <DropdownMenuItem className={menuItemClass} onClick={() => setModal({ kind: 'create-category' })}>
+          </ChatDropdownMenuItem>
+          <ChatDropdownMenuItem onClick={() => setModal({ kind: 'create-category' })}>
             <FolderPlus size={16} />
             Create category
-          </DropdownMenuItem>
-          <DropdownMenuSeparator className="mx-1 my-1" />
-          <DropdownMenuItem className={menuItemClass} onClick={() => navigate('/chat/settings')}>
+          </ChatDropdownMenuItem>
+          <DropdownMenuSeparator />
+          <ChatDropdownMenuItem onClick={() => navigate('/chat/settings')}>
             <Settings size={16} />
             Chat Settings
-          </DropdownMenuItem>
+          </ChatDropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -376,10 +361,8 @@ export function ChannelSidebar({
               <div key={cat.id} className="flex min-w-0 flex-col px-2 pt-5 first:pt-3">
                 <ContextMenu>
                   <ContextMenuTrigger render={<div className="group flex w-full items-center px-1 pb-1" />}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className={`${rowButtonClass} group/toggle relative flex min-w-0 flex-1 cursor-pointer items-center gap-1 text-xs leading-5 font-bold text-muted-foreground transition-colors select-none hover:text-foreground data-[dragging=true]:text-foreground`}
+                    <RowButton
+                      className="group/toggle relative flex-1 cursor-pointer gap-1 text-xs leading-5 font-bold text-muted-foreground hover:text-foreground data-[dragging=true]:text-foreground"
                       data-category-drop-id={cat.id}
                       data-collapsed={isCollapsed ? 'true' : undefined}
                       data-dragging={dragCategoryId === cat.id ? 'true' : undefined}
@@ -401,18 +384,17 @@ export function ChannelSidebar({
                         <span className="truncate">{cat.name}</span>
                       </span>
                       <ChevronDown className="ml-0.5 size-2 shrink-0 transition-transform group-data-[collapsed=true]/toggle:-rotate-90" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className={`${rowButtonClass} flex items-center justify-center text-muted-foreground opacity-0 transition hover:text-foreground group-hover:opacity-100`}
+                    </RowButton>
+                    <RowButton
+                      className="w-auto justify-center text-muted-foreground opacity-0 transition hover:text-foreground group-hover:opacity-100"
                       title="Create Channel"
+                      aria-label="Create Channel"
                       onClick={() => setModal({ kind: 'create-channel', categoryId: cat.id, categoryName: cat.name })}
                     >
                       <Plus className="size-2.5" />
-                    </Button>
+                    </RowButton>
                   </ContextMenuTrigger>
-                  <ContextMenuContent className={`min-w-44 ${menuClass}`}>{categoryMenuItems(cat)}</ContextMenuContent>
+                  <ContextMenuContent className="min-w-44">{categoryMenuItems(cat)}</ContextMenuContent>
                 </ContextMenu>
                 {!isCollapsed ? (
                   <div className="flex flex-col gap-0.5">
@@ -424,10 +406,8 @@ export function ChannelSidebar({
                         <ContextMenu>
                           <ContextMenuTrigger
                             render={
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                className={`${rowButtonClass} relative flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm leading-5 font-semibold text-muted-foreground transition-colors select-none hover:bg-sidebar-accent/50 hover:text-foreground data-[unread=true]:font-medium data-[unread=true]:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[dragging=true]:bg-sidebar-accent data-[dragging=true]:text-foreground dark:hover:bg-sidebar-accent/50 dark:data-[active=true]:bg-sidebar-accent dark:data-[dragging=true]:bg-sidebar-accent [&>svg]:size-4 [&>svg]:shrink-0`}
+                              <RowButton
+                                className="relative cursor-pointer rounded-md px-2 py-1.5 text-sm leading-5 font-semibold text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground data-[unread=true]:font-medium data-[unread=true]:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[dragging=true]:bg-sidebar-accent data-[dragging=true]:text-foreground [&>svg]:size-4"
                                 data-channel-drop-id={ch.id}
                                 data-channel-category-id={cat.id}
                                 data-active={isActive ? 'true' : undefined}
@@ -452,7 +432,7 @@ export function ChannelSidebar({
                               <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-nums">{ch.unreadCount}</span>
                             ) : null}
                           </ContextMenuTrigger>
-                          <ContextMenuContent className={`min-w-44 ${menuClass}`}>{channelMenuItems(ch)}</ContextMenuContent>
+                          <ContextMenuContent className="min-w-44">{channelMenuItems(ch)}</ContextMenuContent>
                         </ContextMenu>
                         {threads.length > 0 ? (
                           <div className="ml-3.5 py-0.5">
@@ -462,10 +442,8 @@ export function ChannelSidebar({
                                 <ContextMenu key={thread.id}>
                                   <ContextMenuTrigger
                                     render={
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        className={`${rowButtonClass} group/row relative flex w-full min-w-0 items-center rounded-md py-1 pr-2 pl-6 text-left text-xs leading-5 font-semibold text-muted-foreground transition-colors hover:text-foreground data-[active=true]:text-foreground`}
+                                      <RowButton
+                                        className="group/row relative gap-0 rounded-md py-1 pr-2 pl-6 text-xs leading-5 font-semibold text-muted-foreground hover:text-foreground data-[active=true]:text-foreground"
                                         data-active={isThreadActive ? 'true' : undefined}
                                         onClick={() => onOpenThread?.(ch.id, thread.id)}
                                       />
@@ -475,7 +453,7 @@ export function ChannelSidebar({
                                     <span aria-hidden className="pointer-events-none absolute inset-0 left-3.5 rounded-md transition-colors group-hover/row:bg-sidebar-accent/45 group-data-[active=true]/row:bg-sidebar-accent" />
                                     <span className="relative z-10 min-w-0 truncate">{threadTitleOf(thread)}</span>
                                   </ContextMenuTrigger>
-                                  <ContextMenuContent className={`min-w-44 ${menuClass}`}>{threadMenuItems(thread)}</ContextMenuContent>
+                                  <ContextMenuContent className="min-w-44">{threadMenuItems(thread)}</ContextMenuContent>
                                 </ContextMenu>
                               )
                             })}
@@ -505,14 +483,11 @@ export function ChannelSidebar({
         />
       ) : null}
       {renamingThread ? (
-        <Modal title="Rename thread" onClose={() => setRenamingThread(null)} maxWidth={384}>
-          <div>
-            <Label htmlFor="rename-thread-name" className="mb-1.5 block text-xs font-bold tracking-wider text-muted-foreground uppercase">
-              Thread name
-            </Label>
+        <Modal title="Rename thread" onClose={() => setRenamingThread(null)} className="sm:max-w-sm">
+          <Field>
+            <FieldLabel htmlFor="rename-thread-name">Thread name</FieldLabel>
             <Input
               id="rename-thread-name"
-              className="h-10 border-border bg-muted px-3 text-sm focus-visible:border-primary md:text-sm dark:bg-muted"
               value={threadNameDraft}
               autoFocus
               onChange={(e) => setThreadNameDraft(e.target.value)}
@@ -520,15 +495,15 @@ export function ChannelSidebar({
                 if (e.key === 'Enter') commitThreadRename()
               }}
             />
-          </div>
-          <div className="mt-1 flex justify-end gap-2">
+          </Field>
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setRenamingThread(null)}>
               Cancel
             </Button>
             <Button type="button" disabled={!threadNameDraft.trim()} onClick={commitThreadRename}>
               Save
             </Button>
-          </div>
+          </DialogFooter>
         </Modal>
       ) : null}
     </div>

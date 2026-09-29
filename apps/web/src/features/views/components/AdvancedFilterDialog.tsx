@@ -21,9 +21,7 @@ import {
 } from '../filterTree'
 import { countConditions, emptyFilter, isGroup, type Condition, type FilterField, type FilterGroup, type FilterNode, type FilterOperator } from '../viewState'
 import { FilterValuePicker } from './FilterValuePicker'
-import { DIALOG_MOTION, POPOVER_MOTION } from './motion'
 
-const OPERATOR_ITEM = 'h-6 px-2 text-xs text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground'
 
 export interface AdvancedFilterDialogProps {
   open: boolean
@@ -56,7 +54,7 @@ export function AdvancedFilterDialog({ open, onOpenChange, filter, options, onAp
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open ? (
-        <DialogContent data-instant={keyboard || undefined} className={cn('gap-0 p-0 sm:max-w-2xl', DIALOG_MOTION)}>
+        <DialogContent data-instant={keyboard || undefined} className="gap-0 p-0 sm:max-w-2xl data-instant:animate-none">
           <TreeEditor filter={filter} options={options} onApply={onApply} validate={validate} onClose={() => onOpenChange(false)} />
         </DialogContent>
       ) : null}
@@ -126,7 +124,7 @@ function TreeEditor({ filter, options, onApply, validate, onClose }: TreeEditorP
 
   return (
     <>
-      <DialogHeader className="gap-1 border-b border-border px-4 py-3 pr-10">
+      <DialogHeader className="gap-1 border-b px-4 py-3 pr-10">
         <DialogTitle>Advanced filter</DialogTitle>
         <DialogDescription className="text-xs">Combine conditions with and/or groups, up to three levels deep.</DialogDescription>
       </DialogHeader>
@@ -170,7 +168,7 @@ function GroupEditor({ group, path, root, options, issue, issueNode, onChange }:
   const error = path.length > 0 && issue && samePath(issueNode, path) ? issue.message : null
   const setOp = (op: FilterGroup['op']) => onChange(updateNode(root, path, (node) => (isGroup(node) ? { ...node, op } : node)))
   return (
-    <div role="group" aria-label={label} className={cn('flex flex-col gap-2', path.length > 0 && 'border-l-2 border-border py-1 pl-3', error && 'border-destructive/60')}>
+    <div role="group" aria-label={label} className={cn('flex flex-col gap-2', path.length > 0 && 'border-l-2 py-1 pl-3', error && 'border-destructive/60')}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span>Match</span>
         <ToggleGroup
@@ -184,10 +182,10 @@ function GroupEditor({ group, path, root, options, issue, issueNode, onChange }:
             if (next === 'and' || next === 'or') setOp(next)
           }}
         >
-          <ToggleGroupItem value="and" className={OPERATOR_ITEM}>
+          <ToggleGroupItem value="and" className="h-6 text-xs text-muted-foreground aria-pressed:text-foreground">
             And
           </ToggleGroupItem>
-          <ToggleGroupItem value="or" className={OPERATOR_ITEM}>
+          <ToggleGroupItem value="or" className="h-6 text-xs text-muted-foreground aria-pressed:text-foreground">
             Or
           </ToggleGroupItem>
         </ToggleGroup>
@@ -312,7 +310,7 @@ function ConditionRow({ condition, path, root, options, issue, issueNode, onChan
               }
             />
             {picking ? (
-              <PopoverContent align="start" className={cn('w-auto gap-0 p-0', POPOVER_MOTION)}>
+              <PopoverContent align="start" className="w-auto gap-0 p-0">
                 <FilterValuePicker condition={condition} options={options} onChange={replace} onDone={() => setPicking(false)} />
               </PopoverContent>
             ) : null}

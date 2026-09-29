@@ -18,10 +18,10 @@ test('the task navigation includes a current calendar week view', () => {
 
   fireEvent.click(view.getByRole('link', { name: 'This week' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?view=current_week')
-  expect(view.getByRole('link', { name: 'This week' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  expect(view.getByRole('link', { name: 'This week' }).dataset.active).toBe('true')
   fireEvent.click(view.getByRole('link', { name: 'My week' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?view=my_week')
-  expect(view.getByRole('link', { name: 'My week' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  expect(view.getByRole('link', { name: 'My week' }).dataset.active).toBe('true')
 })
 
 test('task views and the inbox keep the selected project', () => {
@@ -72,8 +72,8 @@ test('task views nest under Tasks, not beside the other apps', () => {
   expect(view.queryByRole('link', { name: 'Views' })).toBeNull()
   fireEvent.click(view.getByRole('link', { name: 'Task views' }))
   expect(view.getByTestId('location').textContent).toBe('/views')
-  expect(view.getByRole('link', { name: 'Task views' }).classList.contains('bg-sidebar-accent')).toBe(true)
-  expect(view.getByRole('link', { name: 'Tasks' }).classList.contains('bg-sidebar-accent')).toBe(false)
+  expect(view.getByRole('link', { name: 'Task views' }).dataset.active).toBe('true')
+  expect(view.getByRole('link', { name: 'Tasks' }).dataset.active).toBe('false')
 })
 
 test('the views entry shows only while the user is in Tasks', () => {
@@ -107,7 +107,7 @@ test('docs are enabled in the sidebar and highlight on page routes', () => {
   expect(docs.textContent).not.toContain('Coming soon')
   fireEvent.click(docs)
   expect(view.getByTestId('location').textContent).toBe('/docs')
-  expect(view.getByRole('link', { name: 'Docs' }).classList.contains('bg-sidebar-accent')).toBe(true)
+  expect(view.getByRole('link', { name: 'Docs' }).dataset.active).toBe('true')
   for (const label of ['Mail', 'Chat']) {
     expect(view.queryByRole('link', { name: label })).toBeNull()
   }

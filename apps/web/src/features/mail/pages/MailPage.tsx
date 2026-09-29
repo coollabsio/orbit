@@ -52,7 +52,7 @@ export function MailPage() {
         activeThreadId={thread?.id}
         onCompose={() => setComposeOpen(true)}
       />
-      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col border-l border-border bg-background max-[899px]:border-l-0 max-[899px]:group-data-[view=list]/mail:hidden">
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col border-l bg-background max-[899px]:border-l-0 max-[899px]:group-data-[view=list]/mail:hidden">
         {thread ? (
           <ThreadView
             key={thread.id}

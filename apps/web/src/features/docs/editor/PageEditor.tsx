@@ -1,5 +1,4 @@
 import '@blocknote/shadcn/style.css'
-import './PageEditor.css'
 
 import { use, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type Ref } from 'react'
 import { createPortal } from 'react-dom'
@@ -17,13 +16,13 @@ import {
   SuggestionMenuController,
   useCreateBlockNote,
 } from '@blocknote/react'
-import { BlockNoteView } from '@blocknote/shadcn'
 import type { Awareness } from 'y-protocols/awareness'
 import type * as Y from 'yjs'
 import { ImageViewer } from '@/components/common/ImageViewer'
 import { Spinner } from '@/components/ui/spinner'
 import type { Attachment } from '@/mock/types'
 import { useTheme } from '@/lib/themeContext'
+import { cn } from 'cn'
 import { ImageZoomButton } from './ImageZoomButton'
 import { internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent } from './content'
 import { insertPageBlock } from './pageBlockCommands'
@@ -32,6 +31,7 @@ import { EDITOR_BLOCK_TYPES, pageEditorSchema, type PageEditorInstance } from '.
 import { getPageSlashMenuItems } from './slashMenu'
 import { PageMentionMenu } from './MentionMenu'
 import { PageMentionNamesContext, type PageMentionOptions } from './pageMentions'
+import { ThemedBlockNoteView } from './ThemedBlockNoteView'
 import { commentsApi, threadsQueryOptions } from '../comments/api'
 import { commentComponents } from '../comments/components'
 import { commentEditorSchema, MentionCandidatesContext, MentionNamesContext, type MentionCandidate } from '../comments/mentions'
@@ -209,7 +209,7 @@ function PageEditorInner({
     // Whether uploads exist is fixed per editor; the latest callback is read through a ref.
     uploadFile: uploadFile ? (file: File) => uploadRef.current!(file) : undefined,
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
-    // blocks. The same rules ship statically in PageEditor.css instead.
+    // blocks. The same rules ship statically at the end of src/index.css instead.
     _tiptapOptions: { injectCSS: false },
     dictionary,
   }
@@ -320,11 +320,56 @@ function PageEditorInner({
     <PageEditorContext value={context}>
       <PageMentionNamesContext value={mentionNames}>
       <div className="contents" onClickCapture={onClickCapture}>
-        <BlockNoteView
+        <ThemedBlockNoteView
           editor={editor}
           editable={editable}
           theme={theme}
-          className={className ? `orbit-page-editor ${className}` : 'orbit-page-editor'}
+          data-slot="page-editor"
+          className={cn(
+            // Static placeholders: BlockNote injects its own through a runtime <style>, which the production CSP
+            // (`style-src 'self'`) blocks. The generic hint sits in :where() so the block-type ones win over it.
+            `[&>.bn-editor[contenteditable=true]_.bn-block-content:where([data-is-empty-and-focused]):has(.ProseMirror-trailingBreak:only-child)]:after:content-["Enter_text_or_type_'/'_for_commands"]!`,
+            "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=heading]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Heading']!",
+            "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=toggleListItem]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Toggle']!",
+            "[&>.bn-editor[contenteditable=true]_.bn-block-content:is([data-content-type=bulletListItem],[data-content-type=numberedListItem],[data-content-type=checkListItem]):has(.ProseMirror-trailingBreak:only-child)]:after:content-['List']!",
+            // The callout's placeholder sits next to the emoji (BlockNote's would follow the whole row).
+            "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Callout']!",
+            '[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:absolute [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:top-px [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:left-8',
+            // Inline links use the app's link style instead of the browser's blue.
+            '[&_.bn-editor_a[data-inline-content-type=link]]:text-primary! [&_.bn-editor_a[data-inline-content-type=link]]:underline! [&_.bn-editor_a[data-inline-content-type=link]]:underline-offset-2!',
+            // Callout box (CalloutBlock.tsx): the whole `.bn-block`, so nested blocks sit inside it like in Notion. React
+            // node views put a `.react-renderer` between `.bn-block` and the content, hence both forms in `:has()`.
+            // The tint is mixed here instead of BlockNote's color rules (saturated in dark mode): full on light, a faint
+            // wash on dark. No `data-background-color` = gray (the default); `default` = no fill, just a border.
+            '[&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:[--callout-tint:var(--bn-colors-highlights-gray-background)] [&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:[--callout-strength:100%]',
+            'data-[color-scheme=dark]:[&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:[--callout-strength:24%]',
+            '[&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:my-1 [&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:rounded-[6px] [&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:border [&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:border-transparent [&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:py-3 [&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:pr-3.5 [&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:pl-3',
+            '[&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])]:bg-[color-mix(in_oklab,var(--callout-tint)_var(--callout-strength),transparent)]!',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=brown],>*>[data-content-type=callout][data-background-color=brown])]:[--callout-tint:var(--bn-colors-highlights-brown-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=red],>*>[data-content-type=callout][data-background-color=red])]:[--callout-tint:var(--bn-colors-highlights-red-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=orange],>*>[data-content-type=callout][data-background-color=orange])]:[--callout-tint:var(--bn-colors-highlights-orange-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=yellow],>*>[data-content-type=callout][data-background-color=yellow])]:[--callout-tint:var(--bn-colors-highlights-yellow-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=green],>*>[data-content-type=callout][data-background-color=green])]:[--callout-tint:var(--bn-colors-highlights-green-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=blue],>*>[data-content-type=callout][data-background-color=blue])]:[--callout-tint:var(--bn-colors-highlights-blue-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=purple],>*>[data-content-type=callout][data-background-color=purple])]:[--callout-tint:var(--bn-colors-highlights-purple-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=pink],>*>[data-content-type=callout][data-background-color=pink])]:[--callout-tint:var(--bn-colors-highlights-pink-background)]',
+            '[&_.bn-block:has(>[data-content-type=callout][data-background-color=default],>*>[data-content-type=callout][data-background-color=default])]:border-border [&_.bn-block:has(>[data-content-type=callout][data-background-color=default],>*>[data-content-type=callout][data-background-color=default])]:bg-transparent!',
+            '[&_.bn-block-content[data-content-type=callout]]:relative [&_.bn-block-content[data-content-type=callout]]:p-0! [&_.bn-block-content[data-content-type=callout]]:bg-transparent!',
+            // Nested blocks line up with the callout text (emoji column + gap), not with the emoji.
+            '[&_.bn-block:has(>[data-content-type=callout],>*>[data-content-type=callout])>.bn-block-group]:ml-[32px]!',
+            // Comment anchors: a soft amber wash with an underline, stronger for the selected thread.
+            '[&_.bn-thread-mark:not([data-orphan=true])]:cursor-pointer [&_.bn-thread-mark:not([data-orphan=true])]:border-b-2 [&_.bn-thread-mark:not([data-orphan=true])]:border-b-[rgb(245_158_11/0.55)] [&_.bn-thread-mark:not([data-orphan=true])]:bg-[rgb(251_191_36/0.2)]!',
+            '[&_.bn-thread-mark-selected]:bg-[rgb(251_191_36/0.45)]!',
+            'data-[color-scheme=dark]:[&_.bn-thread-mark:not([data-orphan=true])]:border-b-[rgb(251_191_36/0.5)] data-[color-scheme=dark]:[&_.bn-thread-mark:not([data-orphan=true])]:bg-[rgb(251_191_36/0.13)]!',
+            'data-[color-scheme=dark]:[&_.bn-thread-mark-selected]:bg-[rgb(251_191_36/0.32)]!',
+            // Phones have no room for BlockNote's 54px side-menu gutter; blocks use the full width.
+            'max-[900px]:[&>.bn-editor]:px-0!',
+            // Formatting toolbar on phones: BlockNote caps it at 100vw, which runs off the right edge. Keep a margin,
+            // scroll the rest sideways, and use slightly smaller buttons so more fit.
+            'max-[900px]:[&_.bn-formatting-toolbar]:max-w-[calc(100vw-16px)]! max-[900px]:[&_.bn-formatting-toolbar]:gap-0! max-[900px]:[&_.bn-formatting-toolbar]:overscroll-x-contain max-[900px]:[&_.bn-formatting-toolbar]:[scrollbar-width:none]',
+            'max-[900px]:[&_.bn-formatting-toolbar>button]:h-8! max-[900px]:[&_.bn-formatting-toolbar>button]:min-w-8! max-[900px]:[&_.bn-formatting-toolbar>button]:shrink-0! max-[900px]:[&_.bn-formatting-toolbar>button]:px-0!',
+            className,
+          )}
           slashMenu={false}
           formattingToolbar={false}
           comments={false}
@@ -347,7 +392,7 @@ function PageEditorInner({
                   {comments?.panel ? null : <FloatingThreadController floatingThread={FloatingThreadCard} floatingUIOptions={floatingThreadOptions} />}
                   {comments?.panel
                     ? createPortal(
-                        <div className="bn-shadcn orbit-comments-list" data-color-scheme={theme} data-filter={comments.panel.filter}>
+                        <div className="bn-shadcn" data-slot="comment-thread-list" data-color-scheme={theme} data-filter={comments.panel.filter}>
                           <ThreadList filter={comments.panel.filter} />
                         </div>,
                         comments.panel.container,
@@ -358,7 +403,7 @@ function PageEditorInner({
               </MentionCandidatesContext>
             </MentionNamesContext>
           ) : null}
-        </BlockNoteView>
+        </ThemedBlockNoteView>
         {zoomImage ? <ImageViewer attachment={zoomImage} onClose={() => setZoomImage(null)} /> : null}
       </div>
       </PageMentionNamesContext>

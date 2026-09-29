@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { DialogFooter } from '@/components/ui/dialog'
 import { Modal } from './Modal'
 import { registerConfirmationHandler, type ConfirmationOptions } from './confirmAction'
 
@@ -39,15 +40,15 @@ export function ConfirmationModalHost() {
   if (!request) return null
 
   return (
-    <Modal key={request.id} title={request.title} description={request.description} onClose={cancel} maxWidth={480}>
-      <div className="flex justify-end gap-2">
+    <Modal key={request.id} title={request.title} description={request.description} onClose={cancel} className="sm:max-w-120">
+      <DialogFooter>
         <Button variant="outline" onClick={cancel}>
           {request.cancelLabel ?? 'Cancel'}
         </Button>
         <Button variant={request.danger ? 'destructive' : 'default'} onClick={() => settle(true)}>
           {request.confirmLabel ?? 'Confirm'}
         </Button>
-      </div>
+      </DialogFooter>
     </Modal>
   )
 }

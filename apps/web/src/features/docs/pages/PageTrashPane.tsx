@@ -7,6 +7,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Emoji } from '@/components/common/Emoji'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Pane, PaneTitle } from '@/components/common/Pane'
 import { relativeTime } from '@/lib/format'
 import {
   canPurgePage,
@@ -18,8 +19,6 @@ import {
 } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { PRIVATE_SPACE, pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
-
-const ROW = 'flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b border-border px-3 py-1.5'
 
 const plural = (count: number) => `${count} page${count === 1 ? '' : 's'}`
 
@@ -106,7 +105,7 @@ export function PageTrashPane({ workspaceId, role }: { workspaceId: string; role
     body = (
       <div className="min-h-0 flex-1 overflow-y-auto">
         {trash.data.map((page) => (
-          <div className={ROW} key={page.id}>
+          <div key={page.id} className="flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b border-border px-3 py-1.5">
             <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-muted-foreground/70">
               {page.icon ? <Emoji value={page.icon} size={15} /> : <FileText className="size-[15px]" />}
             </span>
@@ -161,7 +160,7 @@ export function PageTrashPane({ workspaceId, role }: { workspaceId: string; role
   }
 
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <Pane>
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
         <Button
           type="button"
@@ -173,7 +172,7 @@ export function PageTrashPane({ workspaceId, role }: { workspaceId: string; role
         >
           <ArrowLeft className="size-4" />
         </Button>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">Trash</span>
+        <PaneTitle className="min-w-0 flex-1">Trash</PaneTitle>
         {purgeable.length > 0 ? (
           <Button
             type="button"
@@ -188,6 +187,6 @@ export function PageTrashPane({ workspaceId, role }: { workspaceId: string; role
         ) : null}
       </div>
       {body}
-    </section>
+    </Pane>
   )
 }

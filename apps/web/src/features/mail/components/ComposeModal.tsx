@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { DialogFooter } from '@/components/ui/dialog'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Textarea } from '@/components/ui/textarea'
 import { Modal } from '@/components/common/Modal'
 import { composeMail } from '@/mock/actions'
@@ -28,11 +29,11 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
 
   return (
     <Modal title="New message" onClose={onClose}>
-      <div className="flex flex-col gap-3">
-        <div>
-          <Label htmlFor="mail-compose-to" className="mb-1.5 h-4 text-[13px] leading-4 text-muted-foreground">
+      <div className="flex flex-col gap-4">
+        <Field>
+          <FieldLabel htmlFor="mail-compose-to">
             To
-          </Label>
+          </FieldLabel>
           <Input
             id="mail-compose-to"
             type="text"
@@ -41,11 +42,11 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
             onChange={(e) => setTo(e.target.value)}
             autoFocus
           />
-        </div>
-        <div>
-          <Label htmlFor="mail-compose-subject" className="mb-1.5 h-4 text-[13px] leading-4 text-muted-foreground">
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="mail-compose-subject">
             Subject
-          </Label>
+          </FieldLabel>
           <Input
             id="mail-compose-subject"
             type="text"
@@ -53,27 +54,27 @@ export function ComposeModal({ onClose, initial }: ComposeModalProps) {
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
           />
-        </div>
-        <div>
-          <Label htmlFor="mail-compose-body" className="mb-1.5 h-4 text-[13px] leading-4 text-muted-foreground">
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="mail-compose-body">
             Message
-          </Label>
+          </FieldLabel>
           <Textarea
             id="mail-compose-body"
-            className="block field-sizing-fixed min-h-20 resize-y px-3 py-2 text-sm leading-5 text-foreground"
+            className="field-sizing-fixed min-h-20 resize-y"
             placeholder="Write your message…"
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
-        </div>
-        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+        </Field>
+        <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
             Discard
           </Button>
           <Button disabled={!canSend} onClick={send}>
             Send
           </Button>
-        </div>
+        </DialogFooter>
       </div>
     </Modal>
   )

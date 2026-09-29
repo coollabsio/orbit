@@ -6,10 +6,6 @@ import type { Task } from '@/features/tasks/api/models'
 import { useUpdateTask } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
-const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
-const OPTION =
-  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[selected]:bg-accent data-[selected]:font-medium`
-
 /** Priority glyph that opens a menu to change the priority in place (list rows and board cards). */
 export function PriorityPicker({ task, align = 'left' }: { task: Task; align?: 'left' | 'right' }) {
   const { workspace } = useWorkspace()
@@ -24,11 +20,11 @@ export function PriorityPicker({ task, align = 'left' }: { task: Task; align?: '
             </Button>
           }
         />
-        <DropdownMenuContent align={align === 'right' ? 'end' : 'start'} className={MENU}>
+        <DropdownMenuContent align={align === 'right' ? 'end' : 'start'} className="w-auto min-w-45">
           {PRIORITY_ORDER.map((priority) => (
             <DropdownMenuItem
               key={priority}
-              className={OPTION}
+              className="data-selected:bg-accent data-selected:font-medium"
               data-selected={priority === task.priority || undefined}
               onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })}
             >

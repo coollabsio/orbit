@@ -20,7 +20,8 @@ export const codeBlockSpec: typeof defaultCodeBlock = {
       const code = view.contentDOM
       const container = document.createElement('div')
       container.contentEditable = 'false'
-      container.className = 'orbit-code-copy'
+      // The block content is `position: relative` (BlockNote), so this pins the button to its top-right corner.
+      container.className = 'absolute top-2 right-2'
       view.dom.classList.add('group')
       view.dom.appendChild(container)
       const root = createRoot(container)

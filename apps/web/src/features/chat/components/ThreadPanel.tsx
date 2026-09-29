@@ -3,7 +3,6 @@
 // With `fullScreen` it fills the chat area instead (route /chat/:channelId/thread/:rootId).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Edit as Pencil, Xmark as X } from 'reicon-react'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { ExpandIcon } from '@/components/common/icons/ExpandIcon'
@@ -14,14 +13,12 @@ import type { AppState, Channel, ChatMessage } from '@/mock/types'
 import { jumpToMessage, messageMentionsCurrentUser } from '@/features/chat/chatLib'
 import { buildMentionTokens } from '@/lib/mentions'
 import { threadTitleOf } from '@/lib/messagePreview'
+import { ChatIconButton } from './ChatIconButton'
 import { MessageInput } from './MessageInput'
 import { MessageItem } from './MessageItem'
 
 const DEFAULT_WIDTH = 468
 const GROUP_WINDOW_MS = 300_000
-
-const threadIconBtn =
-  'rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:hover:bg-primary/20 dark:data-[active=true]:hover:bg-primary/20'
 
 export function ThreadPanel({
   state,
@@ -112,7 +109,7 @@ export function ThreadPanel({
           {editingTitle ? (
             <Input
               autoFocus
-              className="h-8 w-auto min-w-0 flex-1 rounded-md border border-input bg-muted/40 px-2 py-0 text-sm font-semibold text-foreground focus-visible:border-primary focus-visible:ring-0 md:text-sm dark:bg-muted/40"
+              className="w-auto min-w-0 flex-1 font-semibold"
               value={titleDraft}
               aria-label="Thread name"
               onChange={(e) => setTitleDraft(e.target.value)}
@@ -132,37 +129,32 @@ export function ThreadPanel({
           )}
         </div>
         <div className="ml-2 flex shrink-0 items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={threadIconBtn}
-            data-active={root.threadFollowed ? 'true' : undefined}
+          <ChatIconButton
+            size="sm"
+            active={root.threadFollowed}
+            className="data-[active=true]:bg-primary/10"
             title={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
             aria-label={root.threadFollowed ? 'Unfollow thread' : 'Follow thread'}
             onClick={() => followThread(root.id, !root.threadFollowed)}
           >
             <FollowIcon size={16} />
-          </Button>
+          </ChatIconButton>
           {!fullScreen ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className={threadIconBtn}
+            <ChatIconButton
+              size="sm"
               title="Open full screen"
               aria-label="Open full screen"
               onClick={() => navigate(`/chat/${channel.id}/thread/${root.id}`)}
             >
               <ExpandIcon size={16} />
-            </Button>
+            </ChatIconButton>
           ) : null}
-          <Button type="button" variant="ghost" size="icon-sm" className={threadIconBtn} title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
+          <ChatIconButton size="sm" title="Edit thread name" aria-label="Edit thread name" onClick={startEditing}>
             <Pencil size={16} />
-          </Button>
-          <Button type="button" variant="ghost" size="icon-sm" className={threadIconBtn} title="Close thread" aria-label="Close thread" onClick={onClose}>
+          </ChatIconButton>
+          <ChatIconButton size="sm" title="Close thread" aria-label="Close thread" onClick={onClose}>
             <X size={16} />
-          </Button>
+          </ChatIconButton>
         </div>
       </div>
 

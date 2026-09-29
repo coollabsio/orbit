@@ -254,7 +254,7 @@ function CommentRow({ thread, comment }: { thread: ThreadData; comment: CommentD
         {editing ? (
           <CommentComposer editor={editor} kind="edit" submitLabel="Save" label="Edit comment" onCancel={cancelEdit} autoFocus className="mt-1" />
         ) : (
-          <CommentEditor editor={editor} editable={false} className="orbit-comment-body" />
+          <CommentEditor editor={editor} editable={false} />
         )}
       </div>
     </div>

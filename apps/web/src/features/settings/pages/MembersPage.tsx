@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ComponentProps } from 'react'
+import { cva, type VariantProps } from 'class-variance-authority'
 import { confirmAction } from '@/components/common/confirmAction'
 import { ArrowRight, Notification as Bell, Copy, Add as Plus, SearchNormal as Search, People as Users, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -16,6 +18,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { User } from '@/features/workspaces/models'
 import { INVITABLE_ROLES, canManageMember, canTransferOwnership } from '@/features/settings/memberPermissions'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 
 type Role = User['role']
@@ -34,20 +37,6 @@ const SORT_OPTIONS: { value: Sort; label: string }[] = [
 const PAGE_SIZE_OPTIONS = PAGE_SIZES.map((size) => ({ value: String(size), label: String(size) }))
 const INVITE_ROLE_OPTIONS = INVITABLE_ROLES.map((role) => ({ value: role, label: role }))
 const EMPTY_USERS: User[] = []
-
-const FIELD_LABEL = 'mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-muted-foreground'
-const GRID = 'grid grid-cols-1 gap-4 min-[900px]:grid-cols-2'
-// `gap-0` keeps the Field rows at the previous label/control spacing (the label owns its `mb-1.5`).
-const FIELD = 'w-full min-w-0 gap-0'
-const REQ = 'inline-block font-semibold text-primary'
-const TABLE = 'flex min-w-0 max-w-full flex-col overflow-x-auto [overscroll-behavior-x:contain]'
-const TABLE_GRID = '[grid-template-columns:minmax(0,1.15fr)_minmax(0,1.55fr)_7rem_minmax(10rem,0.9fr)] max-[899px]:[grid-template-columns:minmax(0,1fr)_auto_auto] max-[899px]:[&>:nth-child(2)]:hidden'
-const TABLE_HEADER = cn('grid h-10 items-center gap-4 border-b border-muted bg-black/[0.02] px-4 text-[13px] font-medium text-muted-foreground dark:bg-white/[0.02]', TABLE_GRID)
-const TABLE_ROW = cn('grid min-h-12 items-center gap-4 border-b border-border px-4 py-2.5 transition-colors last:border-b-0 hover:bg-foreground/[0.02]', TABLE_GRID)
-const BADGE = 'h-auto rounded-full border-0 bg-sidebar-accent text-[10px] leading-[14px] text-muted-foreground'
-// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
-const MENU_ITEM = 'min-h-8 w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm font-normal focus:bg-accent focus:text-accent-foreground data-[danger=true]:text-destructive data-[danger=true]:focus:bg-destructive/10 data-[danger=true]:focus:text-destructive data-[danger=true]:focus:**:text-destructive'
-const AVATAR_TILE = 'inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-[11px] font-semibold text-muted-foreground uppercase'
 
 function initial(user: User) {
   return (user.name || user.email).charAt(0).toUpperCase()
@@ -132,8 +121,8 @@ export function MembersPage() {
   return (
     <>
       <SettingsCard title="Members" flush>
-        <div className="flex items-center justify-between gap-2 border-b border-border p-3 max-[899px]:flex-col max-[899px]:items-stretch">
-          <InputGroup className="w-full max-w-96 rounded-lg border-border bg-foreground/[0.02] max-[899px]:max-w-none">
+        <div className="flex items-center justify-between gap-2 border-b p-3 max-[899px]:flex-col max-[899px]:items-stretch">
+          <InputGroup className="max-w-96 max-[899px]:max-w-none">
             <InputGroupAddon align="inline-start">
               <Search className="size-3.5 text-muted-foreground/70" />
             </InputGroupAddon>
@@ -152,7 +141,7 @@ export function MembersPage() {
               <InputGroupAddon align="inline-end">
                 <InputGroupButton
                   size="icon-xs"
-                  className="size-5 rounded text-muted-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground dark:hover:bg-sidebar-accent/50"
+                  className="text-muted-foreground"
                   aria-label="Clear search"
                   onClick={() => {
                     setSearch('')
@@ -200,27 +189,29 @@ export function MembersPage() {
 
         {filtered.length > 0 ? (
           <>
-            <div className={TABLE}>
-              <div className={TABLE_HEADER}>
+            <MemberTable>
+              <MemberRow kind="header">
                 <span>Name</span>
                 <span>Email</span>
                 <span>Role</span>
                 <span className="text-right">Actions</span>
-              </div>
+              </MemberRow>
               {visible.map((user) => (
-                <div key={user.id} data-member-row className={TABLE_ROW}>
+                <MemberRow key={user.id} data-member-row>
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className={AVATAR_TILE}>{initial(user)}</span>
+                    <Avatar size="sm" className="size-7">
+                      <AvatarFallback className="rounded-lg text-[11px] font-semibold">{initial(user)}</AvatarFallback>
+                    </Avatar>
                     <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
                     {user.id === currentUser.data?.id ? (
-                      <Badge className={cn(BADGE, 'bg-primary/10 text-primary')} data-tone="accent">
+                      <Badge data-tone="accent">
                         You
                       </Badge>
                     ) : null}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">{user.email}</div>
                   <div>
-                    <Badge className={BADGE}>{user.role}</Badge>
+                    <Badge variant="secondary">{user.role}</Badge>
                   </div>
                   <div className="flex justify-end">
                     {canManage && canManageMember(workspace.role, currentUser.data?.id, user) ? (
@@ -230,26 +221,26 @@ export function MembersPage() {
                         >
                           Manage
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-auto min-w-[13rem] p-1">
+                        <DropdownMenuContent align="end" className="w-auto min-w-52">
                           {INVITABLE_ROLES.filter((role) => role !== user.role).map((role) => (
                             <DropdownMenuItem
                               key={role}
-                              className={MENU_ITEM}
                               onClick={() => changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role.toLowerCase() as 'admin' | 'member' })}
                             >
                               Make {role.toLowerCase()}
                             </DropdownMenuItem>
                           ))}
                           {canTransferOwnership(workspace.role, currentUser.data?.id, user) ? (
-                            <DropdownMenuItem className={MENU_ITEM} onClick={async () => {
+                            <DropdownMenuItem onClick={async () => {
                               if (await confirmAction({ title: `Transfer ownership of ${workspace.name} to ${user.name}?`, confirmLabel: 'Transfer ownership', danger: true })) {
                                 transferOwnership.mutate({ membershipId: user.membershipId, membershipVersion: user.version, workspaceVersion: workspace.version })
                               }
                             }}>Transfer ownership</DropdownMenuItem>
                           ) : null}
                           <DropdownMenuSeparator />
+                          {/* data-danger (not variant="destructive"): the menu popup forces destructive items to the accent colour */}
                           <DropdownMenuItem
-                            className={MENU_ITEM}
+                            className="text-destructive focus:bg-destructive/10 focus:text-destructive focus:**:text-destructive"
                             data-danger="true"
                             onClick={() => removeMember.mutate({ membershipId: user.membershipId, version: user.version })}
                           >
@@ -259,10 +250,10 @@ export function MembersPage() {
                       </DropdownMenu>
                     ) : null}
                   </div>
-                </div>
+                </MemberRow>
               ))}
-            </div>
-            <footer className="flex min-h-11 items-center justify-between border-t border-border px-4 text-[11px] text-muted-foreground/70">
+            </MemberTable>
+            <footer className="flex min-h-11 items-center justify-between border-t px-4 text-[11px] text-muted-foreground/70">
               <div className="inline-flex h-7 items-center gap-3 whitespace-nowrap tabular-nums">
                 <span>
                   {firstRow}-{lastRow} of {filtered.length}
@@ -341,10 +332,10 @@ export function MembersPage() {
               </>
             }
           >
-            <div className={GRID}>
-              <Field className={FIELD}>
-                <FieldLabel className={FIELD_LABEL} htmlFor="invite-email">
-                  Email address <span className={REQ}>*</span>
+            <FieldGrid>
+              <Field>
+                <FieldLabel htmlFor="invite-email">
+                  Email address <RequiredMark />
                 </FieldLabel>
                 <Input
                   id="invite-email"
@@ -355,8 +346,8 @@ export function MembersPage() {
                   onChange={(e) => setInviteEmail(e.target.value)}
                 />
               </Field>
-              <Field className={FIELD}>
-                <FieldLabel className={FIELD_LABEL} htmlFor="invite-role">
+              <Field>
+                <FieldLabel htmlFor="invite-role">
                   Role
                 </FieldLabel>
                 <Select items={INVITE_ROLE_OPTIONS} value={inviteRole} onValueChange={(value) => setInviteRole(value as (typeof INVITABLE_ROLES)[number])}>
@@ -368,11 +359,11 @@ export function MembersPage() {
                   </SelectContent>
                 </Select>
               </Field>
-            </div>
+            </FieldGrid>
             {inviteLink ? (
               <div className="mt-4 flex items-end gap-2">
-                <Field className={FIELD}>
-                  <FieldLabel className={FIELD_LABEL} htmlFor="invite-link">
+                <Field>
+                  <FieldLabel htmlFor="invite-link">
                     Invitation link ({inviteRole})
                   </FieldLabel>
                   <Input id="invite-link" value={inviteLink} readOnly />
@@ -393,15 +384,38 @@ export function MembersPage() {
       {canManage && invitations.isError ? <SettingsCard title="Pending invitations"><p role="alert">Invitations could not be loaded. <Button variant="ghost" onClick={() => void invitations.refetch()}>Retry</Button></p></SettingsCard> : null}
       {canManage && pendingInvitations.length > 0 ? (
         <SettingsCard title="Pending invitations" description="Invitation links that have not been accepted." flush>
-          <div className={TABLE}>
-            {pendingInvitations.map((invitation) => <div className={TABLE_ROW} key={invitation.id}>
-              <span className="truncate">{invitation.email}</span><span className="text-xs text-muted-foreground">Expires {new Date(invitation.expires_at).toLocaleDateString()}</span><Badge className={BADGE}>{invitation.role}</Badge>
+          <MemberTable>
+            {pendingInvitations.map((invitation) => <MemberRow key={invitation.id}>
+              <span className="truncate">{invitation.email}</span><span className="text-xs text-muted-foreground">Expires {new Date(invitation.expires_at).toLocaleDateString()}</span><Badge variant="secondary">{invitation.role}</Badge>
               <span className="text-right"><Button variant="ghost" disabled={revokeInvitation.isPending} onClick={() => revokeInvitation.mutate(invitation.id)}>Revoke</Button></span>
-            </div>)}
-          </div>
+            </MemberRow>)}
+          </MemberTable>
         </SettingsCard>
       ) : null}
       {revokeInvitation.isError ? <p role="alert" className="text-destructive">Invitation revocation failed. <Button variant="ghost" onClick={() => revokeInvitation.variables && revokeInvitation.mutate(revokeInvitation.variables)}>Retry</Button></p> : null}
     </>
   )
+}
+
+/** Scrolls sideways on narrow screens instead of squeezing the columns. */
+function MemberTable({ className, ...props }: ComponentProps<'div'>) {
+  return <div data-slot="member-table" className={cn('flex max-w-full min-w-0 flex-col overflow-x-auto [overscroll-behavior-x:contain]', className)} {...props} />
+}
+
+/** Name · email · role · actions; below 900px the email column hides. */
+const memberRowVariants = cva(
+  'grid items-center gap-4 px-4 [grid-template-columns:minmax(0,1.15fr)_minmax(0,1.55fr)_7rem_minmax(10rem,0.9fr)] max-[899px]:[grid-template-columns:minmax(0,1fr)_auto_auto] max-[899px]:[&>:nth-child(2)]:hidden',
+  {
+    variants: {
+      kind: {
+        header: 'h-10 border-b border-muted bg-black/[0.02] text-[13px] font-medium text-muted-foreground dark:bg-white/[0.02]',
+        row: 'min-h-12 border-b py-2.5 transition-colors last:border-b-0 hover:bg-foreground/[0.02]',
+      },
+    },
+    defaultVariants: { kind: 'row' },
+  },
+)
+
+function MemberRow({ kind, className, ...props }: ComponentProps<'div'> & VariantProps<typeof memberRowVariants>) {
+  return <div data-slot="member-row" data-kind={kind ?? 'row'} className={cn(memberRowVariants({ kind }), className)} {...props} />
 }

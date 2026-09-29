@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router'
 import { Modal } from '@/components/common/Modal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { DialogFooter } from '@/components/ui/dialog'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { useDeleteWorkspace } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { SettingsCard } from '@/components/common/SettingsCard'
@@ -42,19 +43,19 @@ export function WorkspaceDangerZone() {
       <Button type="button" variant="destructive" onClick={() => { setConfirmation(''); deletion.reset(); setOpen(true) }}>Delete workspace</Button>
     </SettingsCard>
     {open ? (
-      <Modal title="Delete workspace?" description={`Deleting "${workspace.name}" removes access to its projects and tasks for everyone.`} onClose={close} maxWidth={480}>
+      <Modal title="Delete workspace?" description={`Deleting "${workspace.name}" removes access to its projects and tasks for everyone.`} onClose={close} className="sm:max-w-120">
         <form onSubmit={(event) => { event.preventDefault(); void deleteConfirmed() }}>
           {workspaces.length === 1 ? <p className="my-3 text-[13px] text-destructive">This is your last workspace. After deletion, you will have no workspace access.</p> : null}
-          <div className="w-full min-w-0">
-            <Label className="mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-muted-foreground" htmlFor={inputId}>Confirm workspace name</Label>
-            <p className="text-xs">Type <strong>{workspace.name}</strong> to confirm deletion.</p>
+          <Field>
+            <FieldLabel htmlFor={inputId}>Confirm workspace name</FieldLabel>
+            <FieldDescription>Type <strong>{workspace.name}</strong> to confirm deletion.</FieldDescription>
             <Input id={inputId} autoComplete="off" required value={confirmation} readOnly={deletion.isPending} onChange={(event) => setConfirmation(event.target.value)} />
-          </div>
+          </Field>
           {deletion.isError ? <p role="alert" className="my-3 text-[13px] text-destructive">Workspace deletion failed. Try again, or refresh the page if the workspace has changed.</p> : null}
-          <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+          <DialogFooter className="mt-4">
             <Button type="button" variant="ghost" disabled={deletion.isPending} onClick={close}>Cancel</Button>
             <Button type="submit" variant="destructive" className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50" disabled={confirmation !== workspace.name} aria-disabled={deletion.isPending || undefined}>{deletion.isPending ? 'Deleting…' : 'Delete workspace'}</Button>
-          </div>
+          </DialogFooter>
         </form>
       </Modal>
     ) : null}

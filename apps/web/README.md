@@ -35,8 +35,17 @@ src/
 
 ## Conventions
 
-- **Styling is Tailwind + shadcn only.** No `.css` files besides `index.css`, and no CSS-in-JS. If something truly needs raw
-  CSS, add it to `index.css` as `@layer components { .name { @apply … } }` and write plain declarations only where no utility exists.
+- **Styling reads like shadcn/ui.** Styles are Tailwind classes inline in JSX (`cn()` from the `cn` package, like the registry), or inside a small
+  component with `data-slot` and `cva` variants (see `components/ui/button.tsx`). No `const fooClass = '…'` variables, no class
+  helper functions, no app-owned CSS classes, no CSS-in-JS. A repeated pattern becomes a component (`components/common/Pane.tsx`).
+- **Use shadcn parts with their default look** (`DialogFooter`, `DropdownMenuItem`, `PopoverContent`, `Button`, `Input`, …).
+  Pass layout classes only (`w-auto p-0`); do not re-skin them with borders, radii, shadows or colours.
+- **Hooks are `data-*` attributes, not classes**: `data-slot` for parts, `data-active`/`data-kind` for state; style them with
+  `data-[…]:`, `in-data-[…]:`, `group-data-[…]:` variants. Tests query by role, label or data attribute.
+- **Library DOM we do not render** (BlockNote `.bn-*`) is styled from our wrapper with arbitrary variants, the way shadcn's
+  `chart.tsx` styles Recharts: see `features/docs/editor/ThemedBlockNoteView.tsx` and `PageEditor.tsx`.
+- **`index.css` is the only stylesheet** and holds tokens (`:root`, `.dark`, `@theme inline`), the base layer, `@theme`
+  animations, and two blocks that cannot be Tailwind: the verbatim Tiptap base stylesheet (CSP) and print mode.
 - **Reach for the registry before writing a component**: `node_modules/.bin/shadcn search @shadcn -l 100`. `components/common/`
   is for app-specific composition over registry parts, not for reimplementing them.
 - **Inline `style={{}}` is for runtime-dynamic values only** (user colours, pointer coordinates, measured sizes).

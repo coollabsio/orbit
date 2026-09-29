@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ZOOM_PRESETS, presetOf, type ZoomPreset } from './timelineLib'
 
 const LABEL: Record<ZoomPreset, string> = { week: 'Week', month: 'Month', quarter: 'Quarter' }
@@ -8,19 +9,25 @@ export function TimelineControls({ pxPerDay, onZoomChange, onToday }: { pxPerDay
   const active = presetOf(pxPerDay)
   return (
     <>
-      <div role="group" aria-label="Timeline zoom" className="flex h-8 items-center rounded-lg border border-input bg-muted p-0.5 max-[899px]:hidden">
+      <ToggleGroup
+        aria-label="Timeline zoom"
+        variant="outline"
+        size="sm"
+        spacing={0}
+        className="max-[899px]:hidden"
+        value={active ? [active] : []}
+        onValueChange={(value: string[]) => {
+          // pressing the active preset again empties the group: keep the zoom
+          const next = value[0] as ZoomPreset | undefined
+          if (next) onZoomChange(ZOOM_PRESETS[next])
+        }}
+      >
         {(Object.keys(ZOOM_PRESETS) as ZoomPreset[]).map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            aria-pressed={preset === active}
-            className="h-full rounded-md px-2 text-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:text-foreground active:scale-[0.97] aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
-            onClick={() => onZoomChange(ZOOM_PRESETS[preset])}
-          >
+          <ToggleGroupItem key={preset} value={preset}>
             {LABEL[preset]}
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
+      </ToggleGroup>
       <Button variant="ghost" onClick={onToday}>Today</Button>
     </>
   )

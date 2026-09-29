@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { ChevronRight } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { UserAvatarStack } from '@/components/common/UserAvatar'
@@ -7,7 +6,7 @@ import type { LabelRecord } from '@/api/generated/types.gen'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
-import { CHEVRON, GroupIcon } from '@/features/views/components/GroupIcon'
+import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
 import type { GroupContext, TaskGroup } from '@/features/views/grouping'
 import { boardGrid, canDrag, cellTasks, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
 import { useCollapsedGroups } from '@/features/views/useCollapsedGroups'
@@ -42,29 +41,6 @@ export interface TaskBoardProps {
 }
 
 const COLUMN_WIDTH = 320
-const ZONE_RING = 'data-[drop-over]:ring-1 data-[drop-over]:ring-primary/40 data-[drop-over]:ring-inset'
-/** Held (a card owns the hover): hidden but keeps its space, so the cards under the pointer do not shift. */
-const PLACEHOLDER = 'min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10 data-[held]:invisible'
-/**
- * Lift only where hover is real and motion is welcome; transition named properties, never `all`. While a drop would
- * nest into the card: tint + inset ring (the chip names the action). The hover styles skip a nest target: `hover-fine`
- * is emitted after `data-*` at equal specificity, so they must be mutually exclusive (.ai/lessons.md).
- */
-const CARD =
-  'relative flex cursor-pointer flex-col gap-[7px] rounded-md border border-border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out not-data-[nest=inside]:hover-fine:hover:border-foreground/20 not-data-[nest=inside]:hover-fine:hover:bg-accent not-data-[nest=inside]:hover-fine:hover:shadow-md motion-safe:not-data-[nest=inside]:hover-fine:hover:-translate-y-px data-[dragging]:border-dashed data-[dragging]:opacity-35 data-[active]:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-[nest=inside]:border-primary/40 data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset'
-/**
- * Column headers are 12px padding + 38px tall; lane headers stick right under them. A collapsed lane is a
- * drop zone itself, tinted like a list group header while a card is over it.
- */
-const LANE_HEADER =
-  'group/lane sticky top-[50px] z-10 col-span-full flex h-9 items-center border-b border-border bg-background transition-colors duration-150 data-[drop-over]:bg-primary/10'
-/**
- * Sticks to the left edge while the board scrolls sideways, so the lane name stays in view. Hover only under
- * a fine pointer; a press scales to 0.97 instead of the default 1px nudge.
- */
-const LANE_LABEL =
-  'sticky left-3 h-7 gap-2 px-1.5 text-xs font-semibold text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out hover-fine:hover:text-foreground group-data-[drop-over]/lane:text-primary active:not-aria-[haspopup]:translate-y-0 active:scale-[0.97] motion-reduce:active:scale-100'
-
 /** Kanban: columns from the grouping, optional swim lanes from the sub-grouping; drops rewrite both fields. */
 export function TaskBoard({ tasks, users, labels, statuses, projects, display, groupContext, collapseScope, activeTaskId, onOpen }: TaskBoardProps) {
   const { workspace } = useWorkspace()
@@ -116,7 +92,14 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     return (
       <article
         data-board-card
-        className={CARD}
+        className={cn(
+          'relative flex cursor-pointer flex-col gap-[7px] rounded-md border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-active:border-primary/40 data-dragging:border-dashed data-dragging:opacity-35',
+          // lift only where hover is real and motion is welcome; the hover styles skip a nest target: `hover-fine` is
+          // emitted after `data-*` at equal specificity, so they must be mutually exclusive (.ai/lessons.md)
+          'not-data-[nest=inside]:hover-fine:hover:border-foreground/20 not-data-[nest=inside]:hover-fine:hover:bg-accent not-data-[nest=inside]:hover-fine:hover:shadow-md motion-safe:not-data-[nest=inside]:hover-fine:hover:-translate-y-px',
+          // while a drop would nest into the card: tint + inset ring (the chip names the action)
+          'data-[nest=inside]:border-primary/40 data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset',
+        )}
         data-active={task.id === activeTaskId || undefined}
         data-dragging={drag?.taskId === task.id || undefined}
         draggable={dragEnabled}
@@ -150,9 +133,10 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
         ) : null}
         {/* the board always renders Nested as Flat: a sub-issue names its parent above its title */}
         {task.parent ? (
-          <button
+          <Button
             type="button"
-            className="-mb-1 flex max-w-full min-w-0 cursor-pointer items-center gap-1 self-start rounded-sm text-left text-[11px] text-muted-foreground/70 outline-none transition-colors duration-150 hover-fine:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+            variant="link"
+            className="-mb-1 h-auto max-w-full min-w-0 shrink gap-1 self-start p-0 text-[11px] font-normal text-muted-foreground hover:text-foreground"
             onClick={(event) => {
               event.stopPropagation()
               onOpen(task.parent!.id)
@@ -160,7 +144,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
           >
             <span className="truncate">{task.parent.title || 'Untitled'}</span>
             <span aria-hidden className="shrink-0 text-muted-foreground/50">›</span>
-          </button>
+          </Button>
         ) : null}
         <h3 className="text-[13px] leading-[18px] font-medium text-foreground">{task.title || 'Untitled'}</h3>
         {cardLabels.length > 0 ? (
@@ -187,7 +171,8 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const placeholderIndex = drop?.zone === zone ? drop.index : null
     // the dragged card stays mounted (faded): unmounting the drag source cancels the browser drag
     const others = drag ? cell.filter((task) => task.id !== drag.taskId) : cell
-    const placeholder = <div data-board-placeholder data-held={(drop?.zone === zone && drop.held) || undefined} className={PLACEHOLDER} style={{ height: dragHeight }} />
+    // held (a card owns the hover): hidden but keeps its space, so the cards under the pointer do not shift
+    const placeholder = <div data-board-placeholder data-held={(drop?.zone === zone && drop.held) || undefined} className="min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10 data-held:invisible" style={{ height: dragHeight }} />
     return (
       <>
         {cell.map((task) => {
@@ -235,7 +220,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
           const values = valuesOf(column)
           const zone = zoneIdOf(values)
           return (
-            <section key={column.key} className={cn('group/col min-w-0 rounded-md bg-muted/40 transition-shadow', ZONE_RING)} {...zoneProps({ id: zone, values, tasks: column.tasks, itemsShown: true })}>
+            <section key={column.key} className="group/col min-w-0 rounded-md bg-muted/40 transition-shadow data-drop-over:ring-1 data-drop-over:ring-primary/40 data-drop-over:ring-inset" {...zoneProps({ id: zone, values, tasks: column.tasks, itemsShown: true })}>
               {columnHeader(column)}
               <div className="flex min-h-[120px] flex-col gap-[7px] px-[7px] pb-[7px]">{renderCards(zone, values, column.tasks, true)}</div>
             </section>
@@ -260,17 +245,20 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
         const laneDrop = open ? {} : zoneProps({ id: laneId, values: laneValues, tasks: lane.tasks, itemsShown: false })
         return (
           <section key={lane.key} aria-label={lane.label} className="col-span-full grid grid-cols-subgrid">
-            <div className={LANE_HEADER} {...laneDrop}>
+            {/* column headers are 12px padding + 38px tall; lane headers stick right under them. A collapsed lane is a
+                drop zone itself, tinted like a list group header while a card is over it */}
+            <div className="group/lane sticky top-[50px] z-10 col-span-full flex h-9 items-center border-b bg-background transition-colors duration-150 data-drop-over:bg-primary/10" {...laneDrop}>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className={LANE_LABEL}
+                // sticks to the left edge while the board scrolls sideways, so the lane name stays in view
+                className="sticky left-3 gap-2 px-1.5 text-xs font-semibold text-muted-foreground group-data-drop-over/lane:text-primary"
                 aria-expanded={open}
                 aria-label={`${open ? 'Collapse' : 'Expand'} ${lane.label}`}
                 onClick={() => toggle(laneId)}
               >
-                <ChevronRight aria-hidden className={cn(CHEVRON, open && 'rotate-90')} />
+                <DisclosureChevron open={open} />
                 <GroupIcon group={lane} context={groupContext} />
                 <span>{lane.label}</span>
                 <span className="font-normal text-muted-foreground/70 tabular-nums">{lane.tasks.length}</span>
@@ -284,7 +272,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
                 <div
                   key={column.key}
                   data-board-cell={zone}
-                  className={cn('my-2 flex min-h-[72px] min-w-0 flex-col gap-[7px] rounded-md bg-muted/40 p-[7px] transition-shadow', ZONE_RING)}
+                  className="my-2 flex min-h-[72px] min-w-0 flex-col gap-[7px] rounded-md bg-muted/40 p-[7px] transition-shadow data-drop-over:ring-1 data-drop-over:ring-primary/40 data-drop-over:ring-inset"
                   {...zoneProps({ id: zone, values, tasks: cell, itemsShown: true })}
                 >
                   {renderCards(zone, values, cell, false)}

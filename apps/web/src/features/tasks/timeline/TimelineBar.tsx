@@ -1,4 +1,5 @@
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react'
+import { cn } from 'cn'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { isClosedCategory } from '@/features/tasks/taskMeta'
@@ -17,7 +18,7 @@ function ResizeHandle({ side, onPointerDown }: { side: 'start' | 'end'; onPointe
   return (
     <span
       aria-hidden="true"
-      className={`absolute inset-y-0 z-10 flex w-2 cursor-ew-resize items-center justify-center ${side === 'start' ? '-left-px' : '-right-px'}`}
+      className={cn('absolute inset-y-0 z-10 flex w-2 cursor-ew-resize items-center justify-center', side === 'start' ? '-left-px' : '-right-px')}
       onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event) }}
     >
       <span className="h-3 w-0.5 rounded-full bg-foreground/50 opacity-0 transition-opacity duration-150 group-hover/bar:opacity-100" />
@@ -63,8 +64,6 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
     onClick,
     onKeyDown,
   }
-  // day-snapped moves glide instead of jumping while the pointer drags
-  const motion = 'data-[dragging]:transition-[left,width] data-[dragging]:duration-100 data-[dragging]:ease-out'
   const tail = overdueDays > 0 ? (
     <div
       data-overdue-tail
@@ -87,7 +86,12 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
         {tail}
         <div
           {...common}
-          className={`group/bar absolute top-1 flex h-6 cursor-grab items-center text-xs whitespace-nowrap text-foreground outline-none select-none focus-visible:[&>[data-diamond]]:ring-2 focus-visible:[&>[data-diamond]]:ring-primary data-[dragging]:cursor-grabbing ${motion} ${closed ? 'opacity-50' : ''}`}
+          className={cn(
+            'group/bar absolute top-1 flex h-6 cursor-grab items-center text-xs whitespace-nowrap text-foreground outline-none select-none focus-visible:[&>[data-diamond]]:ring-2 focus-visible:[&>[data-diamond]]:ring-primary data-dragging:cursor-grabbing',
+            // day-snapped moves glide instead of jumping while the pointer drags
+            'data-dragging:transition-[left,width] data-dragging:duration-100 data-dragging:ease-out',
+            closed && 'opacity-50',
+          )}
           style={{ left: boxLeft }}
           onPointerDown={(event) => onPointerDown(event, 'move')}
         >
@@ -116,7 +120,12 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
       <div
         {...common}
         data-started={status?.category === 'started' || undefined}
-        className={`group/bar absolute top-1 flex h-6 cursor-grab items-center gap-1.5 rounded-md border border-[color-mix(in_oklab,var(--bar)_38%,transparent)] bg-[color-mix(in_oklab,var(--bar)_12%,var(--background))] px-2 text-xs font-medium text-foreground outline-none select-none hover:border-[color-mix(in_oklab,var(--bar)_65%,transparent)] focus-visible:ring-2 focus-visible:ring-primary/60 data-[dragging]:cursor-grabbing data-[dragging]:shadow-lg data-[started]:bg-[color-mix(in_oklab,var(--bar)_22%,var(--background))] ${motion} ${closed ? 'opacity-50' : ''}`}
+        className={cn(
+          'group/bar absolute top-1 flex h-6 cursor-grab items-center gap-1.5 rounded-md border border-[color-mix(in_oklab,var(--bar)_38%,transparent)] bg-[color-mix(in_oklab,var(--bar)_12%,var(--background))] px-2 text-xs font-medium text-foreground outline-none select-none hover:border-[color-mix(in_oklab,var(--bar)_65%,transparent)] focus-visible:ring-2 focus-visible:ring-primary/60 data-dragging:cursor-grabbing data-dragging:shadow-lg data-started:bg-[color-mix(in_oklab,var(--bar)_22%,var(--background))]',
+          // day-snapped moves glide instead of jumping while the pointer drags
+          'data-dragging:transition-[left,width] data-dragging:duration-100 data-dragging:ease-out',
+          closed && 'opacity-50',
+        )}
         style={{ ...tint, left, width: barWidth }}
         onPointerDown={(event) => onPointerDown(event, 'move')}
       >
@@ -132,7 +141,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
         <ResizeHandle side="end" onPointerDown={(event) => onPointerDown(event, 'end')} />
       </div>
       {narrow ? (
-        <span className={`pointer-events-none absolute top-1 flex h-6 items-center gap-1.5 text-xs whitespace-nowrap text-foreground ${closed ? 'opacity-50' : ''}`} style={{ left: Math.max(left + barWidth, overdueDays > 0 ? tailEnd : 0) + GAP }}>
+        <span className={cn('pointer-events-none absolute top-1 flex h-6 items-center gap-1.5 text-xs whitespace-nowrap text-foreground', closed && 'opacity-50')} style={{ left: Math.max(left + barWidth, overdueDays > 0 ? tailEnd : 0) + GAP }}>
           {label}
         </span>
       ) : null}

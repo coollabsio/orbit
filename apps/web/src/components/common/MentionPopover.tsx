@@ -1,6 +1,7 @@
 import { Hashtag as Hash, User } from 'reicon-react'
 import type { MentionSuggestion } from '@/lib/useMentionAutocomplete'
 import { Button } from '@/components/ui/button'
+import { cn } from 'cn'
 
 /** the chat reference mention popup: avatar, @label, handle; onMouseDown keeps the textarea focused. */
 export function MentionPopover({
@@ -23,11 +24,10 @@ export function MentionPopover({
   const channelList = suggestions[0].kind === 'channel'
   return (
     <div
-      className={`absolute z-50 max-h-80 overflow-y-auto border border-border bg-popover py-2 shadow-xl ${
-        placement === 'below'
-          ? 'top-[calc(100%+6px)] left-[30px] w-[min(340px,calc(100vw-48px))] rounded-[10px]'
-          : 'bottom-full right-0 left-0 mb-3 rounded-lg'
-      }`}
+      className={cn(
+        'absolute z-50 max-h-80 overflow-y-auto border border-border bg-popover py-2 shadow-xl',
+        placement === 'below' ? 'top-[calc(100%+6px)] left-[30px] w-[min(340px,calc(100vw-48px))] rounded-[10px]' : 'right-0 bottom-full left-0 mb-3 rounded-lg',
+      )}
       data-placement={placement}
     >
       <div className="px-3 pb-1 text-xs font-bold tracking-wider text-muted-foreground uppercase">{channelList ? 'Channels' : 'Mentions'}</div>
@@ -36,7 +36,7 @@ export function MentionPopover({
           key={suggestion.id}
           type="button"
           variant="ghost"
-          className="flex h-auto w-full items-center justify-start gap-3 rounded-none border-0 px-3 py-2 text-left font-normal text-foreground transition-colors hover:bg-muted/70 hover:text-foreground dark:hover:bg-muted/70 data-[active=true]:bg-muted active:not-aria-[haspopup]:translate-y-0"
+          className="h-auto w-full justify-start gap-3 rounded-none px-3 py-2 text-left font-normal data-[active=true]:bg-muted"
           data-active={index === activeIndex ? 'true' : undefined}
           onMouseDown={(event) => {
             event.preventDefault()

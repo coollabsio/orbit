@@ -4,6 +4,7 @@ import { Add as Plus } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { PaneTitle } from '@/components/common/Pane'
 import { createMailFolder, moveThread } from '@/mock/actions'
 import type { MailFolder, MailThread } from '@/mock/types'
 import { FOLDER_ICONS, folderUnreadCount } from '@/features/mail/mailLib'
@@ -41,7 +42,7 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
         key={folder.id}
         type="button"
         variant="ghost"
-        className="relative flex h-8 w-full min-w-0 items-center justify-start gap-2.5 overflow-hidden rounded-md border-0 px-2.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground dark:hover:bg-sidebar-accent/50 data-[active]:bg-sidebar-accent data-[active]:text-sidebar-accent-foreground data-[drop-over]:bg-primary/10 data-[drop-over]:text-primary"
+        className="w-full min-w-0 justify-start gap-2.5 text-[13px] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground data-drop-over:bg-primary/10 data-drop-over:text-primary"
         data-active={folder.id === activeFolderId || undefined}
         data-drop-over={dropFolderId === folder.id || undefined}
         onClick={() => navigate(`/mail?folder=${folder.id}`)}
@@ -61,10 +62,10 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
           if (threadId && droppable) moveThread(threadId, folder.id)
         }}
       >
-        <Icon className="size-4 shrink-0 opacity-90" />
+        <Icon className="opacity-90" />
         <span className="min-w-0 flex-1 truncate text-left">{folder.name}</span>
         {unread > 0 ? (
-          <Badge className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border-0 bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+          <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">
             {unread}
           </Badge>
         ) : null}
@@ -74,8 +75,8 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
 
   return (
     <nav className="flex h-full w-[200px] shrink-0 flex-col bg-background max-[899px]:hidden">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
-        <span className="truncate text-[13px] font-semibold text-foreground">Mail</span>
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+        <PaneTitle>Mail</PaneTitle>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {system.map(row)}

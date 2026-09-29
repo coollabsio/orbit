@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
 import { Hashtag as Hash } from 'reicon-react'
 import { useAppState } from '@/mock/store'
@@ -5,6 +6,7 @@ import { relativeTime } from '@/lib/format'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
+import { Pane } from '@/components/common/Pane'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { PRIORITY_ORDER } from '@/features/tasks/taskMeta'
@@ -14,9 +16,19 @@ import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import { useTasks } from '@/features/tasks/api/tasks'
 
-const LIST_ROW = 'flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2.5 border-b border-border px-3 py-1.5 text-left transition-colors last:border-b-0 hover:bg-foreground/[0.02]'
-const CARD_EMPTY = 'p-4 text-[13px] text-muted-foreground/70'
-const META = 'shrink-0 text-xs text-muted-foreground/70'
+/** One linked row inside a home card. */
+function CardRow({ className, ...props }: ComponentProps<typeof Link>) {
+  return <Link data-slot="card-row" className={cn('flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2.5 border-b px-3 py-1.5 text-left transition-colors last:border-b-0 hover:bg-foreground/[0.02]', className)} {...props} />
+}
+
+function CardEmpty({ children }: { children: React.ReactNode }) {
+  return <div data-slot="card-empty" className="p-4 text-[13px] text-muted-foreground/70">{children}</div>
+}
+
+/** Quiet trailing detail of a row (identifier, time). */
+function RowMeta({ children }: { children: React.ReactNode }) {
+  return <span data-slot="row-meta" className="shrink-0 text-xs text-muted-foreground/70">{children}</span>
+}
 
 function greetingFor(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -87,7 +99,7 @@ export function HomePage() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+      <Pane>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-6 pt-12 pb-8 max-[599px]:px-4 max-[599px]:pt-8 max-[599px]:pb-6">
             <div>
@@ -115,88 +127,88 @@ export function HomePage() {
             <div className="grid grid-cols-1 items-start gap-4 min-[900px]:grid-cols-2">
               <HomeCard title="My tasks" viewAllTo="/tasks">
                 {myOpenTasks.length === 0 ? (
-                  <div className={CARD_EMPTY}>No open tasks — enjoy the calm.</div>
+                  <CardEmpty>No open tasks — enjoy the calm.</CardEmpty>
                 ) : (
                   myOpenTasks.map((task) => (
-                    <Link key={task.id} to={`/tasks/${task.id}`} className={LIST_ROW}>
+                    <CardRow key={task.id} to={`/tasks/${task.id}`}>
                       <TaskStatusIcon status={statuses.data.find((s) => s.id === task.statusId)} />
-                      <span className={META}>
+                      <RowMeta>
                         {task.identifier}
-                      </span>
+                      </RowMeta>
                       <span className="flex-1 truncate text-[13px]">
                         {task.title}
                       </span>
                       <PriorityIcon priority={task.priority} />
-                      <span className={META}>
+                      <RowMeta>
                         {relativeTime(task.updatedAt)}
-                      </span>
-                    </Link>
+                      </RowMeta>
+                    </CardRow>
                   ))
                 )}
               </HomeCard>
 
               <HomeCard title="Inbox" viewAllTo="/inbox">
                 {inboxItems.length === 0 ? (
-                  <div className={CARD_EMPTY}>Nothing here yet.</div>
+                  <CardEmpty>Nothing here yet.</CardEmpty>
                 ) : (
                   inboxItems.map((n) => (
-                    <Link key={n.id} to="/inbox" className={LIST_ROW}>
+                    <CardRow key={n.id} to="/inbox">
                       <span className={cn('size-2 shrink-0', !n.readAt && 'rounded-full bg-primary')} />
                       <span className="flex-1 truncate text-[13px]">
                         {n.title}
                       </span>
-                      <span className={META}>
+                      <RowMeta>
                         {relativeTime(n.createdAt)}
-                      </span>
-                    </Link>
+                      </RowMeta>
+                    </CardRow>
                   ))
                 )}
               </HomeCard>
 
               <HomeCard title="Recent mail" viewAllTo="/mail">
                 {recentMail.length === 0 ? (
-                  <div className={CARD_EMPTY}>No mail yet.</div>
+                  <CardEmpty>No mail yet.</CardEmpty>
                 ) : (
                   recentMail.map((thread) => (
-                    <Link key={thread.id} to={`/mail/${thread.id}`} className={LIST_ROW}>
+                    <CardRow key={thread.id} to={`/mail/${thread.id}`}>
                       <span className={cn('max-w-[140px] shrink-0 truncate text-[13px]', thread.unread ? 'font-semibold' : 'font-normal')}>
                         {thread.messages[0]?.from.name ?? 'Unknown'}
                       </span>
                       <span className="flex-1 truncate text-[13px] text-muted-foreground">
                         {thread.subject}
                       </span>
-                      <span className={META}>
+                      <RowMeta>
                         {relativeTime(thread.updatedAt)}
-                      </span>
-                    </Link>
+                      </RowMeta>
+                    </CardRow>
                   ))
                 )}
               </HomeCard>
 
               <HomeCard title="Active channels" viewAllTo="/chat">
                 {channels.length === 0 ? (
-                  <div className={CARD_EMPTY}>No channels yet.</div>
+                  <CardEmpty>No channels yet.</CardEmpty>
                 ) : (
                   channels.map((channel) => (
-                    <Link key={channel.id} to={`/chat/${channel.id}`} className={LIST_ROW}>
+                    <CardRow key={channel.id} to={`/chat/${channel.id}`}>
                       <Hash className="size-4 shrink-0 text-muted-foreground/70" />
                       <span className={cn('shrink-0 text-[13px]', channel.unreadCount > 0 ? 'font-semibold' : 'font-normal')}>
                         {channel.name}
                       </span>
                       {channel.unreadCount > 0 ? (
-                        <Badge className="h-4 min-w-4 rounded-full border-0 px-1 py-0 text-[10px] font-semibold">{channel.unreadCount}</Badge>
+                        <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{channel.unreadCount}</Badge>
                       ) : null}
                       <span className="flex-1 truncate text-xs text-muted-foreground/70">
                         {channel.description}
                       </span>
-                    </Link>
+                    </CardRow>
                   ))
                 )}
               </HomeCard>
             </div>
           </div>
         </div>
-      </div>
+      </Pane>
     </div>
   )
 }

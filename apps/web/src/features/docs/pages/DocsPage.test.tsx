@@ -10,7 +10,7 @@ import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { toSummary } from '@/features/docs/api/pages'
 import { CollabConnectContext, type CollabTarget } from '@/features/docs/collab/connection'
 import { DocsPage } from './DocsPage'
-import { PRINT_CLASS } from '@/features/docs/pageExport'
+import { PRINT_ATTR } from '@/features/docs/pageExport'
 import { fakeCollab, fragmentText, type FakeCollab } from '@/test/fakeCollab'
 import { waitForAbsence } from '@/test/waitForAbsence'
 
@@ -680,7 +680,7 @@ test('the page menu exports Markdown (with sub-pages only when there are some) a
   URL.revokeObjectURL = () => {}
   const printed: Array<{ printing: boolean; title: string }> = []
   window.print = () => {
-    printed.push({ printing: document.documentElement.classList.contains(PRINT_CLASS), title: document.title })
+    printed.push({ printing: document.documentElement.hasAttribute(PRINT_ATTR), title: document.title })
   }
   try {
     await view.findByLabelText('Page title')
@@ -699,7 +699,7 @@ test('the page menu exports Markdown (with sub-pages only when there are some) a
     await userEvent.click(view.getByRole('menuitem', { name: 'PDF' }))
     expect(printed).toEqual([{ printing: true, title: 'Plan' }])
     window.dispatchEvent(new Event('afterprint'))
-    expect(document.documentElement.classList.contains(PRINT_CLASS)).toBe(false)
+    expect(document.documentElement.hasAttribute(PRINT_ATTR)).toBe(false)
     // The print stylesheet keeps only this subtree: the title and the editor are inside it.
     const printRoot = view.container.querySelector('[data-print-root]') as HTMLElement
     expect(within(printRoot).getByLabelText('Page title')).toBeTruthy()

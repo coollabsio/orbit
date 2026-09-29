@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { DocumentText as FileText, Add as Plus } from 'reicon-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Pane } from '@/components/common/Pane'
 import { confirmAction } from '@/components/common/confirmAction'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import {
@@ -19,13 +20,17 @@ import {
 } from '@/features/docs/api/pages'
 import { canDeleteTeamspaces, useTeamspaces } from '@/features/docs/api/teamspaces'
 import { descendantsOf, dropOnSpace, landingPage, pageTitle, spaceKey, spaceLabel, type SpaceKey } from '@/features/docs/pageTree'
+import { cn } from 'cn'
 import { DocEditor, type DocEditorControl } from '@/features/docs/components/DocEditor'
 import { DocTree } from '@/features/docs/components/DocTree'
 import { DocPageActionsContext, type DocPageActions } from '@/features/docs/pageActions'
 import { NotionImportPane } from './NotionImportPane'
 import { PageTrashPane } from './PageTrashPane'
 
-const PANE = 'flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=index]/docs:hidden'
+/** The docs page's main pane (hidden on phones while the page list shows). */
+function DocsPane({ className, ...props }: ComponentProps<typeof Pane>) {
+  return <Pane className={cn('max-[899px]:group-data-[view=index]/docs:hidden', className)} {...props} />
+}
 
 /** Desktop lands on the first page; phones show the page list first (the tree is the whole screen there). */
 function landsOnFirstPage() {
@@ -170,7 +175,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     const first = spacesKnown ? landingPage(pages, teamspaces.data) : null
     if (first && landsOnFirstPage()) return <Navigate to={`/docs/${first.id}`} replace />
     content = (
-      <section className={PANE}>
+      <DocsPane>
         {tree.isPending || !spacesKnown ? (
           <div className="flex flex-1 items-center justify-center">
             <Spinner className="text-muted-foreground" />
@@ -194,7 +199,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
             )}
           </div>
         )}
-      </section>
+      </DocsPane>
     )
   } else if (page.data) {
     content = (
@@ -213,7 +218,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   } else if (page.isError) {
     const missing = isPageNotFound(page.error)
     content = (
-      <section className={PANE}>
+      <DocsPane>
         <div className="flex flex-1 flex-col p-6">
           <EmptyState
             icon={FileText}
@@ -233,15 +238,15 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
             }
           />
         </div>
-      </section>
+      </DocsPane>
     )
   } else {
     content = (
-      <section className={PANE}>
+      <DocsPane>
         <div className="flex flex-1 items-center justify-center">
           <Spinner className="text-muted-foreground" />
         </div>
-      </section>
+      </DocsPane>
     )
   }
 

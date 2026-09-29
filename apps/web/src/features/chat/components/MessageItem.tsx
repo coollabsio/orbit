@@ -1,5 +1,6 @@
 // Port of the chat reference MessageItem (the chat reference frontend/src/components/chat/MessageItem.tsx)
-import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { cva } from 'class-variance-authority'
 import { Copy, MoreH as MoreHorizontal, Edit as Pencil, Reply, SmileCircle as SmilePlus, Trash as Trash2 } from 'reicon-react'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { PinIcon } from '@/components/common/icons/PinIcon'
@@ -28,29 +29,55 @@ import { relativeTime } from '@/lib/format'
 import { Emoji } from '@/components/common/Emoji'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from 'cn'
+import { ChatDropdownMenuItem } from './ChatMenuItem'
+import { InitialAvatar } from './InitialAvatar'
 
 const TOOLBAR_EMOJIS = ['👍', '👀', '😂']
-
-const authorNameClass = 'text-sm font-semibold text-foreground max-[899px]:text-xs'
-const timeClass = 'text-[11px] font-semibold text-muted-foreground max-[899px]:text-[10px]'
-const sourceBadgeClass =
-  'inline-flex h-4 items-center rounded-[3px] px-1 text-[10px] leading-4 font-bold text-white data-[source=discord]:bg-[#5865f2] data-[source=github]:bg-[#3f3f46] data-[source=webhook]:bg-[#047857] data-[source=webhook]:normal-case max-[899px]:data-[source=webhook]:h-3.5 max-[899px]:data-[source=webhook]:px-[3px] max-[899px]:data-[source=webhook]:text-[9px] max-[899px]:data-[source=webhook]:leading-[14px]'
-const ctxMenuClass = 'w-auto min-w-48 rounded-xl border border-border bg-popover px-1 py-1.5 text-foreground shadow-xl ring-0'
-// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
-// The `!` colors beat the item's focus rule that recolors every descendant to accent-foreground.
-const ctxItemClass =
-  'group/item gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors focus:bg-muted focus:text-foreground data-[danger=true]:text-destructive data-[danger=true]:focus:bg-destructive/10 data-[danger=true]:focus:text-destructive data-[danger=true]:**:text-destructive!'
-const toolbarButtonClass = 'h-auto rounded-md border-0 p-1.5 text-foreground transition-colors hover:bg-muted dark:hover:bg-muted'
-const ctxIconClass = 'inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground! group-data-[danger=true]/item:text-destructive!'
 
 type MenuAnchor = NonNullable<ComponentProps<typeof DropdownMenuContent>['anchor']>
 
 /** Zero-size virtual element at the pointer, so the menu opens with its corner at the click point. */
 function pointAnchor(x: number, y: number): MenuAnchor {
   return { getBoundingClientRect: () => DOMRect.fromRect({ x, y, width: 0, height: 0 }) }
+}
+
+function AuthorName({ color, children }: { color?: string; children: ReactNode }) {
+  return (
+    <span data-slot="message-author" className="text-sm font-semibold text-foreground max-[899px]:text-xs" style={color ? { color } : undefined}>
+      {children}
+    </span>
+  )
+}
+
+function MessageTime({ children }: { children: ReactNode }) {
+  return (
+    <span data-slot="message-time" className="text-[11px] font-semibold text-muted-foreground max-[899px]:text-[10px]">
+      {children}
+    </span>
+  )
+}
+
+const sourceBadgeVariants = cva('inline-flex h-4 items-center rounded-[3px] px-1 text-[10px] leading-4 font-bold text-white', {
+  variants: {
+    source: {
+      discord: 'bg-[#5865f2]',
+      github: 'bg-[#3f3f46]',
+      webhook: 'bg-[#047857] max-[899px]:h-3.5 max-[899px]:px-[3px] max-[899px]:text-[9px] max-[899px]:leading-[14px]',
+    },
+  },
+})
+
+/** Brand label beside the author name for messages from Discord, GitHub or a webhook. */
+function SourceBadge({ source }: { source: 'discord' | 'github' | 'webhook' }) {
+  return (
+    <span data-slot="source-badge" data-source={source} className={sourceBadgeVariants({ source })}>
+      {source === 'discord' ? 'DISCORD' : source === 'github' ? 'GITHUB' : 'Webhook'}
+    </span>
+  )
 }
 
 export interface MessageItemProps {
@@ -141,23 +168,12 @@ export function MessageItem({
     <div className="min-w-0 flex-1">
       {!compact ? (
         <div className="flex items-baseline gap-2 max-[899px]:gap-1.5">
-          <span className={authorNameClass} style={nameColor ? { color: nameColor } : undefined}>
-            {name}
-          </span>
-          {isExternal ? (
-            <span className={sourceBadgeClass} data-source={message.authorType}>
-              {message.authorType === 'discord' ? 'DISCORD' : 'GITHUB'}
-            </span>
-          ) : null}
-          {isWebhook ? (
-            <span className={sourceBadgeClass} data-source="webhook">
-              Webhook
-            </span>
-          ) : null}
-          <span className={timeClass}>
+          <AuthorName color={nameColor}>{name}</AuthorName>
+          {isExternal || isWebhook ? <SourceBadge source={message.authorType as 'discord' | 'github' | 'webhook'} /> : null}
+          <MessageTime>
             {timeStr}
             {message.editedAt ? ' (edited)' : ''}
-          </span>
+          </MessageTime>
           {message.pinned ? (
             <span className="flex items-center gap-1 text-xs text-amber-500" title="Pinned message">
               <PinIcon size={12} />
@@ -215,11 +231,8 @@ export function MessageItem({
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-sm leading-5 text-muted-foreground [&>strong]:text-foreground">
-              <span className={authorNameClass} style={nameColor ? { color: nameColor } : undefined}>
-                {name}
-              </span>{' '}
-              started a thread: <strong>{threadTitleOf(message)}</strong>.{' '}
-              <span className={timeClass}>{timeStr}</span>
+              <AuthorName color={nameColor}>{name}</AuthorName> started a thread: <strong>{threadTitleOf(message)}</strong>.{' '}
+              <MessageTime>{timeStr}</MessageTime>
             </div>
             <ThreadPreview
               state={state}
@@ -240,9 +253,11 @@ export function MessageItem({
     <>
       <div
         id={`message-${message.id}`}
-        className={`group relative flex flex-col rounded-lg px-0.5 py-1 max-[899px]:py-0.5 ${
-          mentionedCurrentUser ? 'rounded-l-none hover:bg-transparent' : 'hover:bg-foreground/[0.02]'
-        } ${!compact ? 'mt-2 max-[899px]:mt-[5px]' : ''}`}
+        className={cn(
+          'group relative flex flex-col rounded-lg px-0.5 py-1 max-[899px]:py-0.5',
+          mentionedCurrentUser ? 'rounded-l-none' : 'hover:bg-foreground/[0.02]',
+          !compact && 'mt-2 max-[899px]:mt-[5px]',
+        )}
         data-full={!compact ? 'true' : undefined}
         data-mention={mentionedCurrentUser ? 'true' : undefined}
         onMouseEnter={() => setHovered(true)}
@@ -271,12 +286,7 @@ export function MessageItem({
                   {message.webhookIconUrl ? <img src={message.webhookIconUrl} alt="" className="size-full rounded-full object-cover" /> : <WebhookIcon size={20} />}
                 </div>
               ) : (
-                <div
-                  className="relative z-10 flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-semibold text-muted-foreground max-[899px]:size-[30px] max-[899px]:text-[11px]"
-                  style={author ? { background: `color-mix(in srgb, ${author.color} 22%, transparent)`, color: author.color } : undefined}
-                >
-                  {name.charAt(0).toUpperCase()}
-                </div>
+                <InitialAvatar name={name} color={author?.color} className="relative z-10 size-10 text-sm max-[899px]:size-[30px] max-[899px]:text-[11px]" />
               )}
             </div>
           )}
@@ -291,7 +301,8 @@ export function MessageItem({
                 key={emoji}
                 type="button"
                 variant="ghost"
-                className={`${toolbarButtonClass} text-lg leading-5`}
+                size="icon-sm"
+                className="text-lg"
                 title={`React with ${emoji}`}
                 onClick={() => toggleReaction(message.id, emoji)}
               >
@@ -302,8 +313,8 @@ export function MessageItem({
               ref={moreButtonRef}
               type="button"
               variant="ghost"
+              size="icon-sm"
               aria-label="More message actions"
-              className={toolbarButtonClass}
               onClick={() => {
                 setMenuAnchor(moreButtonRef)
                 setPickerOpen(false)
@@ -349,7 +360,7 @@ export function MessageItem({
             side="bottom"
             align={anchoredToMore ? 'end' : 'start'}
             sideOffset={anchoredToMore ? 4 : 0}
-            className="w-auto gap-0 rounded-xl border border-border bg-popover p-0 text-foreground shadow-xl ring-0"
+            className="w-auto gap-0 p-0"
           >
             <EmojiPicker
               onPick={(emoji) => {
@@ -400,9 +411,9 @@ function ThreadPreview({
   const previewText = extractPreview(previewMessage.content)
   const totalMessages = replyCount + 1
   return (
-    <div className={`relative ${starterCard ? 'mt-1.5' : 'mt-2'}`} data-starter={starterCard || undefined}>
+    <div className={cn('relative', starterCard ? 'mt-1.5' : 'mt-2')} data-starter={starterCard || undefined}>
       {!compact && !starterCard ? <span className="pointer-events-none absolute -left-9 top-1 h-4 w-9 rounded-bl-lg border-b-2 border-l-2 border-muted" /> : null}
-      <Button type="button" variant="ghost" className="flex h-auto w-fit max-w-[min(448px,100%)] items-start justify-start gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-2 text-left font-normal whitespace-normal transition-colors hover:bg-muted/45 dark:hover:bg-muted/45" onClick={onOpen}>
+      <Button type="button" variant="ghost" className="flex h-auto w-fit max-w-[min(448px,100%)] items-start justify-start gap-2 rounded-md border-border bg-muted/20 px-2.5 py-2 text-left font-normal whitespace-normal hover:bg-muted/45 dark:hover:bg-muted/45" onClick={onOpen}>
         {!starterCard ? (
           <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
             <ThreadIcon size={14} className="size-3.5" />
@@ -436,7 +447,7 @@ function ReplyReference({ state, reply }: { state: AppState; reply: ChatMessage 
   const name = displayName(state, reply)
   const preview = reply.content.trim() || 'No message content'
   return (
-    <Button type="button" variant="ghost" className="relative mb-0.5 ml-5 flex h-6 min-w-0 max-w-[min(720px,calc(100%-20px))] cursor-pointer items-center justify-start gap-1.5 rounded-none border-0 pr-0 pl-9 text-left text-xs leading-5 font-normal text-muted-foreground transition-colors hover:bg-transparent hover:text-foreground dark:hover:bg-transparent" onClick={() => jumpToMessage(reply.id)}>
+    <Button type="button" variant="ghost" className="relative mb-0.5 ml-5 h-6 min-w-0 max-w-[min(720px,calc(100%-20px))] cursor-pointer justify-start gap-1.5 rounded-none pr-0 pl-9 text-left text-xs leading-5 font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent" onClick={() => jumpToMessage(reply.id)}>
       <span className="pointer-events-none absolute top-3 left-0 h-6 w-8 rounded-tl-md border-t-2 border-l-2 border-muted-foreground/40" />
       <span className="grid size-4 shrink-0 place-items-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground">{name.charAt(0).toUpperCase()}</span>
       <span className="shrink-0 font-bold text-muted-foreground">@{name}</span>
@@ -471,7 +482,7 @@ function EditingTextarea({
     <div>
       <Textarea
         ref={ref}
-        className="min-h-0 w-full resize-none rounded-lg border border-border bg-muted px-3 py-2 text-sm leading-5 text-foreground field-sizing-fixed focus:border-primary focus:outline-none focus-visible:border-primary focus-visible:ring-0 md:text-sm dark:bg-muted"
+        className="min-h-0 resize-none field-sizing-fixed"
         value={value}
         rows={1}
         onChange={(e) => {
@@ -503,7 +514,7 @@ function Reactions({ message, currentUserId }: { message: ChatMessage; currentUs
           key={r.emoji}
           type="button"
           variant="ghost"
-          className="inline-flex h-auto w-max cursor-pointer items-center gap-1 rounded-full border-0 px-2.5 py-0.5 text-sm font-medium whitespace-nowrap ring-1 ring-inset ring-border transition-colors bg-muted text-foreground hover:bg-muted/80 hover:text-foreground dark:hover:bg-muted/80 data-[mine=true]:bg-primary/10 data-[mine=true]:ring-primary/40 data-[mine=true]:hover:bg-primary/20 dark:data-[mine=true]:hover:bg-primary/20"
+          className="h-auto w-max cursor-pointer gap-1 rounded-full bg-muted px-2.5 py-0.5 ring-1 ring-border ring-inset hover:bg-muted/80 dark:hover:bg-muted/80 data-[mine=true]:bg-primary/10 data-[mine=true]:ring-primary/40 data-[mine=true]:hover:bg-primary/20 dark:data-[mine=true]:hover:bg-primary/20"
           data-mine={r.userIds.includes(currentUserId) ? 'true' : undefined}
           onClick={() => toggleReaction(message.id, r.emoji)}
         >
@@ -556,58 +567,44 @@ function MessageContextMenu({
         sideOffset={anchoredToMore ? 4 : 0}
         // no focus return: "Add Reaction" hands focus to the picker's search input
         finalFocus={false}
-        className={ctxMenuClass}
+        className="w-auto min-w-48"
       >
-        <DropdownMenuItem className={ctxItemClass} onClick={onAddReaction}>
-          <span className={ctxIconClass}>
-            <SmilePlus size={16} />
-          </span>
-          <span>Add Reaction</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem className={ctxItemClass} onClick={onReply}>
-          <span className={ctxIconClass}>
-            <Reply size={16} />
-          </span>
-          <span>Reply</span>
-        </DropdownMenuItem>
+        <ChatDropdownMenuItem onClick={onAddReaction}>
+          <SmilePlus />
+          Add Reaction
+        </ChatDropdownMenuItem>
+        <ChatDropdownMenuItem onClick={onReply}>
+          <Reply />
+          Reply
+        </ChatDropdownMenuItem>
         {onThread ? (
-          <DropdownMenuItem className={ctxItemClass} onClick={onThread}>
-            <span className={ctxIconClass}>
-              <ThreadIcon size={16} />
-            </span>
-            <span>{threadLabel}</span>
-          </DropdownMenuItem>
+          <ChatDropdownMenuItem onClick={onThread}>
+            <ThreadIcon size={16} />
+            {threadLabel}
+          </ChatDropdownMenuItem>
         ) : null}
-        <DropdownMenuSeparator className="mx-2 my-1.5" />
+        <DropdownMenuSeparator />
         {isAuthor ? (
-          <DropdownMenuItem className={ctxItemClass} onClick={onEdit}>
-            <span className={ctxIconClass}>
-              <Pencil size={16} />
-            </span>
-            <span>Edit Message</span>
-          </DropdownMenuItem>
+          <ChatDropdownMenuItem onClick={onEdit}>
+            <Pencil />
+            Edit Message
+          </ChatDropdownMenuItem>
         ) : null}
-        <DropdownMenuItem className={ctxItemClass} onClick={onPin}>
-          <span className={ctxIconClass}>
-            <PinIcon size={16} />
-          </span>
-          <span>{message.pinned ? 'Unpin Message' : 'Pin Message'}</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem className={ctxItemClass} onClick={onCopyText}>
-          <span className={ctxIconClass}>
-            <Copy size={16} />
-          </span>
-          <span>Copy Text</span>
-        </DropdownMenuItem>
+        <ChatDropdownMenuItem onClick={onPin}>
+          <PinIcon size={16} />
+          {message.pinned ? 'Unpin Message' : 'Pin Message'}
+        </ChatDropdownMenuItem>
+        <ChatDropdownMenuItem onClick={onCopyText}>
+          <Copy />
+          Copy Text
+        </ChatDropdownMenuItem>
         {canDelete ? (
           <>
-            <DropdownMenuSeparator className="mx-2 my-1.5" />
-            <DropdownMenuItem className={ctxItemClass} data-danger="true" onClick={onDelete}>
-              <span className={ctxIconClass}>
-                <Trash2 size={16} />
-              </span>
-              <span>Delete Message</span>
-            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <ChatDropdownMenuItem danger onClick={onDelete}>
+              <Trash2 />
+              Delete Message
+            </ChatDropdownMenuItem>
           </>
         ) : null}
       </DropdownMenuContent>

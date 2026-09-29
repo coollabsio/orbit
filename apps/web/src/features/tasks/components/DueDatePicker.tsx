@@ -28,8 +28,8 @@ export function DueDatePicker({ task, status, className }: { task: Task; status:
           render={
             <Button
               type="button"
-              variant="ghost"
-              className="inline-flex h-auto cursor-pointer rounded-none border-0 bg-transparent p-0 text-[length:inherit] font-normal hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
+              variant="link"
+              className="h-auto p-0 text-[length:inherit] font-normal"
               aria-label={task.dueAt ? 'Due date' : 'Set due date'}
               title={task.dueAt ? undefined : 'Set due date'}
             >

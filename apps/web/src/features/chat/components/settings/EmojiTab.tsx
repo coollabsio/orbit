@@ -7,6 +7,7 @@ import { createCustomEmoji, deleteCustomEmoji, renameCustomEmoji } from '@/mock/
 import { useAppState } from '@/mock/store'
 import type { CustomEmoji } from '@/mock/types'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { SettingsTabError, SettingsTabHeader } from './SettingsTabHeader'
 
 const MAX_EMOJI_BYTES = 256 * 1024
 
@@ -56,14 +57,10 @@ export function EmojiTab() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col items-start gap-4 border-b border-border pb-7">
-        <div>
-          <h2 className="text-xl leading-7 font-semibold text-foreground">Emoji</h2>
-          <p className="mt-3 max-w-[576px] text-sm leading-6 text-foreground">
-            Custom emojis work everywhere in the app: type :name: in chat, comments and docs, or pick them
-            from any emoji panel.
-          </p>
-        </div>
+      <SettingsTabHeader
+        title="Emoji"
+        description="Custom emojis work everywhere in the app: type :name: in chat, comments and docs, or pick them from any emoji panel."
+      >
         <Button size="lg" onClick={() => fileInput.current?.click()}>
           Upload Emoji
         </Button>
@@ -79,9 +76,9 @@ export function EmojiTab() {
             e.target.value = ''
           }}
         />
-      </div>
+      </SettingsTabHeader>
 
-      {error ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {error ? <SettingsTabError>{error}</SettingsTabError> : null}
 
       {state.customEmojis.length === 0 ? (
         <p className="py-8 text-sm text-muted-foreground">No custom emojis yet.</p>
@@ -97,7 +94,7 @@ export function EmojiTab() {
               <img className="size-8 rounded-md object-contain" src={emoji.url} alt={`:${emoji.name}:`} />
               <div className="flex items-center gap-0.5 text-muted-foreground/70">
                 <Input
-                  className="h-8 w-[200px]"
+                  className="w-[200px]"
                   value={drafts[emoji.id] ?? emoji.name}
                   aria-label={`Emoji name ${emoji.name}`}
                   onChange={(e) => setDrafts((prev) => ({ ...prev, [emoji.id]: e.target.value }))}

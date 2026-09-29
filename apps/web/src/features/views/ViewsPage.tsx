@@ -11,7 +11,6 @@ import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useReorderFavorites, useSavedViews, type SavedView } from './api/views'
 import { FavoriteStar } from './components/FavoriteStar'
-import { PRESS_MOTION } from './components/motion'
 import { SaveViewDialog } from './components/SaveViewDialog'
 import { ViewActionsMenu } from './components/ViewActionsMenu'
 import { ViewIcon } from './components/ViewIcon'
@@ -23,18 +22,6 @@ import { defaultViewState, isGroup, normalizeViewState, type FilterField, type F
 
 type RowDialog = { mode: 'edit' | 'duplicate'; view: SavedView }
 type Section = { key: string; label: string; icon: IconComponent; views: SavedView[]; reorderable?: boolean }
-
-/** Same sticky header as a task list group, so the page reads as part of Tasks. */
-const SECTION_HEADER =
-  'sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-border bg-card px-3 text-xs font-semibold text-muted-foreground max-[899px]:px-2'
-
-/** Row actions stay out of the way until the row is hovered or focused; touch screens always show them. */
-const REVEAL =
-  'transition-opacity duration-150 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100 hover-fine:group-focus-within/row:opacity-100 hover-fine:aria-expanded:opacity-100'
-
-/** The dragged row fades and stays mounted (a drag cancels if its source leaves the DOM); a 2px pink line marks the drop. */
-const DRAG_STATES =
-  'data-[dragging=true]:opacity-50 data-[drop-target=true]:before:absolute data-[drop-target=true]:before:inset-x-3 data-[drop-target=true]:before:h-0.5 data-[drop-target=true]:before:rounded-full data-[drop-target=true]:before:bg-primary data-[drop-edge=before]:before:-top-px data-[drop-edge=after]:before:-bottom-px'
 
 /** `/views`: one list of the task views the user can see, favorites first, then their own, then the workspace's. */
 export function ViewsPage() {
@@ -88,7 +75,7 @@ export function ViewsPage() {
         </nav>
         <div className="flex-1" />
         {views.length > 0 ? <TaskSearchBox value={search} onChange={setSearch} label="Search views" /> : null}
-        <Button type="button" className={cn('max-[899px]:w-8 max-[899px]:px-0', PRESS_MOTION)} aria-label="New view" onClick={newView}>
+        <Button type="button" className="max-[899px]:w-8 max-[899px]:px-0" aria-label="New view" onClick={newView}>
           <Plus className="size-4" />
           <span className="max-[899px]:hidden">New view</span>
         </Button>
@@ -107,7 +94,7 @@ export function ViewsPage() {
               title="No views yet"
               description="Filter or rearrange any task page, then save it as a view to come back to it."
               action={
-                <Button type="button" className={PRESS_MOTION} onClick={newView}>
+                <Button type="button" onClick={newView}>
                   <Plus className="size-4" />
                   New view
                 </Button>
@@ -204,7 +191,8 @@ function ViewSection({ section, ...actions }: RowActions & { section: Section })
 
   return (
     <section>
-      <div className={SECTION_HEADER}>
+      {/* same sticky header as a task list group, so the page reads as part of Tasks */}
+      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b bg-card px-3 text-xs font-semibold text-muted-foreground max-[899px]:px-2">
         <section.icon className="size-3.5 shrink-0" aria-hidden="true" />
         <h2 className="text-xs font-semibold">{section.label}</h2>
         <span className="font-normal text-muted-foreground/70 tabular-nums">{section.views.length}</span>
@@ -257,8 +245,9 @@ function ViewRow({ view, members, workspaceId, onEdit, onDuplicate, drag }: RowA
   return (
     <li
       className={cn(
-        'group/row relative flex h-11 items-center gap-3 border-b border-border px-3 transition-colors duration-150 ease-out hover-fine:hover:bg-foreground/[0.02] has-[a:focus-visible]:bg-muted/40 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50 has-[a:focus-visible]:ring-inset max-[899px]:gap-2 max-[899px]:px-2',
-        DRAG_STATES,
+        'group/row relative flex h-11 items-center gap-3 border-b px-3 transition-colors duration-150 ease-out hover-fine:hover:bg-foreground/[0.02] has-[a:focus-visible]:bg-muted/40 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50 has-[a:focus-visible]:ring-inset max-[899px]:gap-2 max-[899px]:px-2',
+        // the dragged row fades and stays mounted (a drag cancels if its source leaves the DOM); a 2px pink line marks the drop
+        'data-[dragging=true]:opacity-50 data-[drop-target=true]:before:absolute data-[drop-target=true]:before:inset-x-3 data-[drop-target=true]:before:h-0.5 data-[drop-target=true]:before:rounded-full data-[drop-target=true]:before:bg-primary data-[drop-edge=before]:before:-top-px data-[drop-edge=after]:before:-bottom-px',
       )}
       draggable={drag !== undefined}
       data-dragging={drag?.dragging || undefined}
@@ -301,9 +290,23 @@ function ViewRow({ view, members, workspaceId, onEdit, onDuplicate, drag }: RowA
         <UserAvatar user={owner} name={view.owner.display_name} size={20} />
       </span>
       <div className="relative z-10 flex shrink-0 items-center gap-0.5">
-        {/* a favorite keeps its star lit; otherwise the star appears with the row's other actions */}
-        <FavoriteStar workspaceId={workspaceId} view={view} named className={view.is_favorite ? undefined : REVEAL} />
-        <ViewActionsMenu workspaceId={workspaceId} view={view} onEdit={() => onEdit(view)} onDuplicate={() => onDuplicate(view)} named align="end" className={REVEAL} />
+        {/* row actions stay out of the way until the row is hovered or focused (touch always shows them);
+            a favorite keeps its star lit */}
+        <FavoriteStar
+          workspaceId={workspaceId}
+          view={view}
+          named
+          className={cn(!view.is_favorite && 'transition-opacity duration-150 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100 hover-fine:group-focus-within/row:opacity-100')}
+        />
+        <ViewActionsMenu
+          workspaceId={workspaceId}
+          view={view}
+          onEdit={() => onEdit(view)}
+          onDuplicate={() => onDuplicate(view)}
+          named
+          align="end"
+          className="transition-opacity duration-150 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100 hover-fine:group-focus-within/row:opacity-100 hover-fine:aria-expanded:opacity-100"
+        />
       </div>
     </li>
   )

@@ -59,7 +59,7 @@ export function GithubPage() {
         <p className="mb-2 text-sm font-medium">Installed repositories</p>
         {settings.repositories.length > 0 ? (
           <ul aria-label="Installed repositories" className="grid gap-2">
-            {settings.repositories.map((item) => <li key={`${item.installation_id}:${item.repository}`} className="rounded-md border border-border px-3 py-2 text-sm">{item.repository}</li>)}
+            {settings.repositories.map((item) => <li key={`${item.installation_id}:${item.repository}`} className="rounded-md border px-3 py-2 text-sm">{item.repository}</li>)}
           </ul>
         ) : <p className="text-sm text-muted-foreground">No repositories installed yet.</p>}
       </div>

@@ -28,7 +28,7 @@ function renderComposer() {
   })
   const view = render(<CommentComposer editor={editor} kind="new" submitLabel="Comment" label="New comment" onCancel={onCancel} />)
   const submit = () => view.getByRole('button', { name: 'Comment' }) as HTMLButtonElement
-  const field = () => view.container.querySelector('.orbit-comment-input .bn-editor') as HTMLElement
+  const field = () => view.container.querySelector('[data-slot="comment-editor"][data-kind] .bn-editor') as HTMLElement
   const type = async (text: string) => {
     await act(async () => {
       editor.focus()
@@ -45,7 +45,7 @@ describe('CommentComposer', () => {
     expect(view.getByRole('group', { name: 'New comment' })).toBeTruthy()
     expect(view.getByRole('button', { name: 'Cancel' })).toBeTruthy()
     expect(view.getByRole('button', { name: 'Mention someone' })).toBeTruthy()
-    expect(field().closest('.orbit-comment-input--new')).toBeTruthy()
+    expect(field().closest('[data-slot="comment-editor"]')?.getAttribute('data-kind')).toBe('new')
     expect(submit().disabled).toBe(true)
     await type('Looks good')
     await waitFor(() => expect(submit().disabled).toBe(false))

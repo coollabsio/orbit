@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useDeleteView, type SavedView } from '../api/views'
 import { confirmDeleteView, copyViewLink } from '../viewActions'
-import { PRESS_MOTION } from './motion'
 
 export interface ViewActionsMenuProps {
   workspaceId: string
@@ -46,7 +45,7 @@ export function ViewActionsMenu({ workspaceId, view, onEdit, onDuplicate, onDele
             variant="ghost"
             size="icon-xs"
             aria-label={named ? `${view.name} options` : 'View options'}
-            className={cn('text-muted-foreground', PRESS_MOTION, className)}
+            className={cn('text-muted-foreground', className)}
           >
             <MoreH />
           </Button>

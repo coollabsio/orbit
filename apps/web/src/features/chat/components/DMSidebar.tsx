@@ -7,6 +7,7 @@ import type { AppState } from '@/mock/types'
 import { relativeTime } from '@/lib/format'
 import { extractPreview } from '@/lib/messagePreview'
 import { NewDMModal } from './NewDMModal'
+import { RowButton } from './RowButton'
 
 const WIDTH_KEY = 'orbit:dm_sidebar_width'
 const MIN_WIDTH = 220
@@ -60,11 +61,9 @@ export function DMSidebar({ state, activeId }: { state: AppState; activeId: stri
             if (!user) return null
             const last = state.chatMessages.filter((message) => message.channelId === dm.id && !message.threadRootId).at(-1)
             return (
-              <Button
+              <RowButton
                 key={dm.id}
-                type="button"
-                variant="ghost"
-                className="group/dmrow mb-0.5 flex h-auto bg-clip-border w-full min-w-0 items-center justify-start gap-2.5 rounded-lg border border-transparent p-2 text-left font-normal whitespace-normal text-muted-foreground transition-colors hover:bg-sidebar-accent/55 hover:text-foreground active:not-aria-[haspopup]:translate-y-0 data-[active=true]:bg-sidebar-accent data-[active=true]:text-foreground data-[unread=true]:border-primary/30 data-[unread=true]:bg-primary/[0.09] data-[unread=true]:text-foreground dark:hover:bg-sidebar-accent/55 dark:data-[active=true]:bg-sidebar-accent dark:data-[unread=true]:bg-primary/[0.09] max-[899px]:px-1.5"
+                className="group/dmrow mb-0.5 gap-2.5 rounded-lg border border-transparent p-2 text-sm text-muted-foreground hover:bg-sidebar-accent/55 hover:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-foreground data-[unread=true]:border-primary/30 data-[unread=true]:bg-primary/[0.09] data-[unread=true]:text-foreground max-[899px]:px-1.5"
                 data-active={dm.id === activeId || undefined}
                 data-unread={dm.unreadCount > 0 || undefined}
                 onClick={() => navigate(`/dm/${dm.id}`)}
@@ -81,7 +80,7 @@ export function DMSidebar({ state, activeId }: { state: AppState; activeId: stri
                   <span className="truncate text-[11px] text-muted-foreground/70">{last ? extractPreview(last.content) : `Start a conversation with ${user.name}`}</span>
                 </span>
                 {dm.unreadCount > 0 ? <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-nums">{dm.unreadCount}</span> : null}
-              </Button>
+              </RowButton>
             )
           })}
         </div>

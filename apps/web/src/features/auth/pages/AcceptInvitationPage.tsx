@@ -4,8 +4,6 @@ import { useNavigate } from 'react-router'
 import { createApiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { currentUserQueryOptions, useLogin, useLogout } from '@/features/auth/api'
 import { AuthForm, AuthInput } from '@/features/auth/components/AuthForm'
 import { AuthMessage } from '@/features/auth/components/AuthMessage'
@@ -62,7 +60,7 @@ export function AcceptInvitationPage() {
         accept.reset()
       }}>{signIn ? 'Create an account instead' : 'Sign in instead'}</Button> : undefined}
     >
-      <Label className="grid gap-1.5 text-[13px] text-muted-foreground"><span>Email</span><Input type="email" value={email} readOnly /></Label>
+      <AuthInput label="Email" type="email" value={email} required={false} />
       {mismatch ? <p className="text-[13px]">You are signed in as {user.data!.email}. Switch accounts to accept this invitation as {email}.</p> : (
         <>
           <p className="text-[13px]">{user.data ? 'Accept to join this workspace with your account.' : signIn ? 'Sign in with your existing account to join this workspace.' : 'Choose your name and password to create your account.'} To use another email, ask the inviter for a new invitation.</p>

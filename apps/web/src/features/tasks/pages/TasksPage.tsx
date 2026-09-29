@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useCurrentUser } from '@/features/auth/api'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -38,6 +39,7 @@ import { TaskDetail } from '@/features/tasks/components/TaskDetail'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
+import { ColorDot } from '@/components/common/ColorDot'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { quickSearchTasks, resolveStatusId } from '@/features/tasks/tasksLib'
 import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
@@ -52,7 +54,6 @@ import { groupCreateFields, type GroupValues } from '@/features/views/layoutGrou
 import { AdvancedFilterDialog } from '@/features/views/components/AdvancedFilterDialog'
 import { DisplayPopover } from '@/features/views/components/DisplayPopover'
 import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
-import { PRESS_MOTION } from '@/features/views/components/motion'
 import { SaveViewDialog, type SaveViewMode } from '@/features/views/components/SaveViewDialog'
 import { ViewChanges } from '@/features/views/components/ViewChanges'
 import { ViewHeader, ViewNotFound, ViewStateBanner } from '@/features/views/components/ViewHeader'
@@ -63,9 +64,6 @@ import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeV
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 const OPEN_WAIT_MS = 300
-
-const OPTION =
-  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[active]:bg-accent data-[active]:font-medium`
 
 /** History state of a task URL: the project page it was opened from, where closing returns. */
 type TaskOrigin = { originProject: string | null }
@@ -336,8 +334,8 @@ function WorkspaceTasksPage() {
       {taskId ? (
         <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} onOpenTask={openTask} />
       ) : (
-        <section className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-          <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-foreground max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:border-b-0 max-[899px]:px-2 max-[899px]:py-1.5">
+        <Pane className="relative">
+          <PaneHeader className="bg-background text-foreground max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:px-2 max-[899px]:py-1.5">
             <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
               <Menu className="size-[18px]" />
             </Button>
@@ -354,26 +352,26 @@ function WorkspaceTasksPage() {
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
-                      <Button type="button" variant="ghost" className="h-auto min-w-0 gap-[7px] rounded-md border-0 px-[7px] py-[5px] font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground max-[899px]:max-w-[30vw] dark:hover:bg-accent" aria-label="Select project">
-                        {activeProject ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: activeProject.color }} /> : null}
+                      <Button type="button" variant="ghost" className="min-w-0 gap-[7px] px-[7px] font-normal text-muted-foreground max-[899px]:max-w-[30vw]" aria-label="Select project">
+                        {activeProject ? <ColorDot color={activeProject.color} /> : null}
                         <span className="truncate">{activeProject?.name ?? 'All projects'}</span><ChevronDown className="size-3.5 shrink-0" />
                       </Button>
                     }
                   />
-                  <DropdownMenuContent className="flex w-auto min-w-[190px] flex-col gap-px p-1">
-                    <DropdownMenuItem className={OPTION} data-active={projectFilter === null || undefined} onClick={() => setProjectFilter(null)}><SquareCheck className="size-3.5" />All projects</DropdownMenuItem>
+                  <DropdownMenuContent className="w-auto min-w-[190px]">
+                    <DropdownMenuItem className="data-active:bg-accent data-active:font-medium" data-active={projectFilter === null || undefined} onClick={() => setProjectFilter(null)}><SquareCheck />All projects</DropdownMenuItem>
                     {projects.map((project) => <div key={project.id} className="relative flex items-center">
-                      <DropdownMenuItem className={`${OPTION} min-w-0 flex-1 pr-8`} data-active={project.id === projectFilter || undefined} onClick={() => setProjectFilter(project.id)}>
-                        <span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
+                      <DropdownMenuItem className="min-w-0 flex-1 pr-8 data-active:bg-accent data-active:font-medium" data-active={project.id === projectFilter || undefined} onClick={() => setProjectFilter(project.id)}>
+                        <ColorDot color={project.color} />
                         <span className="min-w-0 flex-1 truncate">{project.name}</span>
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="absolute right-1 flex size-6 items-center justify-center rounded-md px-0 py-0 text-muted-foreground/70 transition hover:bg-accent hover:text-foreground dark:hover:bg-accent" aria-label={`${project.name} settings`} title="Project settings" onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}><Settings className="size-3.5" /></DropdownMenuItem>
+                      <DropdownMenuItem className="absolute right-1 size-6 justify-center p-0 text-muted-foreground" aria-label={`${project.name} settings`} title="Project settings" onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}><Settings className="size-3.5" /></DropdownMenuItem>
                     </div>)}
-                    <DropdownMenuSeparator className="my-1 shrink-0" />
-                    <DropdownMenuItem className={OPTION} onClick={() => setShowNewProject(true)}><Plus className="size-3.5" />New project</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setShowNewProject(true)}><Plus />New project</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <span className="truncate text-[13px] font-semibold text-foreground max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-0">{viewTitle}</span>
+                <PaneTitle className="max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-0">{viewTitle}</PaneTitle>
                 <div className="flex-1 max-[899px]:hidden" />
               </>
             )}
@@ -388,7 +386,7 @@ function WorkspaceTasksPage() {
             />
             <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
             {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
-          </div>
+          </PaneHeader>
           {viewState.stateError ? <ViewStateBanner /> : null}
           <FilterBar
             key={source.kind === 'view' ? source.viewId : source.pageKey}
@@ -404,10 +402,10 @@ function WorkspaceTasksPage() {
               viewState.dirty ? <ViewChanges controller={viewState} onSaveAsNew={(options) => openSaveDialog('save_as_new', options?.instant)} /> : undefined
             ) : filtered ? (
               <>
-                <Button type="button" variant="ghost" size="sm" className={cn('animate-view-bar-enter text-muted-foreground', PRESS_MOTION)} onClick={clearFilters}>
+                <Button type="button" variant="ghost" size="sm" className="animate-view-bar-enter text-muted-foreground" onClick={clearFilters}>
                   Clear all
                 </Button>
-                <Button type="button" variant="outline" size="sm" className={cn('animate-view-bar-enter', PRESS_MOTION)} onClick={() => openSaveDialog('create')}>
+                <Button type="button" variant="outline" size="sm" className="animate-view-bar-enter" onClick={() => openSaveDialog('create')}>
                   <Bookmark className="size-3.5" />
                   Save view
                 </Button>
@@ -441,7 +439,7 @@ function WorkspaceTasksPage() {
             }}
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
-          <div className={`min-h-0 flex-1 ${layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          <div className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {tasksQuery.error || tasksQuery.isLoading ? (
               <div className="flex h-full flex-col p-2 *:flex-1">
                 {tasksQuery.error
@@ -454,12 +452,12 @@ function WorkspaceTasksPage() {
                 ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
                 : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => void startNewTask(values)} />}
           </div>
-        </section>
+        </Pane>
       )}
     </div>
   )
 }
 
 function TaskBoundary({ title, description }: { title: string; description: string }) {
-  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title={title} description={description} /></section></div>
+  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title={title} description={description} /></Pane></div>
 }

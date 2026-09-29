@@ -77,7 +77,6 @@ test('a duplicate shows a banner that opens the canonical task and unmarks it', 
   fireEvent.click(within(banner).getByRole('button', { name: /Login fails on Safari/ }))
   expect(opened).toEqual(['task-91c0'])
   const unmark = within(banner).getByRole('button', { name: 'Unmark' })
-  expect(unmark.className).toContain('active:scale-[0.97]')
   fireEvent.click(unmark)
   await waitFor(() => expect(writes(calls)).toEqual([
     { method: 'PATCH', path: '/api/v1/workspaces/workspace-1/tasks/task-3f2a', body: { expected_version: 1, duplicate_of_id: null } },
@@ -100,7 +99,6 @@ test('relations are grouped in a fixed order; a row opens its task and × remove
   expect(opened).toEqual(['task-77aa'])
   const remove = await within(section).findByRole('button', { name: 'Remove relation to ORB-77AA' })
   expect(remove.className).toContain('hover-fine:opacity-0')
-  expect(remove.className).toContain('active:scale-[0.97]')
   fireEvent.click(remove)
   await waitFor(() => expect(writes(calls)).toEqual([
     { method: 'DELETE', path: '/api/v1/workspaces/workspace-1/tasks/task-3f2a/relations/rel-2', body: undefined },

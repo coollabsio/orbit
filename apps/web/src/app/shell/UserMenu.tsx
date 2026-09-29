@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Check, ChevronDown, Logout as LogOut, Setting2 as Settings, User } from 'reicon-react'
+import { ChevronDown, Logout as LogOut, Setting2 as Settings, User } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -17,10 +19,6 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
 ]
-
-// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
-const optionClass =
-  'min-h-11 w-full justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm font-normal text-foreground focus:bg-accent focus:text-accent-foreground data-disabled:opacity-40 data-[danger=true]:text-destructive data-[danger=true]:focus:bg-destructive/10 data-[danger=true]:focus:text-destructive data-[danger=true]:focus:**:text-destructive'
 
 /** Signed-in profile and account actions shared by both sidebars. */
 export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
@@ -39,11 +37,8 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
       <DropdownMenuTrigger
         render={
           <Button
-            variant="ghost"
-            className={cn(
-              'h-auto min-h-[34px] w-full min-w-0 flex-1 justify-start gap-1.5 rounded-lg border border-border bg-card p-1.5 font-normal shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-muted aria-expanded:bg-card aria-expanded:hover:bg-muted dark:hover:bg-muted',
-              collapsed && 'w-8 px-[5px]',
-            )}
+            variant="outline"
+            className={cn('h-auto min-h-[34px] w-full min-w-0 flex-1 justify-start gap-1.5 p-1.5 font-normal', collapsed && 'w-8 px-[5px]')}
             title={userName}
             aria-label={`Account menu for ${userName}`}
           />
@@ -57,56 +52,41 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
         ) : null}
         {!collapsed ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-aria-expanded/button:rotate-180" /> : null}
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-[220px] max-w-[calc(100vw-32px)] p-1">
+      <DropdownMenuContent side="top" align="start" className="w-[220px] max-w-[calc(100vw-32px)]">
         <div className="min-w-0 px-2 py-1.5">
           <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>
           <div className="truncate text-[11px] text-muted-foreground/70">{me?.email}</div>
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className={optionClass} onClick={() => navigate('/profile')}>
-          <span className="flex items-center gap-2">
-            <User className="size-4 opacity-80" />
-            Account settings
-          </span>
+        <DropdownMenuItem onClick={() => navigate('/profile')}>
+          <User />
+          Account settings
         </DropdownMenuItem>
-        <DropdownMenuItem
-          className={optionClass}
-          closeOnClick={false}
-          aria-expanded={appearanceOpen}
-          onClick={() => setAppearanceOpen((o) => !o)}
-        >
-          <span className="flex items-center gap-2">
-            <Settings className="size-4 opacity-80" />
-            Appearance
-          </span>
-          <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground/70 transition-transform', appearanceOpen && 'rotate-180')} />
+        <DropdownMenuItem closeOnClick={false} aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((o) => !o)}>
+          <Settings />
+          Appearance
+          <ChevronDown className={cn('ml-auto size-3.5 text-muted-foreground transition-transform', appearanceOpen && 'rotate-180')} />
         </DropdownMenuItem>
         {appearanceOpen ? (
-          <div className="mx-1 grid gap-0.5 pb-1 pl-6">
+          <DropdownMenuRadioGroup className="pl-6" value={theme} onValueChange={(value) => setTheme(value as Theme)}>
             {THEMES.map((option) => (
-              <DropdownMenuItem
-                key={option.value}
-                className="min-h-8 w-full justify-between gap-2 rounded-md px-2 text-xs font-normal text-muted-foreground focus:bg-accent focus:text-foreground"
-                onClick={() => setTheme(option.value)}
-              >
-                <span>{option.label}</span>
-                {theme === option.value ? <Check className="size-3.5 text-primary" /> : null}
-              </DropdownMenuItem>
+              <DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick>
+                {option.label}
+              </DropdownMenuRadioItem>
             ))}
-          </div>
+          </DropdownMenuRadioGroup>
         ) : null}
         <DropdownMenuSeparator />
+        {/* data-danger, not variant="destructive": the preset menu popup forces destructive items to the accent color */}
         <DropdownMenuItem
-          className={optionClass}
+          className="data-[danger=true]:text-destructive data-[danger=true]:focus:bg-destructive/10 data-[danger=true]:focus:text-destructive data-[danger=true]:focus:**:text-destructive"
           data-danger="true"
           disabled={logout.isPending}
           closeOnClick={false}
           onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/login', { replace: true }) })}
         >
-          <span className="flex items-center gap-2">
-            <LogOut className="size-4 opacity-90" />
-            {logout.isPending ? 'Logging out…' : 'Log out'}
-          </span>
+          <LogOut />
+          {logout.isPending ? 'Logging out…' : 'Log out'}
         </DropdownMenuItem>
         {logout.isError ? <p className="px-2 py-1.5 text-xs text-destructive" role="alert">Could not log out. Please try again.</p> : null}
       </DropdownMenuContent>

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { cn } from 'cn'
+import { cva } from 'class-variance-authority'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { clipboardFiles } from '@/lib/attachmentLib'
@@ -7,9 +7,25 @@ import { renderMarkdownBlocks } from '@/lib/markdown'
 import type { Task } from '@/features/tasks/api/models'
 import { LinkifiedText } from './LinkifiedText'
 
-const TITLE = 'w-full border-none bg-transparent p-0 text-2xl leading-8 font-semibold text-foreground outline-none placeholder:text-muted-foreground max-[899px]:text-xl max-[899px]:leading-[26px]'
-const DESC = 'w-full resize-none border-none bg-transparent p-0 text-[13px] leading-5 text-foreground outline-none [field-sizing:content] min-h-[60px] placeholder:text-muted-foreground max-[899px]:min-h-12 max-[899px]:text-sm max-[899px]:leading-[22px]'
-const DISPLAY = 'cursor-text whitespace-pre-wrap [overflow-wrap:anywhere] data-[muted]:text-muted-foreground'
+/**
+ * The title and description share one look whether read-only, previewed or edited, so switching to the field
+ * never shifts the text. `md:` repeats the sizes because Input/Textarea set their own `md:text-sm`.
+ */
+const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-foreground outline-none placeholder:text-muted-foreground', {
+  variants: {
+    field: {
+      title: 'text-2xl leading-8 font-semibold max-[899px]:text-xl max-[899px]:leading-[26px] md:text-2xl md:max-[899px]:text-xl',
+      description: 'min-h-[60px] resize-none text-[13px] leading-5 [field-sizing:content] max-[899px]:min-h-12 max-[899px]:text-sm max-[899px]:leading-[22px] md:text-[13px] md:max-[899px]:text-sm',
+    },
+    mode: {
+      read: 'whitespace-pre-wrap [overflow-wrap:anywhere]',
+      preview: 'cursor-text whitespace-pre-wrap [overflow-wrap:anywhere] data-muted:text-muted-foreground',
+      edit: 'h-auto rounded-none focus-visible:ring-0 dark:bg-transparent',
+    },
+  },
+  // the Textarea is a flex box by default; the description field is a plain block
+  compoundVariants: [{ field: 'description', mode: 'edit', className: 'block' }],
+})
 
 export function TaskTextFields({
   task,
@@ -37,10 +53,10 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, childr
   return (
     <>
       {readOnly ? (
-        <div className={`${TITLE} whitespace-pre-wrap [overflow-wrap:anywhere]`} aria-label="Task title"><LinkifiedText text={title} /></div>
+        <div className={taskTextVariants({ field: 'title', mode: 'read' })} aria-label="Task title"><LinkifiedText text={title} /></div>
       ) : editingTitle ? (
         <Input
-          className={cn(TITLE, 'h-auto rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-2xl md:max-[899px]:text-xl')}
+          className={taskTextVariants({ field: 'title', mode: 'edit' })}
           data-keep-font-size=""
           value={title}
           placeholder="Task title"
@@ -63,10 +79,10 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, childr
           }}
         />
       ) : (
-        <EditablePreview className={`${TITLE} ${DISPLAY}`} ariaLabel="Task title" onEdit={() => setEditingTitle(true)}><LinkifiedText text={title} /></EditablePreview>
+        <EditablePreview className={taskTextVariants({ field: 'title', mode: 'preview' })} ariaLabel="Task title" onEdit={() => setEditingTitle(true)}><LinkifiedText text={title} /></EditablePreview>
       )}
       <div
-        className="mt-4 rounded-lg transition-[box-shadow,background-color] data-[drop-over]:bg-primary/10 data-[drop-over]:ring-2 data-[drop-over]:ring-primary/40"
+        className="mt-4 rounded-lg transition-[box-shadow,background-color] data-drop-over:bg-primary/10 data-drop-over:ring-2 data-drop-over:ring-primary/40"
         data-drop-over={dropOver || undefined}
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes('Files')) return
@@ -84,10 +100,10 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, childr
         }}
       >
         {readOnly ? (
-          <div className={`${DESC} [overflow-wrap:anywhere]`} aria-label="Description">{description ? renderMarkdownBlocks(description, 'task-description') : 'No description'}</div>
+          <div className={taskTextVariants({ field: 'description', mode: 'read' })} aria-label="Description">{description ? renderMarkdownBlocks(description, 'task-description') : 'No description'}</div>
         ) : editingDescription ? (
           <Textarea
-            className={cn(DESC, 'block rounded-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-[13px] md:max-[899px]:text-sm')}
+            className={taskTextVariants({ field: 'description', mode: 'edit' })}
             data-keep-font-size=""
             value={description}
             placeholder="Add description… (paste or drop images and files)"
@@ -107,7 +123,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, childr
           />
         ) : (
           <EditablePreview
-            className={`${DESC} ${DISPLAY}`}
+            className={taskTextVariants({ field: 'description', mode: 'preview' })}
             muted={!description}
             ariaLabel="Description"
             onEdit={() => setEditingDescription(true)}

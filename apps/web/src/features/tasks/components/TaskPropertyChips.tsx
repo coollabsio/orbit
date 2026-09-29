@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { isOverdue } from '@/features/tasks/timeline/timelineLib'
 import { fullDate, shortDate } from '@/lib/format'
+import { ColorDot } from '@/components/common/ColorDot'
 
 /** Quiet due-date chip; open tasks past their day turn destructive. Font size comes from the caller. */
 export function DueDateChip({ task, status, className }: { task: Task; status: TaskStatusDef | undefined; className?: string }) {
@@ -25,7 +26,7 @@ export function ProjectChip({ project, className }: { project: Project | undefin
   if (!project) return null
   return (
     <span data-property="project" title={project.name} className={cn('inline-flex max-w-[140px] min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground', className)}>
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
+      <ColorDot color={project.color} />
       <span className="truncate">{project.name}</span>
     </span>
   )

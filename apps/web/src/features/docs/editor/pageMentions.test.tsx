@@ -84,7 +84,7 @@ describe('mention chips', () => {
         <PageMentionChip userId={ANN} name="Ann Lee" />
       </PageMentionNamesContext>,
     )
-    const chip = view.container.querySelector('.orbit-page-mention')!
+    const chip = view.container.querySelector('[data-slot="page-mention"]')!
     expect(chip.textContent).toBe('@Ann Renamed')
     expect(chip.getAttribute('data-mention-user')).toBe(ANN)
     expect(chip.getAttribute('contenteditable')).toBe('false')
@@ -170,7 +170,7 @@ describe('PageEditor with mentions', () => {
       initialContent: content,
       mentions: { members: [{ id: ANN, name: 'Ann Renamed' }], candidates: [], privatePage: false },
     })
-    const chips = [...view.container.querySelectorAll('.orbit-page-mention')].map((chip) => chip.textContent)
+    const chips = [...view.container.querySelectorAll('[data-slot="page-mention"]')].map((chip) => chip.textContent)
     expect(chips).toEqual(['@Ann Renamed', `@${UNKNOWN_USER}`])
     const stored = ref.current!.getContent() as { content: unknown[] }[]
     expect(stored[0].content[1]).toEqual({ type: 'mention', props: { userId: ANN, name: 'Ann Lee' } })
@@ -180,6 +180,6 @@ describe('PageEditor with mentions', () => {
     const { view } = await renderEditor({
       initialContent: [{ id: 'p', type: 'paragraph', content: [{ type: 'mention', props: { userId: ANN, name: 'Ann Lee' } }] }],
     })
-    expect(view.container.querySelector('.orbit-page-mention')?.textContent).toBe('@Ann Lee')
+    expect(view.container.querySelector('[data-slot="page-mention"]')?.textContent).toBe('@Ann Lee')
   })
 })

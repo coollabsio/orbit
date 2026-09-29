@@ -38,7 +38,7 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
 
   return (
     <div
-      className="mt-6 border-t border-border pt-5 duration-150 animate-in fade-in slide-in-from-bottom-1 data-[drop-over]:bg-primary/10 data-[drop-over]:ring-1 data-[drop-over]:ring-inset data-[drop-over]:ring-primary/25"
+      className="mt-6 border-t pt-5 duration-150 animate-in fade-in slide-in-from-bottom-1 data-drop-over:bg-primary/10 data-drop-over:ring-1 data-drop-over:ring-primary/25 data-drop-over:ring-inset"
       data-drop-over={dropOver || undefined}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return
@@ -58,7 +58,8 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
       <div className="text-xs font-medium text-muted-foreground">Reply to {replyToName}</div>
       <Textarea
         ref={textareaRef}
-        className="block field-sizing-fixed min-h-24 w-full resize-y rounded-none border-0 bg-transparent px-0 py-2.5 text-[13px] leading-[1.5] text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:outline-none md:text-[13px] dark:bg-transparent"
+        // borderless: the reply reads as part of the thread, not a boxed field
+        className="field-sizing-fixed min-h-24 resize-y rounded-none border-0 bg-transparent px-0 py-2.5 text-[13px] leading-[1.5] focus-visible:ring-0 md:text-[13px] dark:bg-transparent"
         placeholder="Write a reply…"
         value={body}
         onChange={(e) => setBody(e.target.value)}

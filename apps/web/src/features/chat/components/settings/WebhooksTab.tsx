@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { Check, ChevronRight, Copy, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { WebhookIcon } from '@/components/common/icons/WebhookIcon'
@@ -13,6 +13,8 @@ import { useAppState } from '@/mock/store'
 import type { Webhook } from '@/mock/types'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { channelLabel, webhookUrl } from '@/features/chat/webhookLib'
+import { RowButton } from '../RowButton'
+import { SettingsTabError, SettingsTabHeader } from './SettingsTabHeader'
 
 const MAX_WEBHOOK_ICON_BYTES = 5 * 1024 * 1024
 const MAX_WEBHOOK_ICON_DIMENSION = 1000
@@ -104,19 +106,13 @@ export function WebhooksTab() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col items-start gap-4 border-b border-border pb-7">
-        <div>
-          <h2 className="text-xl leading-7 font-semibold text-foreground">Webhooks</h2>
-          <p className="mt-3 max-w-[576px] text-sm leading-6 text-foreground">
-            Webhooks post messages from other apps and websites into this server.
-          </p>
-        </div>
+      <SettingsTabHeader title="Webhooks" description="Webhooks post messages from other apps and websites into this server.">
         <Button size="lg" onClick={handleCreate}>
           New Webhook
         </Button>
-      </div>
+      </SettingsTabHeader>
 
-      {error ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {error ? <SettingsTabError>{error}</SettingsTabError> : null}
 
       {state.webhooks.length === 0 ? (
         <p className="py-8 text-sm text-muted-foreground">No webhooks yet.</p>
@@ -127,9 +123,9 @@ export function WebhooksTab() {
             const isUploading = uploadingId === wh.id
             return (
               <div key={wh.id} className="overflow-hidden rounded-lg border border-border bg-background">
-                <Button
-                  variant="ghost"
-                  className="flex h-auto w-full justify-start gap-3.5 rounded-none border-0 px-4 py-3.5 text-left font-normal whitespace-normal hover:bg-foreground/[0.02] active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-foreground/[0.02]"
+                <RowButton
+                  className="gap-3.5 px-4 py-3.5 hover:bg-foreground/[0.02]"
+                  aria-expanded={isExpanded}
                   onClick={() => setExpandedId(isExpanded ? null : wh.id)}
                 >
                   <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-amber-500/15 text-amber-400">
@@ -140,7 +136,7 @@ export function WebhooksTab() {
                     <span className="mt-0.5 text-xs font-medium text-muted-foreground">{formatCreatedAt(wh.createdAt)}</span>
                   </span>
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/55 transition-transform data-[open]:rotate-90" data-open={isExpanded || undefined} />
-                </Button>
+                </RowButton>
 
                 {isExpanded ? (
                   <>
@@ -149,6 +145,7 @@ export function WebhooksTab() {
                       <div>
                         <p className="mb-2 text-sm font-semibold text-foreground">Icon</p>
                         <label className="relative flex size-16 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-amber-500/15 text-amber-400 transition-opacity hover:opacity-85">
+                          {/* transparent native file input over the icon: the icon itself is the upload target */}
                           <input
                             type="file"
                             accept="image/*"
@@ -170,11 +167,11 @@ export function WebhooksTab() {
                       </div>
                       <div className="flex min-w-0 flex-col gap-5">
                         <div className="grid grid-cols-2 gap-4 max-[599px]:grid-cols-[minmax(0,1fr)]">
-                          <Label className="block min-w-0">
-                            <span className="mb-2 block text-sm font-semibold text-foreground">Name</span>
+                          <Field className="min-w-0">
+                            <FieldLabel htmlFor={`webhook-name-${wh.id}`}>Name</FieldLabel>
                             <Input
+                              id={`webhook-name-${wh.id}`}
                               type="text"
-                              className="px-3"
                               value={nameDrafts[wh.id] ?? wh.name}
                               onChange={(e) => setNameDrafts((prev) => ({ ...prev, [wh.id]: e.target.value }))}
                               onBlur={() => commitName(wh)}
@@ -182,11 +179,9 @@ export function WebhooksTab() {
                                 if (e.key === 'Enter') e.currentTarget.blur()
                               }}
                             />
-                          </Label>
-                          <div className="block min-w-0">
-                            <Label htmlFor={`webhook-channel-${wh.id}`} className="mb-2 block text-sm font-semibold text-foreground">
-                              Channel
-                            </Label>
+                          </Field>
+                          <Field className="min-w-0">
+                            <FieldLabel htmlFor={`webhook-channel-${wh.id}`}>Channel</FieldLabel>
                             <Select
                               items={channelItems}
                               value={wh.channelId}
@@ -208,7 +203,7 @@ export function WebhooksTab() {
                                 ))}
                               </SelectContent>
                             </Select>
-                          </div>
+                          </Field>
                         </div>
                         <div className="flex flex-wrap gap-3 border-t border-border pt-4">
                           <Button variant="secondary" size="lg" onClick={() => handleCopyUrl(wh)}>

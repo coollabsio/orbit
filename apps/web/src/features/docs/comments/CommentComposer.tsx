@@ -27,7 +27,7 @@ export function CommentComposer({
 }: {
   /** Needs `CommentEditorSubmitExtension` (its callback does the actual save). */
   editor: AnyCommentEditor
-  /** Picks the placeholder (static CSS, see PageEditor.css). */
+  /** Picks the placeholder (static CSS, see CommentEditor). */
   kind: 'new' | 'reply' | 'edit'
   submitLabel: string
   /** Cancel button and Escape; without it neither is offered. */
@@ -78,11 +78,12 @@ export function CommentComposer({
   return (
     <div className={cn('flex flex-col gap-2', className)} data-comment-composer="" onKeyDown={onKeyDown}>
       <div
-        className="orbit-comment-field rounded-lg border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30"
+        data-slot="comment-field"
+        className="rounded-lg border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30"
         role="group"
         aria-label={label}
       >
-        <CommentEditor editor={editor} editable autoFocus={autoFocus} className={`orbit-comment-input orbit-comment-input--${kind}`} />
+        <CommentEditor editor={editor} editable autoFocus={autoFocus} kind={kind} />
       </div>
       <div className="flex items-center gap-1">
         {mentions ? (

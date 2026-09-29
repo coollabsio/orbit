@@ -18,7 +18,7 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
   return (
     <div
       data-slot="mail-message"
-      className="py-4 [[data-slot=mail-message]+&]:border-t [[data-slot=mail-message]+&]:border-t-border"
+      className="py-4 [[data-slot=mail-message]+&]:border-t"
       data-expanded={expanded ? 'true' : undefined}
     >
       <div
@@ -47,11 +47,11 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
             <Attachments attachments={message.attachments} hasTextContent={!!message.body.trim()} />
           ) : null}
           <div className="mt-3 ml-[38px] flex gap-1">
-            <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground" onClick={onReply}>
+            <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={onReply}>
               <Reply className="size-3.5" />
               Reply
             </Button>
-            <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground" onClick={onForward}>
+            <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={onForward}>
               <Forward className="size-3.5" />
               Forward
             </Button>

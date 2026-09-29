@@ -1,10 +1,12 @@
 import { Monitor, Mobile as Smartphone } from 'reicon-react'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { relativeTime } from '@/lib/format'
 import { SessionRevocationError, useRevokeSessions, useSessions } from '@/features/settings/api/sessions'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
+import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 
 /** Account view: the current user's signed-in devices. */
 export function SessionsPage() {
@@ -28,28 +30,26 @@ export function SessionsPage() {
       }
       flush
     >
-      <div className="flex flex-col divide-y divide-border">
-        {sessionsQuery.isPending ? <div className="flex items-center gap-3 px-4 py-3">Loading sessions…</div> : null}
-        {sessionsQuery.isError ? <div className="flex items-center gap-3 px-4 py-3" role="alert">Sessions could not be loaded. <Button variant="ghost" onClick={() => void sessionsQuery.refetch()}>Retry</Button></div> : null}
+      <div className="flex flex-col divide-y">
+        {sessionsQuery.isPending ? <SettingsRow>Loading sessions…</SettingsRow> : null}
+        {sessionsQuery.isError ? <SettingsRow role="alert">Sessions could not be loaded. <Button variant="ghost" onClick={() => void sessionsQuery.refetch()}>Retry</Button></SettingsRow> : null}
         {sessions.map((session) => {
           return (
-            <div key={session.id} className="flex items-center gap-3 px-4 py-3">
-              <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                {session.device.toLowerCase().includes('iphone') || session.device.toLowerCase().includes('android') ? (
-                  <Smartphone className="size-4.5" />
-                ) : (
-                  <Monitor className="size-4.5" />
-                )}
-              </span>
+            <SettingsRow key={session.id} className="flex-nowrap">
+              <RowIcon>
+                {session.device.toLowerCase().includes('iphone') || session.device.toLowerCase().includes('android') ? <Smartphone /> : <Monitor />}
+              </RowIcon>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
                   {session.device} · {session.browser}
-                  {session.current ? <Badge className="h-auto rounded-full border-0 bg-primary/10 text-[10px] leading-[14px] text-primary">Current</Badge> : null}
+                  {session.current ? <Badge>Current</Badge> : null}
                 </span>
                 <span className="text-xs text-muted-foreground/70">last active {relativeTime(session.last_activity_at)}</span>
               </div>
               <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-[11px] font-semibold text-muted-foreground uppercase">{session.user.display_name.charAt(0).toUpperCase()}</span>
+                <Avatar size="sm" className="size-7">
+                  <AvatarFallback className="rounded-lg text-[11px] font-semibold">{session.user.display_name.charAt(0).toUpperCase()}</AvatarFallback>
+                </Avatar>
                 {session.user.display_name}
               </span>
               {!session.current ? (
@@ -57,11 +57,11 @@ export function SessionsPage() {
                   Revoke
                 </Button>
               ) : null}
-            </div>
+            </SettingsRow>
           )
         })}
-        {revokeSessions.isError ? <div className="flex items-center gap-3 px-4 py-3" role="alert">{failure ? `${failure.failedIds.length} of ${failure.total} sessions could not be revoked.` : 'Session revocation failed.'} <Button variant="ghost" onClick={() => revokeSessions.mutate(failure?.failedIds ?? revokeSessions.variables ?? [])}>{failure ? 'Retry failed sessions' : 'Retry'}</Button></div> : null}
-        {revoking ? <div className="flex items-center gap-3 px-4 py-3" role="status">Revoking {revokeSessions.variables?.length ?? 1} session{revokeSessions.variables?.length === 1 ? '' : 's'}…</div> : null}
+        {revokeSessions.isError ? <SettingsRow role="alert">{failure ? `${failure.failedIds.length} of ${failure.total} sessions could not be revoked.` : 'Session revocation failed.'} <Button variant="ghost" onClick={() => revokeSessions.mutate(failure?.failedIds ?? revokeSessions.variables ?? [])}>{failure ? 'Retry failed sessions' : 'Retry'}</Button></SettingsRow> : null}
+        {revoking ? <SettingsRow role="status">Revoking {revokeSessions.variables?.length ?? 1} session{revokeSessions.variables?.length === 1 ? '' : 's'}…</SettingsRow> : null}
       </div>
     </SettingsCard>
   )

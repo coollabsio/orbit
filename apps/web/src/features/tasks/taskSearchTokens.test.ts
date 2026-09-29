@@ -1,16 +1,11 @@
 import { expect, test } from 'bun:test'
 
-test('task search uses shared input tokens and one wrapper focus ring', async () => {
+test('task search keeps the InputGroup look and only overrides its width', async () => {
   const source = await Bun.file(new URL('./components/TaskSearchBox.tsx', import.meta.url)).text()
-  const wrapper = source.slice(source.indexOf('const SEARCH_GROUP'), source.indexOf('export function TaskSearchBox'))
-  // the InputGroup wrapper carries the shared control tokens and the single focus ring
-  expect(wrapper).toContain('border border-input')
-  expect(wrapper).toContain('bg-muted')
-  // the search sits beside the filter buttons: override InputGroup's own `w-full`, or it eats the header row
-  expect(wrapper).toContain('w-auto')
-  expect(wrapper).toContain('has-[[data-slot=input-group-control]:focus-visible]:ring-1')
-  // the inner input contributes no border/ring of its own
   const group = source.slice(source.indexOf('<InputGroup'), source.indexOf('</InputGroup>'))
-  expect(group).toContain('border-0')
-  expect(group).toContain('focus-visible:ring-0')
+  // the search sits beside the filter buttons: override InputGroup's own `w-full`, or it eats the header row
+  expect(group).toContain('w-auto')
+  // the shared control look (border, focus ring) comes from InputGroup itself
+  expect(group).not.toContain('border-input')
+  expect(group).not.toContain('focus-visible]:ring')
 })

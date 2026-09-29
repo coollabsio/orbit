@@ -11,14 +11,11 @@ import { displayName, roleColor } from '@/features/chat/chatLib'
 import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
 import { MentionPopover } from '@/components/common/MentionPopover'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
-
-const inputButtonClass =
-  'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/90 transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted data-[active=true]:text-primary'
-const actionsItemClass =
-  'gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-foreground transition-colors focus:bg-muted focus:text-foreground [&>svg]:size-4 [&>svg]:text-muted-foreground!'
+import { ChatIconButton } from './ChatIconButton'
+import { ChatDropdownMenuItem } from './ChatMenuItem'
 
 export interface MessageInputHandle {
   addFiles: (files: FileList | File[]) => void
@@ -191,9 +188,9 @@ useEffect(() => {
               <div key={a.id} className="flex items-center gap-2 rounded-lg bg-background p-2 transition-colors hover:bg-muted">
                 {a.mimeType.startsWith('image/') ? <img src={a.url} alt="" className="size-14 shrink-0 rounded-md border border-border object-cover" /> : <Paperclip className="size-8 shrink-0 text-muted-foreground" />}
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{a.fileName}</span>
-                <Button type="button" variant="ghost" size="icon-sm" className="size-7 rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted" title="Remove" onClick={() => removeAttachment(a.id)}>
+                <ChatIconButton size="sm" title="Remove" aria-label={`Remove ${a.fileName}`} onClick={() => removeAttachment(a.id)}>
                   <X className="size-3.5" />
-                </Button>
+                </ChatIconButton>
               </div>
             ))}
           </div>
@@ -207,9 +204,9 @@ useEffect(() => {
               <div className="text-xs leading-5 font-bold text-foreground">Replying to {displayName(state, replyTarget)}</div>
               <div className="truncate text-xs leading-5 font-semibold text-muted-foreground">{replyTarget.content || 'No message content'}</div>
             </div>
-            <Button type="button" variant="ghost" size="icon-sm" className="size-7 rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted" title="Cancel reply" onClick={onCancelReply}>
+            <ChatIconButton size="sm" title="Cancel reply" aria-label="Cancel reply" onClick={onCancelReply}>
               <X className="size-3.5" />
-            </Button>
+            </ChatIconButton>
           </div>
         </div>
       ) : null}
@@ -221,18 +218,7 @@ useEffect(() => {
         <input ref={fileInputRef} type="file" multiple hidden aria-label="File upload" onChange={(e) => addFiles(e.target.files)} />
         {/* left plus menu */}
         <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={inputButtonClass}
-                data-active={actionsOpen ? 'true' : undefined}
-                title="Add attachment or action"
-              />
-            }
-          >
+          <DropdownMenuTrigger render={<ChatIconButton active={actionsOpen} title="Add attachment or action" />}>
             <Plus className="size-3.5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -240,15 +226,14 @@ useEffect(() => {
             align="start"
             sideOffset={16}
             finalFocus={inputRef}
-            className="w-56 rounded-lg border border-border bg-popover p-1.5 shadow-xl ring-0"
+            className="w-56"
           >
-            <DropdownMenuItem className={actionsItemClass} onClick={() => fileInputRef.current?.click()}>
-              <Paperclip size={16} />
+            <ChatDropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+              <Paperclip />
               Upload Files
-            </DropdownMenuItem>
+            </ChatDropdownMenuItem>
             {showThreadAction ? (
-              <DropdownMenuItem
-                className={actionsItemClass}
+              <ChatDropdownMenuItem
                 onClick={() => {
                   if (onCreateThread) onCreateThread()
                   else setThreadModeImmediate(true)
@@ -258,13 +243,13 @@ useEffect(() => {
               >
                 <ThreadIcon size={16} />
                 {threadActionLabel}
-              </DropdownMenuItem>
+              </ChatDropdownMenuItem>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
 
         {threadMode ? (
-          <Button type="button" variant="ghost" className="mt-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border-0 bg-primary/10 px-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/20" title="Cancel thread mode" onClick={() => setThreadModeImmediate(false)}>
+          <Button type="button" variant="ghost" size="xs" className="mt-1 bg-primary/10 font-semibold text-primary hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/20" title="Cancel thread mode" onClick={() => setThreadModeImmediate(false)}>
             <ThreadIcon size={12} className="size-3" />
             Thread
           </Button>
@@ -272,7 +257,7 @@ useEffect(() => {
 
         <Textarea
           ref={inputRef}
-          className="h-6 max-h-80 min-h-6 w-auto min-w-0 flex-1 resize-none overflow-y-hidden rounded-none border-0 bg-transparent px-0 py-1 text-sm leading-6 font-semibold text-foreground shadow-none outline-none field-sizing-fixed placeholder:font-semibold placeholder:text-muted-foreground/45 focus-visible:ring-0 dark:bg-transparent max-[899px]:text-[13px] md:max-[899px]:text-[13px]"
+          className="h-6 max-h-80 min-h-6 w-auto min-w-0 flex-1 resize-none overflow-y-hidden rounded-none border-0 bg-transparent px-0 py-1 text-sm leading-6 font-semibold field-sizing-fixed placeholder:font-semibold placeholder:text-muted-foreground/45 focus-visible:ring-0 dark:bg-transparent max-[899px]:text-[13px] md:max-[899px]:text-[13px]"
           value={text}
           rows={1}
           placeholder={placeholder ?? (channel ? `${threadMode ? 'Start a thread' : 'Message'} #${channel.name}` : 'Message')}
@@ -296,18 +281,7 @@ useEffect(() => {
         {/* right emoji menu */}
         <div className="relative flex shrink-0 items-center gap-0.5">
           <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className={inputButtonClass}
-                  data-active={emojiOpen ? 'true' : undefined}
-                  title="Emoji"
-                />
-              }
-            >
+            <PopoverTrigger render={<ChatIconButton active={emojiOpen} title="Emoji" />}>
               <SmilePlus className="size-5" />
             </PopoverTrigger>
             <PopoverContent
@@ -315,7 +289,7 @@ useEffect(() => {
               align="end"
               sideOffset={16}
               finalFocus={inputRef}
-              className="w-auto gap-0 rounded-xl border border-border bg-popover p-0 text-foreground shadow-xl ring-0"
+              className="w-auto gap-0 p-0"
             >
               <EmojiPicker onPick={insertEmoji} />
             </PopoverContent>

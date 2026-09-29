@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { cn } from 'cn'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface ModalProps {
@@ -6,12 +7,12 @@ interface ModalProps {
   description?: string
   onClose: () => void
   children: ReactNode
-  maxWidth?: number
+  className?: string
 }
 
 /** App modal built on the shadcn Dialog. Mounted only while open; Base UI handles
     focus trap, Escape, scroll lock and backdrop dismiss. */
-export function Modal({ title, description, onClose, children, maxWidth = 672 }: ModalProps) {
+export function Modal({ title, description, onClose, children, className }: ModalProps) {
   return (
     <Dialog
       open
@@ -19,7 +20,7 @@ export function Modal({ title, description, onClose, children, maxWidth = 672 }:
         if (!open) onClose()
       }}
     >
-      <DialogContent style={{ maxWidth }}>
+      <DialogContent className={cn('sm:max-w-2xl', className)}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}

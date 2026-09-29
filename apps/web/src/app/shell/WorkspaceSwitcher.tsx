@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ComponentProps } from 'react'
 import { Add as Plus, ChevronDown } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -8,9 +8,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Separator } from '@/components/ui/separator'
 import { useCreateWorkspace } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-
-const optionClass =
-  'h-auto min-h-8 w-full justify-start gap-2 rounded-md border-0 px-2 py-1.5 text-left font-normal text-foreground hover:bg-accent hover:text-accent-foreground active:not-aria-[haspopup]:translate-y-0 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-accent max-[899px]:min-h-11 max-[899px]:whitespace-normal max-[899px]:[overflow-wrap:anywhere]'
 
 /** The panel is a Popover rather than a DropdownMenu: picking a workspace swaps the
     panel for a "create workspace" form, and a menu's typeahead would swallow typing. */
@@ -73,18 +70,31 @@ function WorkspaceMenu({ onSelect, createWorkspace }: { onSelect: () => void; cr
 
   return <>
     {workspaces.map((item) => (
-      <Button
+      <WorkspaceOption
         key={item.id}
-        variant="ghost"
-        className={cn(optionClass, item.id === workspace.id && 'bg-accent font-medium')}
         data-selected={item.id === workspace.id || undefined}
         aria-current={item.id === workspace.id ? 'true' : undefined}
         onClick={() => { selectWorkspace(item.id); onSelect() }}
       >
         {item.name}
-      </Button>
+      </WorkspaceOption>
     ))}
     <Separator className="my-1" />
-    <Button variant="ghost" className={optionClass} disabled={createWorkspace.isPending} onClick={() => { createWorkspace.reset(); setCreating(true) }}><Plus className="size-[15px] shrink-0" />Create workspace</Button>
+    <WorkspaceOption disabled={createWorkspace.isPending} onClick={() => { createWorkspace.reset(); setCreating(true) }}><Plus className="size-[15px]" />Create workspace</WorkspaceOption>
   </>
+}
+
+/** A full-width row in the workspace panel; long names wrap on phones instead of clipping. */
+function WorkspaceOption({ className, ...props }: ComponentProps<typeof Button>) {
+  return (
+    <Button
+      data-slot="workspace-option"
+      variant="ghost"
+      className={cn(
+        'h-auto min-h-8 w-full justify-start px-2 py-1.5 text-left font-normal data-selected:bg-muted data-selected:font-medium max-[899px]:min-h-11 max-[899px]:whitespace-normal max-[899px]:[overflow-wrap:anywhere]',
+        className,
+      )}
+      {...props}
+    />
+  )
 }

@@ -19,9 +19,6 @@ interface ActivityFeedProps {
   onOpenTask?: (taskId: string) => void
 }
 
-const TIMELINE_ITEM =
-  "relative flex min-w-0 items-center gap-2.5 py-[7px] pl-1.5 text-xs text-muted-foreground before:absolute before:top-0 before:left-[12.5px] before:h-[calc(50%-8px)] before:w-px before:bg-border before:content-[''] after:absolute after:bottom-0 after:left-[12.5px] after:top-[calc(50%+8px)] after:w-px after:bg-border after:content-[''] first:before:hidden last:after:hidden"
-
 /**
  * Chronological feed: activity events (timeline rows) and comment threads (cards) interleaved by time,
  * so a change made after a comment shows below that comment.
@@ -34,13 +31,9 @@ function ActivityText({ item, onOpenTask }: { item: TaskActivity; onOpenTask?: (
   return (
     <>
       {item.text.slice(0, at)}
-      <button
-        type="button"
-        className="rounded-sm font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
-        onClick={() => onOpenTask(related.taskId)}
-      >
+      <Button type="button" variant="link" className="h-auto p-0 text-xs text-foreground" onClick={() => onOpenTask(related.taskId)}>
         {related.identifier}
-      </button>
+      </Button>
       {item.text.slice(at + related.identifier.length)}
     </>
   )
@@ -66,7 +59,11 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
         const actor = userById(item.actorId)
         const status = item.statusId ? state.statuses.find((s) => s.id === item.statusId) : undefined
         return (
-          <li key={item.id} className={TIMELINE_ITEM}>
+          <li
+            key={item.id}
+            // the connector line above and below the glyph; the first and last rows drop their outer half
+            className="relative flex min-w-0 items-center gap-2.5 py-[7px] pl-1.5 text-xs text-muted-foreground before:absolute before:top-0 before:left-[12.5px] before:h-[calc(50%-8px)] before:w-px before:bg-border after:absolute after:top-[calc(50%+8px)] after:bottom-0 after:left-[12.5px] after:w-px after:bg-border first:before:hidden last:after:hidden"
+          >
             <span className="inline-flex size-3.5 shrink-0 items-center justify-center">
               {status ? <TaskStatusIcon status={status} size={14} /> : <UserAvatar user={actor} size={14} />}
             </span>
@@ -80,12 +77,12 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   )
 
   const renderThread = (thread: CommentThread) => (
-    <div key={thread.root.id} className="mt-3 overflow-hidden rounded-[10px] border border-border bg-card">
+    <div key={thread.root.id} className="mt-3 overflow-hidden rounded-[10px] border bg-card">
       <CommentItem state={state} taskId={task.id} comment={thread.root} mentionTokens={mentionTokens} />
       {thread.replies.map((reply) => (
         <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
       ))}
-      <div className="border-t border-border px-3 pt-2.5 pb-3">
+      <div className="border-t px-3 pt-2.5 pb-3">
         <TaskCommentComposer compact placeholder="Leave a reply…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ body, files, parentId: thread.root.id })} />
       </div>
     </div>
@@ -93,7 +90,7 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
 
   return (
     <div>
-      <div className="mt-5 mb-2 flex items-center gap-1 border-t border-border pt-3.5 max-[899px]:mt-0 max-[899px]:border-t-0 max-[899px]:pt-0">
+      <div className="mt-5 mb-2 flex items-center gap-1 border-t pt-3.5 max-[899px]:mt-0 max-[899px]:border-t-0 max-[899px]:pt-0">
         <h3 className="m-0 text-sm font-semibold text-foreground">Activity</h3>
         {hasMoreActivity ? (
           <Button

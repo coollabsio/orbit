@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+import { useRender } from '@base-ui/react/use-render'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { Lock, Add as Plus, Menu, Moon, SearchNormal as Search, Setting2 as Settings, Sun } from 'reicon-react'
 import { cn } from 'cn'
@@ -114,6 +116,23 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
   }
 }
 
+/** One breadcrumb: a link to an ancestor, or plain text for the current page (and link-less crumbs). */
+function TopbarCrumb({ to, current, children }: { to?: string; current: boolean; children: ReactNode }) {
+  return useRender({
+    defaultTagName: 'span',
+    render: to ? <Link to={to} /> : undefined,
+    props: {
+      'data-slot': 'topbar-crumb',
+      'data-current': current,
+      className: cn(
+        'min-w-0 shrink overflow-hidden text-[13.5px] font-medium whitespace-nowrap text-ellipsis text-muted-foreground data-[current=true]:max-w-[40vw] data-[current=true]:shrink-0 data-[current=true]:text-foreground group-data-[root=home]/topbar:text-sm group-data-[root=home]/topbar:font-semibold group-data-[root=home]/topbar:text-foreground group-data-[root=settings]/topbar:text-[13px] group-data-[root=settings]/topbar:font-semibold',
+        to && 'hover:text-foreground',
+      ),
+      children,
+    },
+  })
+}
+
 export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => void; onOpenPalette: () => void }) {
   const state = useAppState()
   const { workspace } = useWorkspace()
@@ -135,11 +154,6 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
     tasks: tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [],
   }
   const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state, taskNavigation, { pages: pageTree.data, teamspaces: teamspaces.data })
-
-  const crumbBase =
-    'min-w-0 shrink overflow-hidden text-[13.5px] font-medium whitespace-nowrap text-ellipsis text-muted-foreground group-data-[root=home]/topbar:text-sm group-data-[root=home]/topbar:font-semibold group-data-[root=home]/topbar:text-foreground group-data-[root=settings]/topbar:text-[13px] group-data-[root=settings]/topbar:font-semibold'
-  const menuOptionClass =
-    'min-h-8 w-full gap-2 rounded-md px-2 py-1.5 text-left font-normal text-foreground focus:bg-accent focus:text-accent-foreground data-disabled:opacity-40'
 
   return (
     <header
@@ -165,16 +179,10 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
           return (
             <span key={index} className="contents">
               {index > 0 ? <span className="shrink-0 text-[13px] text-muted-foreground/70 select-none">/</span> : null}
-              {crumb.to && !isLast ? (
-                <Link className={cn(crumbBase, 'hover:text-foreground')} to={crumb.to}>
-                  {crumb.label}
-                </Link>
-              ) : (
-                <span className={cn(crumbBase, 'data-[current=true]:max-w-[40vw] data-[current=true]:shrink-0 data-[current=true]:text-foreground')} data-current={isLast}>
-                  {crumb.icon}
-                  {crumb.label}
-                </span>
-              )}
+              <TopbarCrumb to={isLast ? undefined : crumb.to} current={isLast}>
+                {crumb.icon}
+                {crumb.label}
+              </TopbarCrumb>
             </span>
           )
         })}
@@ -198,21 +206,21 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
               <Plus className="size-4" />
               New
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[160px] p-1">
-              <DropdownMenuItem className={menuOptionClass} onClick={() => navigate('/tasks?new=1')}>
+            <DropdownMenuContent align="end" className="min-w-40">
+              <DropdownMenuItem onClick={() => navigate('/tasks?new=1')}>
                 Task
               </DropdownMenuItem>
               {!docsHidden ? (
                 <DropdownMenuItem
-                  className={menuOptionClass}
+                 
                   disabled={createPage.isPending}
                   onClick={() => createPage.mutate({}, { onSuccess: (page) => navigate(`/docs/${page.id}`) })}
                 >
                   Document
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuItem className={menuOptionClass} disabled>Email</DropdownMenuItem>
-              <DropdownMenuItem className={menuOptionClass} disabled>Chat message</DropdownMenuItem>
+              <DropdownMenuItem disabled>Email</DropdownMenuItem>
+              <DropdownMenuItem disabled>Chat message</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}

@@ -4,13 +4,17 @@ import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import { ArrowLeft, Check, Edit as Pencil, Add as Plus, SearchNormal as Search, Trash as Trash2, People as Users, Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { assignMemberRoles, createRole, deleteRole, reorderRoles, updateRole } from '@/mock/actions'
 import { useAppState } from '@/mock/store'
 import type { Role, User } from '@/mock/types'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
+import { cn } from 'cn'
+import { InitialAvatar } from '../InitialAvatar'
+import { RowButton } from '../RowButton'
 
 const ROLE_COLORS = [
   '#99aab5', '#57f287', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6', '#e91e63', '#f1c40f', '#e67e22', '#e74c3c', '#95a5a6',
@@ -135,24 +139,19 @@ export function RolesTab() {
       <div className="grid min-h-[calc(100vh-5rem)] grid-cols-[13rem_1fr] gap-8 max-[899px]:min-h-0 max-[899px]:grid-cols-[minmax(0,1fr)]">
         <div className="min-w-0 border-r border-border pr-4 max-[899px]:border-r-0 max-[899px]:pr-0">
           <div className="mb-6 flex items-center justify-between">
-            <Button
-              variant="ghost"
-              className="h-auto gap-2 border-0 px-0 text-base leading-6 font-bold uppercase text-foreground hover:bg-transparent hover:text-primary dark:hover:bg-transparent"
-              onClick={() => setSelectedRoleId(null)}
-            >
+            <Button variant="ghost" className="-ml-2.5" onClick={() => setSelectedRoleId(null)}>
               <ArrowLeft className="size-4" />
               Back
             </Button>
-            <Button variant="ghost" size="icon-sm" title="Create role" onClick={handleCreate}>
+            <Button variant="ghost" size="icon-sm" title="Create role" aria-label="Create role" onClick={handleCreate}>
               <Plus className="size-4" />
             </Button>
           </div>
           <div className="flex flex-col gap-1">
             {roles.map((role) => (
-              <Button
+              <RowButton
                 key={role.id}
-                variant="ghost"
-                className="relative flex h-9 w-full min-w-0 cursor-grab justify-start gap-2 rounded-md border-0 px-3 text-left text-sm leading-5 font-bold text-foreground select-none hover:bg-sidebar-accent/60 hover:text-foreground data-[active=true]:bg-sidebar-accent data-[dragging=true]:opacity-50 dark:hover:bg-sidebar-accent/60"
+                className="relative h-9 cursor-grab rounded-md px-3 text-sm leading-5 font-bold text-foreground hover:bg-sidebar-accent/60 data-[active=true]:bg-sidebar-accent data-[dragging=true]:opacity-50"
                 data-role-drop-id={role.id}
                 data-active={selectedRole.id === role.id ? 'true' : undefined}
                 data-dragging={dragRoleId === role.id ? 'true' : undefined}
@@ -170,7 +169,7 @@ export function RolesTab() {
                 <RoleDropLine position={dropIndicator?.roleId === role.id ? dropIndicator.position : null} />
                 <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: role.color }} />
                 <span className="truncate">{role.name}</span>
-              </Button>
+              </RowButton>
             ))}
           </div>
         </div>
@@ -181,8 +180,8 @@ export function RolesTab() {
             <Button
               variant="ghost"
               size="icon"
-              className="size-9 rounded-full border-2 border-muted-foreground/60 text-muted-foreground hover:border-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
               title="Close"
+              aria-label="Close role editor"
               onClick={() => setSelectedRoleId(null)}
             >
               <X className="size-4" />
@@ -190,11 +189,11 @@ export function RolesTab() {
           </div>
 
           <Tabs className="mb-6 gap-0" value={roleTab} onValueChange={(value) => setRoleTab(value as typeof roleTab)}>
-            <TabsList variant="line" className="w-full justify-start gap-8 rounded-none border-b border-border p-0 group-data-horizontal/tabs:h-auto">
-              <TabsTrigger value="display" className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent px-0 pt-0 pb-3 text-sm leading-5 font-semibold text-muted-foreground after:hidden hover:text-foreground dark:text-muted-foreground data-active:border-primary! data-active:text-primary!">
+            <TabsList variant="line" className="w-full justify-start border-b border-border">
+              <TabsTrigger value="display" className="flex-none">
                 Display
               </TabsTrigger>
-              <TabsTrigger value="members" className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent px-0 pt-0 pb-3 text-sm leading-5 font-semibold text-muted-foreground after:hidden hover:text-foreground dark:text-muted-foreground data-active:border-primary! data-active:text-primary!">
+              <TabsTrigger value="members" className="flex-none">
                 Manage Members ({memberCount(members, selectedRole.id)})
               </TabsTrigger>
             </TabsList>
@@ -224,10 +223,12 @@ export function RolesTab() {
       </div>
 
       <div className="flex items-center gap-4">
-        <Label className="relative block min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input type="text" className="h-10 pl-10 pr-3 font-medium" value={roleSearch} placeholder="Search Roles" onChange={(e) => setRoleSearch(e.target.value)} />
-        </Label>
+        <InputGroup className="h-9 flex-1">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput type="text" value={roleSearch} placeholder="Search Roles" aria-label="Search roles" onChange={(e) => setRoleSearch(e.target.value)} />
+        </InputGroup>
         <Button size="lg" onClick={handleCreate}>
           Create Role
         </Button>
@@ -259,9 +260,8 @@ export function RolesTab() {
                 }}
               >
                 <RoleDropLine position={dropIndicator?.roleId === role.id ? dropIndicator.position : null} />
-                <Button
-                  variant="ghost"
-                  className="flex h-auto min-w-0 justify-start gap-3 border-0 py-2 pr-3 pl-0 text-left text-sm leading-5 font-bold text-foreground hover:bg-transparent hover:text-primary dark:hover:bg-transparent"
+                <RowButton
+                  className="gap-3 py-2 pr-3 text-sm leading-5 font-bold text-foreground hover:text-primary"
                   onClick={() => {
                     setSelectedRoleId(role.id)
                     setRoleTab('display')
@@ -269,7 +269,7 @@ export function RolesTab() {
                 >
                   <span className="size-3.5 shrink-0 rounded-full" style={{ backgroundColor: role.color }} />
                   <span className="truncate">{role.name}</span>
-                </Button>
+                </RowButton>
                 <div className="flex items-center gap-1.5 text-sm leading-5 font-medium text-muted-foreground">
                   <span>{memberCount(members, role.id)}</span>
                   <Users className="size-4" />
@@ -278,8 +278,8 @@ export function RolesTab() {
                   <Button
                     variant="outline"
                     size="icon"
-                    className="size-10 rounded-lg bg-muted"
                     title="Edit role"
+                    aria-label={`Edit ${role.name}`}
                     onClick={() => {
                       setSelectedRoleId(role.id)
                       setRoleTab('display')
@@ -290,9 +290,9 @@ export function RolesTab() {
                   <Button
                     variant="outline"
                     size="icon"
-                    className="size-10 rounded-lg bg-muted hover:bg-destructive/10 hover:text-destructive"
-                    data-danger="true"
+                    className="hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/10"
                     title="Delete role"
+                    aria-label={`Delete ${role.name}`}
                     onClick={() => setDeleteRoleTarget(role)}
                   >
                     <Trash2 className="size-4" />
@@ -333,20 +333,19 @@ function RoleDisplayPanel({ role, onUpdate }: { role: Role; onUpdate: (updates: 
 
   return (
     <div>
-      <div className="mb-8 border-b border-border pb-6">
-        <Label className="mb-2 text-sm leading-5 font-bold text-foreground" htmlFor="role-name">
+      <Field className="mb-8 border-b border-border pb-6">
+        <FieldLabel htmlFor="role-name">
           Role name <span className="text-primary">*</span>
-        </Label>
+        </FieldLabel>
         <Input
           id="role-name"
           type="text"
-          className="h-10 px-3 font-medium"
           value={draftName}
           maxLength={50}
           onChange={(e) => setDraftName(e.target.value)}
           onBlur={saveIfChanged}
         />
-      </div>
+      </Field>
 
       <div>
         <h3 className="text-sm leading-5 font-bold text-foreground">
@@ -355,6 +354,7 @@ function RoleDisplayPanel({ role, onUpdate }: { role: Role; onUpdate: (updates: 
         <p className="mb-3 text-sm leading-5 text-muted-foreground">Members use the color of the highest role they have on the roles list.</p>
         <div className="flex flex-wrap items-center gap-2">
           <label className="relative flex h-12 w-16 cursor-pointer items-center justify-center rounded-md border border-border text-white" style={{ backgroundColor: draftColor }} title="Custom color">
+            {/* native color picker under the swatch; the Input primitive has no color variant */}
             <input type="color" className="absolute inset-0 cursor-pointer opacity-0" value={draftColor} aria-label={`${role.name} color`} onChange={(e) => setDraftColor(e.target.value)} onBlur={saveIfChanged} />
             <Pencil className="size-4 [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.4))]" />
           </label>
@@ -362,9 +362,10 @@ function RoleDisplayPanel({ role, onUpdate }: { role: Role; onUpdate: (updates: 
             <Button
               key={color}
               size="icon-xs"
-              className="size-6 rounded-md border-0 text-white"
+              className="rounded-md text-white"
               style={{ backgroundColor: color }}
               title={color}
+              aria-label={`Use color ${color}`}
               onClick={() => {
                 setDraftColor(color)
                 if (color !== role.color) onUpdate({ color })
@@ -399,10 +400,12 @@ function RoleMembersPanel({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-4">
-        <Label className="relative block min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input type="text" className="h-10 pl-10 pr-3 font-medium" value={memberSearch} placeholder="Search Members" onChange={(e) => onMemberSearch(e.target.value)} />
-        </Label>
+        <InputGroup className="h-9 flex-1">
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+          <InputGroupInput type="text" value={memberSearch} placeholder="Search Members" aria-label="Search members" onChange={(e) => onMemberSearch(e.target.value)} />
+        </InputGroup>
         <Button
           size="lg"
           variant={addingMembers ? 'secondary' : 'default'}
@@ -446,17 +449,18 @@ function RoleMembersPanel({
 function MemberRoleRow({ member, action, onClick }: { member: User; action: 'add' | 'remove'; onClick: () => void }) {
   return (
     <div className="flex min-h-10 items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-sidebar-accent/60">
-      <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-bold" style={{ background: `color-mix(in srgb, ${member.color} 22%, transparent)`, color: member.color }}>
-        {member.name.charAt(0).toUpperCase()}
-      </span>
+      <InitialAvatar name={member.name} color={member.color} className="size-7 text-xs font-bold" />
       <div className="min-w-0 flex-1 text-sm leading-5">
         <strong className="font-bold text-foreground">{member.name}</strong>
         <span className="ml-1 text-muted-foreground">{member.handle}</span>
       </div>
       <Button
-        variant="ghost"
+        variant={action === 'remove' ? 'secondary' : 'outline'}
         size="icon-xs"
-        className="size-6 rounded-full border-0 data-[action=remove]:bg-muted data-[action=remove]:text-muted-foreground data-[action=remove]:hover:bg-destructive data-[action=remove]:hover:text-white data-[action=add]:border data-[action=add]:border-border data-[action=add]:text-muted-foreground data-[action=add]:hover:bg-primary data-[action=add]:hover:text-white dark:data-[action=remove]:hover:bg-destructive dark:data-[action=add]:hover:bg-primary"
+        className={cn(
+          'rounded-full text-muted-foreground hover:text-white',
+          action === 'remove' ? 'hover:bg-destructive' : 'hover:bg-primary dark:hover:bg-primary',
+        )}
         data-action={action}
         title={action === 'remove' ? 'Remove from role' : 'Add to role'}
         aria-label={action === 'remove' ? `Remove ${member.name} from role` : `Add ${member.name} to role`}

@@ -12,7 +12,6 @@ import { subIssuesQuery, useCreateTask, useSubIssues, useUpdateTask } from '@/fe
 import { subIssueDefaults } from '@/features/tasks/subIssuesLib'
 import { defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
 import { useParentActions } from '@/features/tasks/useParentActions'
-import { PRESS_MOTION } from '@/features/views/components/motion'
 import { useCollapsedTasks } from '@/features/views/useCollapsedTasks'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -22,9 +21,6 @@ import { TreeGutter } from './TreeGutter'
 
 /** Rows bleed 8px past the text edge (like Relations) so the hover fill frames them; the gutter starts after it. */
 const ROW_INSET = 8
-const ROW = 'group/sub relative flex min-h-8 items-center gap-1.5 rounded-md pr-1 text-xs transition-colors duration-150 hover-fine:hover:bg-muted motion-reduce:transition-none'
-const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
-const OPTION = 'group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal text-foreground data-[selected]:bg-accent data-[selected]:font-medium'
 /** Closed for counts: completed, cancelled and duplicate (the server's rule for `sub_issue_closed_count`). */
 const CLOSED = new Set(['completed', 'cancelled', 'duplicate'])
 
@@ -68,17 +64,17 @@ export function SubIssuesSection({ parent, composing, onComposingChange, onAddEx
   const closed = children.filter((task) => CLOSED.has(statusOf(task)?.category ?? '')).length
   const context: Context = { ...rest, collapsed, toggle, newIds: new Set(newIds) }
   return (
-    <section aria-label="Sub-issues" className="mt-6 border-t border-border pt-4">
+    <section aria-label="Sub-issues" className="mt-6 border-t pt-4">
       <div className="mb-2 flex min-h-6 items-center gap-2">
         <h3 className="text-xs font-semibold text-muted-foreground">Sub-issues</h3>
         {children.length > 0 ? <SubIssueProgress closed={closed} total={children.length} color={completedStatusColor(rest.statuses, parent.projectId)} /> : null}
         <div className="flex-1" />
-        <Button variant="ghost" size="xs" className={cn('text-muted-foreground', PRESS_MOTION)} onClick={onAddExisting}>Add existing</Button>
+        <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={onAddExisting}>Add existing</Button>
         <Button
           ref={addButtonRef}
           variant="ghost"
           size="icon-xs"
-          className={cn('text-muted-foreground', PRESS_MOTION)}
+          className="text-muted-foreground"
           aria-label="Add sub-issue"
           title="Add sub-issue"
           aria-pressed={composing}
@@ -140,7 +136,10 @@ function SubIssueRow({ task, depth, context }: { task: Task; depth: number; cont
   const options = projectStatuses(context.statuses, task.projectId).filter((option) => option.category !== 'duplicate')
   const assignees = context.users.filter((user) => task.assigneeIds.includes(user.id))
   return (
-    <div className={cn(ROW, context.newIds.has(task.id) && 'animate-relation-enter')} data-depth={depth}>
+    <div
+      className={cn('group/sub relative flex min-h-8 items-center gap-1.5 rounded-md pr-1 text-xs transition-colors duration-150 hover-fine:hover:bg-muted motion-reduce:transition-none', context.newIds.has(task.id) && 'animate-relation-enter')}
+      data-depth={depth}
+    >
       <TreeGutter
         depth={depth}
         inset={ROW_INSET}
@@ -155,11 +154,11 @@ function SubIssueRow({ task, depth, context }: { task: Task; depth: number; cont
             <TaskStatusIcon status={status} />
           </Button>
         } />
-        <DropdownMenuContent className={MENU}>
+        <DropdownMenuContent className="w-auto min-w-45">
           {options.map((option) => (
             <DropdownMenuItem
               key={option.id}
-              className={OPTION}
+              className="data-selected:bg-accent data-selected:font-medium"
               data-selected={option.id === task.statusId || undefined}
               onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
             >
@@ -169,21 +168,22 @@ function SubIssueRow({ task, depth, context }: { task: Task; depth: number; cont
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      <button
+      <Button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-2 self-stretch rounded-md py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        variant="link"
+        className="h-auto min-w-0 flex-1 shrink justify-start gap-2 self-stretch p-0 text-xs font-normal text-foreground"
         onClick={() => context.onOpen(task.id)}
       >
         <span className="shrink-0 text-muted-foreground tabular-nums">{task.identifier}</span>
-        <span className="truncate text-foreground">{task.title || 'Untitled'}</span>
-      </button>
+        <span className="truncate">{task.title || 'Untitled'}</span>
+      </Button>
       {assignees.length > 0 ? <UserAvatarStack users={assignees} size={16} /> : null}
       <Button
         variant="ghost"
         size="icon-xs"
         aria-label={`Remove ${task.identifier} from parent`}
         title="Remove from parent"
-        className={cn('shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/sub:opacity-100 focus-visible:opacity-100', PRESS_MOTION)}
+        className="shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/sub:opacity-100 focus-visible:opacity-100"
         onClick={() => void parentActions.setParent([task], null)}
       >
         <X className="size-3" />
@@ -246,8 +246,8 @@ function SubIssueComposer({ inputRef, parent, siblings, statuses, currentUserId,
         submit()
       }}
     >
-      {/* the gutter's width at depth 0, so the status icon lines up with the rows above */}
-      <span aria-hidden className="shrink-0" style={{ width: ROW_INSET + 16 }} />
+      {/* the gutter's width at depth 0 (ROW_INSET + the 16px chevron slot), so the status icon lines up with the rows above */}
+      <span aria-hidden className="w-6 shrink-0" />
       <span className="flex size-[22px] shrink-0 items-center justify-center">
         <TaskStatusIcon status={defaultStatusOf(statuses, parent.projectId)} />
       </span>
@@ -265,7 +265,8 @@ function SubIssueComposer({ inputRef, parent, siblings, statuses, currentUserId,
           event.stopPropagation()
           onClose()
         }}
-        className="h-8 w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:ring-0 md:text-[13px] dark:bg-transparent"
+        // borderless: the form row carries the fill and the focus ring
+        className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[13px] focus-visible:ring-0 md:text-[13px] dark:bg-transparent"
       />
       {createTask.isError ? <span role="alert" className="shrink-0 text-xs text-destructive">Couldn’t create the sub-issue.</span> : null}
     </form>

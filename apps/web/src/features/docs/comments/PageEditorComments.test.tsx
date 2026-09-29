@@ -188,7 +188,7 @@ describe('comments in the collaborative editor', () => {
     document.body.append(container)
     const { view } = await renderCollab({ panel: { container, filter: 'open' } })
     await waitFor(() => expect(container.textContent).toContain('Please check'))
-    expect(container.querySelector('.orbit-mention')?.textContent).toBe('@Bob Stone')
+    expect(container.querySelector('[data-slot="mention"]')?.textContent).toBe('@Bob Stone')
     await waitFor(() => expect(container.textContent).toContain('Ann'))
     view.unmount()
     container.remove()

@@ -1,10 +1,10 @@
 import { Link } from 'react-router'
 import { Layer } from 'reicon-react'
 import { EmptyState } from '@/components/common/EmptyState'
+import { PaneTitle } from '@/components/common/Pane'
 import { buttonVariants } from '@/components/ui/button'
 import type { ViewStateController } from '../useViewState'
 import { FavoriteStar } from './FavoriteStar'
-import { PRESS_MOTION } from './motion'
 import { ViewActionsMenu } from './ViewActionsMenu'
 import { ViewIcon } from './ViewIcon'
 
@@ -24,7 +24,7 @@ export function ViewHeader({ workspaceId, controller, onEdit, onDuplicate, onDel
     <>
       <div className="flex min-w-0 items-center gap-1.5 pl-1">
         <ViewIcon icon={view.icon} color={view.color} />
-        <h1 className="truncate text-[13px] font-semibold text-foreground">{view.name}</h1>
+        <PaneTitle render={<h1 />}>{view.name}</PaneTitle>
         <FavoriteStar workspaceId={workspaceId} view={view} />
         <ViewActionsMenu workspaceId={workspaceId} view={view} onEdit={onEdit} onDuplicate={onDuplicate} onDeleted={onDeleted} />
       </div>
@@ -36,7 +36,7 @@ export function ViewHeader({ workspaceId, controller, onEdit, onDuplicate, onDel
 /** Shown under the header when the stored state could not be parsed (spec § Errors). */
 export function ViewStateBanner() {
   return (
-    <div role="status" className="shrink-0 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+    <div role="status" className="shrink-0 border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
       This view has settings Orbit can't read. Update the view to reset them.
     </div>
   )
@@ -50,7 +50,7 @@ export function ViewNotFound() {
         icon={Layer}
         title="View not found"
         description="This view was deleted, or it isn't shared with you."
-        action={<Link to="/views" className={buttonVariants({ variant: 'default', className: PRESS_MOTION })}>Go to views</Link>}
+        action={<Link to="/views" className={buttonVariants()}>Go to views</Link>}
       />
     </div>
   )

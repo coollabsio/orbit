@@ -6,9 +6,24 @@ import type { Attachment } from '@/mock/types'
 import { formatSize, isImage } from '@/lib/attachmentLib'
 import { ImageViewer } from './ImageViewer'
 import { Button } from '@/components/ui/button'
+import { cn } from 'cn'
 
-const removeButton =
-  'absolute top-1.5 right-1.5 z-[2] inline-flex size-[22px] items-center justify-center rounded-full border-0 bg-black/60 text-white opacity-0 transition-[opacity,background-color] hover:bg-destructive hover:text-white focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-destructive'
+/** Dark round × over an attachment; shows on hover or keyboard focus. */
+function RemoveAttachmentButton({ attachment, onRemove }: { attachment: Attachment; onRemove: (attachmentId: string) => void }) {
+  return (
+    <Button
+      data-slot="attachment-remove"
+      variant="ghost"
+      size="icon-xs"
+      className="absolute top-1.5 right-1.5 z-[2] size-[22px] rounded-full bg-black/60 text-white opacity-0 transition-[opacity,background-color] group-hover:opacity-100 hover:bg-destructive hover:text-white focus-visible:opacity-100 dark:hover:bg-destructive"
+      aria-label={`Remove ${attachment.fileName}`}
+      title="Remove"
+      onClick={() => onRemove(attachment.id)}
+    >
+      <X className="size-3" />
+    </Button>
+  )
+}
 
 export function Attachments({
   attachments,
@@ -28,10 +43,10 @@ export function Attachments({
   const single = images.length === 1
 
   return (
-    <div className={`flex flex-col gap-2 ${hasTextContent ? 'mt-2' : 'mt-1'}`} data-no-text={hasTextContent ? undefined : 'true'}>
+    <div className={cn('flex flex-col gap-2', hasTextContent ? 'mt-2' : 'mt-1')} data-no-text={hasTextContent ? undefined : 'true'}>
       {images.length > 0 ? (
         <div
-          className={`grid max-w-[512px] gap-1 ${images.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}
+          className={cn('grid max-w-[512px] gap-1', images.length === 3 ? 'grid-cols-3' : 'grid-cols-2')}
           data-count={Math.min(images.length, 4)}
         >
           {images.slice(0, 4).map((att, index) => {
@@ -39,9 +54,11 @@ export function Attachments({
             return (
               <div
                 key={att.id}
-                className={`group relative overflow-hidden rounded-md border border-border transition-opacity hover:opacity-90 ${
-                  single ? 'col-span-2 aspect-auto w-fit' : 'aspect-square'
-                } ${hero ? 'col-span-2 row-span-2' : ''}`}
+                className={cn(
+                  'group relative overflow-hidden rounded-md border border-border transition-opacity hover:opacity-90',
+                  single ? 'col-span-2 aspect-auto w-fit' : 'aspect-square',
+                  hero && 'col-span-2 row-span-2',
+                )}
                 data-single={single || undefined}
                 data-hero={hero ? 'true' : undefined}
               >
@@ -57,9 +74,7 @@ export function Attachments({
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/60 text-lg font-semibold text-white">+{images.length - 4}</div>
                 ) : null}
                 {onRemove ? (
-                  <Button type="button" variant="ghost" size="icon-xs" className={removeButton} aria-label={`Remove ${att.fileName}`} title="Remove" onClick={() => onRemove(att.id)}>
-                    <X className="size-3" />
-                  </Button>
+                  <RemoveAttachmentButton attachment={att} onRemove={onRemove} />
                 ) : null}
               </div>
             )
@@ -82,9 +97,7 @@ export function Attachments({
                 </span>
               </a>
               {onRemove ? (
-                <Button type="button" variant="ghost" size="icon-xs" className={removeButton} aria-label={`Remove ${att.fileName}`} title="Remove" onClick={() => onRemove(att.id)}>
-                  <X className="size-3" />
-                </Button>
+                <RemoveAttachmentButton attachment={att} onRemove={onRemove} />
               ) : null}
             </span>
           ))}

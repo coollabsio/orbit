@@ -5,10 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Emoji } from '@/components/common/Emoji'
 import { useDocPageActions } from '@/features/docs/pageActions'
 import { childrenOf, pageTitle, type DropZone } from '@/features/docs/pageTree'
-
-// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
-export const menuItemClass =
-  'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm leading-5 text-foreground focus:bg-muted data-[danger=true]:text-destructive data-[danger=true]:focus:bg-muted data-[danger=true]:focus:text-destructive'
+import { TreeIconButton, TreeRowActions } from './TreeRow'
 
 export type DocDropZone = DropZone
 
@@ -122,7 +119,7 @@ export function DocTreeItem({
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md border-0 text-muted-foreground/70 hover:bg-muted hover:text-foreground dark:hover:bg-muted [&>svg]:transition-transform [&>svg]:duration-[120ms] data-[expanded=true]:[&>svg]:rotate-90"
+            className="size-5 text-muted-foreground/70 [&>svg]:transition-transform [&>svg]:duration-[120ms] data-[expanded=true]:[&>svg]:rotate-90"
             data-expanded={expanded}
             aria-label={expanded ? 'Collapse' : 'Expand'}
             onClick={(e) => {
@@ -139,54 +136,41 @@ export function DocTreeItem({
           {page.icon ? <Emoji value={page.icon} size={15} /> : <FileText className="size-[15px]" />}
         </span>
         <span className="min-w-0 flex-1 truncate">{pageTitle(page)}</span>
-        <span
-          className="invisible relative z-20 flex shrink-0 items-center gap-0.5 group-hover/row:visible group-focus-within/row:visible"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="size-[22px] text-muted-foreground/70"
-            aria-label="Add child page"
-            onClick={() => onCreateChild(page.id)}
-          >
+        <TreeRowActions>
+          <TreeIconButton aria-label="Add child page" onClick={() => onCreateChild(page.id)}>
             <Plus className="size-[13px]" />
-          </Button>
+          </TreeIconButton>
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button type="button" variant="ghost" size="icon-sm" className="size-[22px] text-muted-foreground/70" aria-label="Page options" />
-              }
-            >
+            <DropdownMenuTrigger render={<TreeIconButton aria-label="Page options" />}>
               <Ellipsis className="size-[13px]" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto min-w-36">
               {favorites ? (
-                <DropdownMenuItem className={menuItemClass} onClick={() => favorites.onToggle(page.id, !favorite)}>
+                <DropdownMenuItem onClick={() => favorites.onToggle(page.id, !favorite)}>
                   <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
                   {favorite ? 'Remove from favorites' : 'Add to favorites'}
                 </DropdownMenuItem>
               ) : null}
               {actions ? (
-                <DropdownMenuItem className={menuItemClass} onClick={() => actions.duplicate(page.id, false)}>
+                <DropdownMenuItem onClick={() => actions.duplicate(page.id, false)}>
                   <Copy className="size-[14px]" />
                   Duplicate
                 </DropdownMenuItem>
               ) : null}
               {actions && children.length > 0 ? (
-                <DropdownMenuItem className={menuItemClass} onClick={() => actions.duplicate(page.id, true)}>
+                <DropdownMenuItem onClick={() => actions.duplicate(page.id, true)}>
                   <Copy className="size-[14px]" />
                   Duplicate with sub-pages
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onTrash(page.id)}>
+              {/* Not variant="destructive": the preset menu popup recolors those items to the accent color. */}
+              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onTrash(page.id)}>
                 <Trash2 className="size-[14px]" />
                 Move to trash
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </span>
+        </TreeRowActions>
       </div>
       {expanded
         ? children.map((child) => (

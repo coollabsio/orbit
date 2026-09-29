@@ -1,5 +1,6 @@
-import { Fragment } from 'react'
-import { NavLink, useLocation } from 'react-router'
+import { createContext, Fragment, useContext, type ComponentType, type ReactNode } from 'react'
+import { Link, useLocation, useMatch, useResolvedPath, type LinkProps } from 'react-router'
+import { cva, type VariantProps } from 'class-variance-authority'
 import { Calendar, DirectInbox as Inbox, Home2 as Home, Layer, Message as MessageSquare, Messages2 as MessagesSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -15,16 +16,80 @@ const WORKSPACE_LINKS = [
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
 ].filter((link) => !(docsHidden && link.to === '/docs'))
 
-function sidebarItemClass(active: boolean, collapsed: boolean) {
-  return cn(
-    'relative flex h-8 w-full min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
-    collapsed && 'justify-center px-0',
-    active && 'bg-sidebar-accent text-sidebar-accent-foreground',
+const sidebarNavItemVariants = cva(
+  'relative flex h-8 w-full min-w-0 shrink-0 items-center justify-start gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:opacity-90',
+  {
+    variants: {
+      size: {
+        default: '',
+        // nested under its parent entry while expanded; a plain rail icon while collapsed
+        sub: 'group-data-[collapsed=false]/sidebar-nav:h-7 group-data-[collapsed=false]/sidebar-nav:pl-[34px] group-data-[collapsed=false]/sidebar-nav:font-normal group-data-[collapsed=false]/sidebar-nav:[&_svg]:size-4',
+      },
+    },
+    defaultVariants: { size: 'default' },
+  },
+)
+
+const SidebarNavCollapsed = createContext(false)
+
+type SidebarNavIcon = ComponentType<{ className?: string }>
+
+function SidebarNavLabel({ children }: { children: ReactNode }) {
+  return <span data-slot="sidebar-nav-label" className="min-w-0 flex-1 truncate group-data-[collapsed=true]/sidebar-nav:hidden">{children}</span>
+}
+
+/** A sidebar link. Active when the route matches `to` (like NavLink), unless `active` says otherwise. */
+function SidebarNavItem({
+  to,
+  end = false,
+  icon: Icon,
+  label,
+  'aria-label': ariaLabel = label,
+  active,
+  size,
+  ...props
+}: Omit<LinkProps, 'className' | 'children' | 'title'> & VariantProps<typeof sidebarNavItemVariants> & {
+  end?: boolean
+  icon: SidebarNavIcon
+  label: string
+  active?: boolean
+}) {
+  const collapsed = useContext(SidebarNavCollapsed)
+  const match = useMatch({ path: useResolvedPath(to).pathname, end })
+  const isActive = active ?? match !== null
+  return (
+    <Link
+      data-slot="sidebar-nav-item"
+      data-active={isActive}
+      aria-current={isActive ? 'page' : undefined}
+      aria-label={ariaLabel}
+      title={collapsed ? ariaLabel : undefined}
+      className={sidebarNavItemVariants({ size })}
+      to={to}
+      {...props}
+    >
+      <Icon />
+      <SidebarNavLabel>{label}</SidebarNavLabel>
+    </Link>
   )
 }
 
-function sidebarLabelClass(collapsed: boolean) {
-  return cn('min-w-0 flex-1 truncate', collapsed && 'hidden')
+/** A product area that is not built yet: shown, but disabled. */
+function SidebarNavComingSoon({ icon: Icon, label }: { icon: SidebarNavIcon; label: string }) {
+  return (
+    <Button
+      data-slot="sidebar-nav-item"
+      variant="ghost"
+      className={cn(sidebarNavItemVariants(), 'border-0 dark:hover:bg-sidebar-accent/50 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-[0.48]')}
+      disabled
+      title={`${label} — Coming soon`}
+    >
+      {/* an explicit size: Button's own svg rule outranks the item's [&_svg] one */}
+      <Icon className="size-[18px]" />
+      <SidebarNavLabel>{label}</SidebarNavLabel>
+      <span className="ml-auto text-[10px] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">Coming soon</span>
+    </Button>
+  )
 }
 
 function SidebarSection({ label, collapsed, first }: { label: string; collapsed: boolean; first?: boolean }) {
@@ -55,154 +120,69 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
 
   const inboxPath = selectedProject ? `/inbox?project=${encodeURIComponent(selectedProject)}` : '/inbox'
 
-  const itemClass = (active: boolean) => sidebarItemClass(active, collapsed)
-  const labelClass = sidebarLabelClass(collapsed)
-  const disabledClass = 'justify-start border-0 dark:hover:bg-sidebar-accent/50 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-[0.48]'
-  const comingSoonClass = 'ml-auto text-[10px] text-muted-foreground/70'
-
-  const taskViewActive = (name: string | null) => location.pathname === '/tasks' && view === name
+  // Tasks itself is active on its routes only while no task view is picked
+  const tasksActive = useMatch({ path: '/tasks', end: false }) !== null && !view
+  const taskViewActive = (name: string) => location.pathname === '/tasks' && view === name
   // Views is a part of Tasks: its entry shows only while the user is somewhere in Tasks
   const inTasks = /^\/(tasks|views)(\/|-|$)/.test(location.pathname)
 
   return (
-    <>
-      <Button
-        variant="secondary"
-        className={cn(
-          'h-8 w-full justify-start gap-2 rounded-md border-0 bg-sidebar-accent px-2 text-[13px] font-medium text-muted-foreground/70 hover:bg-sidebar-accent/70 active:not-aria-[haspopup]:translate-y-0',
-          collapsed && 'justify-center px-0',
-        )}
-        aria-label="Search"
-        title={collapsed ? 'Search' : undefined}
-        onClick={() => {
-          onNavigate?.()
-          window.dispatchEvent(new CustomEvent('open-command-palette'))
-        }}
-      >
-        <Search className="size-[15px] shrink-0" />
-        {!collapsed ? (
-          <>
-            Search{' '}
-            <KbdGroup className="ml-auto">
-              <Kbd className="rounded-md bg-sidebar-accent px-1.5 text-[11px] text-muted-foreground/70">⌘K</Kbd>
-            </KbdGroup>
-          </>
-        ) : null}
-      </Button>
-      <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto', collapsed ? 'gap-1' : 'gap-0.5')}>
-        <SidebarSection label="Workspace" collapsed={collapsed} first />
-        {WORKSPACE_LINKS.map((link) => link.enabled ? (
-          <Fragment key={link.to}>
-            <NavLink
-              to={link.to === '/tasks' ? taskViewPath() : link.to}
-              className={({ isActive }) => itemClass(isActive && !view)}
-              aria-label={link.label}
-              title={collapsed ? link.label : undefined}
-              onClick={onNavigate}
-            >
-              <link.icon className="size-[18px] shrink-0 opacity-90" />
-              <span className={labelClass}>{link.label}</span>
-            </NavLink>
-            {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps */}
-            {link.to === '/tasks' && inTasks ? (
-              <NavLink
-                to="/views"
-                end
-                className={({ isActive }) => cn(itemClass(isActive), !collapsed && 'h-7 pl-[34px] font-normal')}
-                aria-label="Task views"
-                title={collapsed ? 'Task views' : undefined}
-                onClick={onNavigate}
-              >
-                <Layer className={cn('shrink-0 opacity-90', collapsed ? 'size-[18px]' : 'size-4')} />
-                <span className={labelClass}>Views</span>
-              </NavLink>
-            ) : null}
-          </Fragment>
-        ) : (
-          <Button key={link.to} variant="ghost" className={cn(disabledClass, itemClass(false))} disabled title={`${link.label} — Coming soon`}>
-            <link.icon className="size-[18px] shrink-0 opacity-90" />
-            <span className={labelClass}>{link.label}</span>
-            {!collapsed ? <span className={comingSoonClass}>Coming soon</span> : null}
-          </Button>
-        ))}
-        <SidebarSection label="Personal" collapsed={collapsed} />
-        <NavLink
-          to={inboxPath}
-          className={({ isActive }) => itemClass(isActive)}
-          aria-label="Inbox"
-          title={collapsed ? 'Inbox' : undefined}
-          onClick={onNavigate}
+    <SidebarNavCollapsed.Provider value={collapsed}>
+      <div data-slot="sidebar-nav" data-collapsed={collapsed} className="group/sidebar-nav flex min-h-0 flex-1 flex-col">
+        <Button
+          variant="secondary"
+          className={cn(
+            'h-8 w-full justify-start gap-2 rounded-md border-0 bg-sidebar-accent px-2 text-[13px] font-medium text-muted-foreground/70 hover:bg-sidebar-accent/70 active:not-aria-[haspopup]:translate-y-0',
+            collapsed && 'justify-center px-0',
+          )}
+          aria-label="Search"
+          title={collapsed ? 'Search' : undefined}
+          onClick={() => {
+            onNavigate?.()
+            window.dispatchEvent(new CustomEvent('open-command-palette'))
+          }}
         >
-          <Inbox className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>Inbox</span>
-        </NavLink>
-        <NavLink
-          to={taskViewPath('mine')}
-          className={itemClass(taskViewActive('mine'))}
-          aria-label="My tasks"
-          title={collapsed ? 'My tasks' : undefined}
-          onClick={onNavigate}
-        >
-          <SquareCheck className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>My tasks</span>
-        </NavLink>
-        <NavLink
-          to={taskViewPath('current_week')}
-          className={itemClass(taskViewActive('current_week'))}
-          aria-label="This week"
-          title={collapsed ? 'This week' : undefined}
-          onClick={onNavigate}
-        >
-          <Calendar className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>This week</span>
-        </NavLink>
-        <NavLink
-          to={taskViewPath('my_week')}
-          className={itemClass(taskViewActive('my_week'))}
-          aria-label="My week"
-          title={collapsed ? 'My week' : undefined}
-          onClick={onNavigate}
-        >
-          <Calendar className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>My week</span>
-        </NavLink>
-        <NavLink
-          to={taskViewPath('overdue')}
-          className={itemClass(taskViewActive('overdue'))}
-          aria-label="Overdue"
-          title={collapsed ? 'Overdue' : undefined}
-          onClick={onNavigate}
-        >
-          <Timer className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>Overdue</span>
-        </NavLink>
-        <NavLink
-          to={taskViewPath('due_soon')}
-          className={itemClass(taskViewActive('due_soon'))}
-          aria-label="Due soon"
-          title={collapsed ? 'Due soon' : undefined}
-          onClick={onNavigate}
-        >
-          <Calendar className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>Due soon</span>
-        </NavLink>
-        <Button variant="ghost" className={cn(disabledClass, itemClass(false))} disabled title="Direct messages — Coming soon">
-          <MessagesSquare className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>Direct messages</span>
-          {!collapsed ? <span className={comingSoonClass}>Coming soon</span> : null}
+          <Search className="size-[15px] shrink-0" />
+          {!collapsed ? (
+            <>
+              Search{' '}
+              <KbdGroup className="ml-auto">
+                <Kbd className="rounded-md bg-sidebar-accent px-1.5 text-[11px] text-muted-foreground/70">⌘K</Kbd>
+              </KbdGroup>
+            </>
+          ) : null}
         </Button>
-        <SidebarSection label="Manage" collapsed={collapsed} />
-        <NavLink
-          to="/settings"
-          className={({ isActive }) => itemClass(isActive)}
-          aria-label="Settings"
-          title={collapsed ? 'Settings' : undefined}
-          onClick={onNavigate}
-        >
-          <Settings className="size-[18px] shrink-0 opacity-90" />
-          <span className={labelClass}>Settings</span>
-        </NavLink>
+        <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto', collapsed ? 'gap-1' : 'gap-0.5')}>
+          <SidebarSection label="Workspace" collapsed={collapsed} first />
+          {WORKSPACE_LINKS.map((link) => link.enabled ? (
+            <Fragment key={link.to}>
+              <SidebarNavItem
+                to={link.to === '/tasks' ? taskViewPath() : link.to}
+                active={link.to === '/tasks' ? tasksActive : undefined}
+                icon={link.icon}
+                label={link.label}
+                onClick={onNavigate}
+              />
+              {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps */}
+              {link.to === '/tasks' && inTasks ? (
+                <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" onClick={onNavigate} />
+              ) : null}
+            </Fragment>
+          ) : (
+            <SidebarNavComingSoon key={link.to} icon={link.icon} label={link.label} />
+          ))}
+          <SidebarSection label="Personal" collapsed={collapsed} />
+          <SidebarNavItem to={inboxPath} icon={Inbox} label="Inbox" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('mine')} active={taskViewActive('mine')} icon={SquareCheck} label="My tasks" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('current_week')} active={taskViewActive('current_week')} icon={Calendar} label="This week" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('my_week')} active={taskViewActive('my_week')} icon={Calendar} label="My week" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('overdue')} active={taskViewActive('overdue')} icon={Timer} label="Overdue" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('due_soon')} active={taskViewActive('due_soon')} icon={Calendar} label="Due soon" onClick={onNavigate} />
+          <SidebarNavComingSoon icon={MessagesSquare} label="Direct messages" />
+          <SidebarSection label="Manage" collapsed={collapsed} />
+          <SidebarNavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
+        </div>
       </div>
-    </>
+    </SidebarNavCollapsed.Provider>
   )
 }

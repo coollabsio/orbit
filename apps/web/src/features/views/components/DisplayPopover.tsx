@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Setting4 } from 'reicon-react'
-import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -9,7 +8,6 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { shouldIgnoreShortcut } from '../shortcuts'
 import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS } from '../displayMeta'
-import { POPOVER_MOTION } from './motion'
 
 export interface DisplayPopoverProps {
   display: DisplayOptions
@@ -49,13 +47,6 @@ const PROPERTY_ORDER: TaskProperty[] = ['id', 'status', 'assignee', 'priority', 
 
 const SUB_ISSUE_LABEL: Record<SubIssuesMode, string> = { nested: 'Nested', flat: 'Flat', hidden: 'Hidden' }
 const SUB_ISSUE_OPTIONS: SubIssuesMode[] = ['nested', 'flat', 'hidden']
-
-/**
- * Pressed chips take the pink accent as a tint. `aria-pressed:` (not `data-[pressed]:`) so tailwind-merge replaces the
- * toggle's own `aria-pressed:bg-muted`; the compound hover keeps the tint under the pointer.
- */
-const PROPERTY_CHIP =
-  'h-6 min-w-0 rounded-md px-2 text-xs font-normal text-muted-foreground aria-pressed:border-primary/30 aria-pressed:bg-primary/10 aria-pressed:text-primary aria-pressed:hover:bg-primary/15 aria-pressed:hover:text-primary'
 
 /** Semantic equality (properties are a set, normalization applied), reusing the saved-view comparison. */
 function sameDisplay(a: DisplayOptions, b: DisplayOptions): boolean {
@@ -141,7 +132,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
         }
       />
       {open ? (
-        <PopoverContent align="end" data-instant={instant || undefined} className={cn('w-80 gap-0 p-0', POPOVER_MOTION)}>
+        <PopoverContent align="end" data-instant={instant || undefined} className="w-80 gap-0 p-0 data-instant:animate-none">
           <div className="p-3">
             <ToggleGroup
               aria-label="Layout"
@@ -161,7 +152,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
               ))}
             </ToggleGroup>
           </div>
-          <div className="flex flex-col gap-1 border-t border-border p-3">
+          <div className="flex flex-col gap-1 border-t p-3">
             <Row label="Grouping">
               <OptionSelect label="Grouping" value={display.group_by} items={groupItems} onChange={setGroup} />
             </Row>
@@ -227,7 +218,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
               />
             </Row>
           </div>
-          <div className="flex flex-col gap-2 border-t border-border p-3">
+          <div className="flex flex-col gap-2 border-t p-3">
             <span className="text-xs font-medium text-muted-foreground">Display properties</span>
             <ToggleGroup
               aria-label="Display properties"
@@ -240,13 +231,13 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
               onValueChange={(value: string[]) => onChange({ properties: PROPERTY_ORDER.filter((property) => value.includes(property)) })}
             >
               {PROPERTY_ORDER.map((property) => (
-                <ToggleGroupItem key={property} value={property} className={PROPERTY_CHIP}>
+                <ToggleGroupItem key={property} value={property} className="h-6 min-w-0 px-2 text-xs font-normal text-muted-foreground aria-pressed:text-foreground">
                   {PROPERTY_LABEL[property]}
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
           </div>
-          <div className="flex justify-end border-t border-border p-2">
+          <div className="flex justify-end border-t p-2">
             <Button type="button" variant="ghost" size="sm" disabled={sameDisplay(display, defaultDisplay)} onClick={() => onChange(defaultDisplay)}>
               Reset to default
             </Button>

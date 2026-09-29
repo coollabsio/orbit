@@ -19,7 +19,7 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
   const [dragging, setDragging] = useState(false)
   return (
     <div
-      className="group/row flex min-h-16 w-full min-w-0 cursor-pointer items-start gap-2 border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.02] data-[active]:bg-muted data-[dragging]:bg-muted data-[dragging]:text-foreground"
+      className="group/row flex min-h-16 w-full min-w-0 cursor-pointer items-start gap-2 border-b px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.02] data-active:bg-muted data-dragging:bg-muted data-dragging:text-foreground"
       data-active={active ? 'true' : undefined}
       data-unread={thread.unread ? 'true' : undefined}
       data-dragging={dragging || undefined}
@@ -30,7 +30,7 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
         // drag image: a small pill with the subject, not the whole translucent row
         const ghost = document.createElement('div')
         ghost.className =
-          'fixed top-[-100px] left-[-100px] z-100 max-w-[260px] overflow-hidden rounded-[8px] border border-border bg-card px-2.5 py-1.5 text-[12px] font-medium text-ellipsis whitespace-nowrap text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.16)]'
+          'fixed top-[-100px] left-[-100px] z-100 max-w-[260px] overflow-hidden rounded-[8px] border bg-card px-2.5 py-1.5 text-[12px] font-medium text-ellipsis whitespace-nowrap text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.16)]'
         ghost.textContent = `✉️ ${thread.subject}`
         document.body.appendChild(ghost)
         e.dataTransfer.setDragImage(ghost, 12, 12)

@@ -1,4 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react'
+import { cn } from 'cn'
 import { differenceInCalendarDays } from 'date-fns'
 import { TaskSquare as SquareCheck } from 'reicon-react'
 import { toast } from 'sonner'
@@ -24,8 +25,6 @@ export const LEFT_PANE = 280
 export const ROW_HEIGHT = 32
 export const HEADER_HEIGHT = 52
 const REVEAL_MARGIN = 48
-/** Opaque so the sticky left cell matches the band behind the track. */
-const GROUP_ROW = 'bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]'
 
 export interface TimelineHandle {
   scrollToToday: () => void
@@ -247,8 +246,8 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupC
           <div data-today-line className="absolute inset-y-0 z-[5] w-px bg-primary/70" style={{ left: todayX }} />
         </div>
 
-        <div className="sticky top-0 z-20 flex border-b border-border bg-background">
-          <div className="sticky left-0 z-10 w-[280px] shrink-0 border-r border-border bg-background max-[899px]:hidden" />
+        <div className="sticky top-0 z-20 flex border-b bg-background">
+          <div className="sticky left-0 z-10 w-[280px] shrink-0 border-r bg-background max-[899px]:hidden" />
           <TimelineHeader range={range} pxPerDay={pxPerDay} today={today} />
         </div>
 
@@ -262,7 +261,11 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupC
           const preview = live ?? saving
           const span = row.kind === 'task' ? (preview ? taskSpan(preview) : row.span) : null
           return (
-            <div key={row.key} className={`group/row relative flex h-8 ${row.kind === 'group' ? GROUP_ROW : 'hover:bg-foreground/[0.03]'}`}>
+            <div
+              key={row.key}
+              // the group band is opaque so the sticky left cell (TimelineRowLabel) matches it
+              className={cn('group/row relative flex h-8', row.kind === 'group' ? 'bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]' : 'hover:bg-foreground/[0.03]')}
+            >
               <TimelineRowLabel
                 row={row}
                 status={status}
@@ -273,7 +276,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupC
                 onReveal={row.kind === 'task' && row.span ? () => reveal(row.span!.start) : undefined}
               />
               <div
-                className={`relative shrink-0 ${undated ? 'cursor-crosshair' : ''}`}
+                className={cn('relative shrink-0', undated && 'cursor-crosshair')}
                 style={{ width: trackWidth }}
                 data-row-track={row.kind === 'task' ? row.task.id : undefined}
                 onPointerDown={undated ? (event) => begin(event, row.task.id, 'draw') : undefined}
@@ -329,7 +332,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, groupC
         })}
         {/* keeps the left pane solid below the last row, so the grid never shows through it */}
         <div className="flex flex-1">
-          <div className="sticky left-0 z-10 w-[280px] shrink-0 border-r border-border bg-background max-[899px]:hidden" />
+          <div className="sticky left-0 z-10 w-[280px] shrink-0 border-r bg-background max-[899px]:hidden" />
         </div>
       </div>
     </div>

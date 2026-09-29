@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
+import { cn } from 'cn'
 import { DirectInbox as Inbox, DocumentText as FileText, Home2 as Home, People as Users, Setting2 as Settings, ShieldTick as ShieldCheck, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import type { IconComponent as LucideIcon } from 'reicon-react'
 import {
@@ -54,6 +55,30 @@ function Highlighted({ text, ranges }: { text: string; ranges: TextRange[] | und
         ),
       )}
     </>
+  )
+}
+
+/** One result row: icon, title (page hits add their highlights and a body snippet), and a meta hint. */
+function PaletteItem({ entry, onSelect }: { entry: CommandEntry; onSelect: () => void }) {
+  return (
+    <CommandItem value={entry.id} className={cn('gap-2.5 px-2.5 text-[13px]', entry.snippet ? 'min-h-10 py-1.5' : 'h-10')} onSelect={onSelect}>
+      <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
+      {entry.snippet ? (
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate">
+            <Highlighted text={entry.title} ranges={entry.titleHighlights} />
+          </span>
+          <span className="truncate text-xs text-muted-foreground" data-snippet>
+            <Highlighted text={entry.snippet.text} ranges={entry.snippet.highlights} />
+          </span>
+        </span>
+      ) : (
+        <span className="truncate">
+          {entry.titleHighlights ? <Highlighted text={entry.title} ranges={entry.titleHighlights} /> : entry.title}
+        </span>
+      )}
+      <CommandShortcut className="text-[11px] tracking-normal whitespace-nowrap text-muted-foreground/70">{entry.meta}</CommandShortcut>
+    </CommandItem>
   )
 }
 
@@ -145,7 +170,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       onOpenChange={(next) => { if (!next) onClose() }}
       title="Command palette"
       description="Search tasks, pages and navigation."
-      className="top-[12vh] max-h-[min(60vh,28rem)] bg-card shadow-2xl ring-border sm:max-w-[576px]"
+      className="top-[12vh] max-h-[min(60vh,28rem)] sm:max-w-[576px]"
     >
       {/* `shouldFilter={false}`: the entry list is already filtered here (tasks and pages are
           filtered server-side), so cmdk only owns highlighting and keyboard navigation. */}
@@ -165,39 +190,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           {recent.length > 0 ? (
             <CommandGroup heading="Recent" className="p-0" data-recent-pages="">
               {recent.map((entry) => (
-                <CommandItem key={entry.id} value={entry.id} className="h-10 gap-2.5 px-2.5 text-[13px]" onSelect={() => open(entry)}>
-                  <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
-                  <span className="truncate">{entry.title}</span>
-                  <CommandShortcut className="text-[11px] tracking-normal whitespace-nowrap text-muted-foreground/70">{entry.meta}</CommandShortcut>
-                </CommandItem>
+                <PaletteItem key={entry.id} entry={entry} onSelect={() => open(entry)} />
               ))}
             </CommandGroup>
           ) : null}
           <CommandGroup heading={recent.length > 0 ? 'Go to' : undefined} className="p-0">
             {results.map((entry) => (
-              <CommandItem
-                key={entry.id}
-                value={entry.id}
-                className={entry.snippet ? 'min-h-10 gap-2.5 px-2.5 py-1.5 text-[13px]' : 'h-10 gap-2.5 px-2.5 text-[13px]'}
-                onSelect={() => open(entry)}
-              >
-                <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
-                {entry.snippet ? (
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">
-                      <Highlighted text={entry.title} ranges={entry.titleHighlights} />
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground" data-snippet>
-                      <Highlighted text={entry.snippet.text} ranges={entry.snippet.highlights} />
-                    </span>
-                  </span>
-                ) : (
-                  <span className="truncate">
-                    {entry.titleHighlights ? <Highlighted text={entry.title} ranges={entry.titleHighlights} /> : entry.title}
-                  </span>
-                )}
-                <CommandShortcut className="text-[11px] tracking-normal whitespace-nowrap text-muted-foreground/70">{entry.meta}</CommandShortcut>
-              </CommandItem>
+              <PaletteItem key={entry.id} entry={entry} onSelect={() => open(entry)} />
             ))}
           </CommandGroup>
         </CommandList>

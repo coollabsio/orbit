@@ -44,7 +44,7 @@ export function CopyCodeButton({ getText, className }: { getText: () => string; 
       type="button"
       variant="outline"
       className={cn(
-        'inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background/90 px-2 text-[11px] font-semibold text-muted-foreground opacity-0 shadow-sm transition-[opacity,background-color,color,transform] hover:bg-muted hover:text-foreground focus:opacity-100 active:scale-95 active:not-aria-[haspopup]:translate-y-0 group-hover:opacity-100 data-[state=copied]:bg-primary/10 data-[state=copied]:text-primary data-[state=failed]:bg-destructive/10 data-[state=failed]:text-destructive dark:border-border dark:bg-background/90 dark:hover:bg-muted dark:data-[state=copied]:bg-primary/10 dark:data-[state=failed]:bg-destructive/10',
+        'h-7 gap-1 bg-background/90 px-2 text-[11px] font-semibold text-muted-foreground opacity-0 shadow-sm transition-[opacity,background-color,color,transform] group-hover:opacity-100 focus:opacity-100 active:scale-95 active:not-aria-[haspopup]:translate-y-0 data-[state=copied]:bg-primary/10 data-[state=copied]:text-primary data-[state=failed]:bg-destructive/10 data-[state=failed]:text-destructive dark:bg-background/90 dark:data-[state=copied]:bg-primary/10 dark:data-[state=failed]:bg-destructive/10',
         className,
       )}
       data-state={copyState}

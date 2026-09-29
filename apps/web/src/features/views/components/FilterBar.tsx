@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import { useEffect, useState, type ComponentProps, type ReactElement, type ReactNode } from 'react'
 import { Add as Plus, Filter, Hierarchy, Lock, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -23,13 +24,6 @@ import { appendCondition } from '../filterTree'
 import { shouldIgnoreShortcut } from '../shortcuts'
 import { countConditions, isFlatFilter, type Condition, type FilterField, type FilterGroup, type FilterOperator } from '../viewState'
 import { FilterValuePicker, ValueGlyph } from './FilterValuePicker'
-import { POPOVER_MOTION } from './motion'
-
-const FILTER_BUTTON =
-  'data-[active]:bg-primary/10 data-[active]:text-primary data-[active]:ring-1 data-[active]:ring-inset data-[active]:ring-primary/25 max-[899px]:w-8 max-[899px]:px-0'
-const CHIP = 'inline-flex h-7 max-w-full origin-left items-stretch overflow-hidden rounded-md border border-border bg-background text-xs'
-const SEGMENT = 'inline-flex min-w-0 items-center gap-1.5 px-2 whitespace-nowrap'
-const SEGMENT_BUTTON = cn(SEGMENT, 'border-l border-border outline-none transition-colors duration-150 ease-out hover-fine:hover:bg-muted focus-visible:bg-muted aria-expanded:bg-muted')
 
 /** Title of the add controls once the tree is at the cap. */
 const FULL_TITLE = `Filters can have at most ${MAX_FILTER_CONDITIONS} conditions`
@@ -73,11 +67,11 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
     <Popover open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())} modal={false}>
       <PopoverTrigger render={trigger} />
       {open ? (
-        <PopoverContent align="start" data-instant={instant || undefined} className={cn('w-auto gap-0 p-0', POPOVER_MOTION)}>
+        <PopoverContent align="start" data-instant={instant || undefined} className="w-auto gap-0 p-0 data-instant:animate-none">
           {draft ? (
             <FilterValuePicker condition={draft} options={options} onChange={change} onDone={close} />
           ) : (
-            <Command label="Filter by" className="w-60 rounded-lg! bg-transparent">
+            <Command label="Filter by" className="w-60">
               <CommandInput autoFocus aria-label="Filter by" placeholder="Filter by…" />
               <CommandList>
                 <CommandEmpty className="py-4 text-xs text-muted-foreground">No matching fields</CommandEmpty>
@@ -157,11 +151,11 @@ export function FilterButton({ filter, options, onChange, onOpenAdvanced }: Filt
         if (!next) setInstant(false)
       }}
       trigger={
-        <Button type="button" variant="ghost" aria-label="Filter tasks" aria-keyshortcuts="F" disabled={full} title={full ? FULL_TITLE : undefined} data-active={count > 0 || undefined} className={FILTER_BUTTON}>
+        <Button type="button" variant="ghost" aria-label="Filter tasks" aria-keyshortcuts="F" disabled={full} title={full ? FULL_TITLE : undefined} data-active={count > 0 || undefined} className="data-active:bg-primary/10 data-active:text-primary max-[899px]:w-8 max-[899px]:px-0">
           <Filter className="size-4" />
           <span className="max-[899px]:hidden">Filter</span>
           {count > 0 ? (
-            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">{count}</span>
+            <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{count}</Badge>
           ) : null}
         </Button>
       }
@@ -196,7 +190,7 @@ export function FilterBar({ filter, options, onChange, presetLabel = null, onOpe
   const replaceAt = (index: number, next: Condition) => onChange({ ...filter, children: filter.children.map((child, i) => (i === index ? next : child)) })
   const removeAt = (index: number) => onChange({ ...filter, children: filter.children.filter((_, i) => i !== index) })
   return (
-    <div role="toolbar" aria-label="Filters" className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-background px-3 py-1.5 max-[899px]:px-2">
+    <div role="toolbar" aria-label="Filters" className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b bg-background px-3 py-1.5 max-[899px]:px-2">
       {presetLabel ? (
         <span
           title="Always applied on this page"
@@ -277,18 +271,18 @@ function ConditionChip({ condition, options, enter, onChange, onRemove }: Condit
   }
 
   return (
-    <div data-filter-chip={condition.field} className={cn(CHIP, animate && 'animate-filter-chip-enter')}>
-      <span className={cn(SEGMENT, 'text-muted-foreground')}>
+    <FilterChip data-filter-chip={condition.field} className={cn(animate && 'animate-filter-chip-enter')}>
+      <ChipSegment>
         <Icon className="size-3.5" aria-hidden="true" />
         {meta.label}
-      </span>
+      </ChipSegment>
       {meta.operators.length > 1 ? (
         <DropdownMenu open={operatorOpen} onOpenChange={setOperatorOpen} modal={false}>
           <DropdownMenuTrigger
             render={
-              <button type="button" className={cn(SEGMENT_BUTTON, 'text-muted-foreground')} aria-label={`${meta.label} operator: ${operatorText}`}>
+              <ChipButton className="text-muted-foreground" aria-label={`${meta.label} operator: ${operatorText}`}>
                 {operatorText}
-              </button>
+              </ChipButton>
             }
           />
           {operatorOpen ? (
@@ -302,56 +296,57 @@ function ConditionChip({ condition, options, enter, onChange, onRemove }: Condit
           ) : null}
         </DropdownMenu>
       ) : (
-        <span className={cn(SEGMENT, 'border-l border-border text-muted-foreground')}>{operatorText}</span>
+        <ChipSegment>{operatorText}</ChipSegment>
       )}
       {operatorNeedsValue(shown.operator) ? (
         <Popover open={draft !== null} onOpenChange={(open) => (open ? setDraft(condition) : closeValues())} modal={false}>
           <PopoverTrigger
             render={
-              <button type="button" className={cn(SEGMENT_BUTTON, 'font-medium text-foreground')} aria-label={`${meta.label} values: ${summary || 'none'}`}>
+              <ChipButton className="font-medium" aria-label={`${meta.label} values: ${summary || 'none'}`}>
                 {glyphs.length > 0 ? (
                   <span aria-hidden="true" className="flex items-center gap-0.5">
                     {glyphs.map((option) => <ValueGlyph key={option.value} glyph={option.glyph} size={12} />)}
                   </span>
                 ) : null}
                 <span className="max-w-56 truncate">{summary || 'Choose…'}</span>
-              </button>
+              </ChipButton>
             }
           />
           {draft ? (
-            <PopoverContent align="start" className={cn('w-auto gap-0 p-0', POPOVER_MOTION)}>
+            <PopoverContent align="start" className="w-auto gap-0 p-0">
               <FilterValuePicker condition={draft} options={options} onChange={edit} onDone={closeValues} />
             </PopoverContent>
           ) : null}
         </Popover>
       ) : null}
-      <button
-        type="button"
-        aria-label={`Remove ${meta.label.toLowerCase()} filter`}
-        onClick={onRemove}
-        className="inline-flex w-6 items-center justify-center border-l border-border text-muted-foreground outline-none transition-colors duration-150 hover-fine:hover:bg-muted hover-fine:hover:text-foreground focus-visible:bg-muted"
-      >
+      <ChipButton aria-label={`Remove ${meta.label.toLowerCase()} filter`} className="w-6 justify-center px-0 text-muted-foreground" onClick={onRemove}>
         <X className="size-3" />
-      </button>
-    </div>
+      </ChipButton>
+    </FilterChip>
   )
+}
+
+/** `Field · operator · values ×` pill: one bordered box, its parts split by a hairline. */
+function FilterChip({ className, ...props }: ComponentProps<'div'>) {
+  return <div data-slot="filter-chip" className={cn('inline-flex h-7 max-w-full origin-left items-stretch overflow-hidden rounded-md border bg-background text-xs', className)} {...props} />
+}
+
+/** A static part of a filter chip (the field name, a fixed operator). */
+function ChipSegment({ className, ...props }: ComponentProps<'span'>) {
+  return <span data-slot="filter-chip-segment" className={cn('inline-flex min-w-0 items-center gap-1.5 px-2 whitespace-nowrap text-muted-foreground not-first:border-l', className)} {...props} />
+}
+
+/** A clickable part of a filter chip: a square-cornered ghost button with the hairline on its left. */
+function ChipButton({ className, ...props }: ComponentProps<typeof Button>) {
+  return <Button type="button" variant="ghost" className={cn('h-auto min-w-0 gap-1.5 rounded-none border-0 border-l border-l-border px-2 text-xs font-normal', className)} {...props} />
 }
 
 function AdvancedChip({ count, enter, onOpen }: { count: number; enter: boolean; onOpen?: () => void }) {
   const [animate] = useState(enter)
   return (
-    <button
-      type="button"
-      disabled={!onOpen}
-      onClick={onOpen}
-      className={cn(
-        CHIP,
-        'items-center gap-1.5 px-2 font-medium text-foreground transition-[background-color,transform] duration-150 ease-out hover-fine:hover:bg-muted active:scale-[0.97] disabled:cursor-default disabled:active:scale-100',
-        animate && 'animate-filter-chip-enter',
-      )}
-    >
-      <Hierarchy className="size-3.5 text-muted-foreground" aria-hidden="true" />
+    <Button type="button" variant="outline" size="sm" disabled={!onOpen} onClick={onOpen} className={cn('origin-left text-xs', animate && 'animate-filter-chip-enter')}>
+      <Hierarchy className="text-muted-foreground" aria-hidden="true" />
       {`Advanced filter · ${count} ${count === 1 ? 'condition' : 'conditions'}`}
-    </button>
+    </Button>
   )
 }

@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { format } from 'date-fns'
 import { dayAt, monthMarks, tickMarks, xOf, type TimeRange } from './timelineLib'
 
@@ -15,7 +16,7 @@ export function TimelineHeader({ range, pxPerDay, today }: { range: TimeRange; p
         <span
           key={tick.x}
           // weekends step back so the working week reads first
-          className={`absolute top-7 h-6 text-center text-[11px] leading-6 tabular-nums ${[0, 6].includes(dayAt(range, Math.round(tick.x / pxPerDay)).getDay()) ? 'text-muted-foreground/50' : 'text-muted-foreground'}`}
+          className={cn('absolute top-7 h-6 text-center text-[11px] leading-6 text-muted-foreground tabular-nums', [0, 6].includes(dayAt(range, Math.round(tick.x / pxPerDay)).getDay()) && 'text-muted-foreground/50')}
           style={{ left: tick.x, width: pxPerDay }}
         >
           {tick.label}

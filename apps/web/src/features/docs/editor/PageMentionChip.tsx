@@ -8,8 +8,9 @@ export function PageMentionChip({ userId, name }: { userId: string; name: string
   const label = mentionLabel(userId, name, names)
   return (
     <span
-      className="orbit-page-mention rounded-[4px] bg-primary/10 px-0.5 font-medium whitespace-nowrap text-primary"
+      data-slot="page-mention"
       data-mention-user={userId}
+      className="rounded-[4px] bg-primary/10 px-0.5 font-medium whitespace-nowrap text-primary"
       contentEditable={false}
     >
       @{label}

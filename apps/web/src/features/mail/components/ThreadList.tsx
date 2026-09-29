@@ -2,6 +2,7 @@ import { Edit as SquarePen } from 'reicon-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/common/EmptyState'
+import { PaneTitle } from '@/components/common/Pane'
 import { setThreadRead } from '@/mock/actions'
 import type { MailFolder, MailThread } from '@/mock/types'
 import { FOLDER_ICONS } from '@/features/mail/mailLib'
@@ -25,10 +26,10 @@ export function ThreadList({ folders, folder, threads, activeThreadId, onCompose
   }
 
   return (
-    <section className="flex h-full w-[360px] shrink-0 flex-col border-l border-border bg-background max-[1199px]:w-[300px] max-[899px]:w-auto max-[899px]:flex-1 max-[899px]:border-l-0 max-[899px]:group-data-[view=thread]/mail:hidden">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
-        <span className="truncate text-[13px] font-semibold text-foreground max-[899px]:hidden">{folder.name}</span>
-        <span className="hidden truncate text-[13px] font-semibold text-foreground max-[899px]:block">Mail</span>
+    <section className="flex h-full w-[360px] shrink-0 flex-col border-l bg-background max-[1199px]:w-[300px] max-[899px]:w-auto max-[899px]:flex-1 max-[899px]:border-l-0 max-[899px]:group-data-[view=thread]/mail:hidden">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3 max-[899px]:border-b-0">
+        <PaneTitle className="max-[899px]:hidden">{folder.name}</PaneTitle>
+        <PaneTitle className="hidden max-[899px]:block">Mail</PaneTitle>
         <span className="flex-1" />
         <Button className="max-[899px]:hidden" onClick={onCompose}>
           <SquarePen className="size-4" />
@@ -44,13 +45,14 @@ export function ThreadList({ folders, folder, threads, activeThreadId, onCompose
           <SquarePen className="size-4" />
         </Button>
       </div>
-      <div className="hidden min-h-10 items-center gap-1.5 overflow-x-auto border-b border-border px-3 py-1 [scrollbar-width:none] max-[899px]:flex">
+      <div className="hidden min-h-10 items-center gap-1.5 overflow-x-auto border-b px-3 py-1 [scrollbar-width:none] max-[899px]:flex">
         {folders.map((f) => (
           <Button
             key={f.id}
             type="button"
             variant="ghost"
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border-0 px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground dark:hover:bg-accent data-[active]:bg-primary/10 data-[active]:text-primary data-[active]:ring-1 data-[active]:ring-primary/25 data-[active]:ring-inset"
+            size="sm"
+            className="shrink-0 text-[13px] text-muted-foreground data-active:bg-primary/10 data-active:text-primary"
             data-active={f.id === folder.id || undefined}
             onClick={() => navigate(`/mail?folder=${f.id}`)}
           >

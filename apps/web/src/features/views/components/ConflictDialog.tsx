@@ -7,7 +7,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { PRESS_MOTION } from './motion'
 
 export interface ConflictDialogProps {
   open: boolean
@@ -27,8 +26,8 @@ export function ConflictDialog({ open, onOpenChange, onReload, onOverwrite, pend
             <AlertDialogDescription>Reload to see the latest version and drop your changes, or overwrite it with your changes.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <Button type="button" variant="outline" className={PRESS_MOTION} disabled={pending} onClick={onReload}>Reload</Button>
-            <Button type="button" variant="destructive" className={PRESS_MOTION} disabled={pending} onClick={onOverwrite}>Overwrite</Button>
+            <Button type="button" variant="outline" disabled={pending} onClick={onReload}>Reload</Button>
+            <Button type="button" variant="destructive" disabled={pending} onClick={onOverwrite}>Overwrite</Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       ) : null}

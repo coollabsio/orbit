@@ -287,7 +287,7 @@ test('manual order: a card taking the hover over holds the placeholder in place 
   expect(cardOf(view, 'other').getAttribute('data-nest')).toBe('inside')
   expect(placeholders(view)).toHaveLength(1)
   expect(placeholders(view)[0]!.hasAttribute('data-held')).toBe(true)
-  expect(placeholders(view)[0]!.className).toContain('data-[held]:invisible')
+  expect(placeholders(view)[0]!.className).toContain('data-held:invisible')
   expect(placeholders(view)[0]!.previousElementSibling!.contains(cardOf(view, 'third'))).toBe(true)
   expect(columnOf(view, 'Doing').hasAttribute('data-drop-over')).toBe(false)
 
@@ -304,7 +304,7 @@ test('manual order: a card taking the hover over holds the placeholder in place 
 
 test('nest-target cards skip the hover styles, so the tint always wins', () => {
   const view = renderBoard([task('moving', 'todo', 1)])
-  const hoverClasses = cardOf(view, 'Moving').className.split(' ').filter((name) => name.includes('hover:'))
-  expect(hoverClasses.length).toBeGreaterThan(0)
-  expect(hoverClasses.filter((name) => !name.includes('not-data-[nest=inside]:'))).toHaveLength(0)
+  const hoverTokens = cardOf(view, 'Moving').className.split(' ').filter((name) => name.includes('hover:'))
+  expect(hoverTokens.length).toBeGreaterThan(0)
+  expect(hoverTokens.filter((name) => !name.includes('not-data-[nest=inside]:'))).toHaveLength(0)
 })

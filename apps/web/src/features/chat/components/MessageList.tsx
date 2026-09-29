@@ -4,7 +4,8 @@ import { useSearchParams } from 'react-router'
 import { Message as MessageSquare, Trash as Trash2 } from 'reicon-react'
 import { PinIcon } from '@/components/common/icons/PinIcon'
 import { Button } from '@/components/ui/button'
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { hidePinNotice } from '@/mock/actions'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import type { AppState, Channel, ChatMessage } from '@/mock/types'
@@ -15,12 +16,10 @@ import {
   messageMentionsCurrentUser,
 } from '@/features/chat/chatLib'
 import { buildMentionTokens } from '@/lib/mentions'
+import { ChatContextMenuItem } from './ChatMenuItem'
 import { MessageItem } from './MessageItem'
 
 const GROUP_WINDOW_MS = 300_000 // the chat reference: 300 seconds
-
-const menuItemClass =
-  'gap-2 rounded-lg px-2.5 py-1.5 font-medium text-destructive hover:bg-destructive/10 focus:text-destructive data-highlighted:text-destructive [&>svg]:text-destructive focus:*:[svg]:text-destructive'
 
 export function MessageList({
   state,
@@ -104,15 +103,15 @@ export function MessageList({
     <div className="relative min-h-0 flex-1">
       <div ref={containerRef} className="h-full overflow-y-auto px-4 pt-2 pb-5 max-[899px]:px-2.5 max-[899px]:pt-1.5 max-[899px]:pb-3.5" onScroll={updateJumpToPresent}>
         {messages.length === 0 ? (
-          <div className="flex min-h-full items-center justify-center px-4 py-16">
-            <div className="flex max-w-sm flex-col items-center text-center">
-              <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-                <MessageSquare className="size-7" />
-              </div>
-              <h2 className="text-lg font-semibold text-foreground">No messages yet</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">Start the conversation in #{channel.name}.</p>
-            </div>
-          </div>
+          <Empty className="min-h-full">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <MessageSquare />
+              </EmptyMedia>
+              <EmptyTitle>No messages yet</EmptyTitle>
+              <EmptyDescription>Start the conversation in #{channel.name}.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           messages.map((msg, i) => {
             const prevMsg = i > 0 ? messages[i - 1] : null
@@ -159,7 +158,7 @@ export function MessageList({
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
           <div className="pointer-events-auto flex items-center gap-3 rounded-xl border border-border bg-popover/95 px-3 py-2 shadow-xl backdrop-blur-sm">
             <span className="text-xs font-semibold text-foreground">You're Viewing Older Messages</span>
-            <Button type="button" className="h-auto rounded-lg px-3 py-1.5 text-xs font-bold transition hover:bg-primary hover:brightness-110" onClick={jumpToPresent}>
+            <Button type="button" size="sm" onClick={jumpToPresent}>
               Jump To Present
             </Button>
           </div>
@@ -194,11 +193,11 @@ function PinnedNotice({ state, message }: { state: AppState; message: ChatMessag
             <strong style={actor ? { color: actor.color } : undefined}>{actorName}</strong> pinned <strong>a message</strong> to this channel.
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-44 p-1.5">
-          <ContextMenuItem className={menuItemClass} onClick={() => setConfirmOpen(true)}>
-            <Trash2 size={16} />
+        <ContextMenuContent className="min-w-44">
+          <ChatContextMenuItem danger onClick={() => setConfirmOpen(true)}>
+            <Trash2 />
             Delete pin notice
-          </ContextMenuItem>
+          </ChatContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       {confirmOpen ? (

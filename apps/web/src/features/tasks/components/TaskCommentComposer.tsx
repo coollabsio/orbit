@@ -6,10 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { User } from '@/features/workspaces/models'
 
-const OPTION =
-  `group flex h-auto w-full min-h-8 items-center justify-start gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm font-normal whitespace-normal text-foreground transition-colors hover:bg-accent dark:hover:bg-accent [&_svg:not([class*='size-'])]:size-3.5`
-const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
-
 export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], compact, onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; members?: User[]; compact?: boolean; onSend: (body: string, files: File[], mentionedUserIds: string[]) => Promise<unknown> }) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -46,19 +42,16 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
   return (
     <div className="relative grid gap-2" onDrop={(event) => { event.preventDefault(); setFiles((current) => [...current, ...event.dataTransfer.files]) }} onDragOver={(event) => event.preventDefault()}>
       {suggestions.length > 0 ? (
-        <div className="absolute bottom-full right-0 left-0 z-[5] mb-1.5 flex max-h-[200px] flex-col gap-px overflow-auto rounded-lg border border-border bg-popover p-1 shadow-lg" role="listbox" aria-label="Mention member">
+        <div className="absolute bottom-full right-0 left-0 z-[5] mb-1.5 flex max-h-[200px] flex-col gap-px overflow-auto rounded-lg border bg-popover p-1 shadow-lg" role="listbox" aria-label="Mention member">
           {suggestions.map((member) => (
-            <Button variant="ghost" key={member.id} type="button" className={OPTION} onMouseDown={(event) => { event.preventDefault(); insertMention(member) }}>
+            <Button variant="ghost" key={member.id} type="button" className="w-full justify-start font-normal" onMouseDown={(event) => { event.preventDefault(); insertMention(member) }}>
               @{member.name}
             </Button>
           ))}
         </div>
       ) : null}
       <Textarea
-        className={cn(
-          'block field-sizing-fixed w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30',
-          compact ? 'min-h-11 text-[13px] leading-[18px] md:text-[13px]' : 'min-h-20',
-        )}
+        className={cn('field-sizing-fixed resize-y', compact ? 'min-h-11 text-[13px] leading-[18px] md:text-[13px]' : 'min-h-20')}
         rows={compact ? 1 : 2}
         value={body}
         placeholder={placeholder}
@@ -68,7 +61,14 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
           if (pasted.length > 0) setFiles((current) => [...current, ...pasted])
         }}
       />
-      {files.length > 0 ? <div className="flex flex-wrap items-center gap-2">{files.map((file, index) => <Badge variant="outline" className={PILL} key={`${file.name}-${index}`}>{file.name}<Button type="button" variant="ghost" size="icon-xs" className="ml-1 inline-flex size-auto rounded-none border-0 text-inherit hover:bg-transparent hover:text-inherit dark:hover:bg-transparent" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></Button></Badge>)}</div> : null}
+      {files.length > 0 ? <div className="flex flex-wrap items-center gap-2">{files.map((file, index) => (
+        <Badge variant="outline" className="pr-0.5" key={`${file.name}-${index}`}>
+          {file.name}
+          <Button type="button" variant="ghost" size="icon-xs" className="size-4 rounded-full text-muted-foreground" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+            <X />
+          </Button>
+        </Badge>
+      ))}</div> : null}
       {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         <input ref={input} type="file" multiple hidden aria-label="Attach comment files" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />

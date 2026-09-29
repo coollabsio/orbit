@@ -1,9 +1,11 @@
 // Port of the chat reference MemberList: role groups, Online/Offline sections, presence dots, resizable.
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Xmark as X } from 'reicon-react'
-import { Button } from '@/components/ui/button'
 import type { AppState, User } from '@/mock/types'
 import { primaryRole } from '@/features/chat/chatLib'
+import { cn } from 'cn'
+import { ChatIconButton } from './ChatIconButton'
+import { InitialAvatar } from './InitialAvatar'
 
 const WIDTH_KEY = 'orbit:member_list_width'
 const MIN_WIDTH = 220
@@ -67,50 +69,39 @@ export function MemberList({
   const colorOf = (member: User) => primaryRole(state, member.id)?.color
 
   const content = (
-    <div className={`relative flex shrink-0 flex-col border-l border-border bg-background text-foreground ${isMobile ? 'h-full w-60' : ''}`} style={isMobile ? undefined : { width }}>
+    <div className={cn('relative flex shrink-0 flex-col border-l border-border bg-background text-foreground', isMobile && 'h-full w-60')} style={isMobile ? undefined : { width }}>
       {!isMobile ? (
         <div className="absolute top-0 bottom-0 -left-px z-20 w-1 cursor-col-resize transition-colors hover:bg-primary/40" onPointerDown={handleResizeStart} title="Resize member list" />
       ) : null}
       {isMobile ? (
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
           <span className="text-sm font-semibold">Members</span>
-          <Button type="button" variant="ghost" size="icon-sm" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-muted" title="Close" onClick={onClose}>
+          <ChatIconButton size="sm" title="Close" aria-label="Close member list" onClick={onClose}>
             <X className="size-3.5" />
-          </Button>
+          </ChatIconButton>
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto [overscroll-behavior:none]">
         {roleGroups.map(({ role, members }) => (
-          <div key={role.id} className="flex min-w-0 flex-col gap-0.5 px-4 pt-4">
-            <div className="mb-0.5 flex items-center gap-2 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground">
-              <span>
-                {role.name} — {members.length}
-              </span>
-            </div>
+          <MemberGroup key={role.id} label={`${role.name} — ${members.length}`}>
             {members.map((member) => (
               <MemberItem key={member.id} member={member} online nameColor={colorOf(member)} />
             ))}
-          </div>
+          </MemberGroup>
         ))}
         {online.length > 0 ? (
-          <div className="flex min-w-0 flex-col gap-0.5 px-4 pt-4">
-            <div className="mb-0.5 flex items-center gap-2 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground">
-              <span>Online — {online.length}</span>
-            </div>
+          <MemberGroup label={`Online — ${online.length}`}>
             {online.map((member) => (
               <MemberItem key={member.id} member={member} online nameColor={colorOf(member)} />
             ))}
-          </div>
+          </MemberGroup>
         ) : null}
         {offline.length > 0 ? (
-          <div className="flex min-w-0 flex-col gap-0.5 px-4 pt-4">
-            <div className="mb-0.5 flex items-center gap-2 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground">
-              <span>Offline — {offline.length}</span>
-            </div>
+          <MemberGroup label={`Offline — ${offline.length}`}>
             {offline.map((member) => (
               <MemberItem key={member.id} member={member} online={false} nameColor={colorOf(member)} />
             ))}
-          </div>
+          </MemberGroup>
         ) : null}
       </div>
     </div>
@@ -128,20 +119,24 @@ export function MemberList({
   return <div className="flex max-[1279px]:hidden">{content}</div>
 }
 
+function MemberGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div data-slot="member-group" className="flex min-w-0 flex-col gap-0.5 px-4 pt-4">
+      <div className="mb-0.5 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground">{label}</div>
+      {children}
+    </div>
+  )
+}
+
 function MemberItem({ member, online, nameColor }: { member: User; online: boolean; nameColor?: string }) {
   return (
     <div className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg p-2 text-sm leading-5 font-medium transition-colors hover:bg-muted">
       <div className="relative shrink-0">
-        <div
-          className="flex size-6 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground"
-          style={{ background: `color-mix(in srgb, ${member.color} 22%, transparent)`, color: member.color }}
-        >
-          {member.name.charAt(0).toUpperCase()}
-        </div>
+        <InitialAvatar name={member.name} color={member.color} className="size-6 text-xs font-medium" />
         {online ? <span className="absolute -right-0.5 -bottom-0.5 flex size-3 rounded-full border-2 border-background bg-green-500" /> : null}
       </div>
       <span
-        className={`min-w-0 truncate text-foreground data-[online=false]:text-muted-foreground ${nameColor && !online ? 'opacity-65' : ''}`}
+        className={cn('min-w-0 truncate text-foreground data-[online=false]:text-muted-foreground', nameColor && !online && 'opacity-65')}
         data-online={online ? 'true' : 'false'}
         style={nameColor ? { color: nameColor } : undefined}
       >

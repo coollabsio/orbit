@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
@@ -29,10 +29,15 @@ function emojiCategory({ name, keywords }: EmojiEntry): string {
   return 'Other'
 }
 
-const groupLabelClass =
-  'sticky top-0 z-10 mb-1 border-b border-border bg-popover/95 py-1 text-[10px] font-bold tracking-wider text-muted-foreground uppercase'
-const gridClass = 'grid grid-cols-8 gap-1'
-const gridButtonClass = 'size-8 rounded-lg border-0 text-lg hover:bg-muted dark:hover:bg-muted'
+/** A labelled grid of emoji buttons; the label sticks while the list scrolls. */
+function EmojiGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section data-slot="emoji-group" className="mb-3">
+      <div className="sticky top-0 z-10 mb-1 border-b border-border bg-popover/95 py-1 text-[10px] font-bold tracking-wider text-muted-foreground uppercase">{label}</div>
+      <div className="grid grid-cols-8 gap-1">{children}</div>
+    </section>
+  )
+}
 
 /**
  * Standalone emoji picker panel (the reference app's icon picker shell): header with an optional
@@ -79,7 +84,7 @@ export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => v
           </Button>
         ) : null}
       </div>
-      <InputGroup className="mb-2 bg-muted/40 dark:bg-muted/40">
+      <InputGroup className="mb-2">
         <InputGroupAddon>
           <Search className="size-3.5" />
         </InputGroupAddon>
@@ -88,39 +93,32 @@ export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => v
           placeholder="Search emoji"
           autoFocus
           aria-label="Search emoji"
-          className="text-sm font-medium text-foreground"
           onChange={(e) => setQuery(e.target.value)}
         />
       </InputGroup>
       <div className="max-h-72 overflow-y-auto pr-0.5">
         {customEmojis.filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase())).length > 0 ? (
-          <section className="mb-3">
-            <div className={groupLabelClass}>Custom</div>
-            <div className={gridClass}>
-              {customEmojis
-                .filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase()))
-                .map((custom) => (
-                  <Button key={custom.id} variant="ghost" size="icon" className={gridButtonClass} title={`:${custom.name}:`} onClick={() => onPick(`:${custom.name}:`)}>
-                    <img className="size-6 object-contain" src={custom.url} alt={`:${custom.name}:`} />
-                  </Button>
-                ))}
-            </div>
-          </section>
+          <EmojiGroup label="Custom">
+            {customEmojis
+              .filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase()))
+              .map((custom) => (
+                <Button key={custom.id} variant="ghost" size="icon" title={`:${custom.name}:`} onClick={() => onPick(`:${custom.name}:`)}>
+                  <img className="size-6 object-contain" src={custom.url} alt={`:${custom.name}:`} />
+                </Button>
+              ))}
+          </EmojiGroup>
         ) : null}
         {emojis.length === 0 ? (
           <div className="py-6 text-center text-sm font-medium text-muted-foreground">Loading emoji...</div>
         ) : groups.length > 0 ? (
           groups.map((group) => (
-            <section key={group.category} className="mb-3">
-              <div className={groupLabelClass}>{group.category}</div>
-              <div className={gridClass}>
-                {group.items.map(({ emoji, name }) => (
-                  <Button key={`${emoji}-${name}`} variant="ghost" size="icon" className={gridButtonClass} title={name} onClick={() => onPick(emoji)}>
-                    {emoji}
-                  </Button>
-                ))}
-              </div>
-            </section>
+            <EmojiGroup key={group.category} label={group.category}>
+              {group.items.map(({ emoji, name }) => (
+                <Button key={`${emoji}-${name}`} variant="ghost" size="icon" className="text-lg" title={name} onClick={() => onPick(emoji)}>
+                  {emoji}
+                </Button>
+              ))}
+            </EmojiGroup>
           ))
         ) : (
           <div className="py-6 text-center text-sm font-medium text-muted-foreground">No emoji found</div>

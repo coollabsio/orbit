@@ -3,16 +3,15 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { SmileCircle as Smile, People as Users } from 'reicon-react'
-import { cn } from 'cn'
-import { Button } from '@/components/ui/button'
 import { WebhookIcon } from '@/components/common/icons/WebhookIcon'
+import { RowButton } from '@/features/chat/components/RowButton'
 import { EmojiTab } from '@/features/chat/components/settings/EmojiTab'
 import { RolesTab } from '@/features/chat/components/settings/RolesTab'
 import { WebhooksTab } from '@/features/chat/components/settings/WebhooksTab'
 
 type Tab = 'roles' | 'webhooks' | 'emoji'
 
-const navItems: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }>; danger?: boolean }[] = [
+const navItems: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'roles', label: 'Roles', icon: Users },
   { key: 'webhooks', label: 'Webhooks', icon: WebhookIcon },
   { key: 'emoji', label: 'Emoji', icon: Smile },
@@ -42,25 +41,17 @@ export function ServerSettingsPage() {
           <div className="flex min-w-0 flex-col gap-0.5 px-4 pt-7 max-[899px]:p-3">
             <div className="flex items-center gap-2 pl-0.5 text-xs leading-5 font-semibold text-muted-foreground max-[899px]:hidden">CHAT SETTINGS</div>
             <div className="grid gap-0.5 max-[899px]:flex max-[899px]:gap-1 max-[899px]:overflow-x-auto">
-              {navItems.map(({ key, label, icon: Icon, danger }) => (
-                <Button
+              {navItems.map(({ key, label, icon: Icon }) => (
+                <RowButton
                   key={key}
-                  type="button"
-                  variant="ghost"
-                  className={cn(
-                    'flex h-auto min-w-0 items-center justify-start gap-2 rounded-lg border-0 p-2 text-left text-sm leading-5 font-medium text-foreground transition-colors',
-                    '[&_svg]:shrink-0 [&_svg]:text-muted-foreground',
-                    'hover:bg-sidebar-accent/50 hover:text-foreground dark:hover:bg-sidebar-accent/50 data-[active=true]:bg-sidebar-accent data-[active=true]:[&_svg]:text-primary',
-                    'data-[danger=true]:text-destructive data-[danger=true]:[&_svg]:text-destructive data-[danger=true]:hover:bg-destructive/10 data-[danger=true]:hover:text-destructive data-[danger=true]:data-[active=true]:bg-destructive/10',
-                    'max-[899px]:min-w-max max-[899px]:px-3 max-[899px]:py-2',
-                  )}
+                  className="rounded-lg p-2 text-sm leading-5 font-medium text-foreground hover:bg-sidebar-accent/50 data-[active=true]:bg-sidebar-accent [&_svg]:text-muted-foreground data-[active=true]:[&_svg]:text-primary max-[899px]:w-auto max-[899px]:min-w-max max-[899px]:px-3"
                   data-active={activeTab === key ? 'true' : undefined}
-                  data-danger={danger ? 'true' : undefined}
+                  aria-current={activeTab === key ? 'page' : undefined}
                   onClick={() => selectTab(key)}
                 >
                   <Icon className="size-4" />
                   <span className="truncate">{label}</span>
-                </Button>
+                </RowButton>
               ))}
             </div>
           </div>

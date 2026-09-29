@@ -7,6 +7,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Emoji } from '@/components/common/Emoji'
+import { cn } from 'cn'
 import { notionImportErrorMessage, useStartNotionImport } from '@/features/docs/api/notionImports'
 import { PRIVATE_SPACE, childrenOf, defaultTeamspace, pageTitle, rootsOf, spaceRequest, teamspaceSpace, type SpaceKey } from '@/features/docs/pageTree'
 import {
@@ -185,9 +186,10 @@ export function NotionImportChooser({ workspaceId, item, tree, teamspaces, pages
                     <FileText className="size-[15px]" />
                   )}
                 </span>
+                {/* Clicking the title toggles the row, like the checkbox (the checkbox is the keyboard control). */}
                 <button
                   type="button"
-                  className={`min-w-0 flex-1 truncate text-left ${row.match ? 'font-medium text-foreground' : 'text-foreground'}`}
+                  className={cn('min-w-0 flex-1 truncate text-left text-foreground', row.match && 'font-medium')}
                   tabIndex={-1}
                   onClick={() => setSelected((current) => toggleNode(index, current, id))}
                 >

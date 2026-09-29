@@ -1,6 +1,6 @@
-import { ChevronRight } from 'reicon-react'
 import { cn } from 'cn'
-import { CHEVRON } from '@/features/views/components/GroupIcon'
+import { Button } from '@/components/ui/button'
+import { DisclosureChevron } from '@/features/views/components/GroupIcon'
 import { MAX_TREE_INDENT, TREE_INDENT_PX } from '@/features/views/taskTree'
 
 const CHEVRON_SLOT_PX = 16
@@ -34,20 +34,22 @@ export function TreeGutter({ depth, hasChildren, expanded, onToggle, identifier,
         <span key={level} data-slot="tree-guide" aria-hidden className="absolute inset-y-0 w-px bg-border/60" style={{ left: inset + level * TREE_INDENT_PX + 7 }} />
       ))}
       {hasChildren ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           aria-expanded={expanded}
           aria-label={`${expanded ? 'Collapse' : 'Expand'} sub-issues of ${identifier}`}
-          // the ::after overlay grows the 16px chevron to a 24px hit area
-          className="relative flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/70 outline-none transition-colors duration-150 after:absolute after:-inset-1 hover-fine:hover:bg-accent hover-fine:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+          // the ::after overlay grows the 16px chevron to a 24px hit area; no open fill, every expanded row has one
+          className="relative size-4 rounded-sm text-muted-foreground after:absolute after:-inset-1 aria-expanded:bg-transparent"
           onClick={(event) => {
             // the row behind it opens the task
             event.stopPropagation()
             onToggle()
           }}
         >
-          <ChevronRight aria-hidden className={cn(CHEVRON, expanded && 'rotate-90')} />
-        </button>
+          <DisclosureChevron open={expanded} />
+        </Button>
       ) : null}
     </span>
   )

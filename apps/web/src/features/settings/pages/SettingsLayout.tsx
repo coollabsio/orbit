@@ -1,6 +1,8 @@
 import { NavLink, Outlet } from 'react-router'
 import { Key, Link2, Tag, Setting2 as Settings, ShieldTick as ShieldCheck, Danger as TriangleAlert, Trash as Trash2, People as Users } from 'reicon-react'
 import { cn } from 'cn'
+import { buttonVariants } from '@/components/ui/button'
+import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
 interface NavItem {
@@ -40,25 +42,25 @@ export function SettingsLayout() {
   const canManageTokens = workspace.role === 'owner' || workspace.role === 'admin'
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-        {/* pane-header product-pane-header settings-page-header — hidden on mobile so the shell topbar takes over */}
-        <div className="flex min-h-12 shrink-0 items-center gap-[7px] border-b border-border bg-background py-2 pr-3 pl-[19px] text-muted-foreground max-[899px]:hidden">
+      <Pane className="relative">
+        {/* hidden on mobile so the shell topbar takes over */}
+        <PaneHeader className="gap-[7px] bg-background pl-[19px] text-muted-foreground max-[899px]:hidden">
           <Settings className="size-[15px] shrink-0" />
-          <span className="truncate text-[13px] font-semibold">Settings</span>
-        </div>
+          <PaneTitle className="text-muted-foreground">Settings</PaneTitle>
+        </PaneHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <section className="grid w-full min-w-0 grid-cols-1 gap-6 px-5 pt-5 pb-8 min-[900px]:px-8 min-[900px]:pt-6 min-[900px]:pb-10 xl:grid-cols-[210px_minmax(0,1fr)] xl:gap-8 xl:px-10 xl:pt-7">
             <aside className="min-w-0 xl:sticky xl:top-7 xl:max-h-[calc(100dvh-5.5rem)] xl:self-start xl:overflow-x-hidden xl:overflow-y-auto xl:pr-1.5 xl:[overscroll-behavior:contain]">
               <nav
                 aria-label="Settings"
-                className="grid grid-cols-2 gap-0.5 border-y border-border py-3 min-[900px]:grid-cols-4 xl:grid-cols-1 xl:border-0 xl:py-0"
+                className="grid grid-cols-2 gap-0.5 border-y py-3 min-[900px]:grid-cols-4 xl:grid-cols-1 xl:border-0 xl:py-0"
               >
                 {SECTIONS.map((section, index) => (
                   <div key={section.label} className="contents">
                     <div
                       className={cn(
                         'col-span-full px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground/60 select-none max-xl:hidden',
-                        index > 0 && 'xl:mt-5 xl:border-t xl:border-border xl:pt-4',
+                        index > 0 && 'xl:mt-5 xl:border-t xl:pt-4',
                       )}
                     >
                       {section.label}
@@ -68,14 +70,10 @@ export function SettingsLayout() {
                         key={item.to}
                         to={item.to}
                         end={item.end}
-                        className={({ isActive }) =>
-                          cn(
-                            'relative flex h-8 w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
-                            isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
-                          )
-                        }
+                        // NavLink marks the current page with aria-current
+                        className={cn(buttonVariants({ variant: 'ghost' }), 'w-full min-w-0 justify-start gap-2.5 text-[13px] aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground')}
                       >
-                        <item.icon className="size-4.5 shrink-0 opacity-90" />
+                        <item.icon className="size-4.5 opacity-90" />
                         <span className="min-w-0 flex-1 truncate">{item.label}</span>
                       </NavLink>
                     ))}
@@ -88,7 +86,7 @@ export function SettingsLayout() {
             </div>
           </section>
         </div>
-      </div>
+      </Pane>
     </div>
   )
 }

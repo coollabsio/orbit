@@ -8,8 +8,6 @@ export const CALLOUT_DEFAULT_EMOJI = '💡'
 /** Background of a new callout; any BlockNote color name, `default` = no fill, just a border. */
 export const CALLOUT_DEFAULT_BACKGROUND = 'gray'
 
-const emojiPanelClass = 'w-auto gap-0 rounded-xl border border-border bg-popover p-0 text-foreground shadow-xl ring-0'
-
 interface CalloutEditor {
   readonly isEditable: boolean
   updateBlock: (id: string, update: { props: { emoji: string } }) => unknown
@@ -25,7 +23,7 @@ interface CalloutViewProps {
 
 /**
  * `render` of the `callout` block (Notion-style): the emoji on the left opens the app's emoji picker, the rich
- * text sits on the right. The rounded box, colors and nested children are styled in PageEditor.css.
+ * text sits on the right. The rounded box, colors and nested children are styled from PageEditor's wrapper.
  */
 export function CalloutView({ block, editor, contentRef }: CalloutViewProps) {
   const [open, setOpen] = useState(false)
@@ -39,14 +37,14 @@ export function CalloutView({ block, editor, contentRef }: CalloutViewProps) {
   }
 
   return (
-    <div className="orbit-callout">
+    <div className="flex w-full min-w-0 items-start gap-2">
       <Popover open={open} onOpenChange={(next) => setOpen(next && editor.isEditable)} modal={false}>
         <PopoverTrigger
           render={
             <button
               type="button"
               contentEditable={false}
-              className="orbit-callout-emoji"
+              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-[18px] leading-none select-none hover:bg-foreground/8 focus-visible:outline-2 focus-visible:outline-ring/50 in-[.bn-editor[contenteditable=false]]:pointer-events-none in-[.bn-editor[contenteditable=false]]:cursor-default"
               aria-label="Change callout icon"
               onMouseDown={(event) => {
                 // Keep ProseMirror from turning the click into a selection change or a drag start.
@@ -58,12 +56,12 @@ export function CalloutView({ block, editor, contentRef }: CalloutViewProps) {
           <Emoji value={emoji} size={20} />
         </PopoverTrigger>
         {open ? (
-          <PopoverContent align="start" className={emojiPanelClass}>
+          <PopoverContent align="start" className="w-auto gap-0 p-0">
             <EmojiPicker onPick={pick} />
           </PopoverContent>
         ) : null}
       </Popover>
-      <div ref={contentRef} className="orbit-callout-content" />
+      <div ref={contentRef} className="min-w-0 flex-1 py-px" />
     </div>
   )
 }

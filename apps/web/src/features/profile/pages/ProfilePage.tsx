@@ -6,15 +6,11 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
 import { Button } from '@/components/ui/button'
-import { cn } from 'cn'
 import { useChangePassword, useCurrentUser, useUpdateProfile } from '@/features/auth/api'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 
-const FIELD_LABEL = 'mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-muted-foreground'
-const GRID = 'grid grid-cols-1 gap-4 min-[900px]:grid-cols-2'
-// `gap-0` keeps the Field rows at the previous label/control spacing (the label owns its `mb-1.5`).
-const FIELD = 'w-full min-w-0 gap-0'
-const REQ = 'inline-block font-semibold text-primary'
 
 function PasswordInput({
   id,
@@ -31,11 +27,11 @@ function PasswordInput({
 }) {
   const [visible, setVisible] = useState(false)
   return (
-    <Field className={FIELD}>
-      <FieldLabel className={FIELD_LABEL} htmlFor={id}>
-        {label} <span className={REQ}>*</span>
+    <Field>
+      <FieldLabel htmlFor={id}>
+        {label} <RequiredMark />
       </FieldLabel>
-      <InputGroup className="h-9">
+      <InputGroup>
         <InputGroupInput
           id={id}
           type={visible ? 'text' : 'password'}
@@ -47,11 +43,11 @@ function PasswordInput({
         <InputGroupAddon align="inline-end">
           <InputGroupButton
             size="icon-xs"
-            className="size-7 text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
+            className="text-muted-foreground"
             aria-label="Toggle password visibility"
             onClick={() => setVisible((v) => !v)}
           >
-            {visible ? <EyeOff className="size-4.5" /> : <Eye className="size-4.5" />}
+            {visible ? <EyeOff /> : <Eye />}
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
@@ -116,10 +112,10 @@ export function ProfilePage() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-        <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
-          <span className="truncate text-[13px] font-semibold text-foreground">Account settings</span>
-        </div>
+      <Pane className="relative">
+        <PaneHeader>
+          <PaneTitle>Account settings</PaneTitle>
+        </PaneHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex w-full min-w-0 flex-col gap-6 px-5 pt-5 pb-8 min-[900px]:px-10 min-[900px]:pt-7 min-[900px]:pb-10">
             <form ref={formRef} onSubmit={saveDetails}>
@@ -127,10 +123,10 @@ export function ProfilePage() {
                 title="Profile details"
                 description="Your display name and verified sign-in address."
               >
-                <div className={GRID}>
-                  <Field className={FIELD}>
-                    <FieldLabel className={FIELD_LABEL} htmlFor="profile-name">
-                      Name <span className={REQ}>*</span>
+                <FieldGrid>
+                  <Field>
+                    <FieldLabel htmlFor="profile-name">
+                      Name <RequiredMark />
                     </FieldLabel>
                     <Input
                       id="profile-name"
@@ -139,13 +135,13 @@ export function ProfilePage() {
                       onChange={(e) => setName(e.target.value)}
                     />
                   </Field>
-                  <Field className={FIELD}>
-                    <FieldLabel className={FIELD_LABEL} htmlFor="profile-email">
+                  <Field>
+                    <FieldLabel htmlFor="profile-email">
                       Email
                     </FieldLabel>
                     <Input id="profile-email" value={me?.email ?? ''} readOnly />
                   </Field>
-                </div>
+                </FieldGrid>
                 {updateProfile.isError ? (
                   <p className="text-xs text-destructive" role="alert">
                     {errorDetail(updateProfile.error, 'Display name could not be saved.')}
@@ -164,7 +160,7 @@ export function ProfilePage() {
                   </Button>
                 }
               >
-                <div className={GRID}>
+                <FieldGrid>
                   <div className="min-[900px]:col-span-2">
                     <PasswordInput
                       id="current-password"
@@ -189,11 +185,11 @@ export function ProfilePage() {
                     onChange={setConfirmPassword}
                   />
                   {passwordAlert ? (
-                    <p className={cn('text-xs text-destructive', 'min-[900px]:col-span-2')} role="alert">
+                    <p className="text-xs text-destructive min-[900px]:col-span-2" role="alert">
                       {passwordAlert}
                     </p>
                   ) : null}
-                </div>
+                </FieldGrid>
               </SettingsCard>
             </form>
           </div>
@@ -209,7 +205,7 @@ export function ProfilePage() {
             saving={updateProfile.isPending}
           />
         ) : null}
-      </div>
+      </Pane>
     </div>
   )
 }

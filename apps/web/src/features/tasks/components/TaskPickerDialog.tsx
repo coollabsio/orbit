@@ -33,7 +33,7 @@ export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeI
     <Dialog open={open} onOpenChange={(next) => onOpenChange(next)}>
       <DialogContent
         showCloseButton={false}
-        className="top-[12vh] max-h-[min(60vh,28rem)] translate-y-0 gap-0 overflow-hidden rounded-xl! bg-card p-0 shadow-2xl ring-border sm:max-w-[576px]"
+        className="top-[12vh] max-h-[min(60vh,28rem)] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-[576px]"
       >
         <DialogTitle className="px-3.5 pt-3 pb-1.5 text-[13px] font-medium text-muted-foreground">{title}</DialogTitle>
         <DialogDescription className="sr-only">Search tasks by title or identifier.</DialogDescription>

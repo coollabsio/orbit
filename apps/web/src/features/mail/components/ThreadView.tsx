@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { PaneTitle } from '@/components/common/Pane'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,8 +19,6 @@ import { FOLDER_ICONS, threadSender } from '@/features/mail/mailLib'
 import { MessageItem } from './MessageItem'
 import { ReplyComposer } from './ReplyComposer'
 import { ComposeModal } from './ComposeModal'
-
-const moveItemClass = 'min-h-8 gap-2 rounded-md px-2 py-1.5 text-sm text-foreground focus:bg-accent focus:text-foreground'
 
 interface ThreadViewProps {
   thread: MailThread
@@ -49,7 +48,7 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
 
   return (
     <>
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3 max-[899px]:border-b-0">
         <Button
           variant="ghost"
           size="icon-sm"
@@ -59,7 +58,7 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
         >
           <ArrowLeft className="size-4" />
         </Button>
-        <span className="min-w-0 shrink truncate text-[13px] font-semibold text-foreground">{thread.subject}</span>
+        <PaneTitle className="min-w-0 shrink">{thread.subject}</PaneTitle>
         <span className="flex-1" />
         <Button
           variant="ghost"
@@ -90,16 +89,14 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto min-w-32">
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase">
-                Move to
-              </DropdownMenuLabel>
+              <DropdownMenuLabel>Move to</DropdownMenuLabel>
               {folders
                 .filter((candidate) => candidate.id !== 'f_starred' && candidate.id !== thread.folderId)
                 .map((candidate) => {
                   const Icon = FOLDER_ICONS[candidate.icon]
                   return (
-                    <DropdownMenuItem key={candidate.id} className={moveItemClass} onClick={() => moveTo(candidate.id)}>
-                      <Icon className="size-3.5" />
+                    <DropdownMenuItem key={candidate.id} onClick={() => moveTo(candidate.id)}>
+                      <Icon />
                       {candidate.name}
                     </DropdownMenuItem>
                   )
@@ -135,12 +132,7 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
           <div className="flex flex-wrap items-center gap-2.5 pb-2">
             <h1 className="m-0 text-xl font-semibold text-foreground">{thread.subject}</h1>
             {folder ? (
-              <Badge
-                variant="secondary"
-                className="h-auto gap-1 rounded-full border-0 bg-muted px-2 py-0.5 text-[10px] leading-[14px] font-medium text-muted-foreground"
-              >
-                {folder.name}
-              </Badge>
+              <Badge variant="secondary">{folder.name}</Badge>
             ) : null}
           </div>
           {thread.messages.map((message, index) => {

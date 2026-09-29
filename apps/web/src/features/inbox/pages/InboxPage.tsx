@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { DirectInbox as Inbox, Menu } from 'reicon-react'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { relativeTime } from '@/lib/format'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useMembers } from '@/features/workspaces/api'
 import { isMention, notificationCopy, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
@@ -36,8 +38,8 @@ export function InboxPage() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-        <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+      <Pane>
+        <PaneHeader>
           <Button
             type="button"
             variant="ghost"
@@ -48,8 +50,8 @@ export function InboxPage() {
           >
             <Menu className="size-[18px]" />
           </Button>
-          <span className="truncate text-[13px] font-semibold text-foreground">Inbox</span>
-          {unreadCount > 0 ? <Badge className="h-4 min-w-4 rounded-full border-0 px-1 py-0 text-[10px] font-semibold">{unreadCount}</Badge> : null}
+          <PaneTitle>Inbox</PaneTitle>
+          {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{unreadCount}</Badge> : null}
           <span className="flex-1" />
           <Button
             variant="ghost"
@@ -59,14 +61,14 @@ export function InboxPage() {
           >
             {marking ? 'Marking…' : 'Mark all read'}
           </Button>
-        </div>
+        </PaneHeader>
         <Tabs className="shrink-0 gap-0" value={tab} onValueChange={(value) => setTab(value as InboxTab)}>
-          <TabsList variant="line" className="min-h-10 w-full justify-start gap-1.5 overflow-x-auto rounded-none border-b border-border px-3 py-1 [scrollbar-width:none] group-data-horizontal/tabs:h-auto">
+          <TabsList variant="line" className="min-h-10 w-full justify-start gap-1.5 border-b px-3 group-data-horizontal/tabs:h-auto">
             {(['all', 'unread', 'mentions'] as const).map((item) => (
               <TabsTrigger
                 key={item}
                 value={item}
-                className="h-7 flex-none gap-1 rounded-md border-0 px-2.5 py-0 text-[13px] font-medium text-muted-foreground after:hidden hover:bg-accent hover:text-foreground dark:text-muted-foreground data-active:bg-primary/10! data-active:text-primary! data-active:ring-1 data-active:ring-primary/25 data-active:ring-inset"
+                className="h-7 flex-none px-2.5 text-[13px]"
               >
                 {item === 'all' ? 'All' : item === 'unread' ? 'Unread' : 'Mentions'}
               </TabsTrigger>
@@ -92,7 +94,7 @@ export function InboxPage() {
                 <Button
                   key={notification.id}
                   variant="ghost"
-                  className="flex h-auto min-h-14 w-full min-w-0 cursor-pointer justify-start gap-2.5 rounded-none border-0 border-b border-border px-3 py-1.5 text-left font-normal hover:bg-foreground/[0.02] active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-foreground/[0.02]"
+                  className="h-auto min-h-14 w-full min-w-0 justify-start gap-2.5 rounded-none border-x-0 border-t-0 border-b-border px-3 py-1.5 text-left font-normal"
                   onClick={() => {
                     if (!notification.read_at) markRead.mutate(notification.id)
                     const target = notificationTarget(notification)
@@ -108,9 +110,11 @@ export function InboxPage() {
                   <span className="flex w-2 shrink-0 justify-center">
                     {!notification.read_at ? <span className="size-2 shrink-0 rounded-full bg-primary" /> : null}
                   </span>
-                  <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">{(actor?.name ?? '?').charAt(0).toUpperCase()}</span>
+                  <Avatar className="size-7">
+                    <AvatarFallback>{(actor?.name ?? '?').charAt(0).toUpperCase()}</AvatarFallback>
+                  </Avatar>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-[13px] text-foreground data-[unread]:font-semibold" data-unread={!notification.read_at || undefined}>
+                    <span className="truncate text-[13px] text-foreground data-unread:font-semibold" data-unread={!notification.read_at || undefined}>
                       {copy.title}
                     </span>
                     <span className="truncate text-xs text-muted-foreground/70">{actor ? `${actor.name} · ${copy.body}` : copy.body}</span>
@@ -123,7 +127,7 @@ export function InboxPage() {
             })
           )}
         </div>
-      </div>
+      </Pane>
     </div>
   )
 }

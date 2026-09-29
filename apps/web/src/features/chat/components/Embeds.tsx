@@ -3,6 +3,7 @@
 import type { Embed } from '@/mock/types'
 import type { MentionToken } from '@/lib/mentions'
 import { renderMarkdownBlocks, renderMarkdownText } from '@/lib/markdown'
+import { cn } from 'cn'
 
 function hasVisibleEmbedContent(embed: Embed): boolean {
   return Boolean(
@@ -47,7 +48,7 @@ function EmbedLinkedText({ href, className, children }: { href?: string; classNa
   const safe = safeHref(href)
   if (!href || safe === '#') return <div className={className}>{children}</div>
   return (
-    <a href={safe} target="_blank" rel="noopener noreferrer" className={`${className} text-primary hover:underline`} data-link="true">
+    <a href={safe} target="_blank" rel="noopener noreferrer" className={cn(className, 'text-primary hover:underline')} data-link="true">
       {children}
     </a>
   )
@@ -82,7 +83,7 @@ export function EmbedCard({ embed, mentionTokens = [] }: { embed: Embed; mention
           {embed.fields && embed.fields.length > 0 ? (
             <div className="grid grid-cols-3 gap-2 max-[899px]:gap-1.5 max-[599px]:grid-cols-1">
               {embed.fields.slice(0, 25).map((field, index) => (
-                <div key={`${field.name || 'field'}-${index}`} className={`min-w-0 ${field.inline ? '' : 'col-span-3 max-[599px]:col-auto'}`} data-inline={field.inline ? 'true' : 'false'}>
+                <div key={`${field.name || 'field'}-${index}`} className={cn('min-w-0', !field.inline && 'col-span-3 max-[599px]:col-auto')} data-inline={field.inline ? 'true' : 'false'}>
                   {field.name ? (
                     <div className="text-xs font-bold text-foreground max-[899px]:text-[10px] max-[899px]:leading-[15px]">{renderMarkdownText(field.name, `embed-field-name-${index}`, mentionTokens)}</div>
                   ) : null}
@@ -129,7 +130,7 @@ export function EmbedCards({
   const visible = embeds.filter(hasVisibleEmbedContent).slice(0, 10)
   if (visible.length === 0) return null
   return (
-    <div className={`flex max-w-[520px] flex-col gap-2 max-[899px]:max-w-[320px] max-[899px]:gap-[5px] ${hasTextContent ? 'mt-2' : 'mt-1'} max-[899px]:mt-[5px]`} data-no-text={hasTextContent ? undefined : 'true'}>
+    <div className={cn('flex max-w-[520px] flex-col gap-2 max-[899px]:mt-[5px] max-[899px]:max-w-[320px] max-[899px]:gap-[5px]', hasTextContent ? 'mt-2' : 'mt-1')} data-no-text={hasTextContent ? undefined : 'true'}>
       {visible.map((embed, index) => (
         <EmbedCard key={index} embed={embed} mentionTokens={mentionTokens} />
       ))}

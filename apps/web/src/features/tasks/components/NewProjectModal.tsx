@@ -1,7 +1,8 @@
 import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { DialogFooter } from '@/components/ui/dialog'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Modal } from '@/components/common/Modal'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { Project } from '@/features/tasks/api/models'
@@ -26,19 +27,19 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
   }
 
   return (
-    <Modal title="New project" onClose={onClose} maxWidth={448}>
-      <form onSubmit={(event) => void submit(event)}>
-        <div className="w-full min-w-0">
-          <Label className="mb-1.5 flex h-4 items-center gap-1 text-[13px] leading-4 font-medium text-muted-foreground" htmlFor={inputId}>Project name <span className="font-semibold text-primary">*</span></Label>
+    <Modal title="New project" onClose={onClose} className="sm:max-w-md">
+      <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
+        <Field>
+          <FieldLabel htmlFor={inputId}>Project name <span className="font-semibold text-primary">*</span></FieldLabel>
           <Input id={inputId} autoFocus required value={name} disabled={createProject.isPending} onChange={(event) => setName(event.target.value)} />
-        </div>
+        </Field>
         {createProject.isError ? <p role="alert" className="text-xs text-destructive">Project creation failed. Try again.</p> : null}
-        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+        <DialogFooter>
           <Button type="button" variant="outline" disabled={createProject.isPending} onClick={onClose}>Cancel</Button>
           <Button type="submit" disabled={!name.trim() || createProject.isPending}>
             {createProject.isPending ? 'Creating…' : 'Create project'}
           </Button>
-        </div>
+        </DialogFooter>
       </form>
     </Modal>
   )

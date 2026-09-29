@@ -1,5 +1,4 @@
 import { cn } from 'cn'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
@@ -28,21 +27,8 @@ import { DueDatePicker } from './DueDatePicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { TreeGutter } from './TreeGutter'
 import { NestChip } from './NestChip'
+import { LabelPill } from './TaskLabels'
 import type { NestRowProps } from '@/features/views/useNestDrop'
-
-const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
-const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
-const OPTION =
-  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[selected]:bg-accent data-[selected]:font-medium`
-/** Multi-select rows keep room on the right for the checked indicator. */
-const CHECK_OPTION =
-  `group min-h-8 cursor-pointer gap-2 py-1.5 pr-8 pl-2 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-checked:bg-accent data-checked:font-medium`
-const HEADING = 'px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase'
-/** 2px insertion line on the row edge while a manual-order drag hovers it; absolute, so nothing shifts. */
-const DROP_LINE =
-  'data-[drop-edge]:before:pointer-events-none data-[drop-edge]:before:absolute data-[drop-edge]:before:inset-x-0 data-[drop-edge]:before:z-[1] data-[drop-edge]:before:h-0.5 data-[drop-edge]:before:bg-primary data-[drop-edge=top]:before:-top-px data-[drop-edge=bottom]:before:-bottom-px'
-/** Tint + inset ring while a drop would nest into the row (the chip names the action). */
-const NEST = 'data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset'
 
 /** A row's place in the nested list's tree. */
 export interface TaskRowTree {
@@ -91,9 +77,11 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
   return (
     <div
       className={cn(
-        'group/row relative flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2 border-b border-border px-3 py-1.5 text-left transition-colors hover:bg-foreground/[0.02] data-[dragging]:bg-muted data-[dragging]:opacity-50 data-[selected]:bg-primary/10 max-[480px]:gap-1.5',
-        DROP_LINE,
-        NEST,
+        'group/row relative flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-left transition-colors hover:bg-foreground/[0.02] data-dragging:bg-muted data-dragging:opacity-50 data-selected:bg-primary/10 max-[480px]:gap-1.5',
+        // 2px insertion line on the row edge while a manual-order drag hovers it; absolute, so nothing shifts
+        'data-drop-edge:before:pointer-events-none data-drop-edge:before:absolute data-drop-edge:before:inset-x-0 data-drop-edge:before:z-[1] data-drop-edge:before:h-0.5 data-drop-edge:before:bg-primary data-[drop-edge=top]:before:-top-px data-[drop-edge=bottom]:before:-bottom-px',
+        // tint + inset ring while a drop would nest into the row (the chip names the action)
+        'data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset',
       )}
       data-task-row
       data-depth={tree?.depth ?? 0}
@@ -121,7 +109,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
           checked={selected}
           aria-label={`Select ${task.identifier}`}
           onCheckedChange={() => onToggleSelect(task.id)}
-          className="absolute top-1/2 left-3 size-4 -translate-y-1/2 cursor-pointer rounded border-foreground/20 bg-background opacity-0 transition-opacity group-hover/row:opacity-100 group-data-[selected]/row:opacity-100 after:-top-3 after:-bottom-3 after:-left-3 after:right-0 focus-visible:opacity-100 dark:bg-background"
+          className="absolute top-1/2 left-3 -translate-y-1/2 cursor-pointer opacity-0 transition-opacity group-hover/row:opacity-100 group-data-selected/row:opacity-100 after:-top-3 after:-bottom-3 after:-left-3 after:right-0 focus-visible:opacity-100"
         />
       </div>
       {has('priority') ? <PriorityPicker task={task} /> : null}
@@ -153,11 +141,11 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
                 </Button>
               }
             />
-            <DropdownMenuContent className={MENU}>
+            <DropdownMenuContent className="w-auto min-w-45">
               {options.map((option) => (
                 <DropdownMenuItem
                   key={option.id}
-                  className={OPTION}
+                  className="data-selected:bg-accent data-selected:font-medium"
                   data-selected={option.id === task.statusId || undefined}
                   onClick={() => option.category === 'duplicate'
                     ? onRequestDuplicate(task)
@@ -174,17 +162,18 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       {!has('id') && task.blocked ? <BlockedIndicator /> : null}
       {showParent && task.parent ? (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
-          <button
+          <Button
             type="button"
+            variant="link"
             title={`Open ${refIdentifier(task.parent)}`}
-            className="max-w-[40%] shrink-0 cursor-pointer truncate rounded-sm text-muted-foreground outline-none transition-colors duration-150 hover-fine:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-auto max-w-[40%] shrink justify-start p-0 text-[13px] font-normal text-muted-foreground hover:text-foreground"
             onClick={(event) => {
               event.stopPropagation()
               onOpen(task.parent!.id)
             }}
           >
-            {task.parent.title || 'Untitled'}
-          </button>
+            <span className="truncate">{task.parent.title || 'Untitled'}</span>
+          </Button>
           <span aria-hidden className="shrink-0 text-muted-foreground/50">›</span>
           <span className="min-w-0 flex-1 truncate font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
         </span>
@@ -195,7 +184,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
         <span className="flex shrink-0 gap-1 max-[1099px]:hidden">
           {task.labels.map((labelId) => {
             const label = labels.find((item) => item.id === labelId)
-            return label ? <Badge key={label.id} variant="outline" className={PILL}><span className="size-1.5 shrink-0 rounded-full" style={{ background: label.color }} />{label.name}</Badge> : null
+            return label ? <LabelPill key={label.id} label={label} /> : null
           })}
         </span>
       ) : null}
@@ -216,7 +205,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
                 <Button
                   type="button"
                   variant="ghost"
-                  className="inline-flex h-auto cursor-pointer rounded-none border-0 bg-transparent p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
+                  className="h-auto rounded-full p-0"
                   aria-label={assignees.length > 0 ? `Assignees: ${assignees.map((user) => user.name).join(', ')}` : 'Assign task'}
                 >
                   {/* at most two circles (28px) so the slot stays narrow */}
@@ -224,15 +213,14 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
                 </Button>
               }
             />
-            <DropdownMenuContent align="end" className={MENU}>
-              <DropdownMenuGroup className="flex flex-col gap-px">
-                <DropdownMenuLabel className={HEADING}>Assignees</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="w-auto min-w-45">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Assignees</DropdownMenuLabel>
                 {users.map((user) => {
                   const active = task.assigneeIds.includes(user.id)
                   return (
                     <DropdownMenuCheckboxItem
                       key={user.id}
-                      className={CHECK_OPTION}
                       checked={active}
                       closeOnClick
                       onCheckedChange={() => updateTask.mutate({

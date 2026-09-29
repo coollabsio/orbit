@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
 import { ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
 import { DatePicker } from '@/components/common/DatePicker'
@@ -18,6 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Pane, PaneHeader } from '@/components/common/Pane'
 import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
@@ -40,20 +42,8 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
-import { TaskLabels } from './TaskLabels'
+import { LabelPill, TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
-
-const MENU = 'flex w-auto min-w-[180px] flex-col gap-px p-1'
-const OPTION =
-  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-[selected]:bg-accent data-[selected]:font-medium`
-/** Multi-select rows keep room on the right for the checked indicator. */
-const CHECK_OPTION =
-  `group min-h-8 cursor-pointer gap-2 py-1.5 pr-8 pl-2 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-checked:bg-accent data-checked:font-medium`
-const HEADING = 'px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase'
-const PILL = 'inline-flex h-[22px] items-center gap-1.5 overflow-visible rounded-full border border-border bg-muted px-2.5 text-xs font-medium leading-none whitespace-nowrap text-foreground'
-const SIDE_PROP = '-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:min-h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs'
-const SIDE_GROUP = 'mb-6 flex flex-col items-start gap-0.5 max-[899px]:mb-0 max-[899px]:min-w-0'
-const SIDE_HEADING = 'mb-1.5 text-xs font-medium text-muted-foreground/70'
 
 function dueDateLabel(value: string | null, startValue?: string | null) {
   if (!value) return 'Set due date'
@@ -151,8 +141,8 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
   }
 
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+    <Pane>
+      <PaneHeader>
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 min-[900px]:hidden" onClick={onBack} aria-label="Back to tasks">
           <ArrowLeft className="size-4" />
         </Button>
@@ -168,7 +158,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
           <X className="size-4" />
         </Button>
-      </div>
+      </PaneHeader>
       {!task ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <EmptyState
@@ -227,7 +217,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
             {addRelation.isError ? <p role="alert" className="text-xs text-destructive">Couldn't add the relation. {addRelation.error.message}</p> : null}
             {removeRelation.isError ? <p role="alert" className="text-xs text-destructive">Couldn't remove the relation. {removeRelation.error.message}</p> : null}
 
-            {githubPullRequests.length > 0 ? <section aria-label="GitHub links" className="mt-6 border-t border-border pt-4">
+            {githubPullRequests.length > 0 ? <section aria-label="GitHub links" className="mt-6 border-t pt-4">
               <h3 className="mb-2 text-xs font-semibold text-muted-foreground">GitHub</h3>
               <div className="grid gap-1">
                 {githubPullRequests.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground hover:bg-muted">
@@ -264,23 +254,22 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
 
           </div>
 
-          <aside className="col-start-2 w-60 shrink-0 pt-1.5 [grid-row:1/span_2] max-[899px]:col-start-1 max-[899px]:row-auto max-[899px]:grid max-[899px]:w-full max-[899px]:grid-cols-2 max-[899px]:gap-x-3 max-[899px]:gap-y-3.5 max-[899px]:border-y max-[899px]:border-border max-[899px]:py-3.5">
-            <div className={`${SIDE_GROUP} max-[899px]:col-span-full max-[899px]:flex-row max-[899px]:flex-wrap max-[899px]:items-center max-[899px]:gap-1`}>
-              <h4 className={`${SIDE_HEADING} max-[899px]:w-full`}>Properties</h4>
+          <aside className="col-start-2 w-60 shrink-0 pt-1.5 [grid-row:1/span_2] max-[899px]:col-start-1 max-[899px]:row-auto max-[899px]:grid max-[899px]:w-full max-[899px]:grid-cols-2 max-[899px]:gap-x-3 max-[899px]:gap-y-3.5 max-[899px]:border-y max-[899px]:py-3.5">
+            <PropertyGroup title="Properties" className="max-[899px]:col-span-full max-[899px]:flex-row max-[899px]:flex-wrap max-[899px]:items-center max-[899px]:gap-1 max-[899px]:*:data-[slot=property-heading]:w-full">
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="ghost" className={SIDE_PROP}>
+                    <PropertyButton>
                       <TaskStatusIcon status={status} />
                       {status?.name ?? 'No status'}
-                    </Button>
+                    </PropertyButton>
                   }
                 />
-                <DropdownMenuContent className={MENU}>
+                <DropdownMenuContent className="w-auto min-w-45">
                   {statusOptions.map((option) => (
                     <DropdownMenuItem
                       key={option.id}
-                      className={OPTION}
+                      className="data-selected:bg-accent data-selected:font-medium"
                       data-selected={option.id === task.statusId || undefined}
                       onClick={() => option.category === 'duplicate'
                         ? setPicker('duplicate')
@@ -295,17 +284,17 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="ghost" className={SIDE_PROP}>
+                    <PropertyButton>
                       <PriorityIcon priority={task.priority} />
                       {task.priority === 'none' ? 'Set priority' : PRIORITY_LABEL[task.priority]}
-                    </Button>
+                    </PropertyButton>
                   }
                 />
-                <DropdownMenuContent className={MENU}>
+                <DropdownMenuContent className="w-auto min-w-45">
                   {PRIORITY_ORDER.map((priority) => (
                     <DropdownMenuItem
                       key={priority}
-                      className={OPTION}
+                      className="data-selected:bg-accent data-selected:font-medium"
                       data-selected={priority === task.priority || undefined}
                       onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })}
                     >
@@ -319,7 +308,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="ghost" className={SIDE_PROP}>
+                    <PropertyButton>
                       {assignees.length > 0 ? (
                         <>
                           <UserAvatarStack users={assignees} size={16} />
@@ -331,18 +320,17 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                           Assign
                         </>
                       )}
-                    </Button>
+                    </PropertyButton>
                   }
                 />
-                <DropdownMenuContent className={MENU}>
-                  <DropdownMenuGroup className="flex flex-col gap-px">
-                    <DropdownMenuLabel className={HEADING}>Assignees</DropdownMenuLabel>
+                <DropdownMenuContent className="w-auto min-w-45">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Assignees</DropdownMenuLabel>
                     {users.map((u) => {
                       const active = task.assigneeIds.includes(u.id)
                       return (
                         <DropdownMenuCheckboxItem
                           key={u.id}
-                          className={CHECK_OPTION}
                           checked={active}
                           closeOnClick
                           onCheckedChange={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
@@ -358,53 +346,52 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
               {task.parent ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger render={
-                    <Button variant="ghost" className={`${SIDE_PROP} max-w-full`} aria-label={`Parent: ${refIdentifier(task.parent)} ${task.parent.title}`}>
+                    <PropertyButton className="max-w-full" aria-label={`Parent: ${refIdentifier(task.parent)} ${task.parent.title}`}>
                       <Hierarchy2 className="size-3.5" aria-hidden="true" />
                       <span className="shrink-0 text-muted-foreground tabular-nums">{refIdentifier(task.parent)}</span>
                       <span className="truncate">{task.parent.title || 'Untitled'}</span>
-                    </Button>
+                    </PropertyButton>
                   } />
-                  <DropdownMenuContent className={MENU}>
-                    <DropdownMenuItem className={OPTION} onClick={() => openTask(task.parent!.id)}>Open parent</DropdownMenuItem>
-                    <DropdownMenuItem className={OPTION} onClick={() => setParentPicker('set')}>Change parent…</DropdownMenuItem>
-                    <DropdownMenuItem className={OPTION} onClick={() => void parentActions.setParent([task], null)}>Remove parent</DropdownMenuItem>
+                  <DropdownMenuContent className="w-auto min-w-45">
+                    <DropdownMenuItem onClick={() => openTask(task.parent!.id)}>Open parent</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setParentPicker('set')}>Change parent…</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => void parentActions.setParent([task], null)}>Remove parent</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
-                <Button variant="ghost" className={`${SIDE_PROP} text-muted-foreground`} onClick={() => setParentPicker('set')}>
+                <PropertyButton className="text-muted-foreground" onClick={() => setParentPicker('set')}>
                   <Hierarchy2 className="size-3.5" aria-hidden="true" />
                   Set parent
-                </Button>
+                </PropertyButton>
               )}
-            </div>
+            </PropertyGroup>
 
-            <div className={SIDE_GROUP}>
-              <h4 className={SIDE_HEADING}>Labels</h4>
+            <PropertyGroup title="Labels">
               <TaskLabels workspaceId={workspace.id} labelIds={task.labels} labels={state.labels} onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })} />
-            </div>
+            </PropertyGroup>
 
-            <div className={SIDE_GROUP}>
-              <h4 className={SIDE_HEADING}>Project</h4>
+            <PropertyGroup title="Project">
               {project ? (
-                <Badge variant="outline" className={PILL}>
-                  <span className="size-1.5 shrink-0 rounded-full" style={{ background: project.color }} />
-                  {project.name}
-                </Badge>
+                <LabelPill label={project} />
               ) : (
                 <span className="text-xs text-muted-foreground/70">—</span>
               )}
-            </div>
+            </PropertyGroup>
 
-            <div className={SIDE_GROUP}>
-              <h4 className={SIDE_HEADING}>Source</h4>
+            <PropertyGroup title="Source">
               {task.sourceUrl ? (
-                <a href={task.sourceUrl} target="_blank" rel="noopener noreferrer" className={`${SIDE_PROP} inline-flex h-8 max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-foreground hover:bg-accent`}>
-                  <Link2 className="size-3.5 shrink-0" aria-hidden="true" />
+                <a
+                  href={task.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(buttonVariants({ variant: 'ghost' }), '-ml-2 max-w-full text-[13px] max-[899px]:h-7 max-[899px]:px-1.5 max-[899px]:text-xs')}
+                >
+                  <Link2 className="size-3.5" aria-hidden="true" />
                   <span className="truncate">{task.sourceUrl.replace(/^https?:\/\//, '').split('/')[0]}</span>
                 </a>
               ) : null}
               <Popover open={sourceOpen} onOpenChange={setSourceOpen}>
-                <PopoverTrigger render={<Button type="button" variant="ghost" className={`${SIDE_PROP} h-7 text-muted-foreground`}>{task.sourceUrl ? 'Edit source' : 'Add source'}</Button>} />
+                <PopoverTrigger render={<PropertyButton type="button" className="h-7 text-muted-foreground">{task.sourceUrl ? 'Edit source' : 'Add source'}</PropertyButton>} />
                 <PopoverContent align="start" className="w-72 gap-2 p-3">
                   <form onSubmit={(event) => {
                     event.preventDefault()
@@ -417,22 +404,16 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                   </form>
                 </PopoverContent>
               </Popover>
-            </div>
+            </PropertyGroup>
 
-            <div className={SIDE_GROUP}>
-              <h4 className={SIDE_HEADING}>Due date</h4>
+            <PropertyGroup title="Due date">
               <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
                 <PopoverTrigger
                   render={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="-ml-2 inline-flex h-auto min-h-8 items-center gap-2 rounded-md border-0 px-2 py-1.5 text-[13px] font-normal text-foreground transition-colors hover:bg-accent aria-expanded:bg-accent dark:hover:bg-accent"
-                      aria-label="Due date"
-                    >
+                    <PropertyButton type="button" aria-label="Due date">
                       <Calendar className="size-3.5" aria-hidden="true" />
                       <span>{dueDateLabel(task.dueAt, task.dueStartAt)}</span>
-                    </Button>
+                    </PropertyButton>
                   }
                 />
                 <PopoverContent align="start" side="top" className="w-auto gap-0 p-0">
@@ -456,7 +437,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                   />
                 </PopoverContent>
               </Popover>
-            </div>
+            </PropertyGroup>
           </aside>
 
           <div className="col-start-1 min-w-0 max-w-[760px] max-[899px]:w-full max-[899px]:max-w-none">
@@ -496,6 +477,27 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
           ) : null}
         </div>
       )}
-    </section>
+    </Pane>
+  )
+}
+
+/** A titled block of the properties sidebar; on phones the sidebar becomes a two-column grid of these. */
+function PropertyGroup({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
+  return (
+    <div data-slot="property-group" className={cn('mb-6 flex flex-col items-start gap-0.5 max-[899px]:mb-0 max-[899px]:min-w-0', className)}>
+      <h4 data-slot="property-heading" className="mb-1.5 text-xs font-medium text-muted-foreground/70">{title}</h4>
+      {children}
+    </div>
+  )
+}
+
+/** A sidebar property value that opens its editor: a ghost button pulled left so its text lines up with the heading. */
+function PropertyButton({ className, ...props }: ComponentProps<typeof Button>) {
+  return (
+    <Button
+      variant="ghost"
+      className={cn('-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs', className)}
+      {...props}
+    />
   )
 }

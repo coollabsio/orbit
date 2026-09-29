@@ -3,8 +3,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-export function AuthInput({ label, value, onChange, type = 'text', required = true }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {
-  return <Label className="grid gap-1.5 text-[13px] text-muted-foreground"><span>{label}</span><Input type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} /></Label>
+export function AuthInput({ label, value, onChange, type = 'text', required = true }: { label: string; value: string; onChange?: (value: string) => void; type?: string; required?: boolean }) {
+  return <Label className="grid gap-1.5"><span>{label}</span><Input type={type} required={required} readOnly={!onChange} value={value} onChange={(event) => onChange?.(event.target.value)} /></Label>
+}
+
+/** The centred card every auth screen sits in. */
+export function AuthCard({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-background p-6">
+      <section data-slot="auth-card" className="w-[min(100%,420px)] rounded-xl border bg-card p-8 shadow-lg">{children}</section>
+    </main>
+  )
 }
 
 export function AuthBrand() {
@@ -14,7 +23,7 @@ export function AuthBrand() {
 
 export function AuthForm({ title, children, error, pending, submitLabel, onSubmit, footer }: { title: string; children: React.ReactNode; error: Error | null; pending: boolean; submitLabel: string; onSubmit: () => Promise<unknown>; footer?: React.ReactNode }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-background p-6"><form className="grid w-[min(100%,420px)] gap-[18px] rounded-xl border border-border bg-card p-8 shadow-lg" onSubmit={(event) => {
+    <AuthCard><form className="grid gap-[18px]" onSubmit={(event) => {
       event.preventDefault()
       // Dismiss the mobile keyboard before replacing the login form with the app.
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
@@ -25,6 +34,6 @@ export function AuthForm({ title, children, error, pending, submitLabel, onSubmi
       {error ? <p className="text-[13px] text-destructive" role="alert">{error instanceof ApiProblem ? error.detail : 'The server could not complete the request.'}</p> : null}
       <Button type="submit" disabled={pending}>{pending ? 'Please wait…' : submitLabel}</Button>
       {footer ? <div className="text-center text-[13px]">{footer}</div> : null}
-    </form></main>
+    </form></AuthCard>
   )
 }

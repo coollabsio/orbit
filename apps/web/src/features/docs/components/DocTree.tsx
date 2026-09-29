@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import {
@@ -28,6 +28,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Emoji } from '@/components/common/Emoji'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { EmptyState } from '@/components/common/EmptyState'
+import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { confirmAction } from '@/components/common/confirmAction'
 import {
   PRIVATE_SPACE,
@@ -56,7 +57,8 @@ import {
   useTeamspaces,
   useUpdateTeamspace,
 } from '@/features/docs/api/teamspaces'
-import { DocTreeItem, menuItemClass, type DocDropZone, type DocTreeDnd, type DocTreeFavorites } from './DocTreeItem'
+import { DocTreeItem, type DocDropZone, type DocTreeDnd, type DocTreeFavorites } from './DocTreeItem'
+import { TreeIconButton, TreeRowActions } from './TreeRow'
 
 interface DocTreeProps {
   workspaceId: string
@@ -87,14 +89,6 @@ function readCollapsed(workspaceId: string): ReadonlySet<string> {
   }
 }
 
-/** Header row of a space: a drop target ("move to the end of this space") that collapses its pages. */
-const spaceRowClass =
-  "group/space relative flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md whitespace-nowrap transition-colors select-none hover:bg-sidebar-accent/50 data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset"
-/** Before/after line on a teamspace header while another teamspace is dragged over it. */
-const reorderLineClass =
-  "data-[reorder=before]:before:absolute data-[reorder=before]:before:inset-x-1.5 data-[reorder=before]:before:-top-px data-[reorder=before]:before:h-0.5 data-[reorder=before]:before:rounded-[1px] data-[reorder=before]:before:bg-primary data-[reorder=before]:before:content-[''] data-[reorder=after]:after:absolute data-[reorder=after]:after:inset-x-1.5 data-[reorder=after]:after:-bottom-px data-[reorder=after]:after:h-0.5 data-[reorder=after]:after:rounded-[1px] data-[reorder=after]:after:bg-primary data-[reorder=after]:after:content-[''] data-[dragging]:opacity-60"
-const hoverActionsClass = 'invisible relative z-20 flex shrink-0 items-center gap-0.5 group-hover/space:visible group-focus-within/space:visible'
-const smallIconButton = 'size-[22px] text-muted-foreground/70'
 
 export function DocTree({
   workspaceId,
@@ -499,11 +493,11 @@ export function DocTree({
 
   return (
     <section className="flex h-full min-h-0 w-[260px] min-w-0 shrink-0 flex-col border-r border-border bg-background max-[899px]:w-full max-[899px]:border-r-0 max-[899px]:group-data-[view=doc]/docs:hidden">
-      <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:min-h-11 max-[899px]:border-b-0 max-[899px]:px-2 max-[899px]:py-1.5">
+      <PaneHeader className="max-[899px]:min-h-11 max-[899px]:px-2 max-[899px]:py-1.5">
         <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
           <Menu className="size-[18px]" />
         </Button>
-        <span className="truncate text-[13px] font-semibold text-foreground">Documents</span>
+        <PaneTitle>Documents</PaneTitle>
         <span className="flex-1" />
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -512,7 +506,7 @@ export function DocTree({
             <Ellipsis className="size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto min-w-44">
-            <DropdownMenuItem className={menuItemClass} onClick={() => navigate('/docs/import')}>
+            <DropdownMenuItem onClick={() => navigate('/docs/import')}>
               <Import className="size-[14px]" />
               Import from Notion
             </DropdownMenuItem>
@@ -521,7 +515,7 @@ export function DocTree({
         <Button type="button" size="icon" aria-label="New page" disabled={createPage.isPending} onClick={() => handleCreate(null)}>
           <Plus className="size-4" />
         </Button>
-      </div>
+      </PaneHeader>
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {loading ? (
           <div className="flex flex-1 items-center justify-center p-6">
@@ -586,9 +580,9 @@ export function DocTree({
             <SectionLabel
               label="Teamspaces"
               action={
-                <Button type="button" variant="ghost" size="icon-sm" className={smallIconButton} aria-label="New teamspace" onClick={() => setCreateOpen(true)}>
+                <TreeIconButton aria-label="New teamspace" onClick={() => setCreateOpen(true)}>
                   <Plus className="size-[13px]" />
-                </Button>
+                </TreeIconButton>
               }
             />
             {teamspaces.map((teamspace, index) => {
@@ -598,12 +592,17 @@ export function DocTree({
                 <div key={teamspace.id} className="flex flex-col gap-px" role="group" aria-label={teamspace.name}>
                   {/* The dragged header stays mounted (faded via data-dragging); the browser cancels a drag whose source
                       leaves the DOM. */}
-                  <div
+                  <SpaceRow
                     ref={(element) => {
                       if (element) headerRefs.current.set(teamspace.id, element)
                       else headerRefs.current.delete(teamspace.id)
                     }}
-                    className={cn(spaceRowClass, reorderLineClass, 'h-8 px-1.5 text-[13px] font-medium text-sidebar-foreground')}
+                    className={cn(
+                      'h-8 px-1.5 text-[13px] font-medium text-sidebar-foreground data-[dragging]:opacity-60',
+                      // Before/after line while another teamspace is dragged over this one.
+                      "data-[reorder=before]:before:absolute data-[reorder=before]:before:inset-x-1.5 data-[reorder=before]:before:-top-px data-[reorder=before]:before:h-0.5 data-[reorder=before]:before:rounded-[1px] data-[reorder=before]:before:bg-primary data-[reorder=before]:before:content-['']",
+                      "data-[reorder=after]:after:absolute data-[reorder=after]:after:inset-x-1.5 data-[reorder=after]:after:-bottom-px data-[reorder=after]:after:h-0.5 data-[reorder=after]:after:rounded-[1px] data-[reorder=after]:after:bg-primary data-[reorder=after]:after:content-['']",
+                    )}
                     role="treeitem"
                     aria-level={1}
                     aria-expanded={open}
@@ -613,11 +612,11 @@ export function DocTree({
                     {...teamspaceHeaderProps(teamspace)}
                   >
                     <span className="relative inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/70">
-                      <span className="inline-flex group-hover/space:invisible">
+                      <span className="inline-flex group-hover/row:invisible">
                         {teamspace.icon ? <Emoji value={teamspace.icon} size={15} /> : <Users className="size-[15px]" />}
                       </span>
                       <ChevronRight
-                        className={cn('invisible absolute size-3 transition-transform duration-[120ms] group-hover/space:visible', open && 'rotate-90')}
+                        className={cn('invisible absolute size-3 transition-transform duration-[120ms] group-hover/row:visible', open && 'rotate-90')}
                         aria-hidden="true"
                       />
                     </span>
@@ -636,7 +635,7 @@ export function DocTree({
                         ) : null}
                       </span>
                     )}
-                    <span className={hoverActionsClass} onClick={(e) => e.stopPropagation()}>
+                    <TreeRowActions>
                       <TeamspaceMenu
                         teamspace={teamspace}
                         canDelete={canDeleteTeamspaces}
@@ -647,18 +646,11 @@ export function DocTree({
                         onMove={(offset) => submitTeamspaceMove(teamspace, index + offset)}
                         onDelete={() => void requestDelete(teamspace)}
                       />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className={smallIconButton}
-                        aria-label={`Add page to ${teamspace.name}`}
-                        onClick={() => handleCreate(null, space)}
-                      >
+                      <TreeIconButton aria-label={`Add page to ${teamspace.name}`} onClick={() => handleCreate(null, space)}>
                         <Plus className="size-[13px]" />
-                      </Button>
-                    </span>
-                  </div>
+                      </TreeIconButton>
+                    </TreeRowActions>
+                  </SpaceRow>
                   {open ? renderPages(space, 1) : null}
                 </div>
               )
@@ -672,16 +664,9 @@ export function DocTree({
                 onToggle={() => setSpaceCollapsed(PRIVATE_SPACE, !collapsed.has(PRIVATE_SPACE))}
                 dropProps={spaceDropProps(PRIVATE_SPACE)}
                 action={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className={smallIconButton}
-                    aria-label="Add private page"
-                    onClick={() => handleCreate(null, PRIVATE_SPACE)}
-                  >
+                  <TreeIconButton aria-label="Add private page" onClick={() => handleCreate(null, PRIVATE_SPACE)}>
                     <Plus className="size-[13px]" />
-                  </Button>
+                  </TreeIconButton>
                 }
               />
               {collapsed.has(PRIVATE_SPACE) ? null : renderPages(PRIVATE_SPACE, 0)}
@@ -760,8 +745,8 @@ function SectionLabel({
 }) {
   const interactive = Boolean(onToggle)
   return (
-    <div
-      className={cn(spaceRowClass, 'h-7 px-2 text-xs font-medium text-muted-foreground', !interactive && 'cursor-default hover:bg-transparent')}
+    <SpaceRow
+      className={cn('h-7 px-2 text-xs font-medium text-muted-foreground', !interactive && 'cursor-default hover:bg-transparent')}
       role={interactive ? 'treeitem' : undefined}
       aria-level={interactive ? 1 : undefined}
       aria-expanded={interactive ? expanded : undefined}
@@ -773,10 +758,23 @@ function SectionLabel({
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className={hoverActionsClass} onClick={(e) => e.stopPropagation()}>
-        {action}
-      </span>
-    </div>
+      <TreeRowActions>{action}</TreeRowActions>
+    </SpaceRow>
+  )
+}
+
+/** Header row of a space: a drop target ("move to the end of this space") that collapses its pages. */
+function SpaceRow({ className, ...props }: ComponentProps<'div'>) {
+  return (
+    <div
+      data-slot="space-row"
+      className={cn(
+        'group/row relative flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md whitespace-nowrap transition-colors select-none hover:bg-sidebar-accent/50',
+        'data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset',
+        className,
+      )}
+      {...props}
+    />
   )
 }
 
@@ -805,7 +803,7 @@ function TeamspaceMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button type="button" variant="ghost" size="icon-sm" className={smallIconButton} aria-label={`${teamspace.name} options`} />}
+        render={<TreeIconButton aria-label={`${teamspace.name} options`} />}
       >
         <Ellipsis className="size-[13px]" />
       </DropdownMenuTrigger>
@@ -819,7 +817,6 @@ function TeamspaceMenu({
         }}
       >
         <DropdownMenuItem
-          className={menuItemClass}
           onClick={() => {
             keepFocus.current = true
             onRename()
@@ -829,7 +826,6 @@ function TeamspaceMenu({
           Rename
         </DropdownMenuItem>
         <DropdownMenuItem
-          className={menuItemClass}
           onClick={() => {
             keepFocus.current = true
             onChangeIcon()
@@ -838,16 +834,16 @@ function TeamspaceMenu({
           <Smile className="size-[14px]" />
           Change icon
         </DropdownMenuItem>
-        <DropdownMenuItem className={menuItemClass} disabled={!canMoveUp} onClick={() => onMove(-1)}>
+        <DropdownMenuItem disabled={!canMoveUp} onClick={() => onMove(-1)}>
           <ArrowUp className="size-[14px]" />
           Move up
         </DropdownMenuItem>
-        <DropdownMenuItem className={menuItemClass} disabled={!canMoveDown} onClick={() => onMove(1)}>
+        <DropdownMenuItem disabled={!canMoveDown} onClick={() => onMove(1)}>
           <ArrowDown className="size-[14px]" />
           Move down
         </DropdownMenuItem>
         {canDelete ? (
-          <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={onDelete}>
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={onDelete}>
             <Trash2 className="size-[14px]" />
             Delete teamspace
           </DropdownMenuItem>

@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { toast } from 'sonner'
 import { createApiClient } from '@/api/client'
-import { PRINT_CLASS, dispositionFileName, downloadPageMarkdown, printPage } from './pageExport'
+import { PRINT_ATTR, dispositionFileName, downloadPageMarkdown, printPage } from './pageExport'
 
 afterEach(() => {
-  document.documentElement.classList.remove(PRINT_CLASS)
+  document.documentElement.removeAttribute(PRINT_ATTR)
 })
 
 test('dispositionFileName prefers the UTF-8 name, falls back to the ASCII one, and never keeps paths', () => {
@@ -89,7 +89,7 @@ test('printPage prints with the print class and the page title, then restores bo
   document.title = 'Orbit'
   const during: Array<{ printing: boolean; title: string }> = []
   let print = () => {
-    during.push({ printing: root.classList.contains(PRINT_CLASS), title: document.title })
+    during.push({ printing: root.hasAttribute(PRINT_ATTR), title: document.title })
   }
   const events = new EventTarget()
   const win = {
@@ -101,9 +101,9 @@ test('printPage prints with the print class and the page title, then restores bo
   printPage('Quarterly plan', win)
   expect(during).toEqual([{ printing: true, title: 'Quarterly plan' }])
   // Chrome's print() blocks until the dialog closes; afterprint follows.
-  expect(root.classList.contains(PRINT_CLASS)).toBe(true)
+  expect(root.hasAttribute(PRINT_ATTR)).toBe(true)
   events.dispatchEvent(new Event('afterprint'))
-  expect(root.classList.contains(PRINT_CLASS)).toBe(false)
+  expect(root.hasAttribute(PRINT_ATTR)).toBe(false)
   expect(document.title).toBe('Orbit')
 
   // A browser without print support leaves nothing behind.
@@ -111,14 +111,14 @@ test('printPage prints with the print class and the page title, then restores bo
     throw new Error('not supported')
   }
   printPage('  ', win)
-  expect(root.classList.contains(PRINT_CLASS)).toBe(false)
+  expect(root.hasAttribute(PRINT_ATTR)).toBe(false)
   expect(document.title).toBe('Orbit')
 })
 
 test('the print stylesheet is static CSS in index.css (no runtime <style> under the production CSP)', async () => {
   const css = await Bun.file(new URL('../../index.css', import.meta.url)).text()
   const print = css.slice(css.indexOf('@media print'))
-  expect(print).toContain(`html.${PRINT_CLASS} body :not(:has([data-print-root])):not([data-print-root]):not([data-print-root] *)`)
+  expect(print).toContain(`html[${PRINT_ATTR}] body :not(:has([data-print-root])):not([data-print-root]):not([data-print-root] *)`)
   expect(print).toContain('[data-print-hide]')
   expect(print).toContain('color-scheme: light')
   expect(print).toContain('max-width: 100% !important')

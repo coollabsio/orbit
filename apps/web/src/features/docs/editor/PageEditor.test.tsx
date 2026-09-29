@@ -43,6 +43,13 @@ async function renderEditor(overrides: Partial<PageEditorProps> = {}) {
 }
 
 describe('PageEditor', () => {
+  test('the editor root is data-slot="page-editor" with .bn-editor as a direct child (its styles target `& > .bn-editor`)', async () => {
+    const { view } = await renderEditor()
+    const root = view.container.querySelector('[data-slot="page-editor"]')!
+    expect(root.classList.contains('bn-root')).toBe(true)
+    expect(root.querySelector(':scope > .bn-editor')).toBeTruthy()
+  })
+
   test('starts from empty content with a single empty paragraph and no change event', async () => {
     const { ref, props } = await renderEditor()
     const content = ref.current!.getContent() as { type: string; content: unknown[] }[]

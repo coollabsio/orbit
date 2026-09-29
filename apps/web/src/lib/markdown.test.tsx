@@ -9,11 +9,11 @@ function preview(source: string) {
 test('renders checked and unchecked task items with nested mixed lists', () => {
   const view = preview('- [ ] Plan\n  1. First\n  2. Second\n  - Extra\n- [x] Done')
   const outer = view.container.querySelector('ul')!
-  const boxes = view.getAllByRole('checkbox') as HTMLInputElement[]
+  const boxes = view.getAllByRole('checkbox')
 
   expect(outer.children).toHaveLength(2)
-  expect(boxes.map((box) => box.checked)).toEqual([false, true])
-  expect(boxes.every((box) => box.disabled)).toBe(true)
+  expect(boxes.map((box) => box.getAttribute('aria-checked'))).toEqual(['false', 'true'])
+  expect(boxes.every((box) => box.hasAttribute('data-disabled'))).toBe(true)
   expect(outer.children[0].querySelector('ol')?.children).toHaveLength(2)
   expect(outer.children[0].querySelector('ul')?.textContent).toBe('Extra')
 })
@@ -38,7 +38,7 @@ test('renders tables with inline Markdown and horizontal overflow', () => {
   expect(view.getByText('Old').tagName).toBe('DEL')
   expect((view.getByRole('link', { name: 'Two' }) as HTMLAnchorElement).href).toBe('https://example.com/two')
   expect(table.parentElement?.classList.contains('overflow-x-auto')).toBe(true)
-  expect(table.querySelectorAll('th')[1].classList.contains('text-right')).toBe(true)
+  expect(table.querySelectorAll('th')[1].dataset.align).toBe('right')
 })
 
 test('renders horizontal rules and strikethrough but leaves fenced code raw', () => {

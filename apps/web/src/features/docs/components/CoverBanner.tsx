@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ComponentProps } from 'react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import {
@@ -118,19 +118,14 @@ export function CoverBanner({
       >
         {repositioning ? (
           <>
-            <Button type="button" className={cn(COVER_BTN, COVER_BTN_PRIMARY)} onClick={saveFraming}>
+            <CoverButton variant="default" onClick={saveFraming}>
               Save position
-            </Button>
-            <Button type="button" variant="outline" className={cn(COVER_BTN, COVER_BTN_OUTLINE)} onClick={cancelFraming}>
-              Cancel
-            </Button>
+            </CoverButton>
+            <CoverButton onClick={cancelFraming}>Cancel</CoverButton>
           </>
         ) : (
           <>
-            <Button
-              type="button"
-              variant="outline"
-              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
+            <CoverButton
               onClick={() => {
                 setSourceOpen(false)
                 setRepositioning(true)
@@ -138,23 +133,9 @@ export function CoverBanner({
               }}
             >
               Reposition
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
-              onClick={() => setSourceOpen((o) => !o)}
-            >
-              Change
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className={cn(COVER_BTN, COVER_BTN_OUTLINE)}
-              onClick={() => onChange({ cover_url: null, cover_position: null })}
-            >
-              Remove
-            </Button>
+            </CoverButton>
+            <CoverButton onClick={() => setSourceOpen((o) => !o)}>Change</CoverButton>
+            <CoverButton onClick={() => onChange({ cover_url: null, cover_position: null })}>Remove</CoverButton>
           </>
         )}
       </div>}
@@ -187,7 +168,19 @@ export function CoverBanner({
   )
 }
 
-const COVER_BTN = 'h-auto min-h-[26px] rounded-md px-2.5 py-[3px] text-xs font-medium backdrop-blur-[4px]'
-const COVER_BTN_OUTLINE =
-  'border-border bg-background/80 text-foreground hover:bg-background dark:border-border dark:bg-background/80 dark:hover:bg-background'
-const COVER_BTN_PRIMARY = 'border-primary bg-primary text-primary-foreground hover:bg-primary'
+/** A button over the cover image: blurred backdrop; outline ones keep a near-solid fill so they read on any image. */
+function CoverButton({ variant = 'outline', className, ...props }: ComponentProps<typeof Button>) {
+  return (
+    <Button
+      type="button"
+      size="xs"
+      variant={variant}
+      className={cn(
+        'backdrop-blur-[4px]',
+        variant === 'outline' && 'bg-background/80 hover:bg-background dark:border-border dark:bg-background/80 dark:hover:bg-background',
+        className,
+      )}
+      {...props}
+    />
+  )
+}

@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { InfoTip } from '@/components/common/InfoTip'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
@@ -20,6 +21,7 @@ import { useCreateStatus, useDeleteProject, useDeleteStatus, useProjectStatuses,
 import { useTasks } from '@/features/tasks/api/tasks'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { ColorSwatch, CustomColorSwatch } from '@/components/common/ColorSwatch'
 import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 
@@ -28,15 +30,6 @@ const PROJECT_COLORS = [
   '#ec4899', '#d946ef', '#64748b', '#78716c',
 ]
 
-const FIELD_LABEL = 'mb-1.5 flex h-4 items-center gap-1 text-[13px] leading-4 font-medium text-muted-foreground'
-// data-danger (not variant="destructive"): the preset menu popup forces destructive items to the accent color.
-const OPTION =
-  `group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground [&_svg:not([class*='size-'])]:size-3.5 data-disabled:pointer-events-none data-disabled:opacity-50 data-[danger=true]:text-destructive data-[danger=true]:focus:bg-destructive/10 data-[danger=true]:focus:text-destructive data-[danger=true]:[&>svg]:text-destructive`
-const COLOR_DOT =
-  'relative inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-white aria-pressed:ring-2 aria-pressed:ring-foreground/60 aria-pressed:ring-offset-2 aria-pressed:ring-offset-background'
-/** COLOR_DOT on a shadcn Button: drop its border, keep the white check on hover (the swatch color comes from inline style). */
-const SWATCH = `${COLOR_DOT} border-0 hover:text-white`
-const TILE = 'inline-flex size-10 items-center justify-center rounded-lg bg-muted'
 
 type Editor = { mode: 'new'; category: StatusCategory } | { mode: 'edit'; statusId: string }
 
@@ -76,21 +69,21 @@ export function ProjectSettingsPage() {
   }
 
   if (projectsQuery.isPending || statusQuery.isPending || tasksQuery.isPending) {
-    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title="Loading project" description="Loading persisted project settings." /></section></div>
+    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Loading project" description="Loading persisted project settings." /></Pane></div>
   }
   if (projectsQuery.isError || statusQuery.isError || tasksQuery.isError) {
-    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"><EmptyState icon={SquareCheck} title="Project unavailable" description="The server could not load this project." /></section></div>
+    return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Project unavailable" description="The server could not load this project." /></Pane></div>
   }
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      <section className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-        <div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2 max-[899px]:border-b-0">
+      <Pane className="relative">
+        <PaneHeader>
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
             <ArrowLeft className="size-4" />
           </Button>
-          <span className="truncate text-[13px] font-semibold text-foreground">{project ? `${project.name} settings` : 'Project settings'}</span>
-        </div>
+          <PaneTitle>{project ? `${project.name} settings` : 'Project settings'}</PaneTitle>
+        </PaneHeader>
         {!project ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <EmptyState icon={SquareCheck} title="Project not found" description="This project does not exist or was removed." />
@@ -136,7 +129,7 @@ export function ProjectSettingsPage() {
                           ) : (
                             <div
                               key={status.id}
-                              className="group/row relative flex items-center gap-3 px-1 py-2.5 data-[dragging]:rounded-lg data-[dragging]:bg-muted data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-0 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-[''] data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-['']"
+                              className="group/row relative flex items-center gap-3 px-1 py-2.5 data-dragging:rounded-lg data-dragging:bg-muted data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-0 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary"
                               draggable
                               data-dragging={dragId === status.id || undefined}
                               data-drop={dropAt?.id === status.id ? dropAt.position : undefined}
@@ -177,7 +170,7 @@ export function ProjectSettingsPage() {
                               <span className="absolute -left-[13px] inline-flex text-muted-foreground/70 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden="true">
                                 <GripIcon />
                               </span>
-                              <span className={TILE}>
+                              <span className="inline-flex size-10 items-center justify-center rounded-lg bg-muted">
                                 <TaskStatusIcon status={status} size={16} />
                               </span>
                               <span className="flex flex-col gap-0.5">
@@ -210,13 +203,14 @@ export function ProjectSettingsPage() {
                                     </Button>
                                   }
                                 />
-                                <DropdownMenuContent align="end" className="flex w-auto min-w-[180px] flex-col gap-px p-1">
-                                  <DropdownMenuItem className={OPTION} onClick={() => setEditor({ mode: 'edit', statusId: status.id })}>
+                                <DropdownMenuContent align="end" className="w-auto min-w-45">
+                                  <DropdownMenuItem onClick={() => setEditor({ mode: 'edit', statusId: status.id })}>
                                     <Pencil className="size-3.5" />
                                     Edit
                                   </DropdownMenuItem>
+                                  {/* data-danger (not variant="destructive"): the menu popup forces destructive items to the accent colour */}
                                   <DropdownMenuItem
-                                    className={OPTION}
+                                    className="text-destructive focus:bg-destructive/10 focus:text-destructive *:[svg]:text-destructive"
                                     data-danger="true"
                                     disabled={status.category === 'duplicate' || regularCount === 1}
                                     title={status.category === 'duplicate' ? 'System status' : undefined}
@@ -269,7 +263,7 @@ export function ProjectSettingsPage() {
           onSave={() => { generalPending?.save(); githubPending?.save() }}
           saving={generalPending?.saving || githubPending?.saving}
         /> : null}
-      </section>
+      </Pane>
 
       {deleteTarget && project ? (
         <ConfirmDeleteModal
@@ -328,13 +322,13 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
       <SettingsCard title="General" description="Name, tag and color of this project.">
         <div className="grid grid-cols-2 gap-4 max-[899px]:grid-cols-1">
           <div className="w-full min-w-0">
-            <Label className={FIELD_LABEL} htmlFor="project-name">
+            <Label className="mb-1.5 text-[13px] text-muted-foreground" htmlFor="project-name">
               Name
             </Label>
             <Input id="project-name" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
           </div>
           <div className="w-full min-w-0">
-            <Label className={FIELD_LABEL} htmlFor="project-key">
+            <Label className="mb-1.5 text-[13px] text-muted-foreground" htmlFor="project-key">
               Tag
               <InfoTip text={`Short prefix used in task ids, for example ${project.key}-101.`} />
             </Label>
@@ -347,27 +341,22 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
             />
           </div>
           <div className="col-span-2 w-full min-w-0 max-[899px]:col-span-1">
-            <span className={FIELD_LABEL}>Color</span>
+            <span className="mb-1.5 flex text-[13px] leading-none font-medium text-muted-foreground">Color</span>
             <div className="flex flex-wrap items-center gap-2 pt-1.5">
               {PROJECT_COLORS.map((color) => (
-                <Button
+                <ColorSwatch
                   key={color}
-                  type="button"
-                  size="icon"
-                  className={SWATCH}
-                  style={{ backgroundColor: color }}
+                  color={color}
                   title={color}
                   aria-label={`Color ${color}`}
                   aria-pressed={draft.color.toLowerCase() === color}
                   onClick={() => setDraft((d) => ({ ...d, color }))}
                 >
                   {draft.color.toLowerCase() === color ? <Check className="size-3.5" /> : null}
-                </Button>
+                </ColorSwatch>
               ))}
               <Separator orientation="vertical" className="data-vertical:h-5 data-vertical:self-center" />
-              <label className={`${COLOR_DOT} bg-[conic-gradient(#eb5757,#f2c94c,#4cb782,#26b5ce,#5e6ad2,#a78bfa,#eb5757)]`} title="Custom color">
-                <input type="color" value={draft.color} aria-label="Custom color" className="absolute inset-0 cursor-pointer opacity-0" onChange={(e) => setDraft((d) => ({ ...d, color: e.target.value }))} />
-              </label>
+              <CustomColorSwatch value={draft.color} onChange={(color) => setDraft((d) => ({ ...d, color }))} />
             </div>
           </div>
         </div>
@@ -488,30 +477,25 @@ function StatusEditor({
       <Popover>
         <PopoverTrigger
           render={
-            <Button type="button" variant="ghost" className={`${TILE} cursor-pointer border-0 hover:bg-border dark:hover:bg-border`} aria-label="Status color" title="Color">
+            <Button type="button" variant="secondary" size="icon-lg" className="size-10" aria-label="Status color" title="Color">
               <TaskStatusIcon status={{ category, color }} size={16} />
             </Button>
           }
         />
         <PopoverContent align="start" className="w-auto flex-row items-center gap-2 p-1.5">
           {STATUS_COLORS.map((preset) => (
-            <Button
+            <ColorSwatch
               key={preset}
-              type="button"
-              size="icon"
-              className={SWATCH}
-              style={{ backgroundColor: preset }}
+              color={preset}
               aria-label={`Color ${preset}`}
               aria-pressed={color === preset}
               onClick={() => setColor(preset)}
             >
               {color === preset ? <Check className="size-3.5" /> : null}
-            </Button>
+            </ColorSwatch>
           ))}
           <Separator orientation="vertical" className="data-vertical:h-5 data-vertical:self-center" />
-          <label className={`${COLOR_DOT} bg-[conic-gradient(#eb5757,#f2c94c,#4cb782,#26b5ce,#5e6ad2,#a78bfa,#eb5757)]`} title="Custom color">
-            <input type="color" value={color} aria-label="Custom color" className="absolute inset-0 cursor-pointer opacity-0" onChange={(e) => setColor(e.target.value)} />
-          </label>
+          <CustomColorSwatch value={color} onChange={setColor} />
         </PopoverContent>
       </Popover>
       <Input

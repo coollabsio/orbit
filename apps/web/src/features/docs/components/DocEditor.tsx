@@ -26,6 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Spinner } from '@/components/ui/spinner'
 import { Emoji } from '@/components/common/Emoji'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
+import { Pane } from '@/components/common/Pane'
 import {
   conflictCurrentPage,
   conflictCurrentVersion,
@@ -66,7 +67,6 @@ import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import type { PageRef } from '@/features/docs/editor/pageEditorContext'
 import { CoverBanner } from './CoverBanner'
 import { CoverSourcePanel } from './CoverSourcePanel'
-import { menuItemClass } from './DocTreeItem'
 import { PageHistoryPane } from './PageHistoryPane'
 import { PageLinkDialog } from './PageLinkDialog'
 
@@ -78,9 +78,6 @@ const editorSpinner = (
     <Spinner className="text-muted-foreground" />
   </div>
 )
-
-/** The emoji picker panel brings its own chrome, so the popover is just an anchored frame. */
-const emojiPanelClass = 'w-auto gap-0 rounded-xl border border-border bg-popover p-0 text-foreground shadow-xl ring-0'
 
 /** What the docs page needs from the open editor to trash it safely. */
 export interface DocEditorControl {
@@ -597,10 +594,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     <>
       {/* Realtime refreshes may run while the title or editor is focused: remote titles only apply without local
           edits (see the effect above) and content syncs through Yjs, so nothing here is remounted or overwritten. */}
-      <section
-        data-realtime-safe=""
-        className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background max-[899px]:group-data-[view=index]/docs:hidden"
-      >
+      <Pane data-realtime-safe="" className="max-[899px]:group-data-[view=index]/docs:hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
           <Button
             type="button"
@@ -710,7 +704,6 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                     {spaceTargets.map((target) => (
                       <DropdownMenuItem
                         key={target}
-                        className={menuItemClass}
                         disabled={target === space}
                         onClick={() => onRequestMove(pageId, target)}
                       >
@@ -723,60 +716,58 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                   <DropdownMenuSeparator />
                 </>
               ) : null}
-              <DropdownMenuItem className={menuItemClass} onClick={() => setFavorite(!favorite)}>
+              <DropdownMenuItem onClick={() => setFavorite(!favorite)}>
                 <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
                 {favoriteLabel}
               </DropdownMenuItem>
-              <DropdownMenuCheckboxItem className={menuItemClass} checked={fullWidth} onCheckedChange={toggleFullWidth}>
+              <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>
                 <ArrowSwapHorizontal className="size-[14px]" />
                 Full width
               </DropdownMenuCheckboxItem>
-              <DropdownMenuItem className={menuItemClass} disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
+              <DropdownMenuItem disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
                 {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
                 {locked ? 'Unlock page' : 'Lock page'}
               </DropdownMenuItem>
-              <DropdownMenuItem className={menuItemClass} onClick={() => setHistoryOpen(true)}>
+              <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
                 <History className="size-[14px]" />
                 Version history
               </DropdownMenuItem>
               {pageActions ? (
-                <DropdownMenuItem className={menuItemClass} onClick={() => pageActions.duplicate(pageId, false)}>
+                <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, false)}>
                   <Copy className="size-[14px]" />
                   Duplicate
                 </DropdownMenuItem>
               ) : null}
               {pageActions && hasChildren ? (
-                <DropdownMenuItem className={menuItemClass} onClick={() => pageActions.duplicate(pageId, true)}>
+                <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, true)}>
                   <Copy className="size-[14px]" />
                   Duplicate with sub-pages
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger className={menuItemClass}>
+                <DropdownMenuSubTrigger>
                   <Download className="size-[14px]" />
                   Export
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="min-w-44">
                   <DropdownMenuItem
-                    className={menuItemClass}
                     onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: false })}
                   >
                     Markdown
                   </DropdownMenuItem>
                   {hasChildren ? (
                     <DropdownMenuItem
-                      className={menuItemClass}
                       onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: true })}
                     >
                       Markdown with sub-pages
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuItem className={menuItemClass} onClick={() => printPage(displayTitle)}>
+                  <DropdownMenuItem onClick={() => printPage(displayTitle)}>
                     PDF
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
-              <DropdownMenuItem className={menuItemClass} data-danger="true" onClick={() => onRequestTrash(pageId)}>
+              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onRequestTrash(pageId)}>
                 <Trash2 className="size-[14px]" />
                 Move to trash
               </DropdownMenuItem>
@@ -863,7 +854,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                   >
                     <Emoji value={icon} size={56} />
                   </PopoverTrigger>
-                  <PopoverContent align="start" className={emojiPanelClass}>
+                  <PopoverContent align="start" className="w-auto gap-0 p-0">
                     <EmojiPicker
                       onPick={(emoji) => {
                         changeIcon(emoji)
@@ -887,7 +878,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                     >
                       😀 Add icon
                     </PopoverTrigger>
-                    <PopoverContent align="start" className={emojiPanelClass}>
+                    <PopoverContent align="start" className="w-auto gap-0 p-0">
                       <EmojiPicker
                         onPick={(emoji) => {
                           changeIcon(emoji)
@@ -1004,7 +995,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
         {linkOpen ? (
           <PageLinkDialog pages={pages} excludeId={pageId} onPick={(picked) => closeLinkDialog(picked.id)} onClose={() => closeLinkDialog(null)} />
         ) : null}
-      </section>
+      </Pane>
       {historyOpen ? (
         <PageHistoryPane
           workspaceId={workspaceId}

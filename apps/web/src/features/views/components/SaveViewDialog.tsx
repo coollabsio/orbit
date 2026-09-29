@@ -1,6 +1,5 @@
 import { useId, useState, type FormEvent } from 'react'
 import { Lock, People } from 'reicon-react'
-import { cn } from 'cn'
 import { ApiProblem } from '@/api/problem'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -10,9 +9,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useCurrentUser } from '@/features/auth/api'
+import { ColorSwatch } from '@/components/common/ColorSwatch'
 import { useCreateView, useUpdateView, type SavedView } from '../api/views'
 import { defaultViewState, type ViewState } from '../viewState'
-import { DIALOG_MOTION, POPOVER_MOTION, PRESS_MOTION } from './motion'
 import { VIEW_COLORS, VIEW_ICONS, VIEW_ICON_NAMES, ViewIcon } from './ViewIcon'
 
 export type SaveViewMode = 'create' | 'save_as_new' | 'duplicate' | 'edit'
@@ -45,7 +44,7 @@ export function SaveViewDialog({ open, onOpenChange, instant = false, ...form }:
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open ? (
-        <DialogContent data-instant={instant || undefined} className={cn('sm:max-w-md', DIALOG_MOTION)}>
+        <DialogContent data-instant={instant || undefined} className="sm:max-w-md data-instant:animate-none">
           <SaveViewForm {...form} onClose={() => onOpenChange(false)} />
         </DialogContent>
       ) : null}
@@ -114,49 +113,38 @@ function SaveViewForm({ mode, workspaceId, state, view, onSaved, onClose }: Save
           <Popover open={pickerOpen} onOpenChange={setPickerOpen} modal={false}>
             <PopoverTrigger
               render={
-                <Button type="button" variant="outline" size="icon" aria-label="Choose icon and color" className={PRESS_MOTION}>
+                <Button type="button" variant="outline" size="icon" aria-label="Choose icon and color">
                   <ViewIcon icon={icon} color={color} />
                 </Button>
               }
             />
             {pickerOpen ? (
-              <PopoverContent align="start" className={cn('w-64 gap-3 p-3', POPOVER_MOTION)}>
-                <div role="group" aria-label="Icon" className="grid grid-cols-7 gap-1">
+              <PopoverContent align="start" className="w-64 gap-3 p-3">
+                <ToggleGroup
+                  aria-label="Icon"
+                  size="sm"
+                  spacing={1}
+                  className="grid w-full grid-cols-7"
+                  value={icon ? [icon] : []}
+                  onValueChange={(value: string[]) => {
+                    // pressing the chosen icon again keeps it
+                    if (value[0]) setIcon(value[0])
+                  }}
+                >
                   {VIEW_ICON_NAMES.map((key) => {
                     const Icon = VIEW_ICONS[key].icon
                     return (
-                      <button
-                        key={key}
-                        type="button"
-                        aria-label={`${VIEW_ICONS[key].label} icon`}
-                        aria-pressed={icon === key}
-                        onClick={() => setIcon(key)}
-                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-[background-color,color,scale] duration-150 ease-out hover-fine:hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.97] motion-reduce:active:scale-100 aria-pressed:bg-primary/10 aria-pressed:text-primary"
-                      >
-                        <Icon className="size-4" aria-hidden="true" />
-                      </button>
+                      <ToggleGroupItem key={key} value={key} aria-label={`${VIEW_ICONS[key].label} icon`} className="px-0 text-muted-foreground aria-pressed:text-foreground">
+                        <Icon aria-hidden="true" />
+                      </ToggleGroupItem>
                     )
                   })}
-                </div>
+                </ToggleGroup>
                 <div role="group" aria-label="Color" className="flex flex-wrap items-center gap-1.5">
                   {VIEW_COLORS.map((swatch) => (
-                    <button
-                      key={swatch.value}
-                      type="button"
-                      aria-label={swatch.name}
-                      aria-pressed={color === swatch.value}
-                      onClick={() => setColor(swatch.value)}
-                      style={{ backgroundColor: swatch.value }}
-                      className="size-5 rounded-full ring-offset-2 ring-offset-popover outline-none transition-[scale] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] motion-reduce:active:scale-100 aria-pressed:ring-2 aria-pressed:ring-foreground/60"
-                    />
+                    <ColorSwatch key={swatch.value} size="sm" color={swatch.value} aria-label={swatch.name} aria-pressed={color === swatch.value} onClick={() => setColor(swatch.value)} />
                   ))}
-                  <button
-                    type="button"
-                    aria-label="No color"
-                    aria-pressed={color === null}
-                    onClick={() => setColor(null)}
-                    className="size-5 rounded-full border border-dashed border-muted-foreground ring-offset-2 ring-offset-popover outline-none transition-[scale] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] motion-reduce:active:scale-100 aria-pressed:ring-2 aria-pressed:ring-foreground/60"
-                  />
+                  <ColorSwatch size="sm" color={null} aria-label="No color" aria-pressed={color === null} onClick={() => setColor(null)} />
                 </div>
               </PopoverContent>
             ) : null}
@@ -205,8 +193,8 @@ function SaveViewForm({ mode, workspaceId, state, view, onSaved, onClose }: Save
       )}
       {error ? <FieldError>{error}</FieldError> : null}
       <DialogFooter>
-        <DialogClose render={<Button type="button" variant="outline" className={PRESS_MOTION} />}>Cancel</DialogClose>
-        <Button type="submit" disabled={pending} className={PRESS_MOTION}>{pending ? 'Saving…' : SUBMIT[mode]}</Button>
+        <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+        <Button type="submit" disabled={pending}>{pending ? 'Saving…' : SUBMIT[mode]}</Button>
       </DialogFooter>
     </form>
   )

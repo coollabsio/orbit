@@ -7,10 +7,6 @@ import { taskIdentifier, type Project, type TaskRef, type TaskStatusDef } from '
 import { ADD_RELATION_OPTIONS, groupRelations, type RelationKind } from '@/features/tasks/relationsLib'
 import { TaskStatusIcon } from './TaskStatusIcon'
 
-const MENU = 'flex w-auto min-w-[200px] flex-col gap-px p-1'
-const OPTION = 'group min-h-8 cursor-pointer gap-2 px-2 py-1.5 text-sm font-normal whitespace-normal text-foreground'
-/** Press feedback (emil-design-eng): 0.97 on :active, 160ms ease-out; replaces the Button's 1px press nudge. */
-const PRESS = 'transition-transform duration-160 ease-out active:not-aria-[haspopup]:translate-y-0 active:scale-[0.97]'
 const DUPLICATE_FALLBACK = { category: 'duplicate', color: '#8b8f98' } as const
 
 const projectOf = (projects: Project[], projectId: string) => projects.find((project) => project.id === projectId)
@@ -30,20 +26,16 @@ export function DuplicateBanner({ duplicateOf, projects, status, animate, pendin
     <div
       role="note"
       aria-label={`Duplicate of ${identifier}`}
-      className={cn('mb-5 flex min-h-10 min-w-0 items-center gap-2 border-b border-border pb-2 text-[13px] text-muted-foreground', animate && 'animate-relation-enter')}
+      className={cn('mb-5 flex min-h-10 min-w-0 items-center gap-2 border-b pb-2 text-[13px] text-muted-foreground', animate && 'animate-relation-enter')}
     >
       <TaskStatusIcon status={status ?? DUPLICATE_FALLBACK} />
       <span className="shrink-0">Duplicate of</span>
-      <button
-        type="button"
-        className="flex min-w-0 items-center gap-1.5 rounded-sm text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
-        onClick={() => onOpen(duplicateOf.id)}
-      >
+      <Button type="button" variant="link" className="h-auto min-w-0 shrink p-0 text-[13px] font-normal text-foreground" onClick={() => onOpen(duplicateOf.id)}>
         <span className="shrink-0 text-muted-foreground tabular-nums">{identifier}</span>
         <span className="truncate font-medium">{duplicateOf.title || 'Untitled'}</span>
-      </button>
+      </Button>
       <div className="flex-1" />
-      <Button variant="ghost" size="xs" className={cn('shrink-0 text-muted-foreground', PRESS)} disabled={pending} onClick={onUnmark}>
+      <Button variant="ghost" size="xs" className="shrink-0 text-muted-foreground" disabled={pending} onClick={onUnmark}>
         Unmark
       </Button>
     </div>
@@ -67,7 +59,7 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
   if (groups.length === 0) return null
   const count = groups.reduce((total, group) => total + group.relations.length, 0)
   return (
-    <section aria-label="Relations" className="mt-6 border-t border-border pt-4">
+    <section aria-label="Relations" className="mt-6 border-t pt-4">
       <h3 className="mb-2 flex items-baseline gap-1.5 text-xs font-semibold text-muted-foreground">
         Relations
         <span className="font-normal text-muted-foreground/60 tabular-nums">{count}</span>
@@ -84,6 +76,7 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
                   key={relation.id}
                   className={cn('group/relation col-span-full grid min-h-8 grid-cols-subgrid items-center rounded-md hover:bg-muted', relation.id === newRelationId && 'animate-relation-enter')}
                 >
+                  {/* raw: one hit area across four subgrid columns, the row's hover fill already covers it */}
                   <button
                     type="button"
                     className="col-span-4 grid grid-cols-subgrid items-center rounded-md py-1.5 pl-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -99,7 +92,7 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
                     size="icon-xs"
                     aria-label={`Remove relation to ${identifier}`}
                     disabled={removingId === relation.id}
-                    className={cn('mr-1 shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/relation:opacity-100 focus-visible:opacity-100', PRESS)}
+                    className="mr-1 shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/relation:opacity-100 focus-visible:opacity-100"
                     onClick={() => onRemove(relation.id)}
                   >
                     <X className="size-3" />
@@ -126,9 +119,9 @@ export function AddRelationMenu({ onChoose }: { onChoose: (kind: RelationKind) =
           </Button>
         }
       />
-      <DropdownMenuContent className={MENU}>
+      <DropdownMenuContent className="w-auto min-w-50">
         {ADD_RELATION_OPTIONS.map((option) => (
-          <DropdownMenuItem key={option.kind} className={OPTION} onClick={() => onChoose(option.kind)}>
+          <DropdownMenuItem key={option.kind} onClick={() => onChoose(option.kind)}>
             {option.label}
           </DropdownMenuItem>
         ))}
