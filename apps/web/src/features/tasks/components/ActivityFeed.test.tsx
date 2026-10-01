@@ -23,7 +23,7 @@ const task: Task = {
   id: 'task-1', identifier: 'ORB-1', title: 'Activity test', description: '', statusId: 'todo',
   position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',
   labels: [], attachments: [], dueAt: null, createdAt: '', updatedAt: '', comments: [], version: 1,
-  activity: Array.from({ length: 5 }, (_, index) => ({
+  activity: Array.from({ length: 7 }, (_, index) => ({
     id: `activity-${index + 1}`,
     actorId: 'user-1',
     text: `Activity ${index + 1}`,
@@ -40,19 +40,22 @@ const state: TaskViewState = {
   statuses: [], labels: [], tasks: [task],
 }
 
-test('shows the latest three activities and expands the full list', () => {
+test('shows the first and the latest activities, with the hidden ones behind a row between them', () => {
   const view = render(<ActivityFeed task={task} state={state} />, { wrapper: Wrapper })
 
-  expect(view.queryByText(/Activity 1/)).toBeNull()
-  expect(view.getByText(/Activity 3/)).toBeTruthy()
-  expect(view.getByText(/Activity 5/)).toBeTruthy()
+  expect(view.getByText(/Activity 1/)).toBeTruthy()
+  expect(view.queryAllByText(/Activity [23]\b/)).toHaveLength(0)
+  expect(view.getByText(/Activity 4/)).toBeTruthy()
+  expect(view.getByText(/Activity 7/)).toBeTruthy()
 
-  const toggle = view.getByRole('button', { name: 'Show all activities' })
+  const toggle = view.getByRole('button', { name: 'Show 2 more' })
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
   fireEvent.click(toggle)
 
-  expect(view.getByText(/Activity 1/)).toBeTruthy()
-  expect(view.getByRole('button', { name: 'Show fewer activities' }).getAttribute('aria-expanded')).toBe('true')
+  expect(view.getByText(/Activity 2/)).toBeTruthy()
+  // the row sits right after the first activity
+  expect(view.getAllByRole('listitem').map((row) => row.textContent?.includes('Show less')).indexOf(true)).toBe(1)
+  expect(view.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true')
 })
 
 test('shows a service account as the activity actor', () => {

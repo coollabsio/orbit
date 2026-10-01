@@ -166,3 +166,16 @@ test('parent changes and automatic closes read as sentences that link the other 
   expect(task.activity[0]!.related).toEqual({ taskId: '01HZYPARENT0000000000012', identifier: 'ORB-0012' })
   expect(task.activity[2]!.statusId).toBe('status-done')
 })
+
+test('an update event becomes one row per changed field; an event with nothing to show is dropped', () => {
+  const task = taskFromRecord(record, project, [], [], [
+    relationEvent('task.updated', { changes: { status: { from: 'todo', to: 'done' }, labels: { added: ['label-1'], removed: [] }, description: true } }),
+    relationEvent('task.updated', { changes: {} }),
+  ], [project])
+  expect(task.activity.map((item) => item.change)).toEqual([
+    { field: 'status', from: 'todo', to: 'done' },
+    { field: 'labels', added: ['label-1'], removed: [] },
+    { field: 'description' },
+  ])
+  expect(task.activity[0]!.statusId).toBe('done')
+})

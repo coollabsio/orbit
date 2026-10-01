@@ -1,6 +1,6 @@
-import type { StatusCategory, Task, TaskActivity, TaskComment, TaskStatusDef } from '@/features/tasks/api/models'
-import { relativeTime } from '@/lib/format'
-import { defaultStatusOf, sortStatuses, statusKeyOf } from './taskMeta'
+import type { StatusCategory, Task, TaskActivity, TaskChange, TaskComment, TaskPriority, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
+import { relativeTime, shortDate } from '@/lib/format'
+import { defaultStatusOf, PRIORITY_LABEL, sortStatuses, statusKeyOf } from './taskMeta'
 
 /** Local quick search (never saved): title, description or identifier contains the text. */
 export function quickSearchTasks(tasks: Task[], search: string): Task[] {
@@ -80,4 +80,42 @@ export function buildFeed(task: Task): FeedEntry[] {
     }
   }
   return feed
+}
+
+/** Activity sentence for one changed field, e.g. "Changed status from Backlog to Done". Deleted statuses, members and labels get a neutral word. */
+export function activityChangeText(change: TaskChange, state: Pick<TaskViewState, 'users' | 'statuses' | 'labels'>): string {
+  const names = (ids: string[], all: Array<{ id: string; name: string }>, unknown: string) =>
+    ids.map((id) => all.find((item) => item.id === id)?.name ?? unknown).join(', ')
+  // "Assigned Ada and unassigned Bo"
+  const both = (added: string, removed: string) => [added, removed && (added ? removed.replace(/^./, (letter) => letter.toLowerCase()) : removed)].filter(Boolean).join(' and ')
+  switch (change.field) {
+    case 'status': {
+      const from = state.statuses.find((status) => status.id === change.from)?.name
+      const to = state.statuses.find((status) => status.id === change.to)?.name ?? 'another status'
+      return from ? `Changed status from ${from} to ${to}` : `Changed status to ${to}`
+    }
+    case 'priority':
+      return change.to === 'none' ? 'Removed priority' : `Set priority to ${PRIORITY_LABEL[change.to as TaskPriority] ?? change.to}`
+    case 'assignees':
+      return both(
+        change.added.length > 0 ? `Assigned ${names(change.added, state.users, 'someone')}` : '',
+        change.removed.length > 0 ? `Unassigned ${names(change.removed, state.users, 'someone')}` : '',
+      )
+    case 'labels':
+      return both(
+        change.added.length > 0 ? `Added label${change.added.length > 1 ? 's' : ''} ${names(change.added, state.labels, 'a deleted label')}` : '',
+        change.removed.length > 0 ? `Removed label${change.removed.length > 1 ? 's' : ''} ${names(change.removed, state.labels, 'a deleted label')}` : '',
+      )
+    case 'due':
+      if (!change.end) return 'Removed due date'
+      return `Set due date to ${change.start ? `${shortDate(change.start)} – ` : ''}${shortDate(change.end)}`
+    case 'title':
+      return `Changed title from "${change.from}" to "${change.to}"`
+    case 'project':
+      return `Moved from ${change.from} to ${change.to}`
+    case 'description':
+      return 'Updated the description'
+    case 'source_url':
+      return 'Updated the source link'
+  }
 }

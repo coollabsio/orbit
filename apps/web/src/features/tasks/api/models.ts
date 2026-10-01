@@ -44,6 +44,15 @@ export interface TaskComment {
   version: number
 }
 
+/** One field an update changed. Ids stay ids: the feed names them (`activityChangeText`); projects are already names. */
+export type TaskChange =
+  | { field: 'status'; from: string; to: string }
+  | { field: 'priority'; from: string; to: string }
+  | { field: 'assignees' | 'labels'; added: string[]; removed: string[] }
+  | { field: 'due'; start: string | null; end: string | null }
+  | { field: 'title' | 'project'; from: string; to: string }
+  | { field: 'description' | 'source_url' }
+
 export interface TaskActivity {
   id: string
   actorId: string
@@ -52,6 +61,8 @@ export interface TaskActivity {
   text: string
   /** The other task of a relation event; the feed links `identifier` inside `text`. */
   related?: { taskId: string; identifier: string }
+  /** The changed field of a `task.updated` event; the feed shows its sentence instead of `text`. */
+  change?: TaskChange
   createdAt: string
   statusId?: string
 }
@@ -175,6 +186,26 @@ function subIssueActivity(
   return null
 }
 
+/**
+ * The fields a `task.updated` event changed, one entry each. `null` for an event without the `changes`
+ * metadata (recorded before the server sent it); an empty list when only a field with its own event changed.
+ */
+function updateChanges(metadata: Record<string, unknown>, projectName: (projectId: string) => string): TaskChange[] | null {
+  const changes = metadata.changes
+  if (typeof changes !== 'object' || changes === null) return null
+  const text = (value: unknown) => (typeof value === 'string' ? value : '')
+  const ids = (value: unknown) => (Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [])
+  return Object.entries(changes as Record<string, Record<string, unknown> | true>).flatMap(([field, value]): TaskChange[] => {
+    if (field === 'description' || field === 'source_url') return [{ field }]
+    if (typeof value !== 'object' || value === null) return []
+    if (field === 'status' || field === 'priority' || field === 'title') return [{ field, from: text(value.from), to: text(value.to) }]
+    if (field === 'project') return [{ field, from: projectName(text(value.from)), to: projectName(text(value.to)) }]
+    if (field === 'assignees' || field === 'labels') return [{ field, added: ids(value.added), removed: ids(value.removed) }]
+    if (field === 'due') return [{ field, start: text(value.start) || null, end: text(value.end) || null }]
+    return []
+  })
+}
+
 /** Human task id: project key + last four id characters, e.g. ORB-91C0. */
 export function taskIdentifier(taskId: string, project: Pick<ProjectRecord, 'key'> | undefined): string {
   return `${project?.key ?? 'TASK'}-${taskId.slice(-4).toUpperCase()}`
@@ -266,11 +297,11 @@ export function taskFromRecord(
         .map(attachmentView),
       version: comment.version,
     })),
-    activity: activity.map((event) => {
+    activity: activity.flatMap((event): TaskActivity[] => {
       const metadata = (event.metadata ?? {}) as Record<string, unknown>
       const sentence: Pick<TaskActivity, 'text' | 'related' | 'statusId'> | null =
         relationActivity(event.action, metadata, identifierOf) ?? subIssueActivity(event.action, metadata, identifierOf)
-      return {
+      const base: TaskActivity = {
         id: event.id,
         actorId: event.actor_id ?? '',
         actorName: typeof metadata.actor_service_account_name === 'string' ? metadata.actor_service_account_name : undefined,
@@ -280,6 +311,11 @@ export function taskFromRecord(
         statusId: sentence?.statusId,
         createdAt: event.occurred_at,
       }
+      const changes = event.action === 'task.updated' ? updateChanges(metadata, (id) => projectFor(id)?.name ?? 'another project') : null
+      // one row per changed field; a status change shows the new status glyph
+      return changes
+        ? changes.map((change) => ({ ...base, id: `${event.id}:${change.field}`, change, statusId: change.field === 'status' ? change.to : undefined }))
+        : [base]
     }),
     duplicateOf: record.duplicate_of
       ? { id: record.duplicate_of.id, projectId: record.duplicate_of.project_id, title: record.duplicate_of.title }

@@ -357,6 +357,55 @@ async fn task_activity_is_task_scoped_and_paginated() {
 }
 
 #[tokio::test]
+async fn task_update_activity_names_the_changed_fields() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("First title").await;
+    let task_id = task["id"].as_str().unwrap();
+    let uri = format!(
+        "/api/v1/workspaces/{}/tasks/{task_id}",
+        fixture.workspace_id
+    );
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &uri,
+            &fixture.owner_cookie,
+            json!({"expected_version": 0, "title": "Second title", "priority": "high", "due_at": "2030-01-02T12:30:00Z"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!("{uri}/activity"),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    let page = response_json(response).await;
+    let updated = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["action"] == "task.updated")
+        .unwrap();
+    // unchanged fields (status, assignees, labels, description) are left out
+    assert_eq!(
+        updated["metadata"]["changes"],
+        json!({
+            "priority": {"from": task["priority"], "to": "high"},
+            "due": {"start": null, "end": "2030-01-02T12:30:00.000Z"},
+            "title": {"from": "First title", "to": "Second title"},
+        })
+    );
+}
+
+#[tokio::test]
 async fn project_creation_is_atomic_and_statuses_are_project_scoped() {
     let fixture = Fixture::new().await;
     let response = fixture
