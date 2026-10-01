@@ -1,0 +1,84 @@
+import { afterEach, expect, test } from 'bun:test'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import { NewTaskDialog } from './NewTaskDialog'
+
+const originalFetch = globalThis.fetch
+afterEach(() => {
+  globalThis.fetch = originalFetch
+  window.localStorage.clear()
+})
+
+const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true }
+const status = (id: string, name: string, category: string, position: number) => ({ id, project_id: 'project-1', name, description: '', color: '#888', category, position, version: 1 })
+
+/** Records the bodies of the create requests; each one answers with a new task. */
+function api(created: unknown[]) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    const url = new URL(request.url)
+    if (request.method === 'POST' && url.pathname.endsWith('/tasks')) {
+      const body = await request.json()
+      created.push(body)
+      return Response.json({
+        ...body, id: `task-000${created.length}`, workspace_id: 'workspace-1', position: 0, creator_id: 'user-1', created_at: '', updated_at: '',
+        version: 1, duplicate_of: null, blocked: false, parent_task_id: null, parent: null, sub_issue_count: 0, sub_issue_closed_count: 0, auto_closed: [],
+      })
+    }
+    if (url.pathname.endsWith('/projects')) return Response.json({ items: [project], next_cursor: null })
+    if (url.pathname.endsWith('/statuses')) return Response.json({ items: [status('doing', 'Doing', 'started', 0), status('todo', 'Todo', 'unstarted', 0)], next_cursor: null })
+    return Response.json({ items: [], next_cursor: null })
+  }) as unknown as typeof fetch
+}
+
+function Wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  return <QueryClientProvider client={client}><MemoryRouter><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></MemoryRouter></QueryClientProvider>
+}
+
+test('creates the task with the defaults and opens it', async () => {
+  const created: unknown[] = []
+  api(created)
+  const opened: string[] = []
+  const view = render(<NewTaskDialog defaults={{ priority: 'high' }} onClose={() => {}} onOpenTask={(task) => opened.push(task.id)} />, { wrapper: Wrapper })
+  // no status default: the project's first unstarted status
+  await view.findByRole('button', { name: 'Status: Todo' })
+  await userEvent.type(view.getByLabelText('Task title'), '  Fix login  ')
+  await userEvent.click(view.getByRole('button', { name: 'Create task' }))
+  await waitFor(() => expect(opened).toEqual(['task-0001']))
+  expect(created).toEqual([{ title: 'Fix login', description: '', project_id: 'project-1', status_id: 'todo', priority: 'high', assignee_ids: [], label_ids: [], due_at: null, due_start_at: null }])
+})
+
+test('"Create more" keeps the dialog and the properties for the next task', async () => {
+  window.localStorage.setItem('orbit:new_task_create_more', '1')
+  const created: Array<{ title: string; status_id: string }> = []
+  api(created)
+  const opened: string[] = []
+  const view = render(<NewTaskDialog defaults={{ project_id: 'project-1', status_id: 'doing' }} onClose={() => {}} onOpenTask={(task) => opened.push(task.id)} />, { wrapper: Wrapper })
+  await view.findByRole('button', { name: 'Status: Doing' })
+  const title = view.getByLabelText('Task title') as HTMLInputElement
+  await userEvent.type(title, 'First{Control>}{Enter}{/Control}')
+  await view.findByText('Created')
+  expect(title.value).toBe('')
+  expect(opened).toEqual([])
+  await userEvent.type(title, 'Second{Control>}{Enter}{/Control}')
+  await waitFor(() => expect(created.map((body) => [body.title, body.status_id])).toEqual([['First', 'doing'], ['Second', 'doing']]))
+  // the notice opens the last created task
+  await userEvent.click(await view.findByRole('button', { name: 'ORB-0002' }))
+  expect(opened).toEqual(['task-0002'])
+})
+
+test('an empty title creates nothing', async () => {
+  const created: unknown[] = []
+  api(created)
+  const view = render(<NewTaskDialog onClose={() => {}} onOpenTask={() => {}} />, { wrapper: Wrapper })
+  await view.findByRole('button', { name: 'Status: Todo' })
+  await userEvent.type(view.getByLabelText('Task title'), '   {Control>}{Enter}{/Control}')
+  expect((view.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(created).toEqual([])
+})

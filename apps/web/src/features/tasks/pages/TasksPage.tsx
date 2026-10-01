@@ -25,7 +25,6 @@ import { taskFromRecord } from '@/features/tasks/api/models'
 import {
   prefetchTaskDetail,
   useCommentAttachments,
-  useCreateTask,
   useTask,
   useTaskActivity,
   useTaskAttachments,
@@ -39,6 +38,7 @@ import { TaskDetail } from '@/features/tasks/components/TaskDetail'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
+import { NewTaskDialog } from '@/features/tasks/components/NewTaskDialog'
 import { ColorDot } from '@/components/common/ColorDot'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { quickSearchTasks, resolveStatusId } from '@/features/tasks/tasksLib'
@@ -58,6 +58,7 @@ import { SaveViewDialog, type SaveViewMode } from '@/features/views/components/S
 import { ViewChanges } from '@/features/views/components/ViewChanges'
 import { ViewHeader, ViewNotFound, ViewStateBanner } from '@/features/views/components/ViewHeader'
 import { PRESET_LABEL, type FilterOptions } from '@/features/views/filterFields'
+import { shouldIgnoreShortcut } from '@/features/views/shortcuts'
 import { rebaseViewSessionEdit, useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
 import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
@@ -93,7 +94,6 @@ function WorkspaceTasksPage() {
   const membersQuery = useMembers(workspace.id)
   const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
-  const createTask = useCreateTask(workspace.id)
   const queryClient = useQueryClient()
   const [showNewProject, setShowNewProject] = useState(false)
   const [pxPerDay, setPxPerDay] = useTimelineZoom()
@@ -195,9 +195,7 @@ function WorkspaceTasksPage() {
   // collapsed groups are remembered per page (not part of the view state)
   const collapseScope = source.kind === 'view' ? `view:${source.viewId}` : source.pageKey
 
-  const persisted = new URLSearchParams(searchParams)
-  persisted.delete('new')
-  const detailParams = new URLSearchParams(persisted)
+  const detailParams = new URLSearchParams(searchParams)
   detailParams.delete('project')
   const detailSearch = detailParams.toString()
   const detailSearchSuffix = detailSearch ? `?${detailSearch}` : ''
@@ -217,7 +215,6 @@ function WorkspaceTasksPage() {
     const next = new URLSearchParams(searchParams)
     if (projectId) next.set('project', projectId)
     else next.delete('project')
-    next.delete('new')
     if (taskId || viewId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
     else setSearchParams(next, { replace: true })
   }
@@ -246,10 +243,10 @@ function WorkspaceTasksPage() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [basePath, closeSearchSuffix, navigate, redirect, taskId])
 
-  const creating = useRef(false)
-  /** `values` = the group (and sub-group) whose + was pressed; each value wins over the filter default for its field. */
-  const startNewTask = async (values: GroupValues = [], replace = false) => {
-    if (creating.current) return
+  // The new-task dialog: `values` = the group (and sub-group) whose + was pressed; `instant` = opened with the C key.
+  const [newTask, setNewTask] = useState<{ values: GroupValues; instant: boolean } | null>(null)
+  /** Starting properties of a new task; each group value wins over the filter default for its field. */
+  const newTaskDefaults = (values: GroupValues) => {
     const fromGroup = groupCreateFields(values)
     const fromFilter = createDefaultsFromFilter(viewState.effective, {
       ...groupContext,
@@ -257,38 +254,24 @@ function WorkspaceTasksPage() {
     })
     // a project group wins; otherwise the filter's single project, then the page or first project
     const projectId = fromGroup.projectId ?? fromFilter.project_id
-    if (!projectId) return
     // the filter's status was resolved in the filter's project; only reuse it for that project
     const filterStatusId = fromFilter.project_id === projectId ? fromFilter.status_id : undefined
-    const statusId = fromGroup.statusKey
+    const statusId = !projectId ? undefined : fromGroup.statusKey
       ? resolveStatusId(statusesQuery.data, projectId, fromGroup.statusKey)
       : filterStatusId ?? resolveStatusId(statusesQuery.data, projectId, null)
-    if (!statusId) return
-    creating.current = true
-    try {
-      const task = await createTask.mutateAsync({
-        ...fromFilter,
-        ...fromGroup.body,
-        title: 'Untitled',
-        project_id: projectId,
-        status_id: statusId,
-      })
-      navigate(`${basePath}/${task.id}${detailSearchSuffix}`, { replace, state: originState })
-    } catch {
-      // The mutation exposes the server problem beside the create action.
-    } finally {
-      creating.current = false
-    }
+    return { ...fromFilter, ...fromGroup.body, project_id: projectId, status_id: statusId }
   }
 
-  const wantsNew = searchParams.get('new') === '1'
-  const stateLoading = viewState.isLoading
   useEffect(() => {
-    // new-task defaults come from the page's filter, so wait until it has loaded
-    if (wantsNew && !stateLoading && projects.length > 0 && statusesQuery.data.length > 0) void startNewTask([], true)
-    // The URL flag is the one-shot trigger; the ref prevents duplicate in-flight creation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsNew, stateLoading, projects.length, statusesQuery.data.length])
+    if (taskId) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'c' || shouldIgnoreShortcut(event)) return
+      event.preventDefault()
+      setNewTask({ values: [], instant: true })
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [taskId])
 
   const activeProject = projects.find((project) => project.id === projectFilter)
   // the user's own conditions (a preset page's chip is not one): only then can they be cleared or saved as a view.
@@ -384,8 +367,7 @@ function WorkspaceTasksPage() {
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
               onChange={viewState.setDisplay}
             />
-            <Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" disabled={createTask.isPending} onClick={() => void startNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
-            {createTask.isError ? <span role="alert" className="text-xs text-destructive">Task creation failed.</span> : null}
+            <Button aria-label="New task" title="New task (C)" className="max-[899px]:w-8 max-[899px]:px-0" onClick={() => setNewTask({ values: [], instant: false })}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
           </PaneHeader>
           {viewState.stateError ? <ViewStateBanner /> : null}
           <FilterBar
@@ -438,6 +420,7 @@ function WorkspaceTasksPage() {
               if (saveDialog?.mode !== 'edit') navigate(`/views/${saved.id}`)
             }}
           />
+          {newTask ? <NewTaskDialog defaults={newTaskDefaults(newTask.values)} instant={newTask.instant} onClose={() => setNewTask(null)} onOpenTask={(task) => openTask(task.id)} /> : null}
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
           <div className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {tasksQuery.error || tasksQuery.isLoading ? (
@@ -450,7 +433,7 @@ function WorkspaceTasksPage() {
               ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
               : layout === 'board'
                 ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
-                : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => void startNewTask(values)} />}
+                : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => setNewTask({ values, instant: false })} />}
           </div>
         </Pane>
       )}

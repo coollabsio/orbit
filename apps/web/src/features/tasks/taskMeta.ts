@@ -62,3 +62,19 @@ export const PRIORITY_LABEL: Record<TaskPriority, string> = {
 }
 
 export const PRIORITY_ORDER: TaskPriority[] = ['urgent', 'high', 'medium', 'low', 'none']
+
+/** Text of a due-date button: a range, one date with its time, or the prompt to set one. */
+export function dueDateLabel(value: string | null, startValue?: string | null) {
+  if (!value) return 'Set due date'
+  if (startValue) {
+    const format = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    return `${format.format(new Date(startValue))} – ${format.format(new Date(value))}`
+  }
+  return new Date(value).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}

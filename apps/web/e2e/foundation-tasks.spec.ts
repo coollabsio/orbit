@@ -99,13 +99,11 @@ async function createTaskWithAttachment(page: Page) {
   await api(page, `/api/v1/workspaces/${workspaceId}/labels`, 'POST', { name: 'Unused label', color: '#123456' })
   await page.goto('/tasks')
   await page.getByRole('button', { name: 'New task' }).click()
-  await expect(page).toHaveURL(/\/tasks\/.+/)
-  const title = page.getByLabel('Task title')
+  const title = page.getByRole('dialog').getByLabel('Task title')
   await expect(title).toBeFocused()
   await title.fill('Restored task')
-  const titleSaved = page.waitForResponse((response) => response.request().method() === 'PATCH' && /\/tasks\/[^/]+$/.test(new URL(response.url()).pathname))
-  await title.press('Tab')
-  await titleSaved
+  await page.getByRole('button', { name: 'Create task' }).click()
+  await expect(page).toHaveURL(/\/tasks\/.+/)
   await page.getByLabel('Attach files').setInputFiles({
     name: 'proof.txt',
     mimeType: 'text/plain',

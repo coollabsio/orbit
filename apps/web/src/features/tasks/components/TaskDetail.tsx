@@ -22,7 +22,7 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader } from '@/components/common/Pane'
 import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
-import { PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
+import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
 import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
 import { useProjects } from '@/features/tasks/api/projects'
@@ -44,21 +44,6 @@ import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { LabelPill, TaskLabels } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
-
-function dueDateLabel(value: string | null, startValue?: string | null) {
-  if (!value) return 'Set due date'
-  if (startValue) {
-    const format = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-    return `${format.format(new Date(startValue))} – ${format.format(new Date(value))}`
-  }
-  return new Date(value).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 interface TaskDetailProps {
   task: Task | undefined
