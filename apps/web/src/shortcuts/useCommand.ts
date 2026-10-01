@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
-import type { Bindings } from './bindings'
+import { shortcutLabel, type Bindings } from './bindings'
 import type { Command, CommandId } from './commands'
-import { BindingsContext, CommandStoreContext, PendingSequenceContext } from './ShortcutProvider'
+import { BindingsContext, CommandStoreContext, PendingSequenceContext, SuspendContext } from './context'
 
 /** Gives a command its action while the calling component is mounted. `null` or `enabled: false` leaves it inactive:
  *  its key does nothing and the command menu does not list it. */
@@ -35,3 +35,15 @@ export const useBindings = (): Bindings => useContext(BindingsContext)
 
 /** The first key of a sequence that waits for its second key, or null. */
 export const usePendingSequence = (): string | null => useContext(PendingSequenceContext)
+
+/** Turns every shortcut off while the calling component is mounted, e.g. while a key recorder listens. */
+export function useSuspendShortcuts() {
+  const suspend = useContext(SuspendContext)
+  useEffect(() => {
+    suspend(true)
+    return () => suspend(false)
+  }, [suspend])
+}
+
+/** `aria-keyshortcuts` for the current keys of a command. */
+export const useShortcutLabel = (id: CommandId) => shortcutLabel(useBindings()[id])

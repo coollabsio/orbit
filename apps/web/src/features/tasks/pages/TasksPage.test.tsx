@@ -1,3 +1,4 @@
+import { NewTaskProvider } from '@/features/tasks/newTask'
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -84,6 +85,7 @@ function renderAt(url: string, goTo?: string | string[]) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[url]}>
         <WorkspaceProvider>
+          <NewTaskProvider>
           <Routes>
             <Route path="tasks" element={<TasksPage />} />
             <Route path="tasks/:taskId" element={<TasksPage />} />
@@ -93,6 +95,7 @@ function renderAt(url: string, goTo?: string | string[]) {
           </Routes>
           <Location />
           {[goTo ?? []].flat().map((to) => <GoTo key={to} to={to} />)}
+          </NewTaskProvider>
         </WorkspaceProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -218,6 +221,31 @@ test('closing a task returns to the page it was opened from', async () => {
   await project.findByRole('button', { name: 'Close task' })
   fireEvent.keyDown(document, { key: 'Escape' })
   await waitFor(() => expect(project.getByTestId('location').textContent).toBe('/tasks?workspace=workspace-1&project=project-1'))
+})
+
+test('Escape does not close the task while typing or while a menu is open', async () => {
+  serve()
+  const page = renderAt('/tasks?workspace=workspace-1')
+  fireEvent.click(await page.findByText('Ship release'))
+  await page.findByRole('button', { name: 'Close task' })
+  const opened = page.getByTestId('location').textContent
+
+  const field = document.createElement('input')
+  document.body.append(field)
+  field.focus()
+  fireEvent.keyDown(field, { key: 'Escape', code: 'Escape' })
+  field.remove()
+
+  const menu = document.createElement('div')
+  menu.setAttribute('role', 'menu')
+  document.body.append(menu)
+  fireEvent.keyDown(document.body, { key: 'Escape', code: 'Escape' })
+  await settle(50)
+  expect(page.getByTestId('location').textContent).toBe(opened)
+
+  menu.remove()
+  fireEvent.keyDown(document.body, { key: 'Escape', code: 'Escape' })
+  await waitFor(() => expect(page.getByTestId('location').textContent).toBe('/tasks?workspace=workspace-1'))
 })
 
 test('a saved view opens and closes tasks under its own path', async () => {

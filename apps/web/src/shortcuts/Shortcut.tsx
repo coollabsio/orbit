@@ -32,14 +32,3 @@ export function Shortcut({ id, className }: { id: CommandId; className?: string 
   const keys = useBindings()[id]
   return keys ? <ShortcutKeys keys={keys} className={className} /> : null
 }
-
-/** A value for `aria-keyshortcuts`. A sequence has no ARIA form. */
-export function shortcutLabel(keys: string | null): string | undefined {
-  const steps = keys ? parseKeys(keys) : null
-  if (!steps || steps.length !== 1) return undefined
-  const step = steps[0].replace('Ctrl+', 'Control+')
-  return step.includes('Mod+') ? `${step.replace('Mod+', 'Control+')} ${step.replace('Mod+', 'Meta+')}` : step
-}
-
-/** `aria-keyshortcuts` for the current keys of a command. */
-export const useShortcutLabel = (id: CommandId) => shortcutLabel(useBindings()[id])

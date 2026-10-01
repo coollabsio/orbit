@@ -102,3 +102,11 @@ const RESERVED = ['Mod+W', 'Mod+T', 'Mod+N', 'Mod+Q', 'Mod+R', 'Mod+L', 'Mod+Shi
 export function isReserved(keys: string): boolean {
   return keys.split(' ').some((step) => RESERVED.includes(step) || step.split('+').every((part) => MODIFIERS.includes(part)))
 }
+
+/** A value for `aria-keyshortcuts`. A sequence has no ARIA form. */
+export function shortcutLabel(keys: string | null): string | undefined {
+  const steps = keys ? parseKeys(keys) : null
+  if (!steps || steps.length !== 1) return undefined
+  const step = steps[0].replace('Ctrl+', 'Control+')
+  return step.includes('Mod+') ? `${step.replace('Mod+', 'Control+')} ${step.replace('Mod+', 'Meta+')}` : step
+}

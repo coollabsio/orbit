@@ -1,5 +1,4 @@
-import { useShortcutLabel } from '@/shortcuts/Shortcut'
-import { useCommand } from '@/shortcuts/useCommand'
+import { useCommand, useShortcutLabel } from '@/shortcuts/useCommand'
 import { useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Setting4 } from 'reicon-react'
 import { Button } from '@/components/ui/button'

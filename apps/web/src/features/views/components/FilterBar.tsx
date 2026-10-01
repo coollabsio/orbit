@@ -1,5 +1,4 @@
-import { useShortcutLabel } from '@/shortcuts/Shortcut'
-import { useCommand } from '@/shortcuts/useCommand'
+import { useCommand, useShortcutLabel } from '@/shortcuts/useCommand'
 import { useEffect, useState, type ComponentProps, type ReactElement, type ReactNode } from 'react'
 import { Add as Plus, Filter, Hierarchy, Lock, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'

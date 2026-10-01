@@ -1,74 +1,14 @@
 import { useHotkeySequences, useHotkeys, type UseHotkeyDefinition, type UseHotkeySequenceDefinition } from '@tanstack/react-hotkeys'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { toast } from 'sonner'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { parseKeys, resolveBindings, toEngineStep, type Bindings, type Overrides } from './bindings'
-import { COMMANDS, type Command } from './commands'
+import type { Command } from './commands'
+import { BindingsContext, CommandStore, CommandStoreContext, PendingSequenceContext, SuspendContext } from './context'
 
 /** Longest pause between the two keys of a sequence. */
-export const SEQUENCE_TIMEOUT_MS = 1000
+const SEQUENCE_TIMEOUT_MS = 1000
 
 const OPEN_POPUP = '[role="menu"]:not([data-closed]), [role="dialog"]:not([data-closed]), [role="alertdialog"]:not([data-closed]), [role="listbox"]:not([data-closed])'
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta', 'AltGraph']
-const ALL_COMMANDS: readonly Command[] = COMMANDS
-
-type Handler = { run: () => void }
-
-/** The handlers that features mounted with `useCommand`. The last mounted handler of a command runs. */
-export class CommandStore {
-  private handlers = new Map<string, Handler[]>()
-  private listeners = new Set<() => void>()
-  private active: Command[] = []
-
-  add(id: string, handler: Handler) {
-    this.handlers.set(id, [...(this.handlers.get(id) ?? []), handler])
-    this.changed()
-    return () => {
-      this.handlers.set(id, (this.handlers.get(id) ?? []).filter((item) => item !== handler))
-      this.changed()
-    }
-  }
-
-  private changed() {
-    this.active = ALL_COMMANDS.filter((command) => this.handlers.get(command.id)?.length)
-    for (const listener of this.listeners) listener()
-  }
-
-  subscribe = (listener: () => void) => {
-    this.listeners.add(listener)
-    return () => void this.listeners.delete(listener)
-  }
-
-  getActive = () => this.active
-
-  /** Runs the command; false when no handler is mounted. An error in a handler is reported and does not spread. */
-  run(id: string): boolean {
-    const handler = this.handlers.get(id)?.at(-1)
-    if (!handler) return false
-    try {
-      handler.run()
-    } catch (error) {
-      console.error(error)
-      toast.error(`Could not run "${ALL_COMMANDS.find((command) => command.id === id)?.title ?? id}".`)
-    }
-    return true
-  }
-}
-
-const fallbackStore = new CommandStore()
-export const CommandStoreContext = createContext<CommandStore>(fallbackStore)
-export const BindingsContext = createContext<Bindings>(resolveBindings({}))
-/** The first key of a sequence that waits for its second key, in registry notation. */
-export const PendingSequenceContext = createContext<string | null>(null)
-const SuspendContext = createContext<(suspended: boolean) => void>(() => {})
-
-/** Turns every shortcut off while the calling component is mounted, e.g. while a key recorder listens. */
-export function useSuspendShortcuts() {
-  const suspend = useContext(SuspendContext)
-  useEffect(() => {
-    suspend(true)
-    return () => suspend(false)
-  }, [suspend])
-}
 
 const hasModifier = (step: string) => /(^|\+)(Mod|Ctrl|Alt)\+/.test(step)
 

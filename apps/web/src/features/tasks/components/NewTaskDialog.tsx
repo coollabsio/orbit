@@ -1,3 +1,4 @@
+import { useCommand } from '@/shortcuts/useCommand'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Calendar, ChevronRight, Paperclip2 as Paperclip, User as UserIcon, Xmark as X } from 'reicon-react'
@@ -102,7 +103,8 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
     setOpen(false)
     onOpenTask(task)
   }
-  const submit = async () => {
+  /** `more` keeps the dialog for the next task; it defaults to the "Create more" switch. */
+  const submit = async (more = createMore) => {
     if (!canCreate) return
     try {
       const task = await createTask.mutateAsync({
@@ -127,7 +129,7 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
           setUploading(false)
         }
       }
-      if (!createMore) return openTask(task)
+      if (!more) return openTask(task)
       // the properties stay for the next task of the batch
       setCreated(task)
       setTitle('')
@@ -139,6 +141,8 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
       // The draft stays; the mutation shows the error beside the create action.
     }
   }
+
+  useCommand('newTask.submitMore', () => void submit(true))
 
   return (
     <Dialog
@@ -164,7 +168,8 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
             void submit()
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            // with Shift it is the "create and add another" command
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
               event.preventDefault()
               void submit()
             }

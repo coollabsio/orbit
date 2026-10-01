@@ -1,3 +1,4 @@
+import { NewTaskProvider } from '@/features/tasks/newTask'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
@@ -62,6 +63,7 @@ export function AppShell() {
   }, [sidebarCollapsed])
 
   return (
+    <NewTaskProvider>
     <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
       {!live ? (
         <div
@@ -133,5 +135,6 @@ export function AppShell() {
 
       {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
     </div>
+    </NewTaskProvider>
   )
 }

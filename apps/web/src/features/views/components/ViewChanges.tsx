@@ -1,5 +1,4 @@
-import { useShortcutLabel } from '@/shortcuts/Shortcut'
-import { useCommand } from '@/shortcuts/useCommand'
+import { useCommand, useShortcutLabel } from '@/shortcuts/useCommand'
 import { useRef, useState } from 'react'
 import { Bookmark } from 'reicon-react'
 import { toast } from 'sonner'

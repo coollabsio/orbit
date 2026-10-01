@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, waitFor } from '@testing-library/react'
+import { fireEvent, waitFor } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -114,4 +115,18 @@ test('creating a label inside the dialog does not create the task', async () => 
   // the label form clears once its request has finished
   await waitFor(() => expect(name.value).toBe(''))
   expect(created).toEqual([])
+})
+
+test('Mod+Shift+Enter creates the task and keeps the dialog, with "Create more" off', async () => {
+  const created: Array<{ title: string }> = []
+  api(created)
+  const opened: string[] = []
+  const view = render(<NewTaskDialog onClose={() => {}} onOpenTask={(task) => opened.push(task.id)} />, { wrapper: Wrapper })
+  await view.findByRole('button', { name: 'Status: Todo' })
+  const title = view.getByLabelText('Task title') as HTMLInputElement
+  await userEvent.type(title, 'First{Control>}{Shift>}{Enter}{/Shift}{/Control}')
+  await view.findByText('Created')
+  expect(title.value).toBe('')
+  expect(opened).toEqual([])
+  expect(created.map((body) => body.title)).toEqual(['First'])
 })

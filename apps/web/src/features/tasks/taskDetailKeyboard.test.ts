@@ -1,15 +1,5 @@
 import { expect, test } from 'bun:test'
 
-test('Escape closes task detail on its redirect or the page it was opened from', async () => {
-  const source = await Bun.file(new URL('./pages/TasksPage.tsx', import.meta.url)).text()
-  const effect = source.slice(source.indexOf("if (!taskId) return"), source.indexOf('const creating = useRef'))
-
-  expect(effect).toContain("event.key === 'Escape'")
-  expect(effect).toContain('navigate(redirect ?? `${basePath}${closeSearchSuffix}`)')
-  expect(effect).toContain("document.addEventListener('keydown', onKeyDown)")
-  expect(effect).toContain("document.removeEventListener('keydown', onKeyDown)")
-})
-
 test('task detail URLs omit the project query parameter', async () => {
   const source = await Bun.file(new URL('./pages/TasksPage.tsx', import.meta.url)).text()
 
