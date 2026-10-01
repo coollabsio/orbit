@@ -37,7 +37,8 @@ export function visibleTaskIds(): string[] {
 /** The task row that holds the keyboard focus. */
 export const focusedTaskId = () => rowOf(document.activeElement)
 
-function focusRow(id: string) {
+/** Gives a task row the keyboard focus and brings it into view. */
+export function focusTaskRow(id: string) {
   const row = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(id)}"]`)
   row?.focus({ preventScroll: true })
   // keyboard movement never animates: the row is in view at once
@@ -118,7 +119,7 @@ export function useListNavigation(onOpen: ((id: string) => void) | null, options
     const { visible, focused, index } = current()
     if (visible.length === 0) return null
     const next = index === -1 ? visible[0] : visible[Math.min(visible.length - 1, Math.max(0, index + step))]
-    focusRow(next)
+    focusTaskRow(next)
     return { from: index === -1 ? null : focused, to: next }
   }
   const extend = (step: 1 | -1) => {

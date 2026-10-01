@@ -1,3 +1,4 @@
+import { useCommand } from '@/shortcuts/useCommand'
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -153,6 +154,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [addIconOpen, setAddIconOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  useCommand('docs.history', () => setHistoryOpen((open) => !open))
   const [fullWidth, setFullWidth] = useState(page.full_width)
   const setPageLock = useSetPageLock(workspaceId)
   /** Locked pages are read-only here (the server refuses edits too, see `POST .../lock`). */

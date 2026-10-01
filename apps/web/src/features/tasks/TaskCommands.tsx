@@ -16,7 +16,7 @@ import { GroupIcon } from '@/features/views/components/GroupIcon'
 import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useTaskTarget } from '@/shortcuts/taskTarget'
+import { focusTaskRow, focusedTaskId, useTaskTarget } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 
 type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate'
@@ -40,7 +40,8 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const { getTargetIds, selectedIds, openTaskId, setSelected } = useTaskTarget()
   const bulkTasks = useBulkTasks(workspace.id)
   const deleteTask = useDeleteTask(workspace.id)
-  const [menu, setMenu] = useState<{ field: TaskField; ids: string[] } | null>(null)
+  // `focused`: the row that had the keyboard focus, to give it back when the list closes
+  const [menu, setMenu] = useState<{ field: TaskField; ids: string[]; focused: string | null } | null>(null)
 
   const targets = () => {
     const ids = getTargetIds()
@@ -50,7 +51,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const mutate = (updates: BulkItem[]) => {
     if (updates.length > 0) bulkTasks.mutate(updates)
   }
-  const open = (field: TaskField) => () => setMenu({ field, ids: targets().map((task) => task.id) })
+  const open = (field: TaskField) => () => setMenu({ field, ids: targets().map((task) => task.id), focused: focusedTaskId() })
   // one task only: these have no form for several tasks
   const single = selectedIds.length <= 1
   const copy = (text: string, done: string) => void navigator.clipboard.writeText(text).then(() => toast(done), () => toast.error('Could not copy to the clipboard.'))
@@ -77,7 +78,14 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   // the live tasks, so that a second choice in the same list sends the current versions
   const menuTasks = menu ? tasks.filter((task) => menu.ids.includes(task.id)) : []
   if (!menu || menuTasks.length === 0) return null
-  const close = () => setMenu(null)
+  const close = () => {
+    setMenu(null)
+    // a change can move the row to another group, which mounts it again: the keyboard stays on the task
+    const row = menu.focused
+    if (row) setTimeout(() => {
+      if (focusedTaskId() !== row) focusTaskRow(row)
+    }, 50)
+  }
   const scope = menuTasks.length === 1 ? menuTasks[0].identifier : `${menuTasks.length} tasks`
 
   if (menu.field === 'dueDate') {

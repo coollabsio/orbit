@@ -1,3 +1,4 @@
+import { useCommand } from '@/shortcuts/useCommand'
 import '@blocknote/shadcn/style.css'
 
 import { use, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type Ref } from 'react'
@@ -246,6 +247,9 @@ function PageEditorInner({
   useEffect(() => {
     latest.setEditor(editor)
   }, [latest, editor])
+
+  // a comment needs selected text to attach to; the key works from inside the editor
+  useCommand('docs.comment', collab && comments ? () => editor.getExtension(CommentsExtension)?.startPendingComment() : null, { available: () => editor.getSelectedText().trim() !== '' })
 
   // Deep link to a thread (inbox): select it once the threads are loaded.
   const showThreadId = comments?.showThreadId ?? null

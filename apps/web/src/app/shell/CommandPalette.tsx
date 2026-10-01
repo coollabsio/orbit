@@ -180,7 +180,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // what can act now, read once when the palette opens: a task command needs the task the pointer was on
   const available = useAvailableCommands()
   const [commands] = useState<CommandEntry[]>(() => available()
-    .filter((command) => !command.fixed && command.group !== 'Navigation' && command.id !== 'palette.open' && command.id !== 'search.open')
+    // not the keys that only move the focus or the selection: they mean nothing as a menu entry
+    .filter((command) => !command.fixed && !command.repeat && command.group !== 'Navigation' && !command.id.startsWith('list.') && command.id !== 'palette.open' && command.id !== 'search.open')
+    // the commands for the task come before those of the page
+    .sort((a, b) => Number(b.group === 'Task') - Number(a.group === 'Task'))
     .map((command) => ({ id: `command_${command.id}`, icon: COMMAND_ICON[command.group], title: command.title, meta: command.group, command: command.id as CommandId, run: true, keywords: command.group })))
   const runCommand = useRunCommand()
   const matches = (entry: CommandEntry) => `${entry.title} ${entry.keywords}`.toLowerCase().includes(query.trim().toLowerCase())
