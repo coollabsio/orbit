@@ -43,6 +43,7 @@ use super::files::sanitize_file_name;
 use super::model::{BlockNode, NotionPage, normalize_id};
 pub use super::scan::{NotionImportNode, NotionImportNodeKind, NotionImportTree};
 use super::scan::{ScanControl, build_tree};
+use crate::repositories::membership;
 use crate::repositories::page_files::{PageFileRepository, page_file_url};
 use crate::repositories::page_versions::SaveOrigin;
 use crate::repositories::pages::{
@@ -1690,19 +1691,10 @@ impl NotionImportService {
     }
 
     async fn require_member(&self, workspace_id: Id, user_id: Id) -> Result<(), ImportError> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-             WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL",
-        )
-        .bind(workspace_id.to_string())
-        .bind(user_id.to_string())
-        .fetch_one(self.database().pool())
-        .await?;
-        if count == 1 {
-            Ok(())
-        } else {
-            Err(ImportError::NotFound)
-        }
+        membership::actor(self.database().pool(), workspace_id, user_id)
+            .await?
+            .map(|_| ())
+            .ok_or(ImportError::NotFound)
     }
 
     async fn has_active_import(

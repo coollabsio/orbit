@@ -511,6 +511,13 @@ async fn owners_and_admins_manage_members_without_crossing_global_account_scope(
         .await
         .unwrap();
     let members = response_json(members).await;
+    // The caller is the owner: the owner row is protected, the admin row is fully manageable.
+    for item in members["items"].as_array().unwrap() {
+        let is_owner = item["role"] == "owner";
+        assert_eq!(item["can_change_role"], !is_owner, "{item}");
+        assert_eq!(item["can_remove"], !is_owner, "{item}");
+        assert_eq!(item["can_transfer_ownership"], !is_owner, "{item}");
+    }
     let owner_membership = members["items"]
         .as_array()
         .unwrap()

@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use axum::body::to_bytes;
 use axum::extract::{Extension, FromRequest, Path, Query, Request, State};
-use axum::http::header::{AUTHORIZATION, COOKIE, ORIGIN};
+use axum::http::header::{AUTHORIZATION, ORIGIN};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use hmac::{Hmac, Mac};
-use orbit_domain::{Permission, Policy};
+use orbit_domain::Permission;
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis, generate_opaque_token};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -19,9 +19,10 @@ use sqlx::{Sqlite, Transaction};
 use utoipa::ToSchema;
 
 use crate::audit::{self, AuditOutcome};
-use crate::auth_routes::CookieMode;
+use crate::auth_routes::{CookieMode, request_session};
 use crate::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use crate::repositories::identity::IdentityRepository;
+use crate::repositories::membership;
 use crate::repositories::tasks::{
     DiscordTask, GithubWorkItem, TaskError, TaskRecord, TaskRepository,
 };
@@ -220,28 +221,9 @@ async fn github_session_user(
     request_id: Option<&RequestId>,
 ) -> Result<Id, ApiError> {
     let settings = github_settings_context(state, request_id)?;
-    let token = headers
-        .get(COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookies| {
-            cookies.split(';').map(str::trim).find_map(|cookie| {
-                cookie.strip_prefix(&format!("{}=", settings.cookie_mode.session_cookie_name()))
-            })
-        })
-        .ok_or_else(|| {
-            ApiError::new(
-                StatusCode::UNAUTHORIZED,
-                "authentication_required",
-                "Authentication required",
-                "A valid session is required.",
-                request_id,
-            )
-        })?;
-    let session = settings
-        .identity
-        .authenticate_session(token, TimestampMillis::now())
+    let session = request_session(&settings.identity, settings.cookie_mode, headers)
         .await
-        .map_err(|_| {
+        .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "authentication_required",
@@ -269,10 +251,10 @@ async fn github_workspace_access(
             request_id,
         )
     })?;
-    let role: Option<String> = sqlx::query_scalar("SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL")
-        .bind(workspace).bind(user_id.to_string()).fetch_optional(state.tasks.database().pool()).await
+    let actor = membership::actor(state.tasks.database().pool(), workspace_id, user_id)
+        .await
         .map_err(|_| ApiError::internal(request_id))?;
-    let role = role.ok_or_else(|| {
+    let actor = actor.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
             "github_workspace_not_found",
@@ -281,7 +263,7 @@ async fn github_workspace_access(
             request_id,
         )
     })?;
-    Ok((workspace_id, can_manage_integrations(&role)))
+    Ok((workspace_id, actor.can(Permission::IntegrationsManage)))
 }
 
 async fn github_project_access(
@@ -310,10 +292,19 @@ async fn github_project_access(
             request_id,
         )
     })?;
-    let role: Option<String> = sqlx::query_scalar("SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id JOIN projects ON projects.workspace_id = memberships.workspace_id WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND projects.id = ? AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL")
-        .bind(workspace).bind(user_id.to_string()).bind(project).fetch_optional(state.tasks.database().pool()).await
+    let pool = state.tasks.database().pool();
+    let actor = membership::actor(pool, workspace_id, user_id)
+        .await
         .map_err(|_| ApiError::internal(request_id))?;
-    let role = role.ok_or_else(|| {
+    let project_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM projects WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+    )
+    .bind(project)
+    .bind(workspace)
+    .fetch_one(pool)
+    .await
+    .map_err(|_| ApiError::internal(request_id))?;
+    let actor = actor.filter(|_| project_exists).ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
             "github_project_not_found",
@@ -322,11 +313,11 @@ async fn github_project_access(
             request_id,
         )
     })?;
-    Ok((workspace_id, project_id, can_manage_integrations(&role)))
-}
-
-fn can_manage_integrations(role: &str) -> bool {
-    Policy::stored_role_can(role, Permission::IntegrationsManage)
+    Ok((
+        workspace_id,
+        project_id,
+        actor.can(Permission::IntegrationsManage),
+    ))
 }
 
 fn require_github_manager(

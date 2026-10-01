@@ -44,7 +44,6 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   const location = useLocation()
   const { workspace } = useWorkspace()
   const canDeleteTeamspaces = useCan('teamspaces.delete')
-  const canPurgeTeamspacePages = useCan('pages.purge')
   const tree = usePageTree(workspace.id)
   const teamspaces = useTeamspaces(workspace.id)
   // The open page was trashed (here or by someone else) and we are leaving it. Navigations run as transitions, so
@@ -169,7 +168,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   let content
   if (view === 'trash') {
-    content = <PageTrashPane workspaceId={workspace.id} canPurgeTeamspacePages={canPurgeTeamspacePages} />
+    content = <PageTrashPane workspaceId={workspace.id} />
   } else if (view === 'import') {
     content = <NotionImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
   } else if (!pageId) {

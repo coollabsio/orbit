@@ -45,7 +45,7 @@ test('creates a personal view from the current state with an icon and color', as
 
 test('non-owners edit a workspace view without visibility controls', async () => {
   const requests = stubFetch(() => Response.json(savedView({ id: 'view-1', name: 'Launch board', visibility: 'workspace', version: 4 })))
-  const existing = savedView({ id: 'view-1', name: 'Launch', visibility: 'workspace', version: 3, owner: { user_id: 'user-2', display_name: 'Grace' } })
+  const existing = savedView({ id: 'view-1', name: 'Launch', visibility: 'workspace', version: 3, owner: { user_id: 'user-2', display_name: 'Grace' }, can_change_visibility: false })
   const { view } = renderWithProviders(
     <SaveViewDialog open onOpenChange={() => {}} mode="edit" workspaceId="alpha" state={defaultViewState()} view={existing} onSaved={() => {}} />,
   )

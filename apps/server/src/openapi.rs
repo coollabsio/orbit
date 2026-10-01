@@ -1,4 +1,6 @@
+use orbit_domain::{Policy, WorkspaceRole};
 use std::collections::BTreeMap;
+use utoipa::openapi::extensions::ExtensionsBuilder;
 use utoipa::openapi::path::{ParameterBuilder, ParameterIn};
 use utoipa::openapi::schema::{ObjectBuilder, Type};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityRequirement, SecurityScheme};
@@ -174,6 +176,25 @@ struct ProblemDetails;
 
 impl Modify for ProblemDetails {
     fn modify(&self, openapi: &mut OpenApiDocument) {
+        // The role table, published so generated test fixtures cannot drift from `Policy`.
+        let role_permissions: serde_json::Map<String, serde_json::Value> = [
+            WorkspaceRole::Owner,
+            WorkspaceRole::Admin,
+            WorkspaceRole::Member,
+        ]
+        .into_iter()
+        .map(|role| {
+            (
+                role.as_str().to_owned(),
+                serde_json::json!(Policy::permissions(role)),
+            )
+        })
+        .collect();
+        openapi.extensions = Some(
+            ExtensionsBuilder::new()
+                .add("x-role-permissions", role_permissions)
+                .build(),
+        );
         openapi
             .components
             .as_mut()

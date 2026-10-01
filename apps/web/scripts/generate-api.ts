@@ -33,7 +33,16 @@ if (!generated.success) {
   process.exit(generated.exitCode)
 }
 
+const rolePermissions = document['x-role-permissions']
+if (typeof rolePermissions !== 'object' || !rolePermissions) {
+  throw new Error('OpenAPI x-role-permissions must contain the role table.')
+}
+
 await Bun.write(join(output, 'openapi.json'), source)
+await Bun.write(
+  join(output, 'rolePermissions.ts'),
+  `// Generated from OpenAPI x-role-permissions. Do not edit.\n// For test fixtures and mocks only: the app reads \`workspace.permissions\` from the server.\nimport type { Permission, WorkspaceRole } from './types.gen'\n\nexport const ROLE_PERMISSIONS: Record<WorkspaceRole, Permission[]> = ${JSON.stringify(rolePermissions, null, 2)}\n`,
+)
 await Bun.write(
   join(output, 'contract.ts'),
   `// Generated from OpenAPI info.version. Do not edit.\nexport const CONTRACT_ID = ${JSON.stringify(contractId)} as const\n`,

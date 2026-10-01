@@ -2,6 +2,7 @@ import type { LabelRecord, ProjectRecord } from '@/api/generated/types.gen'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { FilterOptions } from './filterFields'
+import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
 
 export function member(id: string, name: string): User {
   return {
@@ -14,7 +15,7 @@ export function member(id: string, name: string): User {
     color: '#e0457b',
     online: false,
     title: '',
-    roleIds: [],
+    roleIds: [], can: NO_MEMBER_ABILITIES,
     version: 1,
   }
 }

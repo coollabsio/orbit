@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Extension, FromRequest, FromRequestParts, Path, Query, Request, State};
-use axum::http::header::{CONTENT_TYPE, COOKIE};
+use axum::http::header::CONTENT_TYPE;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -14,7 +14,7 @@ use serde_json::Value;
 use sqlx::Row;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::auth_routes::CookieMode;
+use crate::auth_routes::{CookieMode, request_session};
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
@@ -1989,20 +1989,9 @@ pub(crate) async fn authenticate_session(
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<AuthenticatedSession, ApiError> {
-    let token = cookie_value(headers, cookie_mode.session_cookie_name()).ok_or_else(|| {
-        ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "authentication_required",
-            "Authentication required",
-            "A valid session is required.",
-            instance,
-            request_id,
-        )
-    })?;
-    identity
-        .authenticate_session(&token, TimestampMillis::now())
+    request_session(identity, cookie_mode, headers)
         .await
-        .map_err(|_| {
+        .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "authentication_required",
@@ -2012,16 +2001,6 @@ pub(crate) async fn authenticate_session(
                 request_id,
             )
         })
-}
-
-fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .map(str::trim)
-        .find_map(|pair| pair.strip_prefix(&format!("{name}=")).map(str::to_owned))
 }
 
 pub(crate) fn parse_id(

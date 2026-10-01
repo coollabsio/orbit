@@ -1,4 +1,4 @@
-use orbit_domain::{Permission, Policy};
+use orbit_domain::{Actor, Permission};
 use orbit_platform::{Database, Id, TimestampMillis, generate_opaque_token};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -6,6 +6,7 @@ use sqlx::Row;
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::membership;
 use crate::audit::{self, AuditOutcome};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -305,9 +306,9 @@ impl ApiTokenRepository {
     }
 
     async fn require_manager(&self, workspace_id: Id, actor_id: Id) -> Result<(), ApiTokenError> {
-        let role = sqlx::query_scalar::<_, String>("SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL")
-            .bind(workspace_id.to_string()).bind(actor_id.to_string()).fetch_optional(self.database.pool()).await?.ok_or(ApiTokenError::NotFound)?;
-        require_token_manager(&role)
+        require_token_manager(
+            membership::actor(self.database.pool(), workspace_id, actor_id).await?,
+        )
     }
 }
 
@@ -316,13 +317,14 @@ async fn require_manager_in(
     workspace_id: Id,
     actor_id: Id,
 ) -> Result<(), ApiTokenError> {
-    let role = sqlx::query_scalar::<_, String>("SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL")
-        .bind(workspace_id.to_string()).bind(actor_id.to_string()).fetch_optional(&mut **transaction).await?.ok_or(ApiTokenError::NotFound)?;
-    require_token_manager(&role)
+    require_token_manager(membership::actor(&mut **transaction, workspace_id, actor_id).await?)
 }
 
-fn require_token_manager(role: &str) -> Result<(), ApiTokenError> {
-    if Policy::stored_role_can(role, Permission::ApiTokensManage) {
+fn require_token_manager(actor: Option<Actor>) -> Result<(), ApiTokenError> {
+    if actor
+        .ok_or(ApiTokenError::NotFound)?
+        .can(Permission::ApiTokensManage)
+    {
         Ok(())
     } else {
         Err(ApiTokenError::Forbidden)

@@ -10,7 +10,6 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneTitle } from '@/components/common/Pane'
 import { relativeTime } from '@/lib/format'
 import {
-  canPurgePage,
   isPageVersionConflict,
   useEmptyPageTrash,
   usePageTrash,
@@ -24,16 +23,16 @@ const plural = (count: number) => `${count} page${count === 1 ? '' : 's'}`
 
 /**
  * Pages trashed directly (their sub-pages come back with them), newest first. "Delete forever" and "Empty trash"
- * cover what the caller may purge: own private pages always, teamspace pages with `canPurgeTeamspacePages`.
+ * cover the pages the server marks `can_purge` for the caller.
  */
-export function PageTrashPane({ workspaceId, canPurgeTeamspacePages }: { workspaceId: string; canPurgeTeamspacePages: boolean }) {
+export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate()
   const trash = usePageTrash(workspaceId)
   const restore = useRestorePage(workspaceId)
   const purge = usePurgePage(workspaceId)
   const emptyTrash = useEmptyPageTrash(workspaceId)
   const teamspaces = useTeamspaces(workspaceId)
-  const purgeable = (trash.data ?? []).filter((page) => canPurgePage(page, canPurgeTeamspacePages))
+  const purgeable = (trash.data ?? []).filter((page) => page.can_purge)
   const busy = restore.isPending || purge.isPending || emptyTrash.isPending
 
   const requestPurge = async (page: TrashedPage) => {
@@ -139,7 +138,7 @@ export function PageTrashPane({ workspaceId, canPurgeTeamspacePages }: { workspa
               <RotateCcw className="size-3.5" />
               Restore
             </Button>
-            {canPurgePage(page, canPurgeTeamspacePages) ? (
+            {page.can_purge ? (
               <Button
                 type="button"
                 variant="ghost"

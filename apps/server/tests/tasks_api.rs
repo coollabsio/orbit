@@ -1527,6 +1527,25 @@ async fn only_the_author_edits_a_comment_and_only_the_author_or_a_manager_delete
     )
     .await;
     assert_eq!(comment["author_id"], author_id.to_string());
+    assert_eq!(comment["can_edit"], true);
+    // Each caller's list carries what that caller may do with the comment.
+    for (cookie, can_edit, can_delete) in [
+        (&author_cookie, true, true),
+        (&other_cookie, false, false),
+        (&fixture.owner_cookie, false, true),
+    ] {
+        let listed = response_json(
+            fixture
+                .app
+                .clone()
+                .oneshot(cookie_request("GET", &uri, cookie))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(listed["items"][0]["can_edit"], can_edit, "{listed}");
+        assert_eq!(listed["items"][0]["can_delete"], can_delete, "{listed}");
+    }
     let comment_uri = format!("{uri}/{}", comment["id"].as_str().unwrap());
     let edit = |cookie: &str| {
         json_request(

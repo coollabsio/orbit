@@ -410,6 +410,8 @@ async fn workspace_views_are_readable_by_members_and_editable_by_their_owner_or_
     let (status, seen) = fixture.call("GET", &path, &admin, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(seen["can_edit"], true);
+    // An admin edits a shared view but only its owner decides who sees it.
+    assert_eq!(seen["can_change_visibility"], false);
     let (status, renamed) = fixture
         .call(
             "PATCH",

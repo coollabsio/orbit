@@ -1,6 +1,7 @@
 pub mod api_tokens;
 pub mod attachments;
 pub mod identity;
+pub(crate) mod membership;
 pub mod page_comments;
 pub mod page_export;
 pub mod page_files;

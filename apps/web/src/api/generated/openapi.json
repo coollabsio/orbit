@@ -20409,6 +20409,8 @@
           "task_id",
           "author_id",
           "body",
+          "can_edit",
+          "can_delete",
           "version",
           "created_at",
           "updated_at"
@@ -20419,6 +20421,14 @@
           },
           "body": {
             "type": "string"
+          },
+          "can_delete": {
+            "type": "boolean",
+            "description": "Whether the caller may delete this comment."
+          },
+          "can_edit": {
+            "type": "boolean",
+            "description": "Whether the caller may edit this comment."
           },
           "created_at": {
             "type": "string",
@@ -21310,10 +21320,25 @@
           "email",
           "display_name",
           "role",
+          "can_change_role",
+          "can_remove",
+          "can_transfer_ownership",
           "version",
           "created_at"
         ],
         "properties": {
+          "can_change_role": {
+            "type": "boolean",
+            "description": "Whether the caller may change this member's role."
+          },
+          "can_remove": {
+            "type": "boolean",
+            "description": "Whether the caller may remove this member (for the caller's own row: leave)."
+          },
+          "can_transfer_ownership": {
+            "type": "boolean",
+            "description": "Whether the caller may hand the workspace over to this member."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -21328,7 +21353,7 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/WorkspaceRole"
           },
           "suspended_at": {
             "type": [
@@ -22827,6 +22852,8 @@
                 "task_id",
                 "author_id",
                 "body",
+                "can_edit",
+                "can_delete",
                 "version",
                 "created_at",
                 "updated_at"
@@ -22837,6 +22864,14 @@
                 },
                 "body": {
                   "type": "string"
+                },
+                "can_delete": {
+                  "type": "boolean",
+                  "description": "Whether the caller may delete this comment."
+                },
+                "can_edit": {
+                  "type": "boolean",
+                  "description": "Whether the caller may edit this comment."
                 },
                 "created_at": {
                   "type": "string",
@@ -22997,10 +23032,25 @@
                 "email",
                 "display_name",
                 "role",
+                "can_change_role",
+                "can_remove",
+                "can_transfer_ownership",
                 "version",
                 "created_at"
               ],
               "properties": {
+                "can_change_role": {
+                  "type": "boolean",
+                  "description": "Whether the caller may change this member's role."
+                },
+                "can_remove": {
+                  "type": "boolean",
+                  "description": "Whether the caller may remove this member (for the caller's own row: leave)."
+                },
+                "can_transfer_ownership": {
+                  "type": "boolean",
+                  "description": "Whether the caller may hand the workspace over to this member."
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time"
@@ -23015,7 +23065,7 @@
                   "type": "string"
                 },
                 "role": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/WorkspaceRole"
                 },
                 "suspended_at": {
                   "type": [
@@ -23945,10 +23995,15 @@
           "is_favorite",
           "favorite_position",
           "can_edit",
+          "can_change_visibility",
           "created_at",
           "updated_at"
         ],
         "properties": {
+          "can_change_visibility": {
+            "type": "boolean",
+            "description": "Whether the caller may change who sees this view."
+          },
           "can_edit": {
             "type": "boolean",
             "description": "Whether the caller may PATCH/DELETE this view."
@@ -25023,6 +25078,7 @@
           "parent_id",
           "teamspace_id",
           "private",
+          "can_purge",
           "title",
           "icon",
           "position",
@@ -25031,6 +25087,10 @@
           "deleted_at"
         ],
         "properties": {
+          "can_purge": {
+            "type": "boolean",
+            "description": "Whether the caller may delete this page forever."
+          },
           "deleted_at": {
             "type": "string",
             "format": "date-time"
@@ -25417,5 +25477,32 @@
         "name": "__Host-orbit_session"
       }
     }
+  },
+  "x-role-permissions": {
+    "admin": [
+      "workspace.update",
+      "members.manage",
+      "audit.view",
+      "api_tokens.manage",
+      "integrations.manage",
+      "teamspaces.delete",
+      "pages.purge",
+      "views.manage_shared",
+      "comments.moderate"
+    ],
+    "member": [],
+    "owner": [
+      "workspace.update",
+      "workspace.delete",
+      "workspace.transfer",
+      "members.manage",
+      "audit.view",
+      "api_tokens.manage",
+      "integrations.manage",
+      "teamspaces.delete",
+      "pages.purge",
+      "views.manage_shared",
+      "comments.moderate"
+    ]
   }
 }

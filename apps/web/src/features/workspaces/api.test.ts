@@ -22,10 +22,12 @@ test('member records preserve membership versions for protected mutations', () =
   const record: MemberRecord = {
     id: 'membership-1', user_id: 'user-1', display_name: 'Ada', email: 'ada@orbit.test',
     role: 'admin', created_at: '2026-09-04T10:00:00Z', version: 4,
+    can_change_role: true, can_remove: true, can_transfer_ownership: false,
   }
 
   expect(memberFromRecord(record)).toMatchObject({
     id: 'user-1', membershipId: 'membership-1', name: 'Ada', email: 'ada@orbit.test',
     role: 'Admin', version: 4,
+    can: { changeRole: true, remove: true, transferOwnership: false },
   })
 })

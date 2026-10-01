@@ -3,7 +3,7 @@
 //! Personal views exist only for their owner; everyone else gets `NotFound`. Workspace views are
 //! readable by every member and editable by their owner or a workspace owner/admin.
 
-use orbit_domain::{Permission, Policy};
+use orbit_domain::Actor;
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -11,6 +11,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite};
 use utoipa::ToSchema;
 
+use super::membership;
 use super::task_filter::{ViewState, parse_view_state, preset_filter, validate_view_state};
 use super::tasks::{TaskError, parse_id, record_mutation};
 use crate::audit::{self, AuditOutcome};
@@ -79,6 +80,8 @@ pub struct SavedViewRecord {
     pub favorite_position: Option<i64>,
     /// Whether the caller may PATCH/DELETE this view.
     pub can_edit: bool,
+    /// Whether the caller may change who sees this view.
+    pub can_change_visibility: bool,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
@@ -146,7 +149,7 @@ impl ViewRepository {
             .fetch_all(self.database.pool())
             .await?
             .into_iter()
-            .map(|row| view_from_row(row, &caller))
+            .map(|row| view_from_row(row, caller))
             .collect()
     }
 
@@ -157,7 +160,7 @@ impl ViewRepository {
         view_id: Id,
     ) -> Result<SavedViewRecord, TaskError> {
         let caller = load_caller(self.database.pool(), workspace_id, actor_id).await?;
-        find_view(self.database.pool(), &caller, workspace_id, view_id).await
+        find_view(self.database.pool(), caller, workspace_id, view_id).await
     }
 
     pub async fn create_view(
@@ -205,7 +208,7 @@ impl ViewRepository {
             now,
         )
         .await?;
-        let record = find_view(&mut *tx, &caller, workspace_id, id).await?;
+        let record = find_view(&mut *tx, caller, workspace_id, id).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -226,12 +229,12 @@ impl ViewRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let caller = load_caller(&mut *tx, workspace_id, actor_id).await?;
-        let current = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
+        let current = find_view(&mut *tx, caller, workspace_id, view_id).await?;
         if !current.can_edit {
             return Err(TaskError::Forbidden);
         }
         let visibility = input.visibility.unwrap_or(current.visibility);
-        if visibility != current.visibility && current.owner.user_id != actor_id {
+        if visibility != current.visibility && !current.can_change_visibility {
             return Err(TaskError::Forbidden);
         }
         if input.expected_version != current.version {
@@ -278,7 +281,7 @@ impl ViewRepository {
             now,
         )
         .await?;
-        let record = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
+        let record = find_view(&mut *tx, caller, workspace_id, view_id).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -293,7 +296,7 @@ impl ViewRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let caller = load_caller(&mut *tx, workspace_id, actor_id).await?;
-        let current = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
+        let current = find_view(&mut *tx, caller, workspace_id, view_id).await?;
         if !current.can_edit {
             return Err(TaskError::Forbidden);
         }
@@ -331,7 +334,7 @@ impl ViewRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let caller = load_caller(&mut *tx, workspace_id, actor_id).await?;
-        let current = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
+        let current = find_view(&mut *tx, caller, workspace_id, view_id).await?;
         if current.is_favorite == favorite {
             return Ok(());
         }
@@ -520,34 +523,14 @@ impl ViewRepository {
     }
 }
 
-/// The acting member. `manages_shared` is `Permission::ViewsManageShared`.
-struct Caller {
-    id: Id,
-    manages_shared: bool,
-}
-
 /// Same membership rule as `require_access`: non-members and deleted workspaces are `NotFound`.
-async fn load_caller<'e, E>(
-    executor: E,
-    workspace_id: Id,
-    actor_id: Id,
-) -> Result<Caller, TaskError>
+async fn load_caller<'e, E>(executor: E, workspace_id: Id, actor_id: Id) -> Result<Actor, TaskError>
 where
     E: sqlx::Executor<'e, Database = Sqlite>,
 {
-    let role: String = sqlx::query_scalar(
-        "SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-         WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL",
-    )
-    .bind(workspace_id.to_string())
-    .bind(actor_id.to_string())
-    .fetch_optional(executor)
-    .await?
-    .ok_or(TaskError::NotFound)?;
-    Ok(Caller {
-        id: actor_id,
-        manages_shared: Policy::stored_role_can(&role, Permission::ViewsManageShared),
-    })
+    membership::actor(executor, workspace_id, actor_id)
+        .await?
+        .ok_or(TaskError::NotFound)
 }
 
 /// Views the caller can see. Binds, in order: caller id, workspace id, caller id.
@@ -568,7 +551,7 @@ fn visible_views_sql(tail: &str) -> String {
 
 async fn find_view<'e, E>(
     executor: E,
-    caller: &Caller,
+    caller: Actor,
     workspace_id: Id,
     view_id: Id,
 ) -> Result<SavedViewRecord, TaskError>
@@ -577,9 +560,9 @@ where
 {
     let sql = visible_views_sql("AND saved_views.id = ?");
     let row = sqlx::query(&sql)
-        .bind(caller.id.to_string())
+        .bind(caller.user_id.to_string())
         .bind(workspace_id.to_string())
-        .bind(caller.id.to_string())
+        .bind(caller.user_id.to_string())
         .bind(view_id.to_string())
         .fetch_optional(executor)
         .await?
@@ -587,7 +570,7 @@ where
     view_from_row(row, caller)
 }
 
-fn view_from_row(row: SqliteRow, caller: &Caller) -> Result<SavedViewRecord, TaskError> {
+fn view_from_row(row: SqliteRow, caller: Actor) -> Result<SavedViewRecord, TaskError> {
     let owner_id = parse_id(row.get("owner_user_id"))?;
     let visibility = Visibility::from_db(row.get::<String, _>("visibility").as_str())?;
     let (state, state_error) = decode_state(row.get::<String, _>("state_json").as_str());
@@ -609,8 +592,8 @@ fn view_from_row(row: SqliteRow, caller: &Caller) -> Result<SavedViewRecord, Tas
         version: row.get("version"),
         is_favorite: favorite_position.is_some(),
         favorite_position,
-        can_edit: owner_id == caller.id
-            || (visibility == Visibility::Workspace && caller.manages_shared),
+        can_edit: caller.can_edit_view(owner_id, visibility == Visibility::Workspace),
+        can_change_visibility: caller.can_change_view_visibility(owner_id),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
     })

@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { useCurrentUser } from '@/features/auth/api'
 import { ColorSwatch } from '@/components/common/ColorSwatch'
 import { useCreateView, useUpdateView, type SavedView } from '../api/views'
 import { useOpenKey } from '../useOpenKey'
@@ -69,7 +68,6 @@ type SaveViewFormProps = Omit<SaveViewDialogProps, 'open' | 'onOpenChange' | 'in
 function SaveViewForm({ mode, workspaceId, state, view, onSaved, onClose }: SaveViewFormProps) {
   const nameId = useId()
   const descriptionId = useId()
-  const currentUser = useCurrentUser()
   const createView = useCreateView(workspaceId)
   const updateView = useUpdateView(workspaceId)
   const [name, setName] = useState(() => (!view || mode === 'create' ? '' : mode === 'edit' ? view.name : `${view.name} (copy)`))
@@ -79,7 +77,7 @@ function SaveViewForm({ mode, workspaceId, state, view, onSaved, onClose }: Save
   const [visibility, setVisibility] = useState<Visibility>(() => (mode === 'edit' && view ? view.visibility : 'personal'))
   const [error, setError] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const canChangeVisibility = mode !== 'edit' || view?.owner.user_id === currentUser.data?.id
+  const canChangeVisibility = mode !== 'edit' || (view?.can_change_visibility ?? false)
   const pending = createView.isPending || updateView.isPending
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {

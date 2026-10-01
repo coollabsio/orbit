@@ -82,6 +82,7 @@ function record(view: StoredView, person: Person, store: Store) {
     is_favorite: favorites.includes(view.id),
     favorite_position: favorites.includes(view.id) ? favorites.indexOf(view.id) : null,
     can_edit: view.owner_user_id === person.id || person.role !== 'member',
+    can_change_visibility: view.owner_user_id === person.id,
     created_at: '2026-09-01T12:00:00Z',
     updated_at: '2026-09-01T12:00:00Z',
   }
@@ -105,7 +106,7 @@ async function mockApi(page: Page, person: Person, store: Store) {
     if (path === '/api/v1/workspaces') return json([testWorkspace(person.role, { id: 'alpha', name: 'Alpha' })])
     if (path === `${WS}/members`) {
       return json({
-        items: PEOPLE.map((p, index) => ({ id: `membership-${index}`, user_id: p.id, display_name: p.display_name, email: p.email, role: p.role, version: 1, created_at: '2026-09-01T12:00:00Z' })),
+        items: PEOPLE.map((p, index) => ({ id: `membership-${index}`, user_id: p.id, display_name: p.display_name, email: p.email, role: p.role, can_change_role: false, can_remove: false, can_transfer_ownership: false, version: 1, created_at: '2026-09-01T12:00:00Z' })),
         next_cursor: null,
       })
     }

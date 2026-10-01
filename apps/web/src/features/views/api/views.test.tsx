@@ -43,7 +43,7 @@ const savedView = (overrides: Partial<SavedView> = {}): SavedView => ({
   id: 'view-1', workspace_id: 'workspace-1', owner: { user_id: 'user-1', display_name: 'Ann' },
   name: 'Bugs', description: '', icon: null, color: null, visibility: 'personal',
   state: defaultViewState() as unknown as SavedView['state'], state_error: null, version: 3,
-  is_favorite: false, favorite_position: null, can_edit: true, created_at: '2026-09-01T12:00:00Z', updated_at: '2026-09-01T12:00:00Z',
+  is_favorite: false, favorite_position: null, can_edit: true, can_change_visibility: true, created_at: '2026-09-01T12:00:00Z', updated_at: '2026-09-01T12:00:00Z',
   ...overrides,
 })
 

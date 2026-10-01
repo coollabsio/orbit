@@ -1,4 +1,4 @@
-use orbit_domain::{DEFAULT_STATUSES, Permission, Policy, StatusCategory};
+use orbit_domain::{Actor, DEFAULT_STATUSES, StatusCategory};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -7,6 +7,7 @@ use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::membership;
 use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
@@ -146,6 +147,10 @@ pub struct CommentRecord {
     #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
     pub body: String,
+    /// Whether the caller may edit this comment.
+    pub can_edit: bool,
+    /// Whether the caller may delete this comment.
+    pub can_delete: bool,
     pub version: u64,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
@@ -2121,6 +2126,7 @@ impl TaskRepository {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<Page<CommentRecord>, TaskError> {
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
         self.get_task(workspace_id, task_id, actor_id).await?;
         let fingerprint = format!("comments:{task_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
@@ -2151,7 +2157,7 @@ impl TaskRepository {
             .fetch_all(self.database.pool())
             .await?
             .into_iter()
-            .map(comment_from_row)
+            .map(|row| comment_from_row(row, actor))
             .collect::<Result<Vec<_>, _>>()?;
         finish_page(items, limit, &fingerprint, |comment| {
             vec![
@@ -2216,6 +2222,8 @@ impl TaskRepository {
             author_id: actor_id,
             parent_id,
             body,
+            can_edit: true,
+            can_delete: true,
             version: 0,
             created_at: now,
             updated_at: now,
@@ -2235,9 +2243,9 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<CommentRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
-        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id).await?;
-        if current.author_id != actor_id {
+        let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id, actor).await?;
+        if !current.can_edit {
             return Err(TaskError::Forbidden);
         }
         check_version(expected_version, current.version, &current)?;
@@ -2275,19 +2283,10 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
-        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id).await?;
-        if current.author_id != actor_id {
-            let role: String = sqlx::query_scalar(
-                "SELECT role FROM memberships WHERE workspace_id = ? AND user_id = ?",
-            )
-            .bind(workspace_id.to_string())
-            .bind(actor_id.to_string())
-            .fetch_one(&mut *tx)
-            .await?;
-            if !Policy::stored_role_can(&role, Permission::CommentsModerate) {
-                return Err(TaskError::Forbidden);
-            }
+        let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id, actor).await?;
+        if !current.can_delete {
+            return Err(TaskError::Forbidden);
         }
         check_version(expected_version, current.version, &current)?;
         sqlx::query("DELETE FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?").bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
@@ -2800,44 +2799,25 @@ fn priority_rank(priority: &str) -> i64 {
     }
 }
 
+/// The acting member; outsiders and trashed workspaces are `NotFound`.
 pub(super) async fn require_access(
     pool: &sqlx::SqlitePool,
     workspace_id: Id,
     actor_id: Id,
-) -> Result<(), TaskError> {
-    let exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-         WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL",
-    )
-    .bind(workspace_id.to_string())
-    .bind(actor_id.to_string())
-    .fetch_one(pool)
-    .await?;
-    if exists == 1 {
-        Ok(())
-    } else {
-        Err(TaskError::NotFound)
-    }
+) -> Result<Actor, TaskError> {
+    membership::actor(pool, workspace_id, actor_id)
+        .await?
+        .ok_or(TaskError::NotFound)
 }
 
 pub(super) async fn require_access_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
-) -> Result<(), TaskError> {
-    let exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-         WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL",
-    )
-    .bind(workspace_id.to_string())
-    .bind(actor_id.to_string())
-    .fetch_one(&mut **tx)
-    .await?;
-    if exists == 1 {
-        Ok(())
-    } else {
-        Err(TaskError::NotFound)
-    }
+) -> Result<Actor, TaskError> {
+    membership::actor(&mut **tx, workspace_id, actor_id)
+        .await?
+        .ok_or(TaskError::NotFound)
 }
 
 async fn require_project(
@@ -2887,12 +2867,12 @@ async fn require_task_tx(
     workspace_id: Id,
     task_id: Id,
     actor_id: Id,
-) -> Result<(), TaskError> {
-    require_access_tx(tx, workspace_id, actor_id).await?;
+) -> Result<Actor, TaskError> {
+    let actor = require_access_tx(tx, workspace_id, actor_id).await?;
     let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ? AND tasks.workspace_id = ? AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL")
         .bind(task_id.to_string()).bind(workspace_id.to_string()).fetch_one(&mut **tx).await?;
     if exists == 1 {
-        Ok(())
+        Ok(actor)
     } else {
         Err(TaskError::NotFound)
     }
@@ -3320,10 +3300,11 @@ async fn comment_in_tx(
     workspace_id: Id,
     task_id: Id,
     comment_id: Id,
+    actor: Actor,
 ) -> Result<CommentRecord, TaskError> {
     let row = sqlx::query("SELECT id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?")
         .bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
-    comment_from_row(row)
+    comment_from_row(row, actor)
 }
 
 fn project_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ProjectRecord, TaskError> {
@@ -3559,12 +3540,18 @@ fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRec
     })
 }
 
-fn comment_from_row(row: sqlx::sqlite::SqliteRow) -> Result<CommentRecord, TaskError> {
+fn comment_from_row(
+    row: sqlx::sqlite::SqliteRow,
+    actor: Actor,
+) -> Result<CommentRecord, TaskError> {
+    let author_id = parse_id(row.get("author_id"))?;
     Ok(CommentRecord {
         id: parse_id(row.get("id"))?,
         workspace_id: parse_id(row.get("workspace_id"))?,
         task_id: parse_id(row.get("task_id"))?,
-        author_id: parse_id(row.get("author_id"))?,
+        author_id,
+        can_edit: actor.can_edit_comment(author_id),
+        can_delete: actor.can_delete_comment(author_id),
         parent_id: row
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)

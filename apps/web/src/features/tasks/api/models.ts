@@ -37,6 +37,9 @@ export interface TaskComment {
   id: string
   authorId: string
   body: string
+  /** Decided by the server for the current user. */
+  canEdit: boolean
+  canDelete: boolean
   createdAt: string
   parentId?: string
   attachments?: Attachment[]
@@ -289,6 +292,8 @@ export function taskFromRecord(
       id: comment.id,
       authorId: comment.author_id,
       body: comment.body,
+      canEdit: comment.can_edit,
+      canDelete: comment.can_delete,
       createdAt: comment.created_at,
       parentId: comment.parent_id ?? undefined,
       editedAt: comment.updated_at === comment.created_at ? null : comment.updated_at,

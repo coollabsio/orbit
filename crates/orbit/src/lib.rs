@@ -8,7 +8,7 @@ mod workspace;
 
 pub use identity::{Membership, User, WorkspaceRole};
 pub use orbit_platform as platform;
-pub use policy::{Permission, Policy, PolicyError};
+pub use policy::{Actor, MembershipDenied, Permission, Policy, PolicyError};
 pub use ports::{
     AttachmentRepository, AttachmentStorageService, CommentRepository, PortFuture,
     ProjectRepository, RepositoryError, TaskRepository, TaskStatusRepository, UserRepository,

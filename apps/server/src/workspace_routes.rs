@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::extract::{Extension, FromRequest, FromRequestParts, Path, Query, Request, State};
 use axum::http::header::{
-    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, RETRY_AFTER,
+    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE, RETRY_AFTER,
 };
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::ReceiverStream;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::auth_routes::{CookieMode, issued_session_cookie};
+use crate::auth_routes::{CookieMode, issued_session_cookie, request_session};
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
 };
@@ -799,7 +799,7 @@ async fn accept_invitation(
     ApiJson(body): ApiJson<AcceptBody>,
 ) -> Result<Response, ApiError> {
     let instance = "/api/v1/workspaces/invitations/accept";
-    if cookie_value(&headers, state.cookie_mode.session_cookie_name()).is_some() {
+    if state.cookie_mode.session_token(&headers).is_some() {
         let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
         let accepted = state
             .workspaces
@@ -1439,7 +1439,7 @@ async fn require_installation_admin(
             StatusCode::FORBIDDEN,
             "installation_admin_required",
             "Installation administrator required",
-            "Only an installation administrator may access global audit records.",
+            "Only an installation administrator may do this.",
             instance,
             request_id,
         ))
@@ -1461,22 +1461,9 @@ async fn authenticate(
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<AuthenticatedSession, ApiError> {
-    let token =
-        cookie_value(headers, state.cookie_mode.session_cookie_name()).ok_or_else(|| {
-            ApiError::new(
-                StatusCode::UNAUTHORIZED,
-                "authentication_required",
-                "Authentication required",
-                "A valid session is required.",
-                instance,
-                request_id,
-            )
-        })?;
-    state
-        .identity
-        .authenticate_session(&token, TimestampMillis::now())
+    request_session(&state.identity, state.cookie_mode, headers)
         .await
-        .map_err(|_| {
+        .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "authentication_required",
@@ -1486,16 +1473,6 @@ async fn authenticate(
                 request_id,
             )
         })
-}
-
-fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .map(str::trim)
-        .find_map(|pair| pair.strip_prefix(&format!("{name}=")).map(str::to_owned))
 }
 
 fn parse_id(

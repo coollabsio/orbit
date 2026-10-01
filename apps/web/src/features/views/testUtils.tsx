@@ -30,6 +30,7 @@ export function savedView(overrides: Partial<SavedView> & Pick<SavedView, 'id' |
     is_favorite: false,
     favorite_position: null,
     can_edit: true,
+    can_change_visibility: true,
     created_at: '2026-09-01T12:00:00Z',
     updated_at: '2026-09-01T12:00:00Z',
     ...overrides,

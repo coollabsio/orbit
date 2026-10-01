@@ -17,6 +17,7 @@ const SHARED = savedView({
   visibility: 'workspace',
   owner: { user_id: 'user-2', display_name: 'Grace' },
   can_edit: false,
+  can_change_visibility: false,
   is_favorite: true,
   favorite_position: 0,
 })

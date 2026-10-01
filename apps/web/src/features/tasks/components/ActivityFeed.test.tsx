@@ -6,6 +6,7 @@ import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { ActivityFeed } from './ActivityFeed'
 import { testWorkspace } from '@/test/workspace'
+import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
 
 const workspace = testWorkspace()
 
@@ -35,7 +36,7 @@ const state: TaskViewState = {
   users: [{
     id: 'user-1', membershipId: 'membership-1', name: 'Andras', handle: 'andras',
     email: 'andras@example.com', role: 'Owner', color: '#16a34a', online: true,
-    title: '', roleIds: [], version: 1,
+    title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
   }],
   statuses: [], labels: [], tasks: [task],
 }

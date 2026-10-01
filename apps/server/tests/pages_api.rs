@@ -1034,6 +1034,36 @@ async fn empty_trash_purges_only_what_the_caller_may_purge() {
     )
     .await;
     let empty_uri = format!("{}/trash/empty", fixture.pages_uri());
+    let trash_uri = format!("{}/trash", fixture.pages_uri());
+    let purgeable = |trash: &Value| -> Vec<(String, bool)> {
+        trash["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                (
+                    item["title"].as_str().unwrap().to_owned(),
+                    item["can_purge"].as_bool().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let (_, member_trash) = call_as(&fixture, &member_cookie, "GET", &trash_uri, None).await;
+    let mut member_trash = purgeable(&member_trash);
+    member_trash.sort();
+    assert_eq!(
+        member_trash,
+        [
+            ("Member private".to_owned(), true),
+            ("Shared".to_owned(), false)
+        ]
+    );
+    let (_, owner_trash) = fixture.call("GET", &trash_uri, None).await;
+    assert!(
+        purgeable(&owner_trash)
+            .iter()
+            .all(|(_, can_purge)| *can_purge)
+    );
 
     // A member empties only their own private trash; the teamspace trash stays.
     let (status, emptied) = call_as(&fixture, &member_cookie, "POST", &empty_uri, None).await;

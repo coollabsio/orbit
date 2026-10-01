@@ -4,13 +4,14 @@ import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import { createDefaultsFromFilter, dropUpdate, groupTasks, type GroupContext } from './grouping'
 import { effectiveFilter, emptyFilter, type FilterGroup } from './viewState'
+import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
 
 const status = (id: string, projectId: string, name: string, category: TaskStatusDef['category'], position: number): TaskStatusDef => ({
   id, projectId, name, description: '', color: '#888888', category, position, version: 1,
 })
 const member = (id: string, name: string): User => ({
   id, membershipId: `membership-${id}`, name, handle: id, email: `${id}@orbit.test`, role: 'Member',
-  color: '#888888', online: false, title: '', roleIds: [], version: 1,
+  color: '#888888', online: false, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
 })
 const label = (id: string, name: string): LabelRecord => ({ id, name, color: '#888888', version: 1, workspace_id: 'workspace-1' })
 const project = (id: string, name: string): ProjectRecord => ({

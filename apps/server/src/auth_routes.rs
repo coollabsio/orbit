@@ -22,7 +22,9 @@ use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::audit::AuditOutcome;
-use crate::repositories::identity::{IdentityError, IdentityRepository, SetupError, SetupRequest};
+use crate::repositories::identity::{
+    AuthenticatedSession, IdentityError, IdentityRepository, SetupError, SetupRequest,
+};
 
 const SESSION_COOKIE: &str = "__Host-orbit_session";
 const DEV_SESSION_COOKIE: &str = "orbit_session_dev";
@@ -60,6 +62,32 @@ impl CookieMode {
             DEV_SESSION_COOKIE
         }
     }
+
+    /// The session token a request carries, if any.
+    pub(crate) fn session_token(self, headers: &HeaderMap) -> Option<&str> {
+        let name = self.session_cookie_name();
+        headers
+            .get(COOKIE)?
+            .to_str()
+            .ok()?
+            .split(';')
+            .find_map(|pair| pair.trim().strip_prefix(name)?.strip_prefix('='))
+            .filter(|token| !token.is_empty())
+    }
+}
+
+/// The session a request carries. `None` when the cookie is missing or the session is expired,
+/// revoked or belongs to a suspended user. Every cookie-authenticated route and socket uses this.
+pub(crate) async fn request_session(
+    identity: &IdentityRepository,
+    cookie_mode: CookieMode,
+    headers: &HeaderMap,
+) -> Option<AuthenticatedSession> {
+    let token = cookie_mode.session_token(headers)?;
+    identity
+        .authenticate_session(token, TimestampMillis::now())
+        .await
+        .ok()
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -541,8 +569,11 @@ async fn me(
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Response, ApiError> {
     let session = authenticate(&state, &headers, "/api/v1/auth/me", request_id.as_ref()).await?;
-    let token = cookie_value(&headers, cookie_name(state.cookie_mode))
-        .expect("authenticate requires the session cookie");
+    let token = state
+        .cookie_mode
+        .session_token(&headers)
+        .expect("authenticate requires the session cookie")
+        .to_owned();
     let mut response =
         Json(user_response(&state, session.user, "/api/v1/auth/me", request_id.as_ref()).await?)
             .into_response();
@@ -934,22 +965,10 @@ async fn authenticate(
     headers: &HeaderMap,
     instance: &'static str,
     request_id: Option<&Extension<RequestId>>,
-) -> Result<crate::repositories::identity::AuthenticatedSession, ApiError> {
-    let token = cookie_value(headers, cookie_name(state.cookie_mode)).ok_or_else(|| {
-        ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "authentication_required",
-            "Authentication required",
-            "A valid session is required.",
-            instance,
-            request_id,
-        )
-    })?;
-    state
-        .repository
-        .authenticate_session(&token, TimestampMillis::now())
+) -> Result<AuthenticatedSession, ApiError> {
+    request_session(&state.repository, state.cookie_mode, headers)
         .await
-        .map_err(|_| {
+        .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "authentication_required",
@@ -997,16 +1016,6 @@ pub(crate) fn issued_session_cookie(
 
 fn clear_session_cookie(mode: CookieMode) -> String {
     session_cookie(mode, "", 0)
-}
-
-fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .map(str::trim)
-        .find_map(|pair| pair.strip_prefix(&format!("{name}=")).map(str::to_owned))
 }
 
 fn password_problem(

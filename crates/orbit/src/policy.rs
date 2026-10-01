@@ -55,6 +55,113 @@ impl Permission {
     ];
 }
 
+/// A member acting in one workspace. Every rule about what a member may do is a method here:
+/// `can` for rules that depend only on the role, the rest for rules that also depend on a record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Actor {
+    pub user_id: Id,
+    pub role: WorkspaceRole,
+}
+
+/// Why a membership change is refused.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MembershipDenied {
+    /// The actor's role does not allow the change.
+    RoleForbidden,
+    /// The owner's membership, and the owner role, are out of reach.
+    OwnerProtected,
+    /// The owner role only moves through an ownership transfer.
+    TransferRequired,
+}
+
+impl Actor {
+    #[must_use]
+    pub const fn can(self, permission: Permission) -> bool {
+        Policy::can(self.role, permission)
+    }
+
+    /// Only the author rewrites a task comment.
+    #[must_use]
+    pub fn can_edit_comment(self, author_id: Id) -> bool {
+        self.user_id == author_id
+    }
+
+    #[must_use]
+    pub fn can_delete_comment(self, author_id: Id) -> bool {
+        self.user_id == author_id || self.can(Permission::CommentsModerate)
+    }
+
+    /// `shared` is workspace visibility; a personal view is only ever its owner's.
+    #[must_use]
+    pub fn can_edit_view(self, owner_id: Id, shared: bool) -> bool {
+        self.user_id == owner_id || (shared && self.can(Permission::ViewsManageShared))
+    }
+
+    #[must_use]
+    pub fn can_change_view_visibility(self, owner_id: Id) -> bool {
+        self.user_id == owner_id
+    }
+
+    /// A private page is visible to its owner alone, so whoever sees one may delete it forever.
+    #[must_use]
+    pub const fn can_purge_page(self, private: bool) -> bool {
+        private || self.can(Permission::PagesPurge)
+    }
+
+    pub fn invite(self, role: WorkspaceRole) -> Result<(), MembershipDenied> {
+        if !self.can(Permission::MembersManage) {
+            return Err(MembershipDenied::RoleForbidden);
+        }
+        if role == WorkspaceRole::Owner {
+            return Err(MembershipDenied::OwnerProtected);
+        }
+        Ok(())
+    }
+
+    pub fn change_member_role(
+        self,
+        target_role: WorkspaceRole,
+        new_role: WorkspaceRole,
+    ) -> Result<(), MembershipDenied> {
+        if new_role == WorkspaceRole::Owner {
+            return Err(MembershipDenied::TransferRequired);
+        }
+        if !self.can(Permission::MembersManage) {
+            return Err(MembershipDenied::RoleForbidden);
+        }
+        self.owner_protected(target_role)
+    }
+
+    /// Any member may remove themselves (leave); removing others needs `MembersManage`.
+    pub fn remove_member(
+        self,
+        target_user_id: Id,
+        target_role: WorkspaceRole,
+    ) -> Result<(), MembershipDenied> {
+        self.owner_protected(target_role)?;
+        if self.user_id != target_user_id && !self.can(Permission::MembersManage) {
+            return Err(MembershipDenied::RoleForbidden);
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn can_transfer_ownership_to(self, target_user_id: Id) -> bool {
+        self.can(Permission::WorkspaceTransfer) && self.user_id != target_user_id
+    }
+
+    /// The owner's membership never changes directly, not even by the owner.
+    fn owner_protected(self, target_role: WorkspaceRole) -> Result<(), MembershipDenied> {
+        if target_role != WorkspaceRole::Owner {
+            Ok(())
+        } else if self.role == WorkspaceRole::Owner {
+            Err(MembershipDenied::TransferRequired)
+        } else {
+            Err(MembershipDenied::OwnerProtected)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicyError {
     ExactlyOneOwnerRequired,
@@ -94,12 +201,6 @@ impl Policy {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
         }
-    }
-
-    /// As `can`, for a role name read from storage. An unknown name may do nothing.
-    #[must_use]
-    pub fn stored_role_can(role: &str, permission: Permission) -> bool {
-        WorkspaceRole::parse(role).is_some_and(|role| Self::can(role, permission))
     }
 
     #[must_use]

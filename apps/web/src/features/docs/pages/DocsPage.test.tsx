@@ -244,7 +244,7 @@ test('the trash view lists trashed pages and restores them', async () => {
   const { view, calls } = setup('/docs/trash', (call) => {
     if (call.path === '/pages') return Response.json({ items: [] })
     if (call.path === '/pages/trash') {
-      return Response.json({ items: [{ ...summary('old', null, 0, 'Old notes'), version: 3, deleted_at: '2026-09-25T09:00:00Z' }] })
+      return Response.json({ items: [{ ...summary('old', null, 0, 'Old notes'), version: 3, can_purge: true, deleted_at: '2026-09-25T09:00:00Z' }] })
     }
     if (call.path === '/pages/old/restore') return Response.json(fullPage('old', { title: 'Old notes', version: 4 }))
   })
@@ -341,15 +341,16 @@ test('the header star and the page menu add and remove the page from favorites',
   await waitForAbsence(() => view.queryByRole('group', { name: 'Favorites' }))
 })
 
-const trashed = (page: PageSummary, version = 3) => ({ ...page, version, deleted_at: '2026-09-25T09:00:00Z' })
+/** `canPurge` is the server's answer for the caller. */
+const trashed = (page: PageSummary, canPurge: boolean, version = 3) => ({ ...page, version, can_purge: canPurge, deleted_at: '2026-09-25T09:00:00Z' })
 
-test('members delete their own private trash forever; teamspace pages offer only Restore', async () => {
+test('pages the caller may purge offer "Delete forever"; the others offer only Restore', async () => {
   let purged = false
   const { view, calls } = setup('/docs/trash', (call) => {
     if (call.path === '/pages') return Response.json({ items: [] })
     if (call.path === '/pages/trash') {
       return Response.json({
-        items: [trashed(summary('old', null, 0, 'Old notes')), ...(purged ? [] : [trashed(privatePage('diary', 0, 'Diary'))])],
+        items: [trashed(summary('old', null, 0, 'Old notes'), false), ...(purged ? [] : [trashed(privatePage('diary', 0, 'Diary'), true)])],
       })
     }
     if (call.method === 'DELETE' && call.path === '/pages/diary/permanent') {
@@ -375,14 +376,13 @@ test('"Empty trash" confirms with the purgeable count and posts once', async () 
   const { view, calls } = setup('/docs/trash', (call) => {
     if (call.path === '/pages') return Response.json({ items: [] })
     if (call.path === '/pages/trash') {
-      return Response.json({ items: emptied ? [] : [trashed(summary('old', null, 0, 'Old notes')), trashed(privatePage('diary', 0, 'Diary'))] })
+      return Response.json({ items: emptied ? [] : [trashed(summary('old', null, 0, 'Old notes'), true), trashed(privatePage('diary', 0, 'Diary'), true)] })
     }
     if (call.method === 'POST' && call.path === '/pages/trash/empty') {
       emptied = true
       return Response.json({ purged: 2 })
     }
   })
-  // Owners may purge teamspace pages too.
   expect(await view.findByRole('button', { name: 'Delete “Old notes” forever' })).toBeTruthy()
   fireEvent.click(view.getByRole('button', { name: 'Empty trash' }))
   const dialog = await view.findByRole('dialog')

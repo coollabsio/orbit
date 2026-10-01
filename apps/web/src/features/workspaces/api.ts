@@ -37,21 +37,23 @@ export function workspacesQueryOptions(client: ApiClient = apiClient) {
   }
 }
 
+const ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member' } as const
+
 export function memberFromRecord(member: MemberRecord): User {
   const hue = [...member.user_id].reduce((total, character) => total + character.charCodeAt(0), 0) % 360
-  const role = member.role.charAt(0).toUpperCase() + member.role.slice(1)
   return {
     id: member.user_id,
     membershipId: member.id,
     name: member.display_name,
     handle: member.email.split('@')[0] ?? member.email,
     email: member.email,
-    role: role === 'Owner' || role === 'Admin' ? role : 'Member',
+    role: ROLE_LABELS[member.role],
     color: `hsl(${hue} 55% 48%)`,
     online: false,
     title: '',
     roleIds: [],
     version: member.version,
+    can: { changeRole: member.can_change_role, remove: member.can_remove, transferOwnership: member.can_transfer_ownership },
     suspended: Boolean(member.suspended_at),
   }
 }

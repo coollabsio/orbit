@@ -2,6 +2,7 @@ import { expect, mock, test } from 'bun:test'
 import { fireEvent, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TaskCommentComposer } from './TaskCommentComposer'
+import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
 
 test('comment writes announce progress and keep a visible retry after failure', () => {
   const view = render(<TaskCommentComposer placeholder="Reply" pending={false} progress={50} error="Upload failed." onSend={mock(async () => {})} />)
@@ -16,7 +17,7 @@ test('at-mentions resolve to workspace member ids', async () => {
   const sent: Array<{ body: string; ids: string[] }> = []
   const view = render(<TaskCommentComposer placeholder="Reply" pending={false} members={[{
     id: 'user-2', membershipId: 'm2', name: 'Ada', handle: 'ada', email: 'ada@orbit.test',
-    role: 'Member', color: '#000', online: false, title: '', roleIds: [], version: 1,
+    role: 'Member', color: '#000', online: false, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
   }]} onSend={async (body, _files, mentionedUserIds) => { sent.push({ body, ids: mentionedUserIds }) }} />)
   await userEvent.type(view.getByPlaceholderText('Reply'), 'Hey @')
   fireEvent.mouseDown(await view.findByRole('button', { name: '@Ada' }))

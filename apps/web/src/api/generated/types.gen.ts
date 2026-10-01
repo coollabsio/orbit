@@ -192,6 +192,14 @@ export type CommentBody = {
 export type CommentRecord = {
     author_id: string;
     body: string;
+    /**
+     * Whether the caller may delete this comment.
+     */
+    can_delete: boolean;
+    /**
+     * Whether the caller may edit this comment.
+     */
+    can_edit: boolean;
     created_at: string;
     id: string;
     parent_id?: string | null;
@@ -474,11 +482,23 @@ export type LoginResponse = {
 };
 
 export type MemberRecord = {
+    /**
+     * Whether the caller may change this member's role.
+     */
+    can_change_role: boolean;
+    /**
+     * Whether the caller may remove this member (for the caller's own row: leave).
+     */
+    can_remove: boolean;
+    /**
+     * Whether the caller may hand the workspace over to this member.
+     */
+    can_transfer_ownership: boolean;
     created_at: string;
     display_name: string;
     email: string;
     id: string;
-    role: string;
+    role: WorkspaceRole;
     /**
      * Set while the user's account is suspended (they cannot sign in or be notified).
      */
@@ -1099,6 +1119,14 @@ export type PageCommentRecord = {
     items: Array<{
         author_id: string;
         body: string;
+        /**
+         * Whether the caller may delete this comment.
+         */
+        can_delete: boolean;
+        /**
+         * Whether the caller may edit this comment.
+         */
+        can_edit: boolean;
         created_at: string;
         id: string;
         parent_id?: string | null;
@@ -1137,11 +1165,23 @@ export type PageLabelRecord = {
 
 export type PageMemberRecord = {
     items: Array<{
+        /**
+         * Whether the caller may change this member's role.
+         */
+        can_change_role: boolean;
+        /**
+         * Whether the caller may remove this member (for the caller's own row: leave).
+         */
+        can_remove: boolean;
+        /**
+         * Whether the caller may hand the workspace over to this member.
+         */
+        can_transfer_ownership: boolean;
         created_at: string;
         display_name: string;
         email: string;
         id: string;
-        role: string;
+        role: WorkspaceRole;
         /**
          * Set while the user's account is suspended (they cannot sign in or be notified).
          */
@@ -1429,6 +1469,10 @@ export type RoleChangeBody = {
 };
 
 export type SavedViewRecord = {
+    /**
+     * Whether the caller may change who sees this view.
+     */
+    can_change_visibility: boolean;
     /**
      * Whether the caller may PATCH/DELETE this view.
      */
@@ -1774,6 +1818,10 @@ export type TransferBody = {
  * A page trashed directly; its descendants trashed with it are restored together.
  */
 export type TrashedPage = {
+    /**
+     * Whether the caller may delete this page forever.
+     */
+    can_purge: boolean;
     deleted_at: string;
     icon: string | null;
     id: string;

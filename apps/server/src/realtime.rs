@@ -1,6 +1,7 @@
 //! Workspace invalidations. HTTP remains authoritative for resource data.
 use std::time::{Duration, Instant};
 
+use crate::auth_routes::request_session;
 use crate::task_routes::TaskState;
 use axum::{
     Router,
@@ -8,7 +9,7 @@ use axum::{
         Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::{HeaderMap, StatusCode, header::COOKIE},
+    http::{HeaderMap, StatusCode},
     response::Response,
     routing::get,
 };
@@ -35,20 +36,9 @@ async fn connect(
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, StatusCode> {
-    let name = format!("{}=", state.cookie_mode.session_cookie_name());
-    let token = headers
-        .get(COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| {
-            v.split(';')
-                .find_map(|part| part.trim().strip_prefix(&name))
-        })
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let session = state
-        .identity
-        .authenticate_session(token, TimestampMillis::now())
+    let session = request_session(&state.identity, state.cookie_mode, &headers)
         .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        .ok_or(StatusCode::UNAUTHORIZED)?;
     let database = state.identity.database().clone();
     if !authorized(&database, workspace, session.id)
         .await

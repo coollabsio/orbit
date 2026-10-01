@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 
-use orbit_domain::{Permission, Policy};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -18,7 +17,7 @@ use super::page_mentions::notify_new_mentions;
 use super::page_versions::{PageVersionKind, SaveOrigin, snapshot_before_edit, store_version};
 use super::tasks::{TaskError, record_mutation, require_access, require_access_tx};
 use super::teamspaces::{default_teamspace, teamspace_exists};
-use super::workspaces::{WorkspaceError, require_role};
+use super::workspaces::WorkspaceError;
 use crate::audit::{self, AuditOutcome};
 use crate::collab::{CollabError, CollabHub, CollabLock};
 
@@ -212,6 +211,8 @@ pub struct TrashedPage {
     pub teamspace_id: Option<Id>,
     /// True when the page is in the caller's private space.
     pub private: bool,
+    /// Whether the caller may delete this page forever.
+    pub can_purge: bool,
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
@@ -1006,7 +1007,7 @@ impl PageRepository {
         actor_id: Id,
         now: TimestampMillis,
     ) -> Result<PageTrash, PageError> {
-        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
         let rows = sqlx::query(&format!(
             "SELECT {SUMMARY_COLUMNS}, pages.deleted_at AS deleted_at FROM pages \
              WHERE pages.workspace_id = ? AND pages.deleted_at > ? AND pages.trashed_with = pages.id \
@@ -1027,6 +1028,7 @@ impl PageRepository {
                     parent_id: summary.parent_id,
                     teamspace_id: summary.teamspace_id,
                     private: summary.private,
+                    can_purge: actor.can_purge_page(summary.private),
                     title: summary.title,
                     icon: summary.icon,
                     position: summary.position,
@@ -1054,7 +1056,7 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<(), PageError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let role = require_role(&mut tx, workspace_id, actor_id, false).await?;
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let row = sqlx::query(&format!(
             "SELECT deleted_at IS NOT NULL AND trashed_with IS id AS in_trash FROM pages \
              WHERE id = ? AND workspace_id = ? AND {VISIBLE}"
@@ -1069,7 +1071,7 @@ impl PageRepository {
             return Err(PageError::NotTrashed);
         }
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, true).await?;
-        if current.teamspace_id.is_some() && !Policy::can(role, Permission::PagesPurge) {
+        if !actor.can_purge_page(current.teamspace_id.is_none()) {
             return Err(PageError::Forbidden);
         }
         check_version(expected_version, current.version, &current)?;
@@ -1102,7 +1104,7 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<PageTrashEmptied, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let role = require_role(&mut tx, workspace_id, actor_id, false).await?;
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let roots = sqlx::query_scalar::<_, String>(
             "SELECT id FROM pages WHERE workspace_id = ? AND deleted_at IS NOT NULL \
              AND trashed_with = id AND (owner_id = ? OR (? AND teamspace_id IS NOT NULL)) \
@@ -1110,7 +1112,7 @@ impl PageRepository {
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
-        .bind(Policy::can(role, Permission::PagesPurge))
+        .bind(actor.can_purge_page(false))
         .fetch_all(&mut *tx)
         .await?
         .into_iter()

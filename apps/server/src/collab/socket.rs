@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade};
-use axum::http::{HeaderMap, StatusCode, header::COOKIE};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::Deserialize;
@@ -21,7 +21,7 @@ use tokio::sync::broadcast;
 
 use super::close;
 use super::hub::{CollabHub, MessageKind, Outbound, Peer};
-use crate::auth_routes::CookieMode;
+use crate::auth_routes::{CookieMode, request_session};
 use crate::repositories::identity::IdentityRepository;
 
 /// Query parameters y-websocket appends (`params`).
@@ -63,23 +63,7 @@ pub async fn upgrade(
     headers: &HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    let name = format!("{}=", cookie_mode.session_cookie_name());
-    let Some(token) = headers
-        .get(COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
-            value
-                .split(';')
-                .find_map(|part| part.trim().strip_prefix(&name))
-        })
-        .filter(|token| !token.is_empty())
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let Ok(session) = identity
-        .authenticate_session(token, TimestampMillis::now())
-        .await
-    else {
+    let Some(session) = request_session(identity, cookie_mode, headers).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let (Ok(workspace_id), Ok(page_id)) = (workspace.parse::<Id>(), page.parse::<Id>()) else {

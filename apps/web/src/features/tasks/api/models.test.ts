@@ -17,7 +17,7 @@ const record: TaskRecord = {
 }
 const comment: CommentRecord = {
   id: 'comment-1', workspace_id: 'workspace-1', task_id: record.id, author_id: 'user-1',
-  body: 'Looks good', created_at: '2026-09-04T12:00:00Z', updated_at: '2026-09-04T12:05:00Z', version: 3,
+  body: 'Looks good', can_edit: true, can_delete: true, created_at: '2026-09-04T12:00:00Z', updated_at: '2026-09-04T12:05:00Z', version: 3,
 }
 const attachment: AttachmentRecord = {
   id: 'attachment-1', workspace_id: 'workspace-1', task_id: record.id, owner_id: 'user-1',

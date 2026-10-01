@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_domain::{Permission, Policy, WorkspaceDefaults, WorkspaceRole};
+use orbit_domain::{Actor, MembershipDenied, Permission, Policy, WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
     AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
     IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
@@ -17,6 +17,7 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
+use super::membership;
 use super::page_versions;
 use super::task_relations;
 use super::tasks::TaskError;
@@ -48,7 +49,13 @@ pub struct MemberRecord {
     pub user_id: Id,
     pub email: String,
     pub display_name: String,
-    pub role: String,
+    pub role: WorkspaceRole,
+    /// Whether the caller may change this member's role.
+    pub can_change_role: bool,
+    /// Whether the caller may remove this member (for the caller's own row: leave).
+    pub can_remove: bool,
+    /// Whether the caller may hand the workspace over to this member.
+    pub can_transfer_ownership: bool,
     pub version: u64,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
@@ -329,8 +336,8 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<WorkspaceRecord, WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
-        if !Policy::can(actor_role, Permission::WorkspaceUpdate) {
+        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        if !actor.can(Permission::WorkspaceUpdate) {
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -386,8 +393,8 @@ impl WorkspaceRepository {
         Ok(WorkspaceRecord {
             id: workspace_id,
             name,
-            role: actor_role,
-            permissions: Policy::permissions(actor_role),
+            role: actor.role,
+            permissions: Policy::permissions(actor.role),
             version,
             deleted_at: None,
         })
@@ -400,7 +407,7 @@ impl WorkspaceRepository {
         cursor: Option<Id>,
         limit: usize,
     ) -> Result<(Vec<MemberRecord>, Option<Id>), WorkspaceError> {
-        self.get(workspace_id, actor_id).await?;
+        let actor = require_actor(self.database.pool(), workspace_id, actor_id).await?;
         let rows = sqlx::query(
             "SELECT memberships.id, memberships.user_id, memberships.role, memberships.version, \
              memberships.created_at, users.email, users.display_name, users.suspended_at \
@@ -414,7 +421,7 @@ impl WorkspaceRepository {
         .bind(page_size(limit).saturating_add(1) as i64)
         .fetch_all(self.database.pool())
         .await?;
-        page(rows, limit, member_from_row)
+        page(rows, limit, |row| member_from_row(row, actor))
     }
 
     pub async fn invitations(
@@ -425,8 +432,8 @@ impl WorkspaceRepository {
         limit: usize,
         now: TimestampMillis,
     ) -> Result<(Vec<InvitationRecord>, Option<Id>), WorkspaceError> {
-        let role = require_role_from_db(self.database.pool(), workspace_id, actor_id).await?;
-        if !Policy::can(role, Permission::MembersManage) {
+        let actor = require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        if !actor.can(Permission::MembersManage) {
             return Err(WorkspaceError::Forbidden);
         }
         let rows = sqlx::query(
@@ -461,35 +468,12 @@ impl WorkspaceRepository {
             now.as_millis().saturating_add(INVITATION_LIFETIME_MILLIS),
         );
         let mut transaction = self.database.immediate_transaction().await?;
-        match require_permission(
-            &mut transaction,
-            workspace_id,
-            actor_id,
-            Permission::MembersManage,
-        )
-        .await
-        {
-            Ok(_) => {}
-            Err(WorkspaceError::Forbidden) => {
-                audit::record(
-                    &mut transaction,
-                    workspace_id,
-                    Some(actor_id),
-                    "invitation.create_denied",
-                    AuditOutcome::Failure,
-                    "workspace",
-                    Some(workspace_id),
-                    request_id,
-                    json!({"reason":"role_forbidden"}),
-                    now,
-                )
-                .await?;
-                transaction.commit().await?;
-                return Err(WorkspaceError::Forbidden);
-            }
-            Err(error) => return Err(error),
-        }
-        if role == WorkspaceRole::Owner {
+        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        if let Err(denied) = actor.invite(role) {
+            let reason = match denied {
+                MembershipDenied::RoleForbidden => "role_forbidden",
+                _ => "owner_role_forbidden",
+            };
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -499,7 +483,7 @@ impl WorkspaceRepository {
                 "workspace",
                 Some(workspace_id),
                 request_id,
-                json!({"reason":"owner_role_forbidden"}),
+                json!({"reason": reason}),
                 now,
             )
             .await?;
@@ -1090,51 +1074,31 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
-        if role == WorkspaceRole::Owner {
-            audit::record(
-                &mut transaction,
-                workspace_id,
-                Some(actor_id),
-                "membership.change_denied",
-                AuditOutcome::Failure,
-                "membership",
-                Some(membership_id),
-                request_id,
-                json!({"reason":"ownership_transfer_required"}),
-                now,
-            )
-            .await?;
-            transaction.commit().await?;
-            return Err(WorkspaceError::TransferRequired);
-        }
-        if !Policy::can(actor_role, Permission::MembersManage) {
-            audit::record(
-                &mut transaction,
-                workspace_id,
-                Some(actor_id),
-                "membership.change_denied",
-                AuditOutcome::Failure,
-                "membership",
-                Some(membership_id),
-                request_id,
-                json!({"reason": "role_forbidden"}),
-                now,
-            )
-            .await?;
-            transaction.commit().await?;
-            return Err(WorkspaceError::Forbidden);
-        }
-        let (target, current_version) =
-            target_role_and_version(&mut transaction, workspace_id, membership_id).await?;
-        if current_version != expected_version {
-            return Err(WorkspaceError::VersionConflict { current_version });
-        }
-        if target == WorkspaceRole::Owner {
-            let error = if actor_role == WorkspaceRole::Owner {
-                WorkspaceError::TransferRequired
-            } else {
-                WorkspaceError::Forbidden
+        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        // The actor's own rule is checked against an ordinary member first, so a caller who may
+        // not change roles learns nothing about the target, and the denial is audited even for
+        // an unknown membership. The real target is then checked after the version.
+        let denied = match actor.change_member_role(WorkspaceRole::Member, role) {
+            Err(denied) => Some(denied),
+            Ok(()) => {
+                let target =
+                    target_membership(&mut transaction, workspace_id, membership_id).await?;
+                if target.version != expected_version {
+                    return Err(WorkspaceError::VersionConflict {
+                        current_version: target.version,
+                    });
+                }
+                actor.change_member_role(target.role, role).err()
+            }
+        };
+        if let Some(denied) = denied {
+            let reason = match denied {
+                MembershipDenied::RoleForbidden => "role_forbidden",
+                MembershipDenied::OwnerProtected => "owner_protected",
+                MembershipDenied::TransferRequired if role == WorkspaceRole::Owner => {
+                    "ownership_transfer_required"
+                }
+                MembershipDenied::TransferRequired => "owner_protected",
             };
             audit::record(
                 &mut transaction,
@@ -1145,12 +1109,12 @@ impl WorkspaceRepository {
                 "membership",
                 Some(membership_id),
                 request_id,
-                json!({"reason": "owner_protected"}),
+                json!({"reason": reason}),
                 now,
             )
             .await?;
             transaction.commit().await?;
-            return Err(error);
+            return Err(denied.into());
         }
         sqlx::query(
             "UPDATE memberships SET role = ?, version = version + 1, updated_at = ? \
@@ -1215,17 +1179,17 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
-        let (target, current_version) =
-            target_role_and_version(&mut transaction, workspace_id, membership_id).await?;
-        if current_version != expected_version {
-            return Err(WorkspaceError::VersionConflict { current_version });
+        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        let target = target_membership(&mut transaction, workspace_id, membership_id).await?;
+        if target.version != expected_version {
+            return Err(WorkspaceError::VersionConflict {
+                current_version: target.version,
+            });
         }
-        if target == WorkspaceRole::Owner {
-            let error = if actor_role == WorkspaceRole::Owner {
-                WorkspaceError::TransferRequired
-            } else {
-                WorkspaceError::Forbidden
+        if let Err(denied) = actor.remove_member(target.user_id, target.role) {
+            let reason = match denied {
+                MembershipDenied::RoleForbidden => "role_forbidden",
+                _ => "owner_protected",
             };
             audit::record(
                 &mut transaction,
@@ -1236,38 +1200,12 @@ impl WorkspaceRepository {
                 "membership",
                 Some(membership_id),
                 request_id,
-                json!({"reason": "owner_protected"}),
+                json!({"reason": reason}),
                 now,
             )
             .await?;
             transaction.commit().await?;
-            return Err(error);
-        }
-        if !Policy::can(actor_role, Permission::MembersManage) {
-            let target_user = sqlx::query_scalar::<_, String>(
-                "SELECT user_id FROM memberships WHERE id = ? AND workspace_id = ?",
-            )
-            .bind(membership_id.to_string())
-            .bind(workspace_id.to_string())
-            .fetch_one(&mut *transaction)
-            .await?;
-            if target_user != actor_id.to_string() {
-                audit::record(
-                    &mut transaction,
-                    workspace_id,
-                    Some(actor_id),
-                    "membership.remove_denied",
-                    AuditOutcome::Failure,
-                    "membership",
-                    Some(membership_id),
-                    request_id,
-                    json!({"reason": "role_forbidden"}),
-                    now,
-                )
-                .await?;
-                transaction.commit().await?;
-                return Err(WorkspaceError::Forbidden);
-            }
+            return Err(denied.into());
         }
         sqlx::query("DELETE FROM memberships WHERE id = ? AND workspace_id = ? AND version = ?")
             .bind(membership_id.to_string())
@@ -1304,17 +1242,8 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let actor_membership = sqlx::query(
-            "SELECT memberships.id, memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-             WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL",
-        )
-        .bind(workspace_id.to_string())
-        .bind(actor_id.to_string())
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(WorkspaceError::NotFound)?;
-        let actor_role = parse_role(&actor_membership.get::<String, _>("role"))?;
-        if !Policy::can(actor_role, Permission::WorkspaceTransfer) {
+        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        if !actor.can(Permission::WorkspaceTransfer) {
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -1344,15 +1273,14 @@ impl WorkspaceRepository {
                 current_version: workspace_version,
             });
         }
-        let (_, target_version) =
-            target_role_and_version(&mut transaction, workspace_id, membership_id).await?;
-        if target_version != membership_version {
+        let target = target_membership(&mut transaction, workspace_id, membership_id).await?;
+        if target.version != membership_version {
             return Err(WorkspaceError::VersionConflict {
-                current_version: target_version,
+                current_version: target.version,
             });
         }
-        let actor_membership_id = actor_membership.get::<String, _>("id");
-        if actor_membership_id == membership_id.to_string() {
+        // Handing the workspace to yourself changes nothing.
+        if target.user_id == actor_id {
             return Ok(());
         }
         sqlx::query(
@@ -1424,8 +1352,10 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let role = require_role(&mut transaction, workspace_id, actor_id, !deleted).await?;
-        if !Policy::can(role, Permission::WorkspaceDelete) {
+        let actor = membership::actor_in(&mut *transaction, workspace_id, actor_id, !deleted)
+            .await?
+            .ok_or(WorkspaceError::NotFound)?;
+        if !actor.can(Permission::WorkspaceDelete) {
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -1526,8 +1456,8 @@ impl WorkspaceRepository {
         cursor: Option<Id>,
         limit: usize,
     ) -> Result<(Vec<AuditEvent>, Option<Id>), WorkspaceError> {
-        let role = require_role_from_db(self.database.pool(), workspace_id, actor_id).await?;
-        if !Policy::can(role, Permission::AuditView) {
+        let actor = require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        if !actor.can(Permission::AuditView) {
             return Err(WorkspaceError::Forbidden);
         }
         Ok(audit::list(&self.database, workspace_id, cursor, page_size(limit)).await?)
@@ -2066,13 +1996,23 @@ fn workspace_from_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkspaceRecord, W
     })
 }
 
-fn member_from_row(row: sqlx::sqlite::SqliteRow) -> Result<MemberRecord, WorkspaceError> {
+fn member_from_row(
+    row: sqlx::sqlite::SqliteRow,
+    actor: Actor,
+) -> Result<MemberRecord, WorkspaceError> {
+    let user_id = parse_id(row.get("user_id"))?;
+    let role = parse_role(&row.get::<String, _>("role"))?;
     Ok(MemberRecord {
         id: parse_id(row.get("id"))?,
-        user_id: parse_id(row.get("user_id"))?,
+        user_id,
         email: row.get("email"),
         display_name: row.get("display_name"),
-        role: row.get("role"),
+        role,
+        can_change_role: actor
+            .change_member_role(role, WorkspaceRole::Member)
+            .is_ok(),
+        can_remove: actor.remove_member(user_id, role).is_ok(),
+        can_transfer_ownership: actor.can_transfer_ownership_to(user_id),
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         created_at: TimestampMillis::from_millis(row.get("created_at")),
@@ -2110,73 +2050,69 @@ fn invitation_from_row(
     })
 }
 
+/// The acting member, or `NotFound` for outsiders and trashed workspaces.
+pub(super) async fn require_actor<'e, E>(
+    executor: E,
+    workspace_id: Id,
+    actor_id: Id,
+) -> Result<Actor, WorkspaceError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    membership::actor(executor, workspace_id, actor_id)
+        .await?
+        .ok_or(WorkspaceError::NotFound)
+}
+
 pub(super) async fn require_permission(
     transaction: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
     permission: Permission,
 ) -> Result<(), WorkspaceError> {
-    let role = require_role(transaction, workspace_id, actor_id, false).await?;
-    if !Policy::can(role, permission) {
+    if !require_actor(&mut **transaction, workspace_id, actor_id)
+        .await?
+        .can(permission)
+    {
         return Err(WorkspaceError::Forbidden);
     }
     Ok(())
 }
 
-pub(super) async fn require_role(
-    transaction: &mut Transaction<'_, Sqlite>,
-    workspace_id: Id,
-    actor_id: Id,
-    deleted: bool,
-) -> Result<WorkspaceRole, WorkspaceError> {
-    let role = sqlx::query_scalar::<_, String>(
-        "SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-         WHERE memberships.workspace_id = ? AND memberships.user_id = ? \
-         AND ((? = 1 AND workspaces.deleted_at IS NOT NULL) OR (? = 0 AND workspaces.deleted_at IS NULL))",
-    )
-    .bind(workspace_id.to_string())
-    .bind(actor_id.to_string())
-    .bind(i64::from(deleted))
-    .bind(i64::from(deleted))
-    .fetch_optional(&mut **transaction)
-    .await?
-    .ok_or(WorkspaceError::NotFound)?;
-    parse_role(&role)
+impl From<MembershipDenied> for WorkspaceError {
+    fn from(denied: MembershipDenied) -> Self {
+        match denied {
+            MembershipDenied::TransferRequired => Self::TransferRequired,
+            MembershipDenied::RoleForbidden | MembershipDenied::OwnerProtected => Self::Forbidden,
+        }
+    }
 }
 
-async fn require_role_from_db(
-    pool: &sqlx::SqlitePool,
-    workspace_id: Id,
-    actor_id: Id,
-) -> Result<WorkspaceRole, WorkspaceError> {
-    let role = sqlx::query_scalar::<_, String>(
-        "SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-         WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL",
-    )
-    .bind(workspace_id.to_string())
-    .bind(actor_id.to_string())
-    .fetch_optional(pool)
-    .await?
-    .ok_or(WorkspaceError::NotFound)?;
-    parse_role(&role)
+struct TargetMembership {
+    user_id: Id,
+    role: WorkspaceRole,
+    version: u64,
 }
 
-async fn target_role_and_version(
+async fn target_membership(
     transaction: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     membership_id: Id,
-) -> Result<(WorkspaceRole, u64), WorkspaceError> {
-    let row =
-        sqlx::query("SELECT role, version FROM memberships WHERE id = ? AND workspace_id = ?")
-            .bind(membership_id.to_string())
-            .bind(workspace_id.to_string())
-            .fetch_optional(&mut **transaction)
-            .await?
-            .ok_or(WorkspaceError::NotFound)?;
-    let role = parse_role(&row.get::<String, _>("role"))?;
-    let version =
-        u64::try_from(row.get::<i64, _>("version")).map_err(|_| WorkspaceError::Conflict)?;
-    Ok((role, version))
+) -> Result<TargetMembership, WorkspaceError> {
+    let row = sqlx::query(
+        "SELECT user_id, role, version FROM memberships WHERE id = ? AND workspace_id = ?",
+    )
+    .bind(membership_id.to_string())
+    .bind(workspace_id.to_string())
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(WorkspaceError::NotFound)?;
+    Ok(TargetMembership {
+        user_id: parse_id(row.get("user_id"))?,
+        role: parse_role(&row.get::<String, _>("role"))?,
+        version: u64::try_from(row.get::<i64, _>("version"))
+            .map_err(|_| WorkspaceError::Conflict)?,
+    })
 }
 
 fn parse_role(role: &str) -> Result<WorkspaceRole, WorkspaceError> {
