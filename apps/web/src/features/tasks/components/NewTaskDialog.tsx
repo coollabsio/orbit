@@ -158,6 +158,8 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
         <form
           className="contents"
           onSubmit={(event) => {
+            // React events cross portals: the "New label" form in the label popover must not create the task
+            if (event.target !== event.currentTarget) return
             event.preventDefault()
             void submit()
           }}

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, waitFor } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -30,6 +30,7 @@ function api(created: unknown[], uploads: string[] = []) {
         version: 1, duplicate_of: null, blocked: false, parent_task_id: null, parent: null, sub_issue_count: 0, sub_issue_closed_count: 0, auto_closed: [],
       })
     }
+    if (request.method === 'POST' && url.pathname.endsWith('/labels')) return Response.json({ id: 'label-1', workspace_id: 'workspace-1', name: 'bug', color: '#8b5cf6', version: 1, created_at: '', updated_at: '' })
     if (request.method === 'POST' && url.pathname.endsWith('/attachments')) {
       uploads.push(url.pathname)
       return Response.json([])
@@ -99,4 +100,18 @@ test('attached files upload to the task once it exists', async () => {
   await userEvent.type(view.getByLabelText('Task title'), 'With a file{Control>}{Enter}{/Control}')
   await waitFor(() => expect(opened).toEqual(['task-0001']))
   expect(uploads).toEqual(['/api/v1/workspaces/workspace-1/tasks/task-0001/attachments'])
+})
+
+test('creating a label inside the dialog does not create the task', async () => {
+  const created: unknown[] = []
+  api(created)
+  const view = render(<NewTaskDialog onClose={() => {}} onOpenTask={() => {}} />, { wrapper: Wrapper })
+  await view.findByRole('button', { name: 'Status: Todo' })
+  await userEvent.type(view.getByLabelText('Task title'), 'Has a title')
+  fireEvent.click(view.getByRole('button', { name: 'Add label' }))
+  const name = await view.findByLabelText('New label name') as HTMLInputElement
+  await userEvent.type(name, 'bug{Enter}')
+  // the label form clears once its request has finished
+  await waitFor(() => expect(name.value).toBe(''))
+  expect(created).toEqual([])
 })
