@@ -47,7 +47,7 @@ function Rows({ label, rows }: { label: string; rows: Row[] }) {
   )
 }
 
-/** Every shortcut with its current keys. `?` opens it, so it never animates. */
+/** Every shortcut with its current keys. A rare visit, so it opens with the dialog's normal motion. */
 export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
   const bindings = useBindings()
   const [query, setQuery] = useState('')
@@ -61,7 +61,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent instant className="flex max-h-[80vh] flex-col gap-0 p-0 sm:max-w-3xl">
+      <DialogContent className="flex max-h-[80vh] flex-col gap-0 p-0 sm:max-w-3xl">
         <DialogHeader className="flex-row items-center gap-4 border-b py-3 pr-12 pl-4">
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription className="sr-only">All keyboard shortcuts and their current keys.</DialogDescription>

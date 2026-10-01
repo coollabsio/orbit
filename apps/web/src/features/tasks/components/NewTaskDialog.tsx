@@ -43,8 +43,6 @@ const CREATE_MORE_KEY = 'orbit:new_task_create_more'
 interface NewTaskDialogProps {
   /** Starting properties (the page's filter, a group header). Unknown or missing ones fall back to the first project and its default status. */
   defaults?: Partial<CreateTaskBody>
-  /** Opened from the keyboard: no entrance animation. */
-  instant?: boolean
   /** Called after the exit has finished. */
   onClose: () => void
   /** Opens a created task: at once without "Create more", else from the "Created" notice. */
@@ -53,7 +51,7 @@ interface NewTaskDialogProps {
 
 /** Creates tasks without leaving the page. Callers mount it while open. With "Create more" on, the
     dialog stays open after each task and keeps the properties, so a batch needs only titles. */
-export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: NewTaskDialogProps) {
+export function NewTaskDialog({ defaults = {}, onClose, onOpenTask }: NewTaskDialogProps) {
   const { workspace } = useWorkspace()
   const projects = useProjects(workspace.id).data ?? []
   const statuses = useAllStatuses(workspace.id, projects).data
@@ -157,8 +155,10 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
         if (!next) onClose()
       }}
     >
-      {/* anchored to the top so the dialog grows downward as the description grows */}
-      <DialogContent instant={instant} initialFocus={titleRef} className="top-[14vh] max-h-[80vh] translate-y-0 gap-3 sm:max-w-2xl">
+      {/* anchored to the top so the dialog grows downward as the description grows. It always animates, also from
+          the C key: a form the user settles into, a few times a day, reads as broken when it just appears. The
+          entrance is shorter and smaller than the default (150ms, from 97%), so typing can start at once. */}
+      <DialogContent initialFocus={titleRef} className="top-[14vh] max-h-[80vh] translate-y-0 gap-3 duration-150 data-open:zoom-in-97! data-closed:zoom-out-97! sm:max-w-2xl">
         <form
           className="contents"
           onSubmit={(event) => {

@@ -14,8 +14,6 @@ export interface NewTaskSource {
 
 interface NewTaskRequest {
   values?: GroupValues
-  /** Opened from the keyboard: no entrance animation. */
-  instant?: boolean
 }
 
 const NewTaskContext = createContext<{ open: (request?: NewTaskRequest) => void; register: (source: NewTaskSource) => () => void }>({ open: () => {}, register: () => () => {} })
@@ -24,13 +22,12 @@ const NewTaskContext = createContext<{ open: (request?: NewTaskRequest) => void;
 export function NewTaskProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const source = useRef<NewTaskSource | null>(null)
-  const [dialog, setDialog] = useState<{ defaults: Partial<CreateTaskBody>; instant: boolean; onOpenTask: (task: TaskRecord) => void } | null>(null)
+  const [dialog, setDialog] = useState<{ defaults: Partial<CreateTaskBody>; onOpenTask: (task: TaskRecord) => void } | null>(null)
 
   const open = useCallback((request: NewTaskRequest = {}) => {
     const page = source.current
     setDialog((current) => current ?? {
       defaults: page?.defaults(request.values ?? []) ?? {},
-      instant: request.instant ?? false,
       onOpenTask: page?.onOpenTask ?? ((task) => navigate(`/tasks/${task.id}`)),
     })
   }, [navigate])
@@ -40,12 +37,12 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
       if (source.current === page) source.current = null
     }
   }, [])
-  useCommand('task.create', () => open({ instant: true }))
+  useCommand('task.create', () => open())
 
   return (
     <NewTaskContext value={{ open, register }}>
       {children}
-      {dialog ? <NewTaskDialog defaults={dialog.defaults} instant={dialog.instant} onClose={() => setDialog(null)} onOpenTask={dialog.onOpenTask} /> : null}
+      {dialog ? <NewTaskDialog defaults={dialog.defaults} onClose={() => setDialog(null)} onOpenTask={dialog.onOpenTask} /> : null}
     </NewTaskContext>
   )
 }

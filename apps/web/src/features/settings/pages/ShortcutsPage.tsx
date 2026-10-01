@@ -84,7 +84,7 @@ export function ShortcutsPage() {
                     <div className="flex h-8 items-center gap-2">
                       <span className="min-w-0 flex-1 truncate">{command.title}</span>
                       {command.id in overrides && !command.fixed ? (
-                        <Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground/70" aria-label={`Reset ${command.title}`} title="Reset to the default keys" onClick={() => save(applyRebind(overrides, command.id, command.keys, false))}>
+                        <Button type="button" variant="ghost" size="icon-xs" className="animate-in text-muted-foreground/70 duration-150 ease-out fade-in-0" aria-label={`Reset ${command.title}`} title="Reset to the default keys" onClick={() => save(applyRebind(overrides, command.id, command.keys, false))}>
                           <RotateLeft />
                         </Button>
                       ) : null}
@@ -98,10 +98,10 @@ export function ShortcutsPage() {
                         </Button>
                       )}
                     </div>
-                    {rowNotice?.kind === 'reserved' ? <p role="alert" className="pb-1.5 text-xs text-destructive">The browser uses this shortcut. Choose other keys.</p> : null}
-                    {rowNotice?.kind === 'invalid' ? <p role="alert" className="pb-1.5 text-xs text-destructive">These keys cannot be used. Choose other keys.</p> : null}
+                    {rowNotice?.kind === 'reserved' ? <p role="alert" className="animate-in pb-1.5 text-xs text-destructive duration-150 ease-out fade-in-0">The browser uses this shortcut. Choose other keys.</p> : null}
+                    {rowNotice?.kind === 'invalid' ? <p role="alert" className="animate-in pb-1.5 text-xs text-destructive duration-150 ease-out fade-in-0">These keys cannot be used. Choose other keys.</p> : null}
                     {rowNotice?.kind === 'conflict' ? (
-                      <div role="alert" className="flex flex-wrap items-center gap-2 pb-1.5 text-xs text-muted-foreground">
+                      <div role="alert" className="flex animate-in flex-wrap items-center gap-2 pb-1.5 text-xs text-muted-foreground duration-150 ease-out fade-in-0">
                         <ShortcutKeys keys={rowNotice.keys} />
                         {/* a swap is an exchange of two shortcuts: not with a fixed one, and not with several at once */}
                         <span>Used by "{rowNotice.other.title}"{rowNotice.more > 0 ? ` and ${rowNotice.more} more` : ''}.{rowNotice.other.fixed ? ' That shortcut cannot be changed.' : ''}</span>
