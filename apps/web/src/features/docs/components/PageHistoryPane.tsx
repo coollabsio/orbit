@@ -167,7 +167,7 @@ export function PageHistoryPane({ workspaceId, pageId, readCurrent, resolvePage,
               <div className="mx-auto max-w-[680px]">
                 {preview.icon ? (
                   <div className="mb-2 text-[44px] leading-none">
-                    <Emoji value={preview.icon} size={44} />
+                    <Emoji value={preview.icon} />
                   </div>
                 ) : null}
                 <h2 className="mb-4 text-[26px] leading-tight font-bold text-foreground">{preview.title.trim() ? preview.title : 'Untitled'}</h2>

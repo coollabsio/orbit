@@ -4,6 +4,8 @@ import { Toaster } from '@/components/ui/sonner'
 import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router'
 import { setAppNavigate } from '@/lib/navigateBridge'
 import { AppShell } from '@/app/shell/AppShell'
+import { chatEnabled } from '@/app/shell/productNavigation'
+import { ChatPage } from '@/features/chat/pages/ChatPage'
 import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
@@ -64,8 +66,18 @@ export default function App() {
               <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
               <Route path="docs/:pageId?" element={<DocsPage />} />
               <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
-              <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
-              <Route path="dm/*" element={<Navigate to="/tasks" replace />} />
+              {chatEnabled ? (
+                <>
+                  <Route path="chat" element={<ChatPage />} />
+                  <Route path="chat/unreads" element={<ChatPage />} />
+                  <Route path="chat/threads" element={<ChatPage />} />
+                  <Route path="chat/:conversationId" element={<ChatPage />} />
+                  <Route path="chat/:conversationId/thread/:messageId" element={<ChatPage />} />
+                </>
+              ) : (
+                <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
+              )}
+              <Route path="dm/*" element={<Navigate to={chatEnabled ? '/chat' : '/tasks'} replace />} />
               <Route path="inbox" element={<InboxPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<SettingsLayout />}>

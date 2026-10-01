@@ -2,7 +2,7 @@
 import { useRef, useState, type ComponentProps, type KeyboardEvent, type TouchEvent } from 'react'
 import { Download, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
-import type { Attachment } from '@/mock/types'
+import type { Attachment } from '@/lib/attachmentLib'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 

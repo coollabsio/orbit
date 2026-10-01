@@ -1,9 +1,9 @@
-// the chat reference MessageInput mention logic as a reusable hook (chat composer + docs blocks):
+// Mention logic as a reusable hook (chat composer + docs blocks):
 // "@" opens user suggestions, "#" opens channel suggestions (substring match, cap 10), ↑/↓ wrap,
 // Enter/Tab insert "@Name " / "#channel ", Escape closes. suppressRef stops the just-inserted
 // label from reopening the popup.
 import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
-import type { Channel, User } from '@/mock/types'
+import type { MentionChannel, MentionPerson } from './mentions'
 
 export interface MentionState {
   start: number
@@ -20,16 +20,16 @@ export interface MentionSuggestion {
   kind: 'user' | 'channel'
 }
 
-export function useMentionAutocomplete(
-  users: User[],
+export function useMentionAutocomplete<Person extends MentionPerson>(
+  users: Person[],
   text: string,
   setText: (next: string) => void,
   inputRef: RefObject<HTMLTextAreaElement | null>,
   afterInsert?: () => void,
   /** Label color per user (the highest role color); undefined keeps the default text color. */
-  colorOf?: (user: User) => string | undefined,
+  colorOf?: (user: Person) => string | undefined,
   /** When given, "#" suggests these channels. */
-  channels?: Channel[],
+  channels?: MentionChannel[],
 ) {
   const [mentionState, setMentionState] = useState<MentionState | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)

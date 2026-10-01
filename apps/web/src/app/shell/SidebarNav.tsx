@@ -2,11 +2,11 @@ import { Shortcut } from '@/shortcuts/Shortcut'
 import { createContext, Fragment, useContext, type ComponentType, type ReactNode } from 'react'
 import { Link, useLocation, useMatch, useResolvedPath, type LinkProps } from 'react-router'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { Calendar, DirectInbox as Inbox, Home2 as Home, Layer, Message as MessageSquare, Messages2 as MessagesSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
+import { Calendar, DirectInbox as Inbox, Home2 as Home, Layer, Message as MessageSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { docsHidden } from './productNavigation'
+import { chatEnabled, docsHidden } from './productNavigation'
 
 const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
@@ -46,6 +46,7 @@ function SidebarNavItem({
   label,
   'aria-label': ariaLabel = label,
   active,
+  badge = 0,
   size,
   className,
   ...props
@@ -55,23 +56,35 @@ function SidebarNavItem({
   icon: SidebarNavIcon
   label: string
   active?: boolean
+  /** A count of things that wait for the user. Nothing shows for 0. */
+  badge?: number
 }) {
   const collapsed = useContext(SidebarNavCollapsed)
   const match = useMatch({ path: useResolvedPath(to).pathname, end })
   const isActive = active ?? match !== null
+  const name = badge > 0 ? `${ariaLabel}, ${badge} unread` : ariaLabel
   return (
     <Link
       data-slot="sidebar-nav-item"
       data-active={isActive}
       aria-current={isActive ? 'page' : undefined}
-      aria-label={ariaLabel}
-      title={collapsed ? ariaLabel : undefined}
+      aria-label={name}
+      title={collapsed ? name : undefined}
       className={cn(sidebarNavItemVariants({ size }), className)}
       to={to}
       {...props}
     >
       <Icon />
       <SidebarNavLabel>{label}</SidebarNavLabel>
+      {badge > 0 ? (
+        <span
+          data-slot="sidebar-nav-badge"
+          aria-hidden="true"
+          className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5"
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      ) : null}
     </Link>
   )
 }
@@ -107,7 +120,19 @@ function SidebarSection({ label, collapsed, first }: { label: string; collapsed:
 }
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
-export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
+export function SidebarNav({
+  onNavigate,
+  collapsed = false,
+  chatBadge,
+  chatEnabled: chat = chatEnabled,
+}: {
+  onNavigate?: () => void
+  collapsed?: boolean
+  /** Unread count on the Chat item. */
+  chatBadge?: number
+  /** Chat is a link instead of "Coming soon". Defaults to the build's setting. */
+  chatEnabled?: boolean
+}) {
   const location = useLocation()
   const currentParams = new URLSearchParams(location.search)
   const view = currentParams.get('view')
@@ -154,13 +179,14 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
         </Button>
         <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain', collapsed ? 'gap-1' : 'gap-0.5')}>
           <SidebarSection label="Workspace" collapsed={collapsed} first />
-          {WORKSPACE_LINKS.map((link) => link.enabled ? (
+          {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (
             <Fragment key={link.to}>
               <SidebarNavItem
                 to={link.to === '/tasks' ? taskViewPath() : link.to}
                 active={link.to === '/tasks' ? tasksActive : undefined}
                 icon={link.icon}
                 label={link.label}
+                badge={link.to === '/chat' ? chatBadge : undefined}
                 onClick={onNavigate}
               />
               {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps */}
@@ -178,7 +204,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           <SidebarNavItem to={taskViewPath('my_week')} active={taskViewActive('my_week')} icon={Calendar} label="My week" onClick={onNavigate} />
           <SidebarNavItem to={taskViewPath('overdue')} active={taskViewActive('overdue')} icon={Timer} label="Overdue" onClick={onNavigate} />
           <SidebarNavItem to={taskViewPath('due_soon')} active={taskViewActive('due_soon')} icon={Calendar} label="Due soon" onClick={onNavigate} />
-          <SidebarNavComingSoon icon={MessagesSquare} label="Direct messages" />
           <SidebarSection label="Manage" collapsed={collapsed} />
           <SidebarNavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
         </div>

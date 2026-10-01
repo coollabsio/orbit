@@ -1,6 +1,15 @@
 import type { ClipboardEvent } from 'react'
-import { nextId } from '@/mock/store'
-import type { Attachment } from '@/mock/types'
+
+/** A file on a message, comment or page. Images can carry their size, so a list can reserve the space before they load. */
+export interface Attachment {
+  id: string
+  fileName: string
+  mimeType: string
+  fileSize: number
+  url: string
+  width?: number
+  height?: number
+}
 
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -23,10 +32,10 @@ export function fileExtension(fileName: string): string {
   return ext || 'FILE'
 }
 
-/** Wraps a picked / dropped / pasted file as a mock attachment (object URL, no upload). */
+/** Wraps a picked / dropped / pasted file as a local attachment (object URL, no upload). */
 export function fileToAttachment(file: File): Attachment {
   return {
-    id: nextId('att'),
+    id: `att_${crypto.randomUUID()}`,
     fileName: file.name || `pasted-${Date.now()}.${(file.type.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '')}`,
     mimeType: file.type || 'application/octet-stream',
     fileSize: file.size,

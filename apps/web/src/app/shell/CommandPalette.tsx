@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { cn } from 'cn'
-import { DirectInbox as Inbox, DocumentText as FileText, Home2 as Home, People as Users, Setting2 as Settings, ShieldTick as ShieldCheck, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
+import { DirectInbox as Inbox, DocumentText as FileText, Home2 as Home, Message as MessageSquare, People as Users, Setting2 as Settings, ShieldTick as ShieldCheck, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import type { IconComponent as LucideIcon } from 'reicon-react'
 import {
   Command,
@@ -15,6 +16,12 @@ import {
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
 import type { TextRange } from '@/api/generated/types.gen'
+import { queryKeys } from '@/api/queryKeys'
+import { chatKeys } from '@/features/chat/api/keys'
+import type { Conversation } from '@/features/chat/api/types'
+import { conversationPath } from '@/features/chat/chatRoutes'
+import { conversationTitle } from '@/features/chat/lib/sidebar'
+import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord } from '@/features/tasks/api/models'
@@ -28,9 +35,9 @@ import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import type { CommandId, Group } from '@/shortcuts/commands'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useAvailableCommands, useBindings, useRunCommand } from '@/shortcuts/useCommand'
-import { docsHidden } from './productNavigation'
+import { chatEnabled, docsHidden } from './productNavigation'
 
-const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, Docs: FileText }
+const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, Docs: FileText, Chat: MessageSquare }
 
 interface CommandEntry {
   id: string
@@ -96,8 +103,40 @@ function PaletteItem({ entry, onSelect }: { entry: CommandEntry; onSelect: () =>
   )
 }
 
+/** Conversations shown for one search, so they never crowd out tasks and pages. */
+const CONVERSATION_RESULT_LIMIT = 5
+
+/**
+ * The conversations in the user's chat sidebar, read once from the chat cache when the palette opens (the shell keeps
+ * that cache current for the Chat badge). Empty when chat is off.
+ */
+function useConversationEntries(workspaceId: string): CommandEntry[] {
+  const queryClient = useQueryClient()
+  const [entries] = useState<CommandEntry[]>(() => {
+    if (!chatEnabled) return []
+    const conversations = queryClient.getQueryData<Conversation[]>(chatKeys.conversations(workspaceId)) ?? []
+    const people = queryClient.getQueryData<User[]>(queryKeys.members(workspaceId)) ?? []
+    const currentUserId = queryClient.getQueryData<{ id: string } | null>(queryKeys.currentUser)?.id ?? ''
+    return conversations
+      .filter((conversation) => conversation.isMember && !conversation.archived)
+      .map((conversation) => {
+        const dm = conversation.kind === 'dm'
+        return {
+          id: `chat_${conversation.id}`,
+          icon: MessageSquare,
+          title: dm ? conversationTitle(conversation, people, currentUserId) : `#${conversation.name}`,
+          meta: dm ? 'Direct message' : 'Channel',
+          to: conversationPath(conversation.id),
+          keywords: dm ? 'dm' : conversation.topic,
+        }
+      })
+  })
+  return entries
+}
+
 export function CommandPalette({ onClose }: { onClose: () => void }) {
   const { workspace } = useWorkspace()
+  const conversations = useConversationEntries(workspace.id)
   const projects = useProjects(workspace.id)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
@@ -113,6 +152,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_home', icon: Home, title: 'Go to Home', meta: 'Navigation', to: '/', keywords: 'home' },
       { id: 'nav_tasks', icon: SquareCheck, title: 'Go to Tasks', meta: 'Navigation', to: '/tasks', command: 'nav.tasks', keywords: 'tasks all' },
       { id: 'nav_docs', icon: FileText, title: 'Go to Docs', meta: 'Navigation', to: '/docs', command: 'nav.docs', keywords: 'docs pages wiki documents' },
+      ...(chatEnabled ? [{ id: 'nav_chat', icon: MessageSquare, title: 'Go to Chat', meta: 'Navigation', to: '/chat', command: 'nav.chat' as const, keywords: 'chat messages channels' }] : []),
       { id: 'nav_inbox', icon: Inbox, title: 'Go to Inbox', meta: 'Navigation', to: '/inbox', command: 'nav.inbox', keywords: 'inbox notifications' },
       { id: 'nav_profile', icon: Users, title: 'Go to Profile', meta: 'Navigation', to: '/profile', command: 'nav.profile', keywords: 'profile account password name' },
       { id: 'nav_settings', icon: Settings, title: 'Go to Settings', meta: 'Navigation', to: '/settings', command: 'nav.settings', keywords: 'settings preferences' },
@@ -172,10 +212,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return entries.slice(0, recentCount > 0 ? 5 : 9)
-    return entries
-      .filter((e) => e.serverMatch || `${e.title} ${e.meta} ${e.keywords}`.toLowerCase().includes(q))
-      .slice(0, 12)
-  }, [entries, query, recentCount])
+    const matches = (e: CommandEntry) => e.serverMatch || `${e.title} ${e.meta} ${e.keywords}`.toLowerCase().includes(q)
+    const hits = entries.filter(matches)
+    // navigation first, then a few conversations, then pages and tasks: all inside the one cap
+    const navigation = hits.filter((e) => e.meta === 'Navigation')
+    const chat = conversations.filter(matches).slice(0, CONVERSATION_RESULT_LIMIT)
+    return [...navigation, ...chat, ...hits.filter((e) => e.meta !== 'Navigation')].slice(0, 12)
+  }, [entries, conversations, query, recentCount])
 
   // what can act now, read once when the palette opens: a task command needs the task the pointer was on
   const available = useAvailableCommands()
@@ -203,7 +246,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       open
       onOpenChange={(next) => { if (!next) onClose() }}
       title="Command palette"
-      description="Search tasks, pages and navigation."
+      description={chatEnabled ? 'Search tasks, pages, conversations and navigation.' : 'Search tasks, pages and navigation.'}
       className="top-[12vh] max-h-[min(60vh,28rem)] sm:max-w-[576px]"
     >
       {/* `shouldFilter={false}`: the entry list is already filtered here (tasks and pages are

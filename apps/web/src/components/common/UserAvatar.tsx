@@ -1,12 +1,20 @@
 import type { CSSProperties } from 'react'
-import type { User } from '@/mock/types'
 import { Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar'
 import { cn } from 'cn'
 
+/** What the avatar needs of a person. A workspace member and a mail contact both fit. */
+export interface AvatarPerson {
+  name: string
+  color: string
+  online?: boolean
+}
+
 interface UserAvatarProps {
-  user: User | null | undefined
+  user: AvatarPerson | null | undefined
   size?: number
   showOnline?: boolean
+  /** Presence from the caller (chat keeps it in its own store); wins over `user.online`. */
+  online?: boolean
   /** Fallback initials when there is no user (e.g. external senders). */
   name?: string
   className?: string
@@ -20,11 +28,13 @@ function initialsOf(label: string) {
     .join('')
 }
 
-export function UserAvatar({ user, size = 24, showOnline = false, name, className }: UserAvatarProps) {
+export function UserAvatar({ user, size = 24, showOnline = false, online, name, className }: UserAvatarProps) {
   const label = user?.name ?? name ?? '?'
   const fallbackStyle: CSSProperties = user
-    ? { background: `color-mix(in srgb, ${user.color} 22%, transparent)`, color: user.color }
+    ? // the tint sits on the theme's muted surface and the initials lean toward its text colour: readable in both themes
+      { background: `color-mix(in oklch, ${user.color} 26%, var(--muted))`, color: `color-mix(in oklch, ${user.color} 60%, var(--foreground))` }
     : {}
+  const presence = online ?? user?.online
   return (
     <Avatar
       className={cn('after:border-transparent', className)}
@@ -37,15 +47,21 @@ export function UserAvatar({ user, size = 24, showOnline = false, name, classNam
       >
         {initialsOf(label)}
       </AvatarFallback>
-      {showOnline && user?.online ? (
-        <AvatarBadge className="size-2 bg-green-500 ring-background" />
+      {showOnline && presence !== undefined ? (
+        // online is filled, offline is a hollow ring: the state does not depend on colour alone
+        <AvatarBadge
+          data-online={presence}
+          className="size-2 border-[1.5px] border-muted-foreground bg-background ring-background data-[online=true]:border-green-500 data-[online=true]:bg-green-500"
+        >
+          <span className="sr-only">{presence ? 'Online' : 'Offline'}</span>
+        </AvatarBadge>
       ) : null}
     </Avatar>
   )
 }
 
 /** Overlapping avatars for several users; an empty dash avatar when there is nobody. */
-export function UserAvatarStack({ users, size = 18, max = 3 }: { users: User[]; size?: number; max?: number }) {
+export function UserAvatarStack({ users, size = 18, max = 3 }: { users: Array<AvatarPerson & { id: string }>; size?: number; max?: number }) {
   if (users.length === 0) return <UserAvatar user={undefined} size={size} name="—" />
   const shown = users.slice(0, max)
   const rest = users.length - shown.length

@@ -11,7 +11,6 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
 import { useTasks } from '@/features/tasks/api/tasks'
-import { threadTitleOf } from '@/lib/messagePreview'
 import { useOpenNewTask } from '@/features/tasks/newTask'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -82,23 +81,8 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       if (thread) crumbs.push({ label: thread.subject })
       return { crumbs }
     }
-    case 'chat': {
-      const crumbs: Crumb[] = [{ label: 'Chat', to: '/chat' }]
-      const channel = id ? state.channels.find((c) => c.id === id) : null
-      const threadRoot = channel && sub === 'thread' && subId ? state.chatMessages.find((m) => m.id === subId) : null
-      if (id === 'settings') crumbs.push({ label: 'Chat Settings' })
-      else if (channel && threadRoot) {
-        crumbs.push({ label: `#${channel.name}`, to: `/chat/${channel.id}` }, { label: threadTitleOf(threadRoot) })
-      } else if (channel) crumbs.push({ label: `#${channel.name}` })
-      return { crumbs }
-    }
-    case 'dm': {
-      const crumbs: Crumb[] = [{ label: 'Direct Messages', to: '/dm' }]
-      const dm = id ? state.directMessages.find((candidate) => candidate.id === id) : null
-      const participant = dm ? state.users.find((user) => user.id === dm.participantId) : null
-      if (participant) crumbs.push({ label: participant.name })
-      return { crumbs }
-    }
+    case 'chat':
+      return { crumbs: [{ label: 'Chat', to: '/chat' }] }
     case 'views':
       return { crumbs: [{ label: 'Tasks', to: '/tasks' }, { label: 'Views', to: '/views' }] }
     case 'inbox':
@@ -163,7 +147,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
       className={cn(
         'group/topbar hidden h-12 shrink-0 items-center gap-2 bg-background px-2 max-[899px]:flex',
         'data-[root=settings]:h-11 data-[root=settings]:min-h-11 data-[root=settings]:gap-[7px] data-[root=settings]:border-b data-[root=settings]:border-border data-[root=settings]:px-2 data-[root=settings]:py-1.5',
-        'data-[root=tasks]:hidden data-[root=views]:hidden data-[root=mail]:hidden data-[root=docs]:hidden data-[root=dm]:hidden data-[root=chat]:hidden data-[root=inbox]:hidden',
+        'data-[root=tasks]:hidden data-[root=views]:hidden data-[root=mail]:hidden data-[root=docs]:hidden data-[root=chat]:hidden data-[root=inbox]:hidden',
       )}
       data-root={routeRoot}
     >

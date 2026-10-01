@@ -1,4 +1,4 @@
-import type { Role, User } from '@/mock/types'
+import type { User } from '@/mock/types'
 
 // Coolify team as mock users
 export const users: User[] = [
@@ -57,10 +57,4 @@ export const users: User[] = [
     title: 'Frontend Engineer',
     roleIds: [],
   },
-]
-
-export const roles: Role[] = [
-  { id: 'r_core', name: 'Core Team', color: '#9b59b6', position: 0 },
-  { id: 'r_maintainer', name: 'Maintainer', color: '#3498db', position: 1 },
-  { id: 'r_helper', name: 'Helper', color: '#1abc9c', position: 2 },
 ]

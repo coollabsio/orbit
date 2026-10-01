@@ -14,7 +14,6 @@
 ## Sidebars
 
 - First sidebar groups Workspace, Personal, Manage.
-- Personal order is Inbox, then Direct messages.
 - Collapse control is at the bottom beside the user menu.
 - Collapsed state is a 56px icon rail with section separators.
 - Feature sidebars may be resizable from 220–420px; persist widths in local storage and hide resizers on mobile.
@@ -43,12 +42,15 @@
 
 ## Chat conventions
 
-- Message hover toolbar: top three emoji reactions plus `…` only.
-- `…` opens the full context menu.
+- Chat is one list: `Unreads` and `Threads` rows, Favorites, shared categories, Direct messages. All conversations use `/chat/:id`; there is no `/dm`.
+- Threads are the only reply model. Pane: `?thread=`. Full view: `/chat/:id/thread/:messageId` with a breadcrumb to the parent conversation. All chat navigation goes through `useChatNavigation` (open pushes; close, expand, collapse replace).
+- Unread is bold text plus the 6px pink square; a pink count badge replaces the square for mentions, DMs and followed threads. The square shows only on sidebar rows, unread reply summaries and the "New" line. Presence stays a round avatar badge.
+- Message hover toolbar: three quick reactions, reply in thread, `…`. `…` and right click open the same menu.
 - Add Reaction opens the complete shared picker, not a small emoji strip.
-- DM headers show name/avatar/presence only, not job title.
-- Channel mentions visually match user mentions and navigate to the channel.
-- Mobile conversations use compact 12px text, 30px avatars, restrained media widths, and an icon-first header.
+- No motion on row hover, the hover toolbar, conversation change, or sent and received messages. Panes never use transforms.
+- DM headers show name/avatar/presence only, not job title. Author names are neutral.
+- Channel mentions visually match user mentions (pink tint) and navigate to the channel.
+- Mobile conversations use 14px text, 30px avatars, restrained media widths, an icon-first header and a long-press action sheet.
 - `/chat` is the mobile channel list; conversation Back navigation must return there without auto-opening a channel.
 
 ## Mobile navigation

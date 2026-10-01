@@ -33,7 +33,7 @@ export function PageBlockCard({ pageId }: { pageId: string }) {
       }}
     >
       <span className="flex size-[18px] shrink-0 items-center justify-center" aria-hidden>
-        {icon ? <Emoji value={icon} size={17} /> : <DocumentText className="size-[18px]" />}
+        {icon ? <Emoji value={icon} /> : <DocumentText className="size-[18px]" />}
       </span>
       <span
         className={cn(

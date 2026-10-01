@@ -5,8 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import { sendReply } from '@/mock/actions'
-import type { Attachment } from '@/mock/types'
-import { clipboardFiles, fileToAttachment } from '@/lib/attachmentLib'
+import { clipboardFiles, fileToAttachment, type Attachment } from '@/lib/attachmentLib'
 import { Attachments } from '@/components/common/Attachments'
 
 interface ReplyComposerProps {

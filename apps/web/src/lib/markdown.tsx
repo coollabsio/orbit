@@ -2,7 +2,6 @@
 // block parser (fenced code, headings, quotes, lists) -> inline markdown ->
 // mentionify -> linkify. Custom regex parser, zero dependencies. Shared by
 // message content and embed cards.
-import { getState } from '@/mock/store'
 import { appNavigate } from './navigateBridge'
 import { CodeBlock } from '@/components/common/CodeBlock'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -145,8 +144,7 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
         <a
           key={key}
           href={matched.href}
-          className="cursor-pointer rounded-sm bg-[#5865f2]/15 px-0.5 font-bold no-underline hover:underline dark:bg-[#5865f2]/30"
-          style={{ color: matched.color }}
+          className="cursor-pointer rounded-sm bg-primary/10 px-0.5 font-medium text-primary no-underline hover:underline dark:bg-primary/20"
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
@@ -156,7 +154,7 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
           {value}
         </a>
       ) : (
-        <span key={key} className="rounded-sm bg-[#5865f2]/15 px-0.5 font-bold dark:bg-[#5865f2]/30" style={{ color: matched.color }}>
+        <span key={key} className="rounded-sm bg-primary/10 px-0.5 font-medium text-primary dark:bg-primary/20">
           {value}
         </span>
       ),
@@ -221,13 +219,7 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
         </code>,
       )
     } else if (token.startsWith(':')) {
-      const shortcode = token.slice(1, -1)
-      const custom = getState().customEmojis.find((e) => e.name === shortcode)
-      if (custom) {
-        parts.push(<img key={key} className="inline-block size-5 rounded-[3px] object-contain align-[-4px]" src={custom.url} alt={token} title={token} />)
-      } else {
-        parts.push(EMOJI_SHORTCODES[shortcode] || token)
-      }
+      parts.push(EMOJI_SHORTCODES[token.slice(1, -1)] || token)
     } else if (token.startsWith('**') || token.startsWith('__')) {
       parts.push(<strong key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-strong`, mentionTokens)}</strong>)
     } else if (token.startsWith('~~')) {

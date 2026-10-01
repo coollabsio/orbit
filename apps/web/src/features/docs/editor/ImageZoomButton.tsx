@@ -2,7 +2,7 @@
 import { blockHasType, type BlockSchema, type InlineContentSchema, type StyleSchema } from '@blocknote/core'
 import { useBlockNoteEditor, useComponentsContext, useEditorState } from '@blocknote/react'
 import { SearchZoomIn } from 'reicon-react'
-import type { Attachment } from '@/mock/types'
+import type { Attachment } from '@/lib/attachmentLib'
 
 export function ImageZoomButton({ onZoom }: { onZoom: (image: Attachment) => void }) {
   const Components = useComponentsContext()!

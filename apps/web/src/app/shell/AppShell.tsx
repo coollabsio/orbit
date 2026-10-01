@@ -7,7 +7,10 @@ import { NewTaskProvider } from '@/features/tasks/newTask'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
-import { Outlet } from 'react-router'
+import { ChatProvider } from '@/features/chat/api/ChatProvider'
+import { useChatBadgeCount } from '@/features/chat/api/queries'
+import { chatEnabled } from './productNavigation'
+import { Outlet, useLocation } from 'react-router'
 import { SidebarLeft as PanelLeft } from 'reicon-react'
 import { cn } from 'cn'
 import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
@@ -25,7 +28,9 @@ export function AppShell() {
   const { overrides } = useShortcutBindings()
   return (
     <ShortcutProvider overrides={overrides}>
-      <Shell />
+      <ChatProvider enabled={chatEnabled}>
+        <Shell />
+      </ChatProvider>
     </ShortcutProvider>
   )
 }
@@ -33,9 +38,17 @@ export function AppShell() {
 function Shell() {
   const { workspace } = useWorkspace()
   const live = useWorkspaceEvents(workspace.id)
+  const chatBadge = useChatBadgeCount()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('orbit:sidebar_collapsed') === 'true')
+  const [collapsedPreference, setCollapsedPreference] = useState(() => window.localStorage.getItem('orbit:sidebar_collapsed') === 'true')
+  // Chat has its own sidebar, so the app sidebar collapses there. Expanding it in chat lasts for the visit and does not
+  // change the saved preference of the other pages.
+  const { pathname } = useLocation()
+  const inChat = pathname === '/chat' || pathname.startsWith('/chat/')
+  const [chatExpanded, setChatExpanded] = useState(false)
+  const sidebarCollapsed = inChat ? !chatExpanded : collapsedPreference
+  const toggleSidebar = () => (inChat ? setChatExpanded((expanded) => !expanded) : setCollapsedPreference((collapsed) => !collapsed))
 
   useLayoutEffect(() => {
     const viewport = window.visualViewport
@@ -76,8 +89,8 @@ function Shell() {
   }, [])
 
   useEffect(() => {
-    window.localStorage.setItem('orbit:sidebar_collapsed', String(sidebarCollapsed))
-  }, [sidebarCollapsed])
+    window.localStorage.setItem('orbit:sidebar_collapsed', String(collapsedPreference))
+  }, [collapsedPreference])
 
   return (
     <NewTaskProvider>
@@ -105,7 +118,7 @@ function Shell() {
         >
           <WorkspaceSwitcher collapsed={sidebarCollapsed} />
         </div>
-        <SidebarNav collapsed={sidebarCollapsed} />
+        <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} />
         <div
           className={cn(
             'flex shrink-0 items-center gap-2 border-t border-border pt-2',
@@ -119,7 +132,7 @@ function Shell() {
             size="icon-sm"
             className="shrink-0 text-muted-foreground/70"
             aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            onClick={toggleSidebar}
           >
             <PanelLeft className={cn('size-[17px]', sidebarCollapsed && 'rotate-180')} />
           </Button>
@@ -131,7 +144,7 @@ function Shell() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Outlet />
         </div>
-        <MobileDock />
+        <MobileDock chatBadge={chatBadge} />
       </div>
 
       <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>
@@ -143,7 +156,7 @@ function Shell() {
           <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
             <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
           </div>
-          <SidebarNav onNavigate={() => setDrawerOpen(false)} />
+          <SidebarNav onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} />
           <div className="flex shrink-0 items-center gap-2 border-t border-border pt-2">
             <UserMenu />
           </div>

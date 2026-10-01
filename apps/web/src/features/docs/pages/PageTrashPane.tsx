@@ -106,7 +106,7 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
         {trash.data.map((page) => (
           <div key={page.id} className="flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b border-border px-3 py-1.5">
             <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-muted-foreground/70">
-              {page.icon ? <Emoji value={page.icon} size={15} /> : <FileText className="size-[15px]" />}
+              {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-[15px]" />}
             </span>
             <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{pageTitle(page)}</span>
             <span className="flex max-w-40 min-w-0 shrink items-center gap-1 text-xs text-muted-foreground/70" data-space-label>

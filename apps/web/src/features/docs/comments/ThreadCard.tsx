@@ -12,7 +12,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { fullDate, relativeTime } from '@/lib/format'
-import type { User } from '@/mock/types'
 import { CommentComposer, type AnyCommentEditor } from './CommentComposer'
 import { CommentEditor } from './CommentEditor'
 import { COMMENT_PLACEHOLDERS, commentEditorDictionary } from './dictionary'
@@ -40,7 +39,7 @@ function useMember(userId: string | undefined) {
 
 function MemberAvatar({ userId, size }: { userId: string; size: number }) {
   const { name, member } = useMember(userId)
-  const user = member?.color ? ({ id: member.id, name: member.name, color: member.color, online: false } as User) : undefined
+  const user = member?.color ? { name: member.name, color: member.color } : undefined
   return <UserAvatar user={user} name={name} size={size} className="shrink-0" />
 }
 

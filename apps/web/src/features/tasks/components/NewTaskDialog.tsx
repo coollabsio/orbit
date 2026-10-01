@@ -43,6 +43,9 @@ const CREATE_MORE_KEY = 'orbit:new_task_create_more'
 interface NewTaskDialogProps {
   /** Starting properties (the page's filter, a group header). Unknown or missing ones fall back to the first project and its default status. */
   defaults?: Partial<CreateTaskBody>
+  /** Text the first task starts with (a task made from a chat message). */
+  initialTitle?: string
+  initialDescription?: string
   /** Called after the exit has finished. */
   onClose: () => void
   /** Opens a created task: at once without "Create more", else from the "Created" notice. */
@@ -51,7 +54,7 @@ interface NewTaskDialogProps {
 
 /** Creates tasks without leaving the page. Callers mount it while open. With "Create more" on, the
     dialog stays open after each task and keeps the properties, so a batch needs only titles. */
-export function NewTaskDialog({ defaults = {}, onClose, onOpenTask }: NewTaskDialogProps) {
+export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescription = '', onClose, onOpenTask }: NewTaskDialogProps) {
   const { workspace } = useWorkspace()
   const projects = useProjects(workspace.id).data ?? []
   const statuses = useAllStatuses(workspace.id, projects).data
@@ -59,8 +62,8 @@ export function NewTaskDialog({ defaults = {}, onClose, onOpenTask }: NewTaskDia
   const labels = useLabels(workspace.id).data ?? []
   const createTask = useCreateTask(workspace.id)
   const [open, setOpen] = useState(true)
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
+  const [title, setTitle] = useState(initialTitle)
+  const [description, setDescription] = useState(initialDescription)
   const [draft, setDraft] = useState(() => ({
     projectId: defaults.project_id,
     statusId: defaults.status_id,

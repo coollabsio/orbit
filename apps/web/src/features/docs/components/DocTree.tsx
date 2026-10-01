@@ -639,7 +639,7 @@ export function DocTree({
                   >
                     <span className="relative inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/70">
                       <span className="inline-flex group-hover/row:invisible">
-                        {teamspace.icon ? <Emoji value={teamspace.icon} size={15} /> : <Users className="size-[15px]" />}
+                        {teamspace.icon ? <Emoji value={teamspace.icon} /> : <Users className="size-[15px]" />}
                       </span>
                       <ChevronRight
                         className={cn('invisible absolute size-3 transition-transform duration-[120ms] group-hover/row:visible', open && 'rotate-90')}

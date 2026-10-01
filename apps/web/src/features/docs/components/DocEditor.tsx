@@ -854,7 +854,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                       />
                     }
                   >
-                    <Emoji value={icon} size={56} />
+                    <Emoji value={icon} />
                   </PopoverTrigger>
                   <PopoverContent align="start" className="w-auto gap-0 p-0">
                     <EmojiPicker

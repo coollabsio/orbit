@@ -1,6 +1,8 @@
+import { chatEnabled } from '@/lib/chatEnabled'
+
 /** Where a command can run. A page mounts the handlers of its contexts; `task-target` needs a target task. */
-export type Context = 'global' | 'task-list' | 'task-board' | 'timeline' | 'task-detail' | 'task-target' | 'new-task' | 'docs' | 'views'
-export type Group = 'General' | 'Navigation' | 'List' | 'Task' | 'Docs'
+export type Context = 'global' | 'task-list' | 'task-board' | 'timeline' | 'task-detail' | 'task-target' | 'new-task' | 'docs' | 'views' | 'chat'
+export type Group = 'General' | 'Navigation' | 'List' | 'Task' | 'Docs' | 'Chat'
 
 export interface Command {
   id: string
@@ -17,8 +19,7 @@ export interface Command {
   inInputs?: true
 }
 
-/** The single source of truth for shortcuts: the key handler, command menu, help dialog, labels and settings read it. */
-export const COMMANDS = [
+const REGISTRY = [
   { id: 'palette.open', title: 'Open command menu', group: 'General', keys: 'Mod+K', context: 'global', inInputs: true },
   { id: 'help.open', title: 'Show keyboard shortcuts', group: 'General', keys: '?', context: 'global' },
   { id: 'search.open', title: 'Search', group: 'General', keys: '/', context: 'global' },
@@ -33,6 +34,7 @@ export const COMMANDS = [
   { id: 'nav.overdue', title: 'Go to overdue', group: 'Navigation', keys: 'G O', context: 'global' },
   { id: 'nav.views', title: 'Go to views', group: 'Navigation', keys: 'G V', context: 'global' },
   { id: 'nav.docs', title: 'Go to docs', group: 'Navigation', keys: 'G D', context: 'global' },
+  { id: 'nav.chat', title: 'Go to chat', group: 'Navigation', keys: 'G C', context: 'global' },
   { id: 'nav.trash', title: 'Go to trash', group: 'Navigation', keys: 'G X', context: 'global' },
   { id: 'nav.settings', title: 'Go to settings', group: 'Navigation', keys: 'G S', context: 'global' },
   { id: 'nav.profile', title: 'Go to profile', group: 'Navigation', keys: 'G P', context: 'global' },
@@ -76,9 +78,25 @@ export const COMMANDS = [
   { id: 'docs.createPage', title: 'Create page', group: 'Docs', keys: null, context: 'docs' },
   { id: 'docs.history', title: 'Show page history', group: 'Docs', keys: 'Mod+Shift+H', context: 'docs', inInputs: true },
   { id: 'docs.comment', title: 'Add comment', group: 'Docs', keys: 'Mod+Alt+M', context: 'docs', inInputs: true },
+
+  // all of them run while the composer has the focus
+  { id: 'chat.previous', title: 'Go to previous conversation', group: 'Chat', keys: 'Alt+ArrowUp', context: 'chat', inInputs: true },
+  { id: 'chat.next', title: 'Go to next conversation', group: 'Chat', keys: 'Alt+ArrowDown', context: 'chat', inInputs: true },
+  { id: 'chat.previousUnread', title: 'Go to previous unread conversation', group: 'Chat', keys: 'Alt+Shift+ArrowUp', context: 'chat', inInputs: true },
+  { id: 'chat.nextUnread', title: 'Go to next unread conversation', group: 'Chat', keys: 'Alt+Shift+ArrowDown', context: 'chat', inInputs: true },
+  { id: 'chat.unreads', title: 'Open unreads', group: 'Chat', keys: 'Mod+Shift+A', context: 'chat', inInputs: true },
+  { id: 'chat.markAllRead', title: 'Mark all as read', group: 'Chat', keys: 'Shift+Escape', context: 'chat', inInputs: true },
 ] as const satisfies readonly Command[]
 
-export type CommandId = (typeof COMMANDS)[number]['id']
+export type CommandId = (typeof REGISTRY)[number]['id']
+
+/** The commands of this build. With `chat` off (production, for now), the Chat commands are left out. */
+export function commandsFor(chat: boolean): readonly Command[] {
+  return chat ? REGISTRY : REGISTRY.filter((command: Command) => command.group !== 'Chat' && command.context !== 'chat' && command.id !== 'nav.chat')
+}
+
+/** The single source of truth for shortcuts: the key handler, command menu, help dialog, labels and settings read it. */
+export const COMMANDS = commandsFor(chatEnabled)
 
 const byId = new Map<string, Command>(COMMANDS.map((command) => [command.id, command]))
 export const commandById = (id: string): Command | undefined => byId.get(id)

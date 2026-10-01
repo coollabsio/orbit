@@ -179,7 +179,7 @@ export function NotionImportChooser({ workspaceId, item, tree, teamspaces, pages
                 />
                 <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-muted-foreground/70">
                   {row.node.icon ? (
-                    <Emoji value={row.node.icon} size={15} />
+                    <Emoji value={row.node.icon} />
                   ) : row.node.kind === 'database' ? (
                     <Database className="size-[15px]" aria-label="Database" />
                   ) : (

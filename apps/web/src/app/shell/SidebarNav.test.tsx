@@ -112,3 +112,49 @@ test('docs are enabled in the sidebar and highlight on page routes', () => {
     expect(view.queryByRole('link', { name: label })).toBeNull()
   }
 })
+
+test('chat and direct messages are not products in production: Chat is "Coming soon"', () => {
+  const view = render(
+    <MemoryRouter initialEntries={['/tasks']}>
+      <SidebarNav chatEnabled={false} chatBadge={4} />
+    </MemoryRouter>,
+  )
+
+  expect(view.queryAllByRole('link', { name: /Chat/ })).toHaveLength(0)
+  expect((view.getByRole('button', { name: /Chat/ }) as HTMLButtonElement).disabled).toBe(true)
+  expect(view.getByRole('button', { name: /Chat/ }).textContent).toContain('Coming soon')
+  expect(view.queryAllByText('Direct messages')).toHaveLength(0)
+})
+
+test('in a development build Chat is a link that highlights on its routes', () => {
+  const view = render(
+    <MemoryRouter initialEntries={['/tasks']}>
+      <SidebarNav chatEnabled />
+      <Location />
+    </MemoryRouter>,
+  )
+
+  fireEvent.click(view.getByRole('link', { name: 'Chat' }))
+  expect(view.getByTestId('location').textContent).toBe('/chat')
+  expect(view.getByRole('link', { name: 'Chat' }).dataset.active).toBe('true')
+  expect(view.getByRole('link', { name: 'Chat' }).querySelectorAll('[data-slot=sidebar-nav-badge]')).toHaveLength(0)
+})
+
+test('the chat count shows on the Chat item, is in its name, stops at 99+ and hides at zero', () => {
+  const badgeOf = (count: number | undefined) => {
+    const view = render(
+      <MemoryRouter initialEntries={['/tasks']}>
+        <SidebarNav chatEnabled chatBadge={count} />
+      </MemoryRouter>,
+    )
+    const link = view.getByRole('link', { name: /^Chat/ })
+    const result = { name: link.getAttribute('aria-label'), badge: link.querySelector('[data-slot=sidebar-nav-badge]')?.textContent ?? null }
+    view.unmount()
+    return result
+  }
+
+  expect(badgeOf(3)).toEqual({ name: 'Chat, 3 unread', badge: '3' })
+  expect(badgeOf(120)).toEqual({ name: 'Chat, 120 unread', badge: '99+' })
+  expect(badgeOf(0)).toEqual({ name: 'Chat', badge: null })
+  expect(badgeOf(undefined)).toEqual({ name: 'Chat', badge: null })
+})

@@ -1,11 +1,23 @@
 // Generic "@mention" / "#channel" helpers shared by chat, docs, tasks and the markdown renderer.
-import type { Channel, User } from '@/mock/types'
+
+/** What a mention needs of a person. A workspace member fits. */
+export interface MentionPerson {
+  id: string
+  name: string
+  handle: string
+}
+
+/** What a "#channel" mention needs of a channel. */
+export interface MentionChannel {
+  id: string
+  name: string
+}
 
 export type MentionToken = { label: string; color: string; kind: 'user' | 'global' | 'channel'; href?: string }
 
-export function buildMentionTokens(users: User[], channels: Channel[] = []): MentionToken[] {
+export function buildMentionTokens(users: MentionPerson[], channels: MentionChannel[] = []): MentionToken[] {
   return [
-    { label: 'everyone', color: '#dee0fc', kind: 'global' },
+    { label: 'channel', color: '#dee0fc', kind: 'global' },
     { label: 'here', color: '#dee0fc', kind: 'global' },
     ...users.flatMap((user): MentionToken[] => [
       { label: user.name, color: '#dee0fc', kind: 'user' },

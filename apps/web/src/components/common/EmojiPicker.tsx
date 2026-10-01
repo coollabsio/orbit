@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
-import { useAppState } from '@/mock/store'
 import type { EmojiEntry } from '@/lib/emojis'
 
 /** Category buckets mirror the chat composer's emoji panel. */
@@ -44,7 +43,6 @@ function EmojiGroup({ label, children }: { label: string; children: ReactNode })
  * Remove action, search, grouped grid. The catalog is loaded lazily on first mount.
  */
 export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => void; onRemove?: () => void }) {
-  const { customEmojis } = useAppState()
   const [emojis, setEmojis] = useState<EmojiEntry[]>([])
   const [query, setQuery] = useState('')
 
@@ -97,17 +95,6 @@ export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => v
         />
       </InputGroup>
       <div className="max-h-72 overflow-y-auto overscroll-contain pr-0.5">
-        {customEmojis.filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase())).length > 0 ? (
-          <EmojiGroup label="Custom">
-            {customEmojis
-              .filter((e) => !query.trim() || e.name.includes(query.trim().toLowerCase()))
-              .map((custom) => (
-                <Button key={custom.id} variant="ghost" size="icon" title={`:${custom.name}:`} onClick={() => onPick(`:${custom.name}:`)}>
-                  <img className="size-6 object-contain" src={custom.url} alt={`:${custom.name}:`} />
-                </Button>
-              ))}
-          </EmojiGroup>
-        ) : null}
         {emojis.length === 0 ? (
           <div className="py-6 text-center text-sm font-medium text-muted-foreground">Loading emoji...</div>
         ) : groups.length > 0 ? (

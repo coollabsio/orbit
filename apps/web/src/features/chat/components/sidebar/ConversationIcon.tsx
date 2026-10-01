@@ -1,0 +1,53 @@
+import { Hashtag, Lock } from 'reicon-react'
+import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { usePresence } from '@/features/chat/api/liveStore'
+import type { Conversation } from '@/features/chat/api/types'
+import { dmPeerIds } from '@/features/chat/lib/sidebar'
+import type { User } from '@/features/workspaces/models'
+
+/**
+ * The glyph of a conversation: `#` or a lock for a channel, the other person's avatar with presence for a 1:1 DM, and
+ * for a group DM stacked avatars (`group="stack"`, the header) or the number of other members (`group="count"`, a row).
+ */
+export function ConversationIcon({
+  conversation,
+  people,
+  currentUserId,
+  size = 18,
+  group = 'count',
+  filled = false,
+}: {
+  conversation: Conversation
+  people: readonly User[]
+  currentUserId: string | null
+  size?: number
+  group?: 'stack' | 'count'
+  filled?: boolean
+}) {
+  const online = usePresence()
+  if (conversation.kind !== 'dm') {
+    const Icon = conversation.kind === 'private' ? Lock : Hashtag
+    return (
+      <span data-slot="conversation-icon" className="flex shrink-0 items-center justify-center text-muted-foreground" style={{ width: size, height: size }}>
+        <Icon size={Math.round(size * 0.9)} weight={filled ? 'Filled' : 'Outline'} aria-hidden="true" />
+        {conversation.kind === 'private' ? <span className="sr-only">Private channel</span> : null}
+      </span>
+    )
+  }
+  const peerIds = dmPeerIds(conversation, currentUserId ?? '')
+  if (peerIds.length <= 1) {
+    const id = peerIds[0] ?? currentUserId
+    return <UserAvatar user={people.find((person) => person.id === id)} size={size} showOnline online={id ? online.has(id) : false} />
+  }
+  if (group === 'stack') return <UserAvatarStack users={people.filter((person) => peerIds.includes(person.id))} size={size} />
+  return (
+    <span
+      data-slot="conversation-icon"
+      aria-hidden="true"
+      className="flex shrink-0 items-center justify-center rounded-[5px] bg-muted text-[10px] leading-none font-semibold text-muted-foreground tabular-nums"
+      style={{ width: size, height: size }}
+    >
+      {peerIds.length}
+    </span>
+  )
+}

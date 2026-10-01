@@ -53,7 +53,7 @@ export function CalloutView({ block, editor, contentRef }: CalloutViewProps) {
             />
           }
         >
-          <Emoji value={emoji} size={20} />
+          <Emoji value={emoji} />
         </PopoverTrigger>
         <PopoverContent align="start" className="w-auto gap-0 p-0">
           <EmojiPicker onPick={pick} />

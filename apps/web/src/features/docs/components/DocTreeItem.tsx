@@ -140,7 +140,7 @@ export function DocTreeItem({
           <span className="inline-flex size-5 shrink-0" aria-hidden="true" />
         )}
         <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-sm leading-none text-muted-foreground/70">
-          {page.icon ? <Emoji value={page.icon} size={15} /> : <FileText className="size-[15px]" />}
+          {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-[15px]" />}
         </span>
         <span className="min-w-0 flex-1 truncate">{pageTitle(page)}</span>
         <TreeRowActions>

@@ -1,6 +1,4 @@
-// Plain-text previews of markdown message content (the chat reference extractPreview / thread
-// title resolution), shared by chat lists and the app shell breadcrumbs.
-import type { ChatMessage } from '@/mock/types'
+// Plain-text previews of markdown message content, for lists and thread cards.
 
 /** Plain one-line preview of a markdown message (the chat reference extractPreview) for thread cards and lists. */
 export function extractPreview(content: string): string {
@@ -16,9 +14,4 @@ export function extractPreview(content: string): string {
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
     .replace(/\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_|`([^`]+)`/g, (_, a, b, c, d, e) => a ?? b ?? c ?? d ?? e)
     .replace(/\[([^\]]+)\]\(https?:\/\/[^\s)]+\)/g, '$1')
-}
-
-/** the chat reference thread title resolution: thread_title || plain text of content || "Thread". */
-export function threadTitleOf(message: ChatMessage): string {
-  return message.threadTitle?.trim() || extractPreview(message.content) || 'Thread'
 }

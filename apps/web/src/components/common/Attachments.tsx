@@ -2,11 +2,12 @@
 // plus file cards for non-images (paperclip, name, size, download on hover). Self-contained Tailwind styling.
 import { useState } from 'react'
 import { Download, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
-import type { Attachment } from '@/mock/types'
-import { formatSize, isImage } from '@/lib/attachmentLib'
+import { formatSize, isImage, type Attachment } from '@/lib/attachmentLib'
 import { ImageViewer } from './ImageViewer'
 import { Button } from '@/components/ui/button'
 import { cn } from 'cn'
+
+const SINGLE_IMAGE_MAX_HEIGHT = 300
 
 /** Dark round × over an attachment. With a mouse it shows on hover or keyboard focus; on touch it is always visible.
     `after:` grows the 22px circle to a 30px hit area. */
@@ -68,6 +69,12 @@ export function Attachments({
                     src={att.url}
                     alt={att.fileName}
                     loading={att.url.startsWith('data:') ? 'eager' : 'lazy'}
+                    width={att.width}
+                    height={att.height}
+                    // a single image with a known size holds its place before it loads (at most 300px high)
+                    style={single && att.width && att.height
+                      ? { aspectRatio: `${att.width} / ${att.height}`, width: Math.min(att.width, Math.round((SINGLE_IMAGE_MAX_HEIGHT * att.width) / att.height)) }
+                      : undefined}
                     className={single ? 'block h-auto max-h-[300px] w-auto max-w-full object-contain' : 'block size-full object-cover'}
                   />
                 </Button>

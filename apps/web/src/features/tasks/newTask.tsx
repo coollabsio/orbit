@@ -14,6 +14,9 @@ export interface NewTaskSource {
 
 interface NewTaskRequest {
   values?: GroupValues
+  /** Text the dialog starts with, e.g. a task made from a chat message. */
+  title?: string
+  description?: string
 }
 
 const NewTaskContext = createContext<{ open: (request?: NewTaskRequest) => void; register: (source: NewTaskSource) => () => void }>({ open: () => {}, register: () => () => {} })
@@ -22,13 +25,15 @@ const NewTaskContext = createContext<{ open: (request?: NewTaskRequest) => void;
 export function NewTaskProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const source = useRef<NewTaskSource | null>(null)
-  const [dialog, setDialog] = useState<{ defaults: Partial<CreateTaskBody>; onOpenTask: (task: TaskRecord) => void } | null>(null)
+  const [dialog, setDialog] = useState<{ defaults: Partial<CreateTaskBody>; onOpenTask: (task: TaskRecord) => void; title?: string; description?: string } | null>(null)
 
   const open = useCallback((request: NewTaskRequest = {}) => {
     const page = source.current
     setDialog((current) => current ?? {
       defaults: page?.defaults(request.values ?? []) ?? {},
       onOpenTask: page?.onOpenTask ?? ((task) => navigate(`/tasks/${task.id}`)),
+      title: request.title,
+      description: request.description,
     })
   }, [navigate])
   const register = useCallback((page: NewTaskSource) => {
@@ -42,7 +47,7 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
   return (
     <NewTaskContext value={{ open, register }}>
       {children}
-      {dialog ? <NewTaskDialog defaults={dialog.defaults} onClose={() => setDialog(null)} onOpenTask={dialog.onOpenTask} /> : null}
+      {dialog ? <NewTaskDialog defaults={dialog.defaults} initialTitle={dialog.title} initialDescription={dialog.description} onClose={() => setDialog(null)} onOpenTask={dialog.onOpenTask} /> : null}
     </NewTaskContext>
   )
 }
