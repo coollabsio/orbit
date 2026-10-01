@@ -26,6 +26,7 @@ import { ThreadView } from '@/features/chat/components/thread/ThreadView'
 import { ThreadsView } from '@/features/chat/components/views/ThreadsView'
 import { UnreadsView } from '@/features/chat/components/views/UnreadsView'
 import { useMarkAllReadWithUndo } from '@/features/chat/components/views/useMarkAllReadWithUndo'
+import { chatThemeVariables, useChatTheme } from '@/features/chat/lib/chatTheme'
 import { getLastOpenedConversation, setLastOpenedConversation } from '@/features/chat/lib/drafts'
 import { decodeMentions } from '@/features/chat/lib/mentionTokens'
 import { buildSidebarSections, conversationBadge } from '@/features/chat/lib/sidebar'
@@ -165,6 +166,7 @@ function ChatCommands() {
  */
 export function ChatPage() {
   const location = useChatLocation()
+  const theme = useChatTheme()
   const navigation = useChatNavigation()
   const { workspaceId } = useChatContext()
   const conversations = useConversations()
@@ -293,7 +295,8 @@ export function ChatPage() {
       <div
         data-slot="chat-page"
         data-view={location.view === 'home' ? 'index' : 'detail'}
-        className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background dark:[--background:var(--card)]"
+        className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground dark:[--background:var(--card)]"
+        style={chatThemeVariables(theme)}
       >
         <ChatSidebar />
         <div ref={areaRef} data-slot="chat-area" className="flex min-h-0 min-w-0 flex-1 max-[899px]:group-data-[view=index]/chat:hidden">

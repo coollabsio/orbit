@@ -16,7 +16,7 @@ import { CategoryDialog } from '@/features/chat/components/dialogs/CategoryDialo
 import { EditChannelDialog } from '@/features/chat/components/dialogs/EditChannelDialog'
 import { NewChannelDialog } from '@/features/chat/components/dialogs/NewChannelDialog'
 import { NewMessageDialog } from '@/features/chat/components/dialogs/NewMessageDialog'
-import { chatThemeVariables, useChatTheme } from '@/features/chat/lib/chatTheme'
+import { chatSidebarVariables, useChatTheme } from '@/features/chat/lib/chatTheme'
 import { buildSidebarSections, conversationBadge, type SidebarSection } from '@/features/chat/lib/sidebar'
 import { useChatLocation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
@@ -214,7 +214,7 @@ export function ChatSidebar() {
       aria-label="Chat"
       className="relative flex min-h-0 shrink-0 flex-col border-r bg-background max-[899px]:w-full! max-[899px]:border-r-0 max-[899px]:group-data-[view=detail]/chat:hidden"
       data-themed={theme ? '' : undefined}
-      style={{ width, ...chatThemeVariables(theme) }}
+      style={{ width, ...chatSidebarVariables(theme) }}
     >
       <PaneHeader className="gap-1 pr-2">
         <PaneTitle render={<h1 />} className="flex-1">
