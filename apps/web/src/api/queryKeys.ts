@@ -6,6 +6,7 @@ export const queryKeys = {
   setup: ['setup-status'] as const,
   currentUser: ['current-user'] as const,
   sessions: ['sessions'] as const,
+  shortcuts: ['shortcuts'] as const,
   backups: ['admin', 'backups'] as const,
   workspace,
   workspaces: ['workspaces'] as const,

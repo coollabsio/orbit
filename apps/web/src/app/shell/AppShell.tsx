@@ -1,3 +1,5 @@
+import { ShortcutProvider } from '@/shortcuts/ShortcutProvider'
+import { useShortcutBindings } from '@/shortcuts/useShortcutBindings'
 import { SequenceHint } from '@/shortcuts/SequenceHint'
 import { ShortcutHelpDialog } from '@/shortcuts/ShortcutHelpDialog'
 import { NavigationCommands, useGlobalCommands } from './globalCommands'
@@ -18,7 +20,17 @@ import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import { MobileDock } from './MobileDock'
 
+/** The signed-in app. Shortcuts exist only here, with the user's own keys; the sign-in pages have none. */
 export function AppShell() {
+  const { overrides } = useShortcutBindings()
+  return (
+    <ShortcutProvider overrides={overrides}>
+      <Shell />
+    </ShortcutProvider>
+  )
+}
+
+function Shell() {
   const { workspace } = useWorkspace()
   const live = useWorkspaceEvents(workspace.id)
   const [drawerOpen, setDrawerOpen] = useState(false)

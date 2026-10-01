@@ -35,14 +35,21 @@ export function toEngineStep(step: string): string {
   return [...parts, code].join('+')
 }
 
-/** Recorder output back to registry notation; a recording longer than two steps keeps the first two. */
-export function fromRecorded(steps: string[]): string {
+/** Recorder output back to registry notation; a recording longer than two steps keeps the first two.
+ *  The main modifier of the platform (⌘ on macOS, Ctrl elsewhere) becomes `Mod`, as in the defaults. */
+export function fromRecorded(steps: string[], mac = false): string {
+  const modifier = (part: string) => {
+    if (part === 'Control' || part === 'Ctrl') return mac ? 'Ctrl' : 'Mod'
+    if (part === 'Meta' || part === 'Command' || part === 'Cmd') return mac ? 'Mod' : 'Meta'
+    return part
+  }
   return steps.slice(0, 2).map((step) => {
     const parts = step.split('+')
     const key = parts.pop() ?? ''
     const code = /^\[(.+)\]$/.exec(key)?.[1]
     const plain = !code ? key : /^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit[0-9]$/.test(code) ? code.slice(5) : PUNCTUATION_BY_CODE[code] ?? code
-    const modifiers = parts.map((part) => (part === 'Control' ? 'Ctrl' : part))
+    // in the order the registry writes them
+    const modifiers = MODIFIERS.filter((name) => parts.map(modifier).includes(name))
     if (plain === '/' && modifiers.includes('Shift')) return [...modifiers.filter((part) => part !== 'Shift'), '?'].join('+')
     return [...modifiers, plain].join('+')
   }).join(' ')

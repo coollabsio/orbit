@@ -15,6 +15,7 @@ import { LabelsPage } from '@/features/settings/pages/LabelsPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
+import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
 import { ApiTokensPage } from '@/features/settings/pages/ApiTokensPage'
 import { ProfilePage } from '@/features/profile/pages/ProfilePage'
 import { InboxPage } from '@/features/inbox/pages/InboxPage'
@@ -75,6 +76,7 @@ export default function App() {
                 <Route path="members" element={<MembersPage />} />
                 <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
                 <Route path="sessions" element={<SessionsPage />} />
+                <Route path="shortcuts" element={<ShortcutsPage />} />
                 <Route path="api-tokens" element={<ApiTokensPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/tasks" replace />} />

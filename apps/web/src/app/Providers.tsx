@@ -4,7 +4,6 @@ import { BrowserRouter, useNavigate } from 'react-router'
 import { UNAUTHORIZED_EVENT } from '@/api/client'
 import { ThemeProvider } from '@/lib/theme'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { ShortcutProvider } from '@/shortcuts/ShortcutProvider'
 import { clearExpiredSession } from './authSession'
 
 function UnauthorizedSessionHandler() {
@@ -36,9 +35,7 @@ export function Providers({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <UnauthorizedSessionHandler />
-          <ShortcutProvider>
-            <TooltipProvider>{children}</TooltipProvider>
-          </ShortcutProvider>
+          <TooltipProvider>{children}</TooltipProvider>
         </BrowserRouter>
       </QueryClientProvider>
     </ThemeProvider>
