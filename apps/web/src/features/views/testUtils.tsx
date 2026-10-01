@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render } from '@testing-library/react'
+import { render } from '@/test/render'
 import type { ReactElement } from 'react'
 import { MemoryRouter, useLocation } from 'react-router'
 import type { WorkspaceRecord } from '@/api/generated/types.gen'

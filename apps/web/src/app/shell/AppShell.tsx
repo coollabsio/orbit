@@ -1,3 +1,4 @@
+import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { Outlet } from 'react-router'
@@ -43,20 +44,14 @@ export function AppShell() {
     }
   }, [])
 
+  useCommand('palette.open', () => setPaletteOpen((open) => !open))
+
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setPaletteOpen((o) => !o)
-      }
-    }
     const onOpen = () => setPaletteOpen(true)
     const onOpenSidebar = () => setDrawerOpen(true)
-    document.addEventListener('keydown', onKeyDown)
     window.addEventListener('open-command-palette', onOpen)
     window.addEventListener('open-sidebar', onOpenSidebar)
     return () => {
-      document.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('open-command-palette', onOpen)
       window.removeEventListener('open-sidebar', onOpenSidebar)
     }

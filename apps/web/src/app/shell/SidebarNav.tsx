@@ -1,10 +1,10 @@
+import { Shortcut } from '@/shortcuts/Shortcut'
 import { createContext, Fragment, useContext, type ComponentType, type ReactNode } from 'react'
 import { Link, useLocation, useMatch, useResolvedPath, type LinkProps } from 'react-router'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { Calendar, DirectInbox as Inbox, Home2 as Home, Layer, Message as MessageSquare, Messages2 as MessagesSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Separator } from '@/components/ui/separator'
 import { docsHidden } from './productNavigation'
 
@@ -148,9 +148,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           {!collapsed ? (
             <>
               Search{' '}
-              <KbdGroup className="ml-auto">
-                <Kbd className="rounded-md bg-sidebar-accent px-1.5 text-[11px] text-muted-foreground/70">⌘K</Kbd>
-              </KbdGroup>
+              <Shortcut id="palette.open" className="ml-auto **:data-[slot=kbd]:rounded-md **:data-[slot=kbd]:bg-sidebar-accent **:data-[slot=kbd]:text-[11px] **:data-[slot=kbd]:text-muted-foreground/70" />
             </>
           ) : null}
         </Button>

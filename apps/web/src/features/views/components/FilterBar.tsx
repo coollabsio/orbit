@@ -1,3 +1,5 @@
+import { useShortcutLabel } from '@/shortcuts/Shortcut'
+import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useState, type ComponentProps, type ReactElement, type ReactNode } from 'react'
 import { Add as Plus, Filter, Hierarchy, Lock, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
@@ -21,7 +23,6 @@ import {
   type FilterOptions,
 } from '../filterFields'
 import { appendCondition } from '../filterTree'
-import { shouldIgnoreShortcut } from '../shortcuts'
 import { countConditions, isFlatFilter, type Condition, type FilterField, type FilterGroup, type FilterOperator } from '../viewState'
 import { FilterValuePicker, ValueGlyph } from './FilterValuePicker'
 
@@ -130,17 +131,11 @@ export function FilterButton({ filter, options, onChange, onOpenAdvanced }: Filt
   const count = countConditions(filter)
   // at the limit a new condition could push the effective tree past the server's 50
   const full = count >= MAX_FILTER_CONDITIONS
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'f' && event.key !== 'F') return
-      if (full || event.shiftKey || shouldIgnoreShortcut(event)) return
-      event.preventDefault()
-      setInstant(true)
-      setOpen(true)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [full])
+  useCommand('view.filter', () => {
+    setInstant(true)
+    setOpen(true)
+  }, { enabled: !full })
+  const keyShortcuts = useShortcutLabel('view.filter')
   return (
     <AddFilterPopover
       filter={filter}
@@ -154,7 +149,7 @@ export function FilterButton({ filter, options, onChange, onOpenAdvanced }: Filt
         if (!next) setInstant(false)
       }}
       trigger={
-        <Button type="button" variant="ghost" aria-label="Filter tasks" aria-keyshortcuts="F" disabled={full} title={full ? FULL_TITLE : undefined} data-active={count > 0 || undefined} className="data-active:bg-primary/10 data-active:text-primary max-[899px]:w-8 max-[899px]:px-0">
+        <Button type="button" variant="ghost" aria-label="Filter tasks" aria-keyshortcuts={keyShortcuts} disabled={full} title={full ? FULL_TITLE : undefined} data-active={count > 0 || undefined} className="data-active:bg-primary/10 data-active:text-primary max-[899px]:w-8 max-[899px]:px-0">
           <Filter className="size-4" />
           <span className="max-[899px]:hidden">Filter</span>
           {count > 0 ? (

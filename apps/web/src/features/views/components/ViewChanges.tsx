@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useShortcutLabel } from '@/shortcuts/Shortcut'
+import { useCommand } from '@/shortcuts/useCommand'
+import { useRef, useState } from 'react'
 import { Bookmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { ApiProblem } from '@/api/problem'
@@ -39,19 +41,13 @@ export function ViewChanges({ controller, onSaveAsNew }: ViewChangesProps) {
     }
   }
 
-  // Cmd/Ctrl+S works even while typing; it only acts when there is something to save (and never animates)
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 's' || !dirty) return
-      event.preventDefault()
-      // a held key repeats; one press saves once
-      if (event.repeat || savingRef.current) return
-      if (canEdit) void save()
-      else onSaveAsNew({ instant: true })
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  })
+  // works even while typing; it only acts when there is something to save (and never animates)
+  useCommand('view.save', () => {
+    if (savingRef.current) return
+    if (canEdit) void save()
+    else onSaveAsNew({ instant: true })
+  }, { enabled: dirty })
+  const keyShortcuts = useShortcutLabel('view.save')
 
   return (
     <div role="group" aria-label="Unsaved view changes" className="flex shrink-0 animate-view-bar-enter items-center gap-1.5">
@@ -63,12 +59,12 @@ export function ViewChanges({ controller, onSaveAsNew }: ViewChangesProps) {
           <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => onSaveAsNew()}>
             Save as new view
           </Button>
-          <Button type="button" variant="outline" size="sm" disabled={saving} aria-keyshortcuts="Control+S Meta+S" onClick={() => void save()}>
+          <Button type="button" variant="outline" size="sm" disabled={saving} aria-keyshortcuts={keyShortcuts} onClick={() => void save()}>
             Update view
           </Button>
         </>
       ) : (
-        <Button type="button" variant="outline" size="sm" aria-keyshortcuts="Control+S Meta+S" onClick={() => onSaveAsNew()}>
+        <Button type="button" variant="outline" size="sm" aria-keyshortcuts={keyShortcuts} onClick={() => onSaveAsNew()}>
           <Bookmark className="size-3.5" />
           Save as new view
         </Button>

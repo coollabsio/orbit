@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { fireEvent, render, type RenderResult } from '@testing-library/react'
+import { fireEvent, type RenderResult } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { FILTER_OPTIONS } from '../testFixtures'
@@ -27,9 +28,10 @@ test('F opens the filter menu without animation and adds a label chip', async ()
   // focused first, as when typing: React's input polyfill trips over key events on a never-focused input
   const other = view.getByRole('textbox', { name: 'Other field' })
   other.focus()
-  fireEvent.keyDown(other, { key: 'f' })
+  fireEvent.keyDown(other, { key: 'f', code: 'KeyF' })
   expect(trigger.getAttribute('aria-expanded')).toBe('false')
-  fireEvent.keyDown(document.body, { key: 'f' })
+  other.blur()
+  fireEvent.keyDown(document.body, { key: 'f', code: 'KeyF' })
   expect(trigger.getAttribute('aria-expanded')).toBe('true')
   expect(document.querySelector('[data-slot="popover-content"]')?.hasAttribute('data-instant')).toBe(true)
   await userEvent.click(await view.findByRole('option', { name: 'Label' }))
@@ -90,7 +92,7 @@ test('the filter button stops adding conditions at the limit, so a scoped page n
   const view = render(<Harness initial={full} />)
   const trigger = view.getByRole('button', { name: 'Filter tasks' }) as HTMLButtonElement
   expect(trigger.disabled).toBe(true)
-  fireEvent.keyDown(document.body, { key: 'f' })
+  fireEvent.keyDown(document.body, { key: 'f', code: 'KeyF' })
   expect(trigger.getAttribute('aria-expanded')).not.toBe('true')
   expect(readFilter(view).children).toHaveLength(46)
 })

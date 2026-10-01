@@ -121,14 +121,16 @@ function Engine({ store, bindings, onPending }: { store: CommandStore; bindings:
   const { singles, sequences } = useMemo(() => {
     const blocked = (event: KeyboardEvent, command: Command) =>
       event.defaultPrevented
-      || (event.repeat && !command.repeat)
       // a text field keeps its keys, except for the few commands made to work while typing
       || (isEditable(event.target) && !command.inInputs)
       || (command.context !== 'new-task' && command.id !== 'palette.open' && document.querySelector(OPEN_POPUP) !== null)
 
     const run = (event: KeyboardEvent, commands: Command[]) => {
       const command = commands.find((item) => !blocked(event, item))
-      if (command && store.run(command.id)) event.preventDefault()
+      if (!command) return
+      // a held key runs most commands once, but the key stays ours: the browser must not act on the repeats
+      if (event.repeat && !command.repeat) event.preventDefault()
+      else if (store.run(command.id)) event.preventDefault()
     }
 
     const bySingle = new Map<string, Command[]>()

@@ -1,3 +1,4 @@
+import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react'
 import { cn } from 'cn'
 import { differenceInCalendarDays } from 'date-fns'
@@ -196,17 +197,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
     return () => scroller.removeEventListener('wheel', onWheel)
   }, [onZoomChange, empty])
 
-  // `T` jumps to today unless the user is typing
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 't' || event.metaKey || event.ctrlKey || event.altKey) return
-      const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
-      scrollToToday()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  })
+  useCommand('timeline.today', scrollToToday)
 
   if (empty) {
     return <EmptyState icon={SquareCheck} title="No tasks match these filters" description="Change the filters or add a task." />

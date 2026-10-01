@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCommand } from '@/shortcuts/useCommand'
+import { useMemo, useState } from 'react'
 import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -355,17 +356,7 @@ function BulkBar({
   const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
 
   // Esc clears the selection, unless it belongs to a field, an open menu or a dialog
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]')) return
-      // closed Base UI popups stay mounted with data-closed until their exit animation ends
-      if (document.querySelector(['menu', 'dialog', 'alertdialog', 'listbox'].map((role) => `[role="${role}"]:not([data-closed])`).join())) return
-      onClear()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClear])
+  useCommand('list.clearSelection', onClear)
 
   const bulkStatus = (key: string | null) => {
     const updates = tasks.flatMap((task) => {

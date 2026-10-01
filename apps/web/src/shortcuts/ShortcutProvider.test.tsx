@@ -125,3 +125,11 @@ test('the last mounted handler wins and unmounting restores the previous one', a
   await user.keyboard('c')
   expect(calls).toEqual(['inner', 'outer'])
 })
+
+test('a held Mod key still keeps the browser from acting, without running the command again', () => {
+  mount(<Probe id="view.save" run={record('save')} />)
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, repeat: true, code: 'KeyS', key: 's', ctrlKey: true })
+  act(() => void document.body.dispatchEvent(event))
+  expect(calls).toEqual([])
+  expect(event.defaultPrevented).toBe(true)
+})

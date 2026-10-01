@@ -1,11 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useShortcutLabel } from '@/shortcuts/Shortcut'
+import { useCommand } from '@/shortcuts/useCommand'
+import { useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, Setting4 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { shouldIgnoreShortcut } from '../shortcuts'
 import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS, TIMELINE_PROPERTIES } from '../displayMeta'
 
@@ -89,17 +90,11 @@ function OptionSelect<T extends string>({ label, value, items, onChange, describ
 export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPopoverProps) {
   const [open, setOpen] = useState(false)
   const [instant, setInstant] = useState(false)
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.shiftKey || (event.key !== 'V' && event.key !== 'v')) return
-      if (shouldIgnoreShortcut(event)) return
-      event.preventDefault()
-      setInstant(true)
-      setOpen(true)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [])
+  useCommand('view.display', () => {
+    setInstant(true)
+    setOpen(true)
+  })
+  const keyShortcuts = useShortcutLabel('view.display')
 
   const setLayout = (layout: Layout) => onChange(layout === 'board' && display.group_by === 'none' ? { layout, group_by: 'status' } : { layout })
   const setGroup = (group_by: GroupBy) =>
@@ -126,7 +121,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
     >
       <PopoverTrigger
         render={
-          <Button type="button" variant="ghost" aria-label="Display options" aria-keyshortcuts="Shift+V" className="max-[899px]:w-8 max-[899px]:px-0">
+          <Button type="button" variant="ghost" aria-label="Display options" aria-keyshortcuts={keyShortcuts} className="max-[899px]:w-8 max-[899px]:px-0">
             <Setting4 className="size-4" />
             <span className="max-[899px]:hidden">Display</span>
           </Button>
