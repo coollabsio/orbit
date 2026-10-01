@@ -79,19 +79,21 @@ export function contextsOverlap(a: Context, b: Context): boolean {
 
 const isPrefix = (short: string[], long: string[]) => short.every((step, index) => long[index] === step)
 
-/** The command that `keys` would collide with if `id` took them: the same keys, or one a prefix of the other's sequence. */
-export function findConflict(bindings: Bindings, id: string, keys: string): Command | null {
+/** Every command that `keys` would collide with if `id` took them: the same keys, or one a prefix of the other's sequence. */
+export function findConflicts(bindings: Bindings, id: string, keys: string): Command[] {
   const command = commandById(id)
   const steps = parseKeys(keys)?.map(toEngineStep)
-  if (!command || !steps) return null
-  for (const other of COMMANDS as readonly Command[]) {
+  if (!command || !steps) return []
+  return (COMMANDS as readonly Command[]).filter((other) => {
     const otherKeys = bindings[other.id]
-    if (other.id === id || !otherKeys || !contextsOverlap(command.context, other.context)) continue
+    if (other.id === id || !otherKeys || !contextsOverlap(command.context, other.context)) return false
     const otherSteps = parseKeys(otherKeys)?.map(toEngineStep)
-    if (otherSteps && (isPrefix(steps, otherSteps) || isPrefix(otherSteps, steps))) return other
-  }
-  return null
+    return otherSteps !== undefined && (isPrefix(steps, otherSteps) || isPrefix(otherSteps, steps))
+  })
 }
+
+/** The first command that `keys` would collide with, or null. */
+export const findConflict = (bindings: Bindings, id: string, keys: string): Command | null => findConflicts(bindings, id, keys)[0] ?? null
 
 /** Overrides after `id` takes `keys`. With `swap`, the command that had those keys takes the previous keys of `id`. */
 export function applyRebind(overrides: Overrides, id: string, keys: string | null, swap: boolean): Overrides {

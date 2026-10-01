@@ -4,7 +4,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { applyRebind, findConflict, isReserved, resolveBindings } from '@/shortcuts/bindings'
+import { applyRebind, findConflict, findConflicts, isReserved, parseKeys, resolveBindings } from '@/shortcuts/bindings'
 import { COMMANDS, type Command, type Group } from '@/shortcuts/commands'
 import { KeyRecorder } from '@/shortcuts/KeyRecorder'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
@@ -14,7 +14,7 @@ const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Docs']
 const ALL: readonly Command[] = COMMANDS
 
 /** What the page says under a row after a recording that could not be saved as it is. */
-type Notice = { id: string; kind: 'reserved' } | { id: string; kind: 'conflict'; keys: string; other: Command }
+type Notice = { id: string; kind: 'reserved' | 'invalid' } | { id: string; kind: 'conflict'; keys: string; other: Command; more: number }
 
 /** Account view: every shortcut with its keys. A key is a button: press it, then press the new keys. */
 export function ShortcutsPage() {
@@ -31,9 +31,11 @@ export function ShortcutsPage() {
   const record = (command: Command, keys: string) => {
     setRecording(null)
     if (keys === bindings[command.id]) return
+    // a key the app has no name for (the numeric keypad, a special key of one layout)
+    if (parseKeys(keys) === null) return setNotice({ id: command.id, kind: 'invalid' })
     if (isReserved(keys)) return setNotice({ id: command.id, kind: 'reserved' })
-    const other = findConflict(bindings, command.id, keys)
-    if (other) return setNotice({ id: command.id, kind: 'conflict', keys, other })
+    const [other, ...rest] = findConflicts(bindings, command.id, keys)
+    if (other) return setNotice({ id: command.id, kind: 'conflict', keys, other, more: rest.length })
     save(applyRebind(overrides, command.id, keys, false))
   }
   const start = (id: string) => {
@@ -97,12 +99,13 @@ export function ShortcutsPage() {
                       )}
                     </div>
                     {rowNotice?.kind === 'reserved' ? <p role="alert" className="pb-1.5 text-xs text-destructive">The browser uses this shortcut. Choose other keys.</p> : null}
+                    {rowNotice?.kind === 'invalid' ? <p role="alert" className="pb-1.5 text-xs text-destructive">These keys cannot be used. Choose other keys.</p> : null}
                     {rowNotice?.kind === 'conflict' ? (
                       <div role="alert" className="flex flex-wrap items-center gap-2 pb-1.5 text-xs text-muted-foreground">
                         <ShortcutKeys keys={rowNotice.keys} />
-                        {/* a fixed command cannot take other keys, so there is nothing to swap with */}
-                        <span>Used by "{rowNotice.other.title}".{rowNotice.other.fixed ? ' That shortcut cannot be changed.' : ''}</span>
-                        {rowNotice.other.fixed ? null : (
+                        {/* a swap is an exchange of two shortcuts: not with a fixed one, and not with several at once */}
+                        <span>Used by "{rowNotice.other.title}"{rowNotice.more > 0 ? ` and ${rowNotice.more} more` : ''}.{rowNotice.other.fixed ? ' That shortcut cannot be changed.' : ''}</span>
+                        {rowNotice.other.fixed || rowNotice.more > 0 ? null : (
                           <Button type="button" size="xs" variant="outline" onClick={() => { save(applyRebind(overrides, command.id, rowNotice.keys, true)); setNotice(null) }}>Swap</Button>
                         )}
                         <Button type="button" size="xs" variant="ghost" onClick={() => setNotice(null)}>Cancel</Button>

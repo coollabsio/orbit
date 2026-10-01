@@ -133,3 +133,12 @@ test('A toggles assignees and keeps the list open', async () => {
   expect(writes[0].body.updates).toEqual([{ id: 'task-1', expected_version: 1, assignee_ids: ['user-2'] }])
   expect(view.getByRole('option', { name: /Ada Lovelace/ })).toBeTruthy()
 })
+
+test('a selected task that left the list does not switch off the one-task commands', async () => {
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <ShortcutProvider><Wrapper><Page tasks={[task(1), task(2)]} select={['task-1', 'gone']} />{children}</Wrapper></ShortcutProvider>
+  )
+  const { result } = renderHook(() => useAvailableCommands(), { wrapper })
+  await userEvent.click(document.querySelector('button')!)
+  expect(result.current().map((command) => command.id)).toContain('task.copyId')
+})

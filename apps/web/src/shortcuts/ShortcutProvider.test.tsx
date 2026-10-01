@@ -152,3 +152,33 @@ test('a command that is not available right now leaves the key alone', async () 
   expect(calls).toEqual(['status'])
   expect(result.current().map((command) => command.id)).toEqual(['task.setStatus'])
 })
+
+test('a held or repeated first key still makes one sequence, never a single-key command too', () => {
+  mount(<><Probe id="nav.inbox" run={record('inbox')} /><Probe id="task.assignMe" run={record('assign')} /></>)
+  const press = (code: string, key: string, repeat = false) => act(() => void document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, repeat, code, key })))
+  press('KeyG', 'g')
+  press('KeyG', 'g', true)
+  press('KeyI', 'i')
+  expect(calls).toEqual(['inbox'])
+  press('KeyG', 'g')
+  press('KeyG', 'g')
+  press('KeyI', 'i')
+  expect(calls).toEqual(['inbox', 'inbox'])
+})
+
+test('a Mod key after the first key of a sequence still runs its command', async () => {
+  const user = userEvent.setup()
+  mount(<><Probe id="nav.inbox" run={record('inbox')} /><Probe id="palette.open" run={record('palette')} /></>)
+  await user.keyboard('g{Control>}k{/Control}')
+  expect(calls).toEqual(['palette'])
+})
+
+test('a list on the page blocks shortcuts only while the focus is in it', async () => {
+  const user = userEvent.setup()
+  mount(<><Probe id="task.setStatus" run={record('status')} /><div role="listbox" tabIndex={0} data-testid="list" /></>)
+  await user.keyboard('s')
+  expect(calls).toEqual(['status'])
+  await user.click(document.querySelector('[data-testid=list]')!)
+  await user.keyboard('s')
+  expect(calls).toEqual(['status'])
+})

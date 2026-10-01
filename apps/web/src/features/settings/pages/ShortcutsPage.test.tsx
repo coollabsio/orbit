@@ -155,3 +155,20 @@ test('the search narrows the list', async () => {
   expect(view.queryByRole('listitem', { name: 'Change status' })).toBeNull()
   expect(view.getByRole('listitem', { name: 'Change priority' })).toBeTruthy()
 })
+
+test('a key that many shortcuts start with cannot be swapped', async () => {
+  const puts = api()
+  const view = mount()
+  await record(view, 'Change status', 'g')
+  expect(row(view, 'Change status').textContent).toContain('Used by "Go to inbox" and 9 more.')
+  expect(within(row(view, 'Change status')).queryByRole('button', { name: 'Swap' })).toBeNull()
+  expect(puts).toEqual([])
+})
+
+test('a key the app cannot bind is refused, not saved', async () => {
+  const puts = api()
+  const view = mount()
+  await record(view, 'Change status', '[Numpad1]')
+  expect(row(view, 'Change status').textContent).toContain('These keys cannot be used.')
+  expect(puts).toEqual([])
+})

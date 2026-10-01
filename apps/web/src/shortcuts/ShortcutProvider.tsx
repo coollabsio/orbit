@@ -7,7 +7,10 @@ import { BindingsContext, CommandStore, CommandStoreContext, PendingSequenceCont
 /** Longest pause between the two keys of a sequence. */
 const SEQUENCE_TIMEOUT_MS = 1000
 
-const OPEN_POPUP = '[role="menu"]:not([data-closed]), [role="dialog"]:not([data-closed]), [role="alertdialog"]:not([data-closed]), [role="listbox"]:not([data-closed])'
+const OPEN_POPUP = '[role="menu"]:not([data-closed]), [role="dialog"]:not([data-closed]), [role="alertdialog"]:not([data-closed])'
+/** An open menu or dialog owns the keyboard. A list does so only while the focus is in it: a list can be a
+ *  lasting part of a page (the page history), and then it must not switch every shortcut off. */
+const popupOpen = () => document.querySelector(OPEN_POPUP) !== null || document.activeElement?.closest('[role="listbox"]') != null
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta', 'AltGraph']
 
 const hasModifier = (step: string) => /(^|\+)(Mod|Ctrl|Alt)\+/.test(step)
@@ -47,8 +50,10 @@ function Engine({ store, bindings, onPending }: { store: CommandStore; bindings:
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!pending.current || MODIFIER_KEYS.includes(event.key)) return
-      sequenceEvents.current.add(event)
+      // a held first key repeats: it is still the first key
+      if (!pending.current || event.repeat || MODIFIER_KEYS.includes(event.key)) return
+      // a key with Ctrl, ⌘ or Alt is its own shortcut: it ends the sequence and runs
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) sequenceEvents.current.add(event)
       clearPending()
     }
     document.addEventListener('keydown', onKeyDown, true)
@@ -63,7 +68,7 @@ function Engine({ store, bindings, onPending }: { store: CommandStore; bindings:
       event.defaultPrevented
       // a text field keeps its keys, except for the few commands made to work while typing
       || (isEditable(event.target) && !command.inInputs)
-      || (command.context !== 'new-task' && command.id !== 'palette.open' && document.querySelector(OPEN_POPUP) !== null)
+      || (command.context !== 'new-task' && command.id !== 'palette.open' && popupOpen())
 
     const run = (event: KeyboardEvent, commands: Command[]) => {
       const command = commands.find((item) => !blocked(event, item))
@@ -103,7 +108,9 @@ function Engine({ store, bindings, onPending }: { store: CommandStore; bindings:
       singles.push({
         hotkey: hotkey as UseHotkeyDefinition['hotkey'],
         callback: (event) => {
-          if (sequenceEvents.current.has(event) || event.defaultPrevented || event.repeat || document.querySelector(OPEN_POPUP)) return
+          // also when it came as a second key (`G G`): it then starts a new sequence
+          if (event.defaultPrevented || event.repeat || popupOpen()) return
+          if (pending.current) clearTimeout(pending.current)
           onPending(step)
           pending.current = setTimeout(clearPending, SEQUENCE_TIMEOUT_MS)
         },

@@ -118,3 +118,32 @@ test('a row stays the target while the pointer is over a dialog, and stops when 
   fireEvent.click(probe)
   expect(probe.textContent).toBe('')
 })
+
+test('after a scroll the row now under the still pointer is the target', () => {
+  const view = mount()
+  const probe = view.getByRole('button', { name: 'target' })
+  fireEvent.pointerMove(view.getByText('a'), { clientX: 10, clientY: 10 })
+  const original = document.elementFromPoint
+  document.elementFromPoint = () => view.getByText('b')
+  try {
+    fireEvent.scroll(document)
+  } finally {
+    document.elementFromPoint = original
+  }
+  fireEvent.click(probe)
+  expect(probe.textContent).toBe('b')
+})
+
+test('the focused row stays the target while the focus is in a dialog, and not after it goes elsewhere', () => {
+  const view = render(<TaskTargetProvider openTaskId={null}><List ids={['a', 'b']} /><div role="dialog"><input aria-label="menu" /></div><input aria-label="page" /></TaskTargetProvider>)
+  const probe = view.getByRole('button', { name: 'target' })
+  view.getByText('a').focus()
+  // the command menu reads the target as it opens, with the row still focused
+  fireEvent.click(probe)
+  view.getByLabelText('menu').focus()
+  fireEvent.click(probe)
+  expect(probe.textContent).toBe('a')
+  view.getByLabelText('page').focus()
+  fireEvent.click(probe)
+  expect(probe.textContent).toBe('')
+})

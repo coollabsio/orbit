@@ -37,7 +37,7 @@ interface TaskCommandsProps {
  *  row, the row under the pointer, or the open task. A property command opens one list of options for all of them. */
 export function TaskCommands({ tasks, users, labels, statuses, groupContext, currentUserId }: TaskCommandsProps) {
   const { workspace } = useWorkspace()
-  const { getTargetIds, selectedIds, openTaskId, setSelected } = useTaskTarget()
+  const { getTargetIds, openTaskId, setSelected } = useTaskTarget()
   const bulkTasks = useBulkTasks(workspace.id)
   const deleteTask = useDeleteTask(workspace.id)
   // `focused`: the row that had the keyboard focus, to give it back when the list closes
@@ -53,7 +53,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   }
   const open = (field: TaskField) => () => setMenu({ field, ids: targets().map((task) => task.id), focused: focusedTaskId() })
   // one task only: these have no form for several tasks
-  const single = selectedIds.length <= 1
+  const single = () => targets().length === 1
   const copy = (text: string, done: string) => void navigator.clipboard.writeText(text).then(() => toast(done), () => toast.error('Could not copy to the clipboard.'))
 
   useCommand('task.setStatus', open('status'), { available })
@@ -62,8 +62,8 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.setLabels', open('labels'), { available })
   useCommand('task.setDueDate', open('dueDate'), { available })
   useCommand('task.assignMe', () => mutate(assignUpdates(targets(), currentUserId)), { available })
-  useCommand('task.copyId', single ? () => copy(targets()[0].identifier, 'Copied task ID') : null, { available })
-  useCommand('task.copyLink', single ? () => copy(`${window.location.origin}/tasks/${targets()[0].id}`, 'Copied task link') : null, { available })
+  useCommand('task.copyId', () => copy(targets()[0].identifier, 'Copied task ID'), { available: single })
+  useCommand('task.copyLink', () => copy(`${window.location.origin}/tasks/${targets()[0].id}`, 'Copied task link'), { available: single })
   // the open task has its own trash action, which also closes the page
   useCommand('task.trash', openTaskId ? null : async () => {
     const trashed = targets()

@@ -12,8 +12,9 @@ export function resolveTarget({ selectedIds, focusedId, hoveredId, openTaskId, v
   return []
 }
 
-/** The row under the pointer and where the pointer was, kept out of React state: it changes on every move. */
-export interface TaskPointer { hoveredId: string | null; x: number; y: number }
+/** The row under the pointer and where the pointer was, kept out of React state: it changes on every move.
+ *  `focusedId` is the row with the keyboard focus, remembered while the focus is in a dialog or a menu. */
+export interface TaskPointer { hoveredId: string | null; x: number; y: number; focusedId: string | null }
 
 export interface TaskTargetState {
   selectedIds: string[]
@@ -25,7 +26,7 @@ export interface TaskTargetState {
 
 export const TaskTargetContext = createContext<TaskTargetState>({ selectedIds: [], setSelected: () => {}, openTaskId: null, order: { current: [] } })
 /** Apart from the selection, so that a row does not render again each time the selection changes. */
-export const TaskPointerContext = createContext<TaskPointer>({ hoveredId: null, x: -1, y: -1 })
+export const TaskPointerContext = createContext<TaskPointer>({ hoveredId: null, x: -1, y: -1, focusedId: null })
 
 const rowOf = (element: Element | null) => element?.closest('[data-task-id]')?.getAttribute('data-task-id') ?? null
 
@@ -49,10 +50,13 @@ export function useTaskTarget() {
   const state = useContext(TaskTargetContext)
   const { selectedIds, openTaskId } = state
   const pointer = useContext(TaskPointerContext)
-  const getTargetIds = useCallback(
-    () => resolveTarget({ selectedIds, focusedId: focusedTaskId(), hoveredId: pointer.hoveredId, openTaskId, visible: new Set(visibleTaskIds()) }),
-    [openTaskId, pointer, selectedIds],
-  )
+  const getTargetIds = useCallback(() => {
+    // the command menu takes the focus from the row it was opened on: that row is still the focused one.
+    // The menu reads the target when it opens, which is when the row is remembered.
+    const focused = focusedTaskId()
+    if (focused || !inOverlay(document.activeElement)) pointer.focusedId = focused
+    return resolveTarget({ selectedIds, focusedId: pointer.focusedId, hoveredId: pointer.hoveredId, openTaskId, visible: new Set(visibleTaskIds()) })
+  }, [openTaskId, pointer, selectedIds])
   return { ...state, pointer, getTargetIds }
 }
 
@@ -77,8 +81,17 @@ export function trackPointer(pointer: TaskPointer) {
       pointer.hoveredId = null
     }
   }
+  // a scroll moves the rows under a still pointer: the target is the row that is there now
+  const onScroll = () => {
+    if (pointer.hoveredId === null || pointer.x < 0) return
+    pointer.hoveredId = rowOf(document.elementFromPoint?.(pointer.x, pointer.y) ?? null)
+  }
   document.addEventListener('pointermove', onPointerMove)
-  return () => document.removeEventListener('pointermove', onPointerMove)
+  document.addEventListener('scroll', onScroll, true)
+  return () => {
+    document.removeEventListener('pointermove', onPointerMove)
+    document.removeEventListener('scroll', onScroll, true)
+  }
 }
 
 function inOverlay(target: Element | null) {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { applyRebind, contextsOverlap, findConflict, fromRecorded, isReserved, parseKeys, resolveBindings, toEngineStep } from './bindings'
+import { applyRebind, contextsOverlap, findConflict, findConflicts, fromRecorded, isReserved, parseKeys, resolveBindings, toEngineStep } from './bindings'
 
 test('parseKeys splits a sequence and rejects bad input', () => {
   expect(parseKeys('G I')).toEqual(['G', 'I'])
@@ -70,4 +70,11 @@ test('isReserved refuses browser shortcuts and bare modifiers', () => {
   expect(isReserved('Shift')).toBe(true)
   expect(isReserved('Mod+Shift')).toBe(true)
   expect(isReserved('Mod+K')).toBe(false)
+})
+
+test('findConflicts lists every command a key collides with', () => {
+  const bindings = resolveBindings({})
+  expect(findConflicts(bindings, 'task.setStatus', 'G').length).toBe(10)
+  expect(findConflicts(bindings, 'task.setStatus', 'P').map((command) => command.id)).toEqual(['task.setPriority'])
+  expect(findConflicts(bindings, 'task.setStatus', 'Q')).toEqual([])
 })

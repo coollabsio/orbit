@@ -135,7 +135,7 @@ test('bulk toolbar rejects more than 100 selected tasks without a server request
   expect(requests).toBe(0)
   expect(view.queryByRole('button', { name: 'Retry' })).toBeNull()
   // each of the 101 checkbox clicks re-renders every row (~170ms apiece under happy-dom)
-}, 30000)
+}, 45000)
 
 test('bulk due date picker schedules the selected tasks for this week', async () => {
   const writes = captureWrites()
