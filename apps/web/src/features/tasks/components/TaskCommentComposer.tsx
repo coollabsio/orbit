@@ -1,3 +1,4 @@
+import { useShortcutTitle } from '@/shortcuts/shortcutText'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
@@ -23,6 +24,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
   useEffect(() => {
     if (files.length === 0 && input.current) input.current.value = ''
   }, [files.length])
+  const sendTitle = useShortcutTitle('detail.sendComment', 'Send')
   const send = async () => {
     if (sending.current || pending || (!body.trim() && files.length === 0)) return
     sending.current = true
@@ -91,7 +93,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
         {error ? (
           <Button type="button" size="sm" disabled={pending} onClick={() => void send()}>Retry</Button>
         ) : (
-          <Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} title="Send (Ctrl/⌘ + Enter)" disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}><ArrowUp /></Button>
+          <Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} title={sendTitle} disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}><ArrowUp /></Button>
         )}
       </div>
     </div>

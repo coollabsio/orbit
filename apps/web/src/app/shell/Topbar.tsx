@@ -1,3 +1,4 @@
+import { Shortcut } from '@/shortcuts/Shortcut'
 import type { ReactNode } from 'react'
 import { useRender } from '@base-ui/react/use-render'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
@@ -13,7 +14,7 @@ import { useTasks } from '@/features/tasks/api/tasks'
 import { threadTitleOf } from '@/lib/messagePreview'
 import { useOpenNewTask } from '@/features/tasks/newTask'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { AppState } from '@/mock/types'
 import type { PageSummary, Teamspace } from '@/api/generated/types.gen'
 import { useCreatePage, usePageTree } from '@/features/docs/api/pages'
@@ -211,6 +212,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
             <DropdownMenuContent align="end" className="min-w-40">
               <DropdownMenuItem onClick={() => openNewTask()}>
                 Task
+                <DropdownMenuShortcut className="tracking-normal"><Shortcut id="task.create" /></DropdownMenuShortcut>
               </DropdownMenuItem>
               {!docsHidden ? (
                 <DropdownMenuItem

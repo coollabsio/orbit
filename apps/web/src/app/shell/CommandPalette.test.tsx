@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, waitFor } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
+import { useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router'
+import { useCommand } from '@/shortcuts/useCommand'
 import { queryKeys } from '@/api/queryKeys'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { CommandPalette } from './CommandPalette'
@@ -21,7 +23,18 @@ function Location() {
 let pageSearches: string[] = []
 let recentPages: unknown[] = []
 
-function setup(onClose = () => {}) {
+const ran: string[] = []
+/** Commands of the page in view, mounted before the palette opens as in the app. */
+function PageCommands({ target, children }: { target: boolean; children: ReactNode }) {
+  useCommand('task.create', () => void ran.push('create'))
+  useCommand('task.setStatus', () => void ran.push('status'), { available: () => target })
+  useCommand('nav.inbox', () => {})
+  const [ready, setReady] = useState(false)
+  useEffect(() => setReady(true), [])
+  return ready ? children : null
+}
+
+function setup(onClose = () => {}, target = false) {
   pageSearches = []
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
@@ -77,7 +90,7 @@ function setup(onClose = () => {}) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/tasks?workspace=workspace-1']}>
         <WorkspaceProvider>
-          <CommandPalette onClose={onClose} />
+          <PageCommands target={target}><CommandPalette onClose={onClose} /></PageCommands>
           <Location />
         </WorkspaceProvider>
       </MemoryRouter>
@@ -208,4 +221,39 @@ test('an empty query lists recently opened pages first; typing hides them', asyn
   } finally {
     recentPages = []
   }
+})
+
+test('a task command is listed only while there is a task to act on', async () => {
+  const without = setup()
+  await without.findByPlaceholderText('Search tasks, pages and navigation…')
+  expect(without.queryByRole('option', { name: /Change status/ })).toBeNull()
+  without.unmount()
+
+  let closed = 0
+  ran.length = 0
+  const view = setup(() => { closed += 1 }, true)
+  fireEvent.click(await view.findByRole('option', { name: /Change status/ }))
+  expect(closed).toBe(1)
+  await waitFor(() => expect(ran).toEqual(['status']))
+})
+
+test('a command is found by its name and runs after the palette closes', async () => {
+  ran.length = 0
+  const order: string[] = []
+  const view = setup(() => order.push('closed'))
+  const input = await view.findByPlaceholderText('Search tasks, pages and navigation…')
+  await userEvent.type(input, 'create')
+  fireEvent.click(await view.findByRole('option', { name: /Create task/ }))
+  await waitFor(() => expect(ran).toEqual(['create']))
+  expect(order).toEqual(['closed'])
+})
+
+test('a navigation command with a shortcut shows its keys and opens its page', async () => {
+  const view = setup()
+  const input = await view.findByPlaceholderText('Search tasks, pages and navigation…')
+  await userEvent.type(input, 'inbox')
+  const inbox = await view.findByRole('option', { name: /Go to Inbox/ })
+  expect([...inbox.querySelectorAll('[data-slot=kbd]')].map((key) => key.textContent)).toEqual(['G', 'I'])
+  fireEvent.click(inbox)
+  expect(view.getByTestId('location').textContent).toBe('/inbox')
 })

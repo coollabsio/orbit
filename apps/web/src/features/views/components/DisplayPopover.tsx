@@ -96,6 +96,10 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
   const keyShortcuts = useShortcutLabel('view.display')
 
   const setLayout = (layout: Layout) => onChange(layout === 'board' && display.group_by === 'none' ? { layout, group_by: 'status' } : { layout })
+  useCommand('view.layout', () => {
+    const layouts = LAYOUTS.map((layout) => layout.value)
+    setLayout(layouts[(layouts.indexOf(display.layout) + 1) % layouts.length])
+  })
   const setGroup = (group_by: GroupBy) =>
     onChange(group_by === 'none' || group_by === display.sub_group_by ? { group_by, sub_group_by: 'none' } : { group_by })
   const groupItems = GROUP_ORDER.filter((group) => display.layout !== 'board' || group !== 'none').map((group) => ({ value: group, label: GROUP_LABEL[group] }))

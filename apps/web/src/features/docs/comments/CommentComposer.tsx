@@ -1,6 +1,7 @@
 // A comment field that looks and behaves like the app's textarea: a BlockNote comment editor (for mentions and
 // formatting) inside a bordered, focus-ringed box that grows from two to eight lines, with an "@" button, Cancel and a
 // primary submit button below. Cmd/Ctrl+Enter submits (Enter is a new line), Escape cancels.
+import { useShortcutTitle } from '@/shortcuts/shortcutText'
 import { useEffect, useState, type KeyboardEvent } from 'react'
 import { SuggestionMenu, type BlockNoteEditor } from '@blocknote/core'
 import { CommentEditorSubmitExtension } from '@blocknote/core/comments'
@@ -12,8 +13,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { CommentEditor } from './CommentEditor'
 
 export type AnyCommentEditor = BlockNoteEditor<any, any, any>
-
-const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
 
 export function CommentComposer({
   editor,
@@ -39,6 +38,7 @@ export function CommentComposer({
   label: string
   className?: string
 }) {
+  const submitTitle = useShortcutTitle('detail.sendComment', submitLabel)
   const isEmpty = useEditorState({ editor, selector: ({ editor }) => editor.isEmpty })
   const [busy, setBusy] = useState(false)
   // Also when an existing comment switches to editing (BlockNote's own `autoFocus` only acts on mount).
@@ -112,7 +112,7 @@ export function CommentComposer({
             Cancel
           </Button>
         ) : null}
-        <Button type="button" size="sm" disabled={isEmpty || busy} title={`${submitLabel} (${MOD}+Enter)`} onClick={() => void submit()}>
+        <Button type="button" size="sm" disabled={isEmpty || busy} title={submitTitle} onClick={() => void submit()}>
           {submitLabel}
         </Button>
       </div>

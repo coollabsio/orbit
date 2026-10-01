@@ -1,3 +1,6 @@
+import { SequenceHint } from '@/shortcuts/SequenceHint'
+import { ShortcutHelpDialog } from '@/shortcuts/ShortcutHelpDialog'
+import { NavigationCommands, useGlobalCommands } from './globalCommands'
 import { NewTaskProvider } from '@/features/tasks/newTask'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useLayoutEffect, useState } from 'react'
@@ -46,6 +49,8 @@ export function AppShell() {
   }, [])
 
   useCommand('palette.open', () => setPaletteOpen((open) => !open))
+  const [helpOpen, setHelpOpen] = useState(false)
+  useGlobalCommands({ openPalette: () => setPaletteOpen(true), openHelp: () => setHelpOpen(true) })
 
   useEffect(() => {
     const onOpen = () => setPaletteOpen(true)
@@ -134,6 +139,9 @@ export function AppShell() {
       </SideSheet>
 
       {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
+      {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} /> : null}
+      <NavigationCommands />
+      <SequenceHint />
     </div>
     </NewTaskProvider>
   )

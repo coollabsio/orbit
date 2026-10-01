@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, type Dispatch, type PointerEvent, type SetStateAction } from 'react'
+import { createContext, useCallback, useContext, type Dispatch, type SetStateAction } from 'react'
 import { useCommand } from './useCommand'
 
 /** The tasks a task command acts on. An open task wins; in a list it is the selection, else the row with the
@@ -55,25 +55,37 @@ export function useTaskTarget() {
   return { ...state, pointer, getTargetIds }
 }
 
-/** Props that make an element a task row: the keyboard can focus it and the pointer can target it. */
-export function taskRowTarget(pointer: TaskPointer, id: string) {
-  return {
-    'data-task-id': id,
-    onPointerMove: (event: PointerEvent) => {
-      // a scroll moves rows under a still pointer; only a real movement changes the target
-      if (event.clientX === pointer.x && event.clientY === pointer.y) return
-      Object.assign(pointer, { hoveredId: id, x: event.clientX, y: event.clientY })
+/** Marks an element as a task row: the keyboard can focus it and the pointer can target it. */
+export const taskRowTarget = (id: string) => ({ 'data-task-id': id })
+
+/** Follows the pointer for a tasks page: the row under it is the target of task commands. */
+export function trackPointer(pointer: TaskPointer) {
+  const onPointerMove = (event: globalThis.PointerEvent) => {
+    // a scroll moves rows under a still pointer; only a real movement changes the target
+    if (event.clientX === pointer.x && event.clientY === pointer.y) return
+    Object.assign(pointer, { x: event.clientX, y: event.clientY })
+    const target = event.target instanceof Element ? event.target : null
+    const id = rowOf(target)
+    if (id) {
+      pointer.hoveredId = id
       // the pointer takes over from the keyboard
       const focused = document.activeElement
       if (focused instanceof HTMLElement && rowOf(focused) !== null && rowOf(focused) !== id) focused.blur()
-    },
-    onPointerLeave: () => {
-      if (pointer.hoveredId === id) pointer.hoveredId = null
-    },
+    } else if (!inOverlay(target)) {
+      // over a dialog or a menu the row stays the target: the command menu acts on the task it was opened over
+      pointer.hoveredId = null
+    }
   }
+  document.addEventListener('pointermove', onPointerMove)
+  return () => document.removeEventListener('pointermove', onPointerMove)
 }
 
-export const useTaskRowTarget = (id: string) => taskRowTarget(useContext(TaskPointerContext), id)
+function inOverlay(target: Element | null) {
+  const root = document.getElementById('root')
+  // overlays render in portals beside the app root
+  if (root && target && !root.contains(target)) return true
+  return target?.closest('[role="dialog"], [role="menu"], [role="listbox"]') != null
+}
 
 /** Board: moves the focus from a card to the nearest card of the next column with cards, left or right. */
 export function focusAdjacentColumn(card: HTMLElement, step: 1 | -1) {

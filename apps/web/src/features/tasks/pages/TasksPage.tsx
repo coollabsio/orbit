@@ -1,3 +1,4 @@
+import { useShortcutTitle } from '@/shortcuts/shortcutText'
 import { TaskCommands } from '@/features/tasks/TaskCommands'
 import { useListNavigation, useTaskTarget, visibleTaskIds } from '@/shortcuts/taskTarget'
 import { TaskTargetProvider } from '@/shortcuts/TaskTargetProvider'
@@ -277,6 +278,7 @@ function WorkspaceTasksPage() {
 
   useCreateTaskDefaults({ defaults: newTaskDefaults, onOpenTask: (task) => openTask(task.id) })
   const openNewTask = useOpenNewTask()
+  const newTaskTitle = useShortcutTitle('task.create', 'New task')
 
   const activeProject = projects.find((project) => project.id === projectFilter)
   // the user's own conditions (a preset page's chip is not one): only then can they be cleared or saved as a view.
@@ -373,7 +375,7 @@ function WorkspaceTasksPage() {
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
               onChange={viewState.setDisplay}
             />
-            <Button aria-label="New task" title="New task (C)" className="max-[899px]:w-8 max-[899px]:px-0" onClick={() => openNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
+            <Button aria-label="New task" title={newTaskTitle} className="max-[899px]:w-8 max-[899px]:px-0" onClick={() => openNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
           </PaneHeader>
           {viewState.stateError ? <ViewStateBanner /> : null}
           <FilterBar

@@ -10,7 +10,7 @@ import type { User } from '@/features/workspaces/models'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { ShortcutProvider } from '@/shortcuts/ShortcutProvider'
 import { TaskTargetProvider } from '@/shortcuts/TaskTargetProvider'
-import { useTaskRowTarget, useTaskTarget } from '@/shortcuts/taskTarget'
+import { taskRowTarget, useTaskTarget } from '@/shortcuts/taskTarget'
 import { useAvailableCommands } from '@/shortcuts/useCommand'
 import { render } from '@/test/render'
 import { TaskCommands } from './TaskCommands'
@@ -45,7 +45,7 @@ function captureWrites(): Write[] {
 }
 
 function Row({ item }: { item: Task }) {
-  return <div role="button" tabIndex={0} {...useTaskRowTarget(item.id)}>{item.title}</div>
+  return <div role="button" tabIndex={0} {...taskRowTarget(item.id)}>{item.title}</div>
 }
 
 function Page({ tasks, select = [] }: { tasks: Task[]; select?: string[] }) {

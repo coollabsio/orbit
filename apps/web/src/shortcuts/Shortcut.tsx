@@ -1,16 +1,9 @@
-import { formatForDisplay } from '@tanstack/react-hotkeys'
 import { cn } from 'cn'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
-import { parseKeys, toEngineStep } from './bindings'
+import { parseKeys } from './bindings'
 import type { CommandId } from './commands'
+import { stepParts } from './shortcutText'
 import { useBindings } from './useCommand'
-
-/** The key caps of one step: `Mod+Shift+K` → ⌘ ⇧ K on macOS, Ctrl Shift K elsewhere. */
-function stepParts(step: string): string[] {
-  // `?` is matched as Shift and the slash key, but reads as one key
-  if (step.endsWith('?')) return [...formatForDisplay(`${step.slice(0, -1)}[Slash]`, { parts: true }).slice(0, -1), '?']
-  return formatForDisplay(toEngineStep(step), { parts: true })
-}
 
 /** Keys as key caps. The steps of a sequence stand apart. */
 export function ShortcutKeys({ keys, className }: { keys: string; className?: string }) {
