@@ -1,5 +1,6 @@
+import { useTaskTarget } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -59,7 +60,10 @@ export interface TaskListProps {
 export function TaskList({ tasks, users, labels, statuses, projects, display, groupContext, collapseScope, onOpen, onAdd }: TaskListProps) {
   const { workspace } = useWorkspace()
   const [collapsed, toggle] = useCollapsedGroups(`orbit:task_list_collapsed:${workspace.id}:${collapseScope}`)
-  const [selected, setSelected] = useState<string[]>([])
+  // shared with the keyboard: X selects the focused row and task commands act on the selection
+  const { selectedIds: selected, setSelected } = useTaskTarget()
+  // a list for another page starts without a selection
+  useEffect(() => () => setSelected([]), [setSelected])
   const duplicates = useDuplicateActions(workspace.id)
   // tasks waiting for a canonical task: one (row menu, drop on the Duplicate group) or the bulk selection
   const [duplicatePicker, setDuplicatePicker] = useState<Task[] | null>(null)

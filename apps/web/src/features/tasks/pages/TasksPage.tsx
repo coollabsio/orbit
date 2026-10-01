@@ -1,3 +1,5 @@
+import { useListNavigation } from '@/shortcuts/taskTarget'
+import { TaskTargetProvider } from '@/shortcuts/TaskTargetProvider'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -79,7 +81,12 @@ const PRESET_TITLE: Record<TaskPreset, string> = {
 
 export function TasksPage() {
   const { workspace } = useWorkspace()
-  return <WorkspaceTasksPage key={workspace.id} />
+  const { taskId } = useParams()
+  return (
+    <TaskTargetProvider key={workspace.id} openTaskId={taskId ?? null}>
+      <WorkspaceTasksPage />
+    </TaskTargetProvider>
+  )
 }
 
 function WorkspaceTasksPage() {
@@ -236,6 +243,8 @@ function WorkspaceTasksPage() {
 
   // Esc closes the task, unless it belongs to a field, an open menu or a dialog
   useCommand('detail.close', taskId ? closeTask : null)
+  // list keys work in every layout; rows can be selected in the list only (it has the bulk toolbar)
+  useListNavigation(taskId ? null : openTask, { selectable: layout === 'list' })
 
   /** Starting properties of a new task; each group value wins over the filter default for its field. */
   const newTaskDefaults = (values: GroupValues) => {

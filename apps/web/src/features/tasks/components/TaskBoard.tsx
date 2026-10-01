@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { focusAdjacentColumn, TaskPointerContext, taskRowTarget } from '@/shortcuts/taskTarget'
+import { useContext, useState } from 'react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { UserAvatarStack } from '@/components/common/UserAvatar'
@@ -75,6 +76,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
   // the placeholder takes the dragged card's height
   const [dragHeight, setDragHeight] = useState(0)
 
+  const pointer = useContext(TaskPointerContext)
   const dragEnabled = canDrag(display)
   const { columns, lanes } = boardGrid(tasks, display, groupContext)
   const has = (property: TaskProperty) => display.properties.includes(property)
@@ -113,9 +115,16 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
         onDragEnd={endDrag}
         onClick={() => onOpen(task.id)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && event.target === event.currentTarget) onOpen(task.id)
+          if (event.target !== event.currentTarget) return
+          if (event.key === 'Enter') onOpen(task.id)
+          // J and K walk a column; the arrows cross to the next one
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            event.preventDefault()
+            focusAdjacentColumn(event.currentTarget, event.key === 'ArrowRight' ? 1 : -1)
+          }
         }}
         {...nest.rowProps(task)}
+        {...taskRowTarget(pointer, task.id)}
       >
         {/* status · id · blocked … assignees · priority (priority changes in place) */}
         {showTop ? (

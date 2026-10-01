@@ -1,3 +1,4 @@
+import { useTaskRowTarget } from '@/shortcuts/taskTarget'
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react'
 import { cn } from 'cn'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -58,7 +59,9 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
       {task.blocked ? <BlockedIndicator /> : null}
     </>
   )
+  const rowTarget = useTaskRowTarget(task.id)
   const common = {
+    ...rowTarget,
     'data-timeline-bar': task.id,
     'data-dragging': dragging || undefined,
     role: 'button',

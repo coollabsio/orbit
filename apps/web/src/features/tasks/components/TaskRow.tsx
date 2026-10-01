@@ -1,3 +1,4 @@
+import { useTaskRowTarget } from '@/shortcuts/taskTarget'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -74,6 +75,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
   const status = statuses.find((s) => s.id === task.statusId)
   const options = projectStatuses(statuses, task.projectId)
   const has = (property: TaskProperty) => properties.includes(property)
+  const rowTarget = useTaskRowTarget(task.id)
   return (
     <div
       className={cn(
@@ -84,6 +86,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
         'data-[nest=inside]:bg-primary/10 data-[nest=inside]:ring-1 data-[nest=inside]:ring-primary/40 data-[nest=inside]:ring-inset',
       )}
       data-task-row
+      {...rowTarget}
       data-depth={tree?.depth ?? 0}
       data-selected={selected || undefined}
       data-dragging={dragging || undefined}
