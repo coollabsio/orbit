@@ -55,11 +55,12 @@ function CommandDialog({
       </DialogHeader>
       <DialogContent
         className={cn(
-          "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
+          // a column, so the list inside can shrink and scroll when the entries outgrow the dialog's max height.
+          // The entrance is short and small (150ms, from 97%): the menu opens many times a day.
+          "top-1/3 flex translate-y-0 flex-col overflow-hidden rounded-xl! p-0 duration-150 data-open:zoom-in-97! data-closed:zoom-out-97!",
           className
         )}
         showCloseButton={showCloseButton}
-        instant
       >
         {children}
       </DialogContent>

@@ -97,7 +97,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
     }
     return (
       <Dialog open onOpenChange={(next) => { if (!next) close() }}>
-        <DialogContent instant showCloseButton={false} className="top-1/3 w-auto translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-none">
+        <DialogContent showCloseButton={false} className="top-1/3 w-auto translate-y-0 gap-0 overflow-hidden p-0 duration-150 data-open:zoom-in-97! data-closed:zoom-out-97! sm:max-w-none">
           <DialogHeader className="sr-only">
             <DialogTitle>{FIELD_TITLE.dueDate}</DialogTitle>
             <DialogDescription>{scope}</DialogDescription>

@@ -47,7 +47,7 @@ function DialogContent({
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
-  /** No open/close animation, for dialogs opened from the keyboard many times a day (command palette). */
+  /** No open/close animation, for a dialog opened from the keyboard in the middle of another action (save view). */
   instant?: boolean
 }) {
   return (
