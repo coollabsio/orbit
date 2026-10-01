@@ -29,6 +29,8 @@ export function parseKeys(keys: string): string[] | null {
 export function toEngineStep(step: string): string {
   const parts = step.split('+')
   const key = parts.pop() ?? ''
+  // `?` has no physical key of its own: it is Shift and the slash key
+  if (key === '?') return [...parts.filter((part) => part !== 'Shift'), 'Shift', '[Slash]'].join('+')
   const code = /^[A-Z]$/.test(key) ? `[Key${key}]` : /^[0-9]$/.test(key) ? `[Digit${key}]` : key in PUNCTUATION ? `[${PUNCTUATION[key]}]` : key
   return [...parts, code].join('+')
 }
@@ -40,7 +42,9 @@ export function fromRecorded(steps: string[]): string {
     const key = parts.pop() ?? ''
     const code = /^\[(.+)\]$/.exec(key)?.[1]
     const plain = !code ? key : /^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit[0-9]$/.test(code) ? code.slice(5) : PUNCTUATION_BY_CODE[code] ?? code
-    return [...parts.map((part) => (part === 'Control' ? 'Ctrl' : part)), plain].join('+')
+    const modifiers = parts.map((part) => (part === 'Control' ? 'Ctrl' : part))
+    if (plain === '/' && modifiers.includes('Shift')) return [...modifiers.filter((part) => part !== 'Shift'), '?'].join('+')
+    return [...modifiers, plain].join('+')
   }).join(' ')
 }
 
@@ -71,12 +75,12 @@ const isPrefix = (short: string[], long: string[]) => short.every((step, index) 
 /** The command that `keys` would collide with if `id` took them: the same keys, or one a prefix of the other's sequence. */
 export function findConflict(bindings: Bindings, id: string, keys: string): Command | null {
   const command = commandById(id)
-  const steps = parseKeys(keys)
+  const steps = parseKeys(keys)?.map(toEngineStep)
   if (!command || !steps) return null
   for (const other of COMMANDS as readonly Command[]) {
     const otherKeys = bindings[other.id]
     if (other.id === id || !otherKeys || !contextsOverlap(command.context, other.context)) continue
-    const otherSteps = parseKeys(otherKeys)
+    const otherSteps = parseKeys(otherKeys)?.map(toEngineStep)
     if (otherSteps && (isPrefix(steps, otherSteps) || isPrefix(otherSteps, steps))) return other
   }
   return null

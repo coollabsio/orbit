@@ -15,7 +15,7 @@ test('toEngineStep uses physical codes for letters, digits and punctuation', () 
   expect(toEngineStep('S')).toBe('[KeyS]')
   expect(toEngineStep('3')).toBe('[Digit3]')
   expect(toEngineStep('Mod+,')).toBe('Mod+[Comma]')
-  expect(toEngineStep('?')).toBe('?')
+  expect(toEngineStep('?')).toBe('Shift+[Slash]')
   expect(toEngineStep('Escape')).toBe('Escape')
 })
 
@@ -24,6 +24,7 @@ test('fromRecorded turns recorder output into registry notation', () => {
   expect(fromRecorded(['[KeyG]', '[KeyI]'])).toBe('G I')
   expect(fromRecorded(['Mod+Shift+[Comma]'])).toBe('Mod+Shift+,')
   expect(fromRecorded(['[KeyG]', '[KeyI]', '[KeyX]'])).toBe('G I')
+  expect(fromRecorded(['Shift+[Slash]'])).toBe('?')
 })
 
 test('resolveBindings applies valid overrides only', () => {
@@ -45,6 +46,7 @@ test('findConflict sees equal keys and sequence prefixes in overlapping contexts
   expect(findConflict(bindings, 'task.setStatus', 'G I')?.id).toBe('nav.inbox')
   expect(findConflict(bindings, 'task.setStatus', 'S')).toBeNull()
   expect(findConflict(bindings, 'docs.history', 'T')).toBeNull()
+  expect(findConflict(bindings, 'task.setStatus', 'Shift+/')?.id).toBe('help.open')
 })
 
 test('contextsOverlap', () => {

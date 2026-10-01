@@ -13,16 +13,18 @@ export interface Command {
   fixed?: true
   /** Fires again while the key is held. */
   repeat?: true
+  /** Runs while the focus is in a text field. Only for keys that have no meaning in text. */
+  inInputs?: true
 }
 
 /** The single source of truth for shortcuts: the key handler, command menu, help dialog, labels and settings read it. */
 export const COMMANDS = [
-  { id: 'palette.open', title: 'Open command menu', group: 'General', keys: 'Mod+K', context: 'global' },
+  { id: 'palette.open', title: 'Open command menu', group: 'General', keys: 'Mod+K', context: 'global', inInputs: true },
   { id: 'help.open', title: 'Show keyboard shortcuts', group: 'General', keys: '?', context: 'global' },
   { id: 'search.open', title: 'Search', group: 'General', keys: '/', context: 'global' },
   { id: 'task.create', title: 'Create task', group: 'General', keys: 'C', context: 'global' },
-  { id: 'settings.open', title: 'Open settings', group: 'General', keys: 'Mod+,', context: 'global' },
-  { id: 'theme.toggle', title: 'Change theme', group: 'General', keys: 'Mod+Shift+L', context: 'global' },
+  { id: 'settings.open', title: 'Open settings', group: 'General', keys: 'Mod+,', context: 'global', inInputs: true },
+  { id: 'theme.toggle', title: 'Change theme', group: 'General', keys: 'Mod+Shift+L', context: 'global', inInputs: true },
 
   { id: 'nav.inbox', title: 'Go to inbox', group: 'Navigation', keys: 'G I', context: 'global' },
   { id: 'nav.tasks', title: 'Go to all tasks', group: 'Navigation', keys: 'G T', context: 'global' },
@@ -48,7 +50,7 @@ export const COMMANDS = [
   { id: 'list.clearSelection', title: 'Clear the selection', group: 'List', keys: 'Escape', context: 'task-list', fixed: true },
   { id: 'view.filter', title: 'Filter', group: 'List', keys: 'F', context: 'task-list' },
   { id: 'view.display', title: 'Display options', group: 'List', keys: 'Shift+V', context: 'task-list' },
-  { id: 'view.save', title: 'Save view', group: 'List', keys: 'Mod+S', context: 'task-list' },
+  { id: 'view.save', title: 'Save view', group: 'List', keys: 'Mod+S', context: 'task-list', inInputs: true },
   { id: 'view.layout', title: 'Change layout', group: 'List', keys: 'Mod+B', context: 'task-list' },
   { id: 'timeline.today', title: 'Scroll to today', group: 'List', keys: 'T', context: 'timeline' },
 
@@ -70,11 +72,11 @@ export const COMMANDS = [
   { id: 'detail.close', title: 'Close the task', group: 'Task', keys: 'Escape', context: 'task-detail', fixed: true },
   { id: 'detail.sendComment', title: 'Send comment', group: 'Task', keys: 'Mod+Enter', context: 'task-detail', fixed: true },
   { id: 'newTask.submit', title: 'Create the task', group: 'Task', keys: 'Mod+Enter', context: 'new-task', fixed: true },
-  { id: 'newTask.submitMore', title: 'Create and add another', group: 'Task', keys: 'Mod+Shift+Enter', context: 'new-task' },
+  { id: 'newTask.submitMore', title: 'Create and add another', group: 'Task', keys: 'Mod+Shift+Enter', context: 'new-task', inInputs: true },
 
   { id: 'docs.createPage', title: 'Create page', group: 'Docs', keys: null, context: 'docs' },
-  { id: 'docs.history', title: 'Show page history', group: 'Docs', keys: 'Mod+Shift+H', context: 'docs' },
-  { id: 'docs.comment', title: 'Add comment', group: 'Docs', keys: 'Mod+Alt+M', context: 'docs' },
+  { id: 'docs.history', title: 'Show page history', group: 'Docs', keys: 'Mod+Shift+H', context: 'docs', inInputs: true },
+  { id: 'docs.comment', title: 'Add comment', group: 'Docs', keys: 'Mod+Alt+M', context: 'docs', inInputs: true },
 ] as const satisfies readonly Command[]
 
 export type CommandId = (typeof COMMANDS)[number]['id']
