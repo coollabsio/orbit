@@ -7,6 +7,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane } from '@/components/common/Pane'
 import { confirmAction } from '@/components/common/confirmAction'
+import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import {
   isPageNotFound,
@@ -18,7 +19,7 @@ import {
   usePageTree,
   useTrashPage,
 } from '@/features/docs/api/pages'
-import { canDeleteTeamspaces, useTeamspaces } from '@/features/docs/api/teamspaces'
+import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { descendantsOf, dropOnSpace, landingPage, pageTitle, spaceKey, spaceLabel, type SpaceKey } from '@/features/docs/pageTree'
 import { cn } from 'cn'
 import { DocEditor, type DocEditorControl } from '@/features/docs/components/DocEditor'
@@ -42,6 +43,8 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   const navigate = useNavigate()
   const location = useLocation()
   const { workspace } = useWorkspace()
+  const canDeleteTeamspaces = useCan('teamspaces.delete')
+  const canPurgeTeamspacePages = useCan('pages.purge')
   const tree = usePageTree(workspace.id)
   const teamspaces = useTeamspaces(workspace.id)
   // The open page was trashed (here or by someone else) and we are leaving it. Navigations run as transitions, so
@@ -166,7 +169,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   let content
   if (view === 'trash') {
-    content = <PageTrashPane workspaceId={workspace.id} role={workspace.role} />
+    content = <PageTrashPane workspaceId={workspace.id} canPurgeTeamspacePages={canPurgeTeamspacePages} />
   } else if (view === 'import') {
     content = <NotionImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
   } else if (!pageId) {
@@ -265,7 +268,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
           onRetry={() => void tree.refetch()}
           activeId={activeId}
           trashActive={view === 'trash'}
-          canDeleteTeamspaces={canDeleteTeamspaces(workspace.role)}
+          canDeleteTeamspaces={canDeleteTeamspaces}
           onTrash={(id) => void requestTrash(id)}
         />
         {content}

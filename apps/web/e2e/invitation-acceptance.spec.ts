@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 for (const mode of ['new', 'existing', 'wrong-account']) {
   test(`invitation acceptance for ${mode} users keeps the invited email fixed`, async ({ page }) => {
@@ -45,7 +46,7 @@ for (const mode of ['new', 'existing', 'wrong-account']) {
       let body: unknown = { items: [], next_cursor: null }
       if (path.endsWith('/views')) body = []
       if (path.endsWith('/setup/status')) body = { complete: true }
-      if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'member', version: 1 }]
+      if (path === '/api/v1/workspaces') body = [testWorkspace('member', { id: 'alpha', name: 'Alpha' })]
       await route.fulfill({ json: body })
     })
     await page.goto('/accept-invitation?token=invitation-secret')

@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 test('Tasks opens the mobile sidebar with workspace selection without an extra header row', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const workspaces = [
-    { id: 'alpha', name: 'Alpha', role: 'owner', version: 1 },
-    { id: 'beta', name: 'Beta', role: 'owner', version: 1 },
+    testWorkspace('owner', { id: 'alpha', name: 'Alpha' }),
+    testWorkspace('owner', { id: 'beta', name: 'Beta' }),
   ]
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname
@@ -17,13 +18,13 @@ test('Tasks opens the mobile sidebar with workspace selection without an extra h
     if (path === '/api/v1/workspaces') body = workspaces
     if (path === '/api/v1/workspaces' && route.request().method() === 'POST') {
       expect(route.request().postDataJSON()).toEqual({ name: 'Gamma' })
-      const created = { id: 'gamma', name: 'Gamma', role: 'owner', version: 1 }
+      const created = testWorkspace('owner', { id: 'gamma', name: 'Gamma' })
       workspaces.push(created)
       body = created
     }
     if (path === '/api/v1/workspaces/gamma' && route.request().method() === 'PATCH') {
       expect(route.request().postDataJSON()).toEqual({ name: 'Gamma renamed', expected_version: 1 })
-      body = { id: 'gamma', name: 'Gamma renamed', role: 'owner', version: 2 }
+      body = testWorkspace('owner', { id: 'gamma', name: 'Gamma renamed', version: 2 })
     }
     await route.fulfill({ json: body })
   })

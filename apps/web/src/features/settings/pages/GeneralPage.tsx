@@ -2,7 +2,6 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download } from 'reicon-react'
 import { apiClient } from '@/api/client'
-import { ApiProblem } from '@/api/problem'
 import { createBackup, listBackups } from '@/api/generated/sdk.gen'
 import type { BackupSummary } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
@@ -15,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useTheme, type Theme } from '@/lib/themeContext'
 import { useRenameWorkspace } from '@/features/workspaces/api'
+import { useCan, useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { FieldGrid, SettingsRow } from '@/features/settings/components/SettingsParts'
@@ -32,15 +32,16 @@ export function GeneralPage() {
   const renameWorkspace = useRenameWorkspace(workspace.id)
   const renameSlow = useSlowPending(renameWorkspace.isPending)
   const queryClient = useQueryClient()
+  const canRename = useCan('workspace.update')
+  const backupsAllowed = useIsInstallationAdmin()
   const backups = useQuery({
     queryKey: queryKeys.backups,
     queryFn: async () => {
       const { data } = await listBackups({ client: apiClient, throwOnError: true })
       return data.items
     },
+    enabled: backupsAllowed,
   })
-  // Backups are for installation administrators: the card stays hidden until the list loads, and for a 403.
-  const backupsAllowed = !backups.isPending && !(backups.error instanceof ApiProblem && backups.error.status === 403)
   const backup = useMutation({
     mutationFn: async () => {
       const { data } = await createBackup({ client: apiClient, throwOnError: true })
@@ -64,7 +65,7 @@ export function GeneralPage() {
 
   return (
     <>
-      <SettingsCard title="Workspace" description="Rename this workspace.">
+      {canRename ? <SettingsCard title="Workspace" description="Rename this workspace.">
         <form ref={formRef} onSubmit={(event) => { event.preventDefault(); saveWorkspace() }}>
           <FieldGrid>
             <Field><FieldLabel htmlFor="workspace-name">Name</FieldLabel><Input id="workspace-name" required disabled={renameSlow} value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></Field>
@@ -72,7 +73,7 @@ export function GeneralPage() {
         </form>
         {renameWorkspace.isError ? <p role="alert" className="text-destructive">Workspace rename failed. <Button variant="ghost" onClick={saveWorkspace}>Retry</Button></p> : null}
         {renameSlow ? <p role="status">Saving workspace…</p> : null}
-      </SettingsCard>
+      </SettingsCard> : null}
 
       <SettingsCard title="Appearance" description="Theme for this browser.">
         <FieldGrid>

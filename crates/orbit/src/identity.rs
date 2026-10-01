@@ -1,4 +1,6 @@
 use orbit_platform::{Id, TimestampMillis};
+use serde::Serialize;
+use utoipa::ToSchema;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct User {
@@ -22,11 +24,33 @@ impl User {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum WorkspaceRole {
     Owner,
     Admin,
     Member,
+}
+
+impl WorkspaceRole {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Admin => "admin",
+            Self::Member => "member",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(role: &str) -> Option<Self> {
+        match role {
+            "owner" => Some(Self::Owner),
+            "admin" => Some(Self::Admin),
+            "member" => Some(Self::Member),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

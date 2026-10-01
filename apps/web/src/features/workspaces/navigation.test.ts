@@ -3,8 +3,8 @@ import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { selectedWorkspaceId, switchWorkspaceHref } from './navigation'
 
 const workspaces: WorkspaceRecord[] = [
-  { id: 'alpha', name: 'Alpha', role: 'owner', version: 1 },
-  { id: 'beta', name: 'Beta', role: 'member', version: 3 },
+  { id: 'alpha', name: 'Alpha', role: 'owner', permissions: [], version: 1 },
+  { id: 'beta', name: 'Beta', role: 'member', permissions: [], version: 3 },
 ]
 
 test('route selection wins over the saved navigation preference', () => {

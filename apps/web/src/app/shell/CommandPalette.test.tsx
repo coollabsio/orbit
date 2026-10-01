@@ -39,7 +39,7 @@ function setup(onClose = () => {}, target = false) {
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.workspaces, [
-    { id: 'workspace-1', name: 'Alpha', role: 'owner', version: 1 },
+    { id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 },
   ])
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input instanceof Request ? input.url : input)

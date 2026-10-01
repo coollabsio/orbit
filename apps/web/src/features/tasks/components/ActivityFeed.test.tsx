@@ -2,12 +2,12 @@ import { expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { ActivityFeed } from './ActivityFeed'
+import { testWorkspace } from '@/test/workspace'
 
-const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
+const workspace = testWorkspace()
 
 function Wrapper({ children }: { children: ReactNode }) {
   return (

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
-import type { Page, PageSummary, Teamspace } from '@/api/generated/types.gen'
+import type { Page, PageSummary, Teamspace, WorkspaceRole } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
@@ -13,6 +13,7 @@ import { DocsPage } from './DocsPage'
 import { PRINT_ATTR } from '@/features/docs/pageExport'
 import { fakeCollab, fragmentText, type FakeCollab } from '@/test/fakeCollab'
 import { waitForAbsence } from '@/test/waitForAbsence'
+import { testWorkspace } from '@/test/workspace'
 
 beforeAll(() => {
   // BlockNote warns about mobile keyboards without this viewport flag (index.html sets it in the app).
@@ -66,7 +67,7 @@ interface SetupOptions {
   collab?: FakeCollab
 }
 
-function setup(path: string, handler: Handler, role = 'owner', options: SetupOptions = {}) {
+function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', options: SetupOptions = {}) {
   const collab = options.collab ?? fakeCollab({ content: options.content })
   window.localStorage.clear()
   const calls: Call[] = []
@@ -82,7 +83,7 @@ function setup(path: string, handler: Handler, role = 'owner', options: SetupOpt
     return problem(404, 'not_found')
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
-  client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role, version: 1 }])
+  client.setQueryData(queryKeys.workspaces, [testWorkspace(role, { name: 'Alpha' })])
   const view = render(
     <QueryClientProvider client={client}>
       <CollabConnectContext value={collab.connect}>

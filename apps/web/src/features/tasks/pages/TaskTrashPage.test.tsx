@@ -3,11 +3,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { TaskTrashPage } from './TaskTrashPage'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const trashed = (id: string, title: string, count: number) => ({
   id, workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title, description: '', position: 0, priority: 'none',
   assignee_ids: [], creator_id: 'user-1', label_ids: [], created_at: '', updated_at: '', deleted_at: '2026-09-27T10:00:00Z', version: 2,

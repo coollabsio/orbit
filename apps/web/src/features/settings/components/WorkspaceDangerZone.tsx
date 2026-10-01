@@ -6,11 +6,13 @@ import { Input } from '@/components/ui/input'
 import { DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { useDeleteWorkspace } from '@/features/workspaces/api'
+import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { SettingsCard } from '@/components/common/SettingsCard'
 
 export function WorkspaceDangerZone() {
   const { workspace, workspaces } = useWorkspace()
+  const canDelete = useCan('workspace.delete')
   const navigate = useNavigate()
   const deletion = useDeleteWorkspace(workspace.id)
   const [open, setOpen] = useState(false)
@@ -19,7 +21,7 @@ export function WorkspaceDangerZone() {
   // Blocks a second submit before `deletion.isPending` has rendered.
   const deleting = useRef(false)
 
-  if (workspace.role !== 'owner') return null
+  if (!canDelete) return null
 
   async function deleteConfirmed() {
     if (confirmation !== workspace.name || deleting.current) return

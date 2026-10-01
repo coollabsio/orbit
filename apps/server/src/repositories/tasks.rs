@@ -1,4 +1,4 @@
-use orbit_domain::{DEFAULT_STATUSES, StatusCategory};
+use orbit_domain::{DEFAULT_STATUSES, Permission, Policy, StatusCategory};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -2237,6 +2237,9 @@ impl TaskRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
         let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id).await?;
+        if current.author_id != actor_id {
+            return Err(TaskError::Forbidden);
+        }
         check_version(expected_version, current.version, &current)?;
         sqlx::query("UPDATE task_comments SET body = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?")
             .bind(&body).bind(now.as_millis()).bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
@@ -2274,6 +2277,18 @@ impl TaskRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
         let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id).await?;
+        if current.author_id != actor_id {
+            let role: String = sqlx::query_scalar(
+                "SELECT role FROM memberships WHERE workspace_id = ? AND user_id = ?",
+            )
+            .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if !Policy::stored_role_can(&role, Permission::CommentsModerate) {
+                return Err(TaskError::Forbidden);
+            }
+        }
         check_version(expected_version, current.version, &current)?;
         sqlx::query("DELETE FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?").bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
         record_mutation(

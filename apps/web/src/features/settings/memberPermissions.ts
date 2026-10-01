@@ -2,12 +2,12 @@ import type { User } from '@/features/workspaces/models'
 
 export const INVITABLE_ROLES = ['Admin', 'Member'] as const
 
-export function canManageMember(actorRole: string, actorId: string | undefined, target: User): boolean {
-  if (!actorId || actorId === target.id) return false
-  if (actorRole === 'owner') return true
-  return actorRole === 'admin' && target.role !== 'Owner'
+/** `canManageMembers` is the `members.manage` permission. Nobody manages themselves or the owner. */
+export function canManageMember(canManageMembers: boolean, actorId: string | undefined, target: User): boolean {
+  return canManageMembers && !!actorId && actorId !== target.id && target.role !== 'Owner'
 }
 
-export function canTransferOwnership(actorRole: string, actorId: string | undefined, target: User): boolean {
-  return actorRole === 'owner' && target.id !== actorId && target.role !== 'Owner'
+/** `canTransfer` is the `workspace.transfer` permission. */
+export function canTransferOwnership(canTransfer: boolean, actorId: string | undefined, target: User): boolean {
+  return canTransfer && target.id !== actorId && target.role !== 'Owner'
 }

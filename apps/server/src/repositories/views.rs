@@ -3,6 +3,7 @@
 //! Personal views exist only for their owner; everyone else gets `NotFound`. Workspace views are
 //! readable by every member and editable by their owner or a workspace owner/admin.
 
+use orbit_domain::{Permission, Policy};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -519,10 +520,10 @@ impl ViewRepository {
     }
 }
 
-/// The acting member. `manager` is a workspace owner or admin.
+/// The acting member. `manages_shared` is `Permission::ViewsManageShared`.
 struct Caller {
     id: Id,
-    manager: bool,
+    manages_shared: bool,
 }
 
 /// Same membership rule as `require_access`: non-members and deleted workspaces are `NotFound`.
@@ -545,7 +546,7 @@ where
     .ok_or(TaskError::NotFound)?;
     Ok(Caller {
         id: actor_id,
-        manager: role != "member",
+        manages_shared: Policy::stored_role_can(&role, Permission::ViewsManageShared),
     })
 }
 
@@ -608,7 +609,8 @@ fn view_from_row(row: SqliteRow, caller: &Caller) -> Result<SavedViewRecord, Tas
         version: row.get("version"),
         is_favorite: favorite_position.is_some(),
         favorite_position,
-        can_edit: owner_id == caller.id || (visibility == Visibility::Workspace && caller.manager),
+        can_edit: owner_id == caller.id
+            || (visibility == Visibility::Workspace && caller.manages_shared),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
     })

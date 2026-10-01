@@ -3,6 +3,7 @@ import { Key, Keyboard, Link2, Tag, Setting2 as Settings, ShieldTick as ShieldCh
 import { cn } from 'cn'
 import { buttonVariants } from '@/components/ui/button'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
+import type { Permission } from '@/api/generated/types.gen'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
 interface NavItem {
@@ -10,6 +11,8 @@ interface NavItem {
   label: string
   icon: React.ComponentType<{ className?: string }>
   end?: boolean
+  /** Shown only to roles that hold this permission. */
+  permission?: Permission
 }
 
 const SECTIONS: { label: string; items: NavItem[] }[] = [
@@ -19,7 +22,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
       { to: '/settings', label: 'General', icon: Settings, end: true },
       { to: '/settings/sessions', label: 'Sessions', icon: ShieldCheck },
       { to: '/settings/shortcuts', label: 'Keyboard shortcuts', icon: Keyboard },
-      { to: '/settings/api-tokens', label: 'API tokens', icon: Key },
+      { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'api_tokens.manage' },
       { to: '/settings/labels', label: 'Labels', icon: Tag },
       { to: '/settings/github', label: 'GitHub', icon: Link2 },
       { to: '/tasks-trash', label: 'Trash', icon: Trash2 },
@@ -33,14 +36,16 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: 'Workspace',
-    items: [{ to: '/settings/danger-zone', label: 'Danger zone', icon: TriangleAlert }],
+    items: [{ to: '/settings/danger-zone', label: 'Danger zone', icon: TriangleAlert, permission: 'workspace.delete' }],
   },
 ]
 
 /** Coolify `x-settings.layout`: sticky sub-navigation (210px) + content column. */
 export function SettingsLayout() {
   const { workspace } = useWorkspace()
-  const canManageTokens = workspace.role === 'owner' || workspace.role === 'admin'
+  const sections = SECTIONS
+    .map((section) => ({ ...section, items: section.items.filter((item) => !item.permission || workspace.permissions.includes(item.permission)) }))
+    .filter((section) => section.items.length > 0)
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane className="relative">
@@ -56,7 +61,7 @@ export function SettingsLayout() {
                 aria-label="Settings"
                 className="grid grid-cols-2 gap-0.5 border-y py-3 min-[900px]:grid-cols-4 xl:grid-cols-1 xl:border-0 xl:py-0"
               >
-                {SECTIONS.map((section, index) => (
+                {sections.map((section, index) => (
                   <div key={section.label} className="contents">
                     <div
                       className={cn(
@@ -66,7 +71,7 @@ export function SettingsLayout() {
                     >
                       {section.label}
                     </div>
-                    {section.items.filter((item) => item.to !== '/settings/api-tokens' || canManageTokens).map((item) => (
+                    {section.items.map((item) => (
                       <NavLink
                         key={item.to}
                         to={item.to}

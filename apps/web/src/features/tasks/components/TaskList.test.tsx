@@ -6,7 +6,6 @@ import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
-import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from '@/features/views/grouping'
 import type { GroupValues } from '@/features/views/layoutGroups'
@@ -15,6 +14,7 @@ import type { User } from '@/features/workspaces/models'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { TaskList } from './TaskList'
 import { UNDO_TOAST_DURATION, keepIdentifiersTogether } from '@/lib/toast'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -22,7 +22,7 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
+const workspace = testWorkspace()
 const status: TaskStatusDef = {
   id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#aaa',
   category: 'unstarted', position: 0, version: 1,

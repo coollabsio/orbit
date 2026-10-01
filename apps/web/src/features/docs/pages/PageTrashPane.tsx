@@ -24,16 +24,16 @@ const plural = (count: number) => `${count} page${count === 1 ? '' : 's'}`
 
 /**
  * Pages trashed directly (their sub-pages come back with them), newest first. "Delete forever" and "Empty trash"
- * cover what `role` may purge: own private pages always, teamspace pages for owners and admins only.
+ * cover what the caller may purge: own private pages always, teamspace pages with `canPurgeTeamspacePages`.
  */
-export function PageTrashPane({ workspaceId, role }: { workspaceId: string; role?: string | null }) {
+export function PageTrashPane({ workspaceId, canPurgeTeamspacePages }: { workspaceId: string; canPurgeTeamspacePages: boolean }) {
   const navigate = useNavigate()
   const trash = usePageTrash(workspaceId)
   const restore = useRestorePage(workspaceId)
   const purge = usePurgePage(workspaceId)
   const emptyTrash = useEmptyPageTrash(workspaceId)
   const teamspaces = useTeamspaces(workspaceId)
-  const purgeable = (trash.data ?? []).filter((page) => canPurgePage(page, role))
+  const purgeable = (trash.data ?? []).filter((page) => canPurgePage(page, canPurgeTeamspacePages))
   const busy = restore.isPending || purge.isPending || emptyTrash.isPending
 
   const requestPurge = async (page: TrashedPage) => {
@@ -139,7 +139,7 @@ export function PageTrashPane({ workspaceId, role }: { workspaceId: string; role
               <RotateCcw className="size-3.5" />
               Restore
             </Button>
-            {canPurgePage(page, role) ? (
+            {canPurgePage(page, canPurgeTeamspacePages) ? (
               <Button
                 type="button"
                 variant="ghost"

@@ -5,11 +5,12 @@ import userEvent from '@testing-library/user-event'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { TaskPickerDialog, type TaskPickerDialogProps } from './TaskPickerDialog'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1 }
 const statuses: TaskStatusDef[] = [{ id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#888', category: 'unstarted', position: 0, version: 1 }]
 const record = (id: string, title: string, duplicateOf: string | null = null) => ({

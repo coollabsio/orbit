@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 test('shortcuts navigate, create, and follow a rebinding after a reload', async ({ page }) => {
   // the server side of the shortcuts: one stored map per user
@@ -15,7 +16,7 @@ test('shortcuts navigate, create, and follow a rebinding after a reload', async 
     if (path.endsWith('/views')) body = []
     if (path === '/api/v1/setup/status') body = { complete: true }
     if (path === '/api/v1/auth/me') body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
-    if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+    if (path === '/api/v1/workspaces') body = [testWorkspace('owner', { id: 'alpha', name: 'Alpha' })]
     await route.fulfill({ json: body })
   })
 

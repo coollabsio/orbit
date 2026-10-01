@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_domain::{WorkspaceDefaults, WorkspaceRole};
+use orbit_domain::{Permission, Policy, WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
     AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
     IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
@@ -32,7 +32,9 @@ pub struct WorkspaceRecord {
     #[schema(value_type = String)]
     pub id: Id,
     pub name: String,
-    pub role: String,
+    pub role: WorkspaceRole,
+    /// What the caller's role may do in this workspace.
+    pub permissions: Vec<Permission>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
@@ -292,7 +294,8 @@ impl WorkspaceRepository {
         Ok(WorkspaceRecord {
             id,
             name: defaults.workspace.name,
-            role: "owner".to_owned(),
+            role: WorkspaceRole::Owner,
+            permissions: Policy::permissions(WorkspaceRole::Owner),
             version: 0,
             deleted_at: None,
         })
@@ -327,7 +330,7 @@ impl WorkspaceRepository {
     ) -> Result<WorkspaceRecord, WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let actor_role = require_role(&mut transaction, workspace_id, actor_id, false).await?;
-        if actor_role == WorkspaceRole::Member {
+        if !Policy::can(actor_role, Permission::WorkspaceUpdate) {
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -383,7 +386,8 @@ impl WorkspaceRepository {
         Ok(WorkspaceRecord {
             id: workspace_id,
             name,
-            role: role_name(actor_role),
+            role: actor_role,
+            permissions: Policy::permissions(actor_role),
             version,
             deleted_at: None,
         })
@@ -422,7 +426,7 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(Vec<InvitationRecord>, Option<Id>), WorkspaceError> {
         let role = require_role_from_db(self.database.pool(), workspace_id, actor_id).await?;
-        if role == WorkspaceRole::Member {
+        if !Policy::can(role, Permission::MembersManage) {
             return Err(WorkspaceError::Forbidden);
         }
         let rows = sqlx::query(
@@ -457,7 +461,14 @@ impl WorkspaceRepository {
             now.as_millis().saturating_add(INVITATION_LIFETIME_MILLIS),
         );
         let mut transaction = self.database.immediate_transaction().await?;
-        match require_manager(&mut transaction, workspace_id, actor_id, false).await {
+        match require_permission(
+            &mut transaction,
+            workspace_id,
+            actor_id,
+            Permission::MembersManage,
+        )
+        .await
+        {
             Ok(_) => {}
             Err(WorkspaceError::Forbidden) => {
                 audit::record(
@@ -570,7 +581,14 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        match require_manager(&mut transaction, workspace_id, actor_id, false).await {
+        match require_permission(
+            &mut transaction,
+            workspace_id,
+            actor_id,
+            Permission::MembersManage,
+        )
+        .await
+        {
             Ok(_) => {}
             Err(WorkspaceError::Forbidden) => {
                 audit::record(
@@ -1090,7 +1108,7 @@ impl WorkspaceRepository {
             transaction.commit().await?;
             return Err(WorkspaceError::TransferRequired);
         }
-        if actor_role == WorkspaceRole::Member {
+        if !Policy::can(actor_role, Permission::MembersManage) {
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -1225,7 +1243,7 @@ impl WorkspaceRepository {
             transaction.commit().await?;
             return Err(error);
         }
-        if actor_role == WorkspaceRole::Member {
+        if !Policy::can(actor_role, Permission::MembersManage) {
             let target_user = sqlx::query_scalar::<_, String>(
                 "SELECT user_id FROM memberships WHERE id = ? AND workspace_id = ?",
             )
@@ -1295,7 +1313,8 @@ impl WorkspaceRepository {
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(WorkspaceError::NotFound)?;
-        if actor_membership.get::<String, _>("role") != "owner" {
+        let actor_role = parse_role(&actor_membership.get::<String, _>("role"))?;
+        if !Policy::can(actor_role, Permission::WorkspaceTransfer) {
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -1406,7 +1425,7 @@ impl WorkspaceRepository {
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let role = require_role(&mut transaction, workspace_id, actor_id, !deleted).await?;
-        if role != WorkspaceRole::Owner {
+        if !Policy::can(role, Permission::WorkspaceDelete) {
             audit::record(
                 &mut transaction,
                 workspace_id,
@@ -1508,7 +1527,7 @@ impl WorkspaceRepository {
         limit: usize,
     ) -> Result<(Vec<AuditEvent>, Option<Id>), WorkspaceError> {
         let role = require_role_from_db(self.database.pool(), workspace_id, actor_id).await?;
-        if role == WorkspaceRole::Member {
+        if !Policy::can(role, Permission::AuditView) {
             return Err(WorkspaceError::Forbidden);
         }
         Ok(audit::list(&self.database, workspace_id, cursor, page_size(limit)).await?)
@@ -2033,10 +2052,12 @@ fn page_size(limit: usize) -> usize {
 }
 
 fn workspace_from_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkspaceRecord, WorkspaceError> {
+    let role = parse_role(&row.get::<String, _>("role"))?;
     Ok(WorkspaceRecord {
         id: parse_id(row.get("id"))?,
         name: row.get("name"),
-        role: row.get("role"),
+        role,
+        permissions: Policy::permissions(role),
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         deleted_at: row
@@ -2089,13 +2110,14 @@ fn invitation_from_row(
     })
 }
 
-async fn require_manager(
+pub(super) async fn require_permission(
     transaction: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
-    deleted: bool,
+    permission: Permission,
 ) -> Result<(), WorkspaceError> {
-    if require_role(transaction, workspace_id, actor_id, deleted).await? == WorkspaceRole::Member {
+    let role = require_role(transaction, workspace_id, actor_id, false).await?;
+    if !Policy::can(role, permission) {
         return Err(WorkspaceError::Forbidden);
     }
     Ok(())
@@ -2158,21 +2180,11 @@ async fn target_role_and_version(
 }
 
 fn parse_role(role: &str) -> Result<WorkspaceRole, WorkspaceError> {
-    match role {
-        "owner" => Ok(WorkspaceRole::Owner),
-        "admin" => Ok(WorkspaceRole::Admin),
-        "member" => Ok(WorkspaceRole::Member),
-        _ => Err(WorkspaceError::Conflict),
-    }
+    WorkspaceRole::parse(role).ok_or(WorkspaceError::Conflict)
 }
 
 fn role_name(role: WorkspaceRole) -> String {
-    match role {
-        WorkspaceRole::Owner => "owner",
-        WorkspaceRole::Admin => "admin",
-        WorkspaceRole::Member => "member",
-    }
-    .to_owned()
+    role.as_str().to_owned()
 }
 
 fn parse_id(value: String) -> Result<Id, WorkspaceError> {

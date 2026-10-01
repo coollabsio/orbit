@@ -54,6 +54,7 @@ test('sign out all sequences requests and reports and retries every partial fail
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false }, mutations: { retry: false } } })
   client.setQueryData(queryKeys.sessions, records)
+  client.setQueryData(['oauth-grants'], { items: [] })
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
   const view = render(<SessionsPage />, { wrapper })
 

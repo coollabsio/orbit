@@ -85,7 +85,12 @@ impl Fixture {
         format!("__Host-orbit_session={}", session.token)
     }
 
-    async fn call(&self, method: &str, cookie: Option<&str>, body: Option<Value>) -> (StatusCode, Value) {
+    async fn call(
+        &self,
+        method: &str,
+        cookie: Option<&str>,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(PATH);
         if let Some(cookie) = cookie {
             builder = builder.header(header::COOKIE, cookie);
@@ -114,7 +119,10 @@ impl Fixture {
 #[tokio::test]
 async fn a_user_without_overrides_gets_an_empty_map() {
     let fixture = Fixture::new().await;
-    assert_eq!(fixture.get(&fixture.owner_cookie).await, json!({ "bindings": {} }));
+    assert_eq!(
+        fixture.get(&fixture.owner_cookie).await,
+        json!({ "bindings": {} })
+    );
 }
 
 #[tokio::test]
@@ -140,7 +148,9 @@ async fn put_replaces_the_whole_map_and_keeps_null_bindings() {
 async fn limits_are_enforced_and_a_refused_map_is_not_stored() {
     let fixture = Fixture::new().await;
     let cookie = Some(fixture.owner_cookie.as_str());
-    let too_many: Map<String, Value> = (0..201).map(|index| (format!("command.{index}"), json!("Q"))).collect();
+    let too_many: Map<String, Value> = (0..201)
+        .map(|index| (format!("command.{index}"), json!("Q")))
+        .collect();
     let cases = [
         json!({ "bindings": too_many }),
         json!({ "bindings": { "x".repeat(65): "Q" } }),
@@ -154,11 +164,19 @@ async fn limits_are_enforced_and_a_refused_map_is_not_stored() {
         assert_eq!(body["code"], "invalid_shortcuts");
     }
     // the limits themselves are allowed
-    let at_limit: Map<String, Value> = (0..200).map(|index| (format!("command.{index}"), json!("Q"))).collect();
-    let (status, _) = fixture.call("PUT", cookie, Some(json!({ "bindings": at_limit }))).await;
+    let at_limit: Map<String, Value> = (0..200)
+        .map(|index| (format!("command.{index}"), json!("Q")))
+        .collect();
+    let (status, _) = fixture
+        .call("PUT", cookie, Some(json!({ "bindings": at_limit })))
+        .await;
     assert_eq!(status, StatusCode::OK);
     let (status, _) = fixture
-        .call("PUT", cookie, Some(json!({ "bindings": { "x".repeat(64): "Q".repeat(32) } })))
+        .call(
+            "PUT",
+            cookie,
+            Some(json!({ "bindings": { "x".repeat(64): "Q".repeat(32) } })),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 }
@@ -167,11 +185,18 @@ async fn limits_are_enforced_and_a_refused_map_is_not_stored() {
 async fn a_body_of_the_wrong_shape_is_refused() {
     let fixture = Fixture::new().await;
     let cookie = Some(fixture.owner_cookie.as_str());
-    for case in [json!({ "bindings": ["Q"] }), json!({ "bindings": { "task.create": 5 } }), json!({})] {
+    for case in [
+        json!({ "bindings": ["Q"] }),
+        json!({ "bindings": { "task.create": 5 } }),
+        json!({}),
+    ] {
         let (status, _) = fixture.call("PUT", cookie, Some(case)).await;
         assert!(status.is_client_error(), "{status}");
     }
-    assert_eq!(fixture.get(&fixture.owner_cookie).await, json!({ "bindings": {} }));
+    assert_eq!(
+        fixture.get(&fixture.owner_cookie).await,
+        json!({ "bindings": {} })
+    );
 }
 
 #[tokio::test]
@@ -179,13 +204,24 @@ async fn each_user_has_their_own_map() {
     let fixture = Fixture::new().await;
     let other = fixture.add_user("other@example.com").await;
     fixture
-        .call("PUT", Some(&fixture.owner_cookie), Some(json!({ "bindings": { "task.create": "N" } })))
+        .call(
+            "PUT",
+            Some(&fixture.owner_cookie),
+            Some(json!({ "bindings": { "task.create": "N" } })),
+        )
         .await;
     assert_eq!(fixture.get(&other).await, json!({ "bindings": {} }));
     fixture
-        .call("PUT", Some(&other), Some(json!({ "bindings": { "task.create": "M" } })))
+        .call(
+            "PUT",
+            Some(&other),
+            Some(json!({ "bindings": { "task.create": "M" } })),
+        )
         .await;
-    assert_eq!(fixture.get(&fixture.owner_cookie).await, json!({ "bindings": { "task.create": "N" } }));
+    assert_eq!(
+        fixture.get(&fixture.owner_cookie).await,
+        json!({ "bindings": { "task.create": "N" } })
+    );
 }
 
 #[tokio::test]
@@ -193,6 +229,8 @@ async fn shortcuts_need_a_session() {
     let fixture = Fixture::new().await;
     let (status, _) = fixture.call("GET", None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, _) = fixture.call("PUT", None, Some(json!({ "bindings": {} }))).await;
+    let (status, _) = fixture
+        .call("PUT", None, Some(json!({ "bindings": {} })))
+        .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

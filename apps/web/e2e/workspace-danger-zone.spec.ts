@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 for (const width of [390, 1280]) {
   test(`workspace deletion requires confirmation at ${width}px`, async ({ page }) => {
@@ -7,8 +8,8 @@ for (const width of [390, 1280]) {
     let finishDeletion!: () => void
     const pendingDeletion = new Promise<void>((resolve) => { finishDeletion = resolve })
     const workspaces = [
-      { id: 'alpha', name: 'Alpha', role: 'owner', version: 7 },
-      { id: 'beta', name: 'Beta', role: 'owner', version: 1 },
+      testWorkspace('owner', { id: 'alpha', name: 'Alpha', version: 7 }),
+      testWorkspace('owner', { id: 'beta', name: 'Beta' }),
     ]
     await page.route('**/api/v1/**', async (route) => {
       const url = new URL(route.request().url())

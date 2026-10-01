@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 test.use({ viewport: { width: 1280, height: 800 } })
 
@@ -101,7 +102,7 @@ async function mockApi(page: Page, person: Person, store: Store) {
 
     if (path.endsWith('/setup/status')) return json({ complete: true })
     if (path.endsWith('/auth/me')) return json({ id: person.id, display_name: person.display_name, email: person.email })
-    if (path === '/api/v1/workspaces') return json([{ id: 'alpha', name: 'Alpha', role: person.role, version: 1 }])
+    if (path === '/api/v1/workspaces') return json([testWorkspace(person.role, { id: 'alpha', name: 'Alpha' })])
     if (path === `${WS}/members`) {
       return json({
         items: PEOPLE.map((p, index) => ({ id: `membership-${index}`, user_id: p.id, display_name: p.display_name, email: p.email, role: p.role, version: 1, created_at: '2026-09-01T12:00:00Z' })),

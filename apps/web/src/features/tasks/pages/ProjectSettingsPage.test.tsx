@@ -5,11 +5,12 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { ProjectSettingsPage } from './ProjectSettingsPage'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1 }
 const status = (id: string, name: string, category: string, position: number) => ({
   id, workspace_id: 'workspace-1', project_id: 'project-1', name, description: '', color: '#8b8f98', category, position, version: 1,

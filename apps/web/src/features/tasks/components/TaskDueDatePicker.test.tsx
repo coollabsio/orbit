@@ -3,10 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
-import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { TaskDetail } from './TaskDetail'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 
@@ -14,7 +14,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
+const workspace = testWorkspace()
 
 function Wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })

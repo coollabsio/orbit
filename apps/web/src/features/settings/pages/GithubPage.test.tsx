@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { GithubPage } from './GithubPage'
 import { waitForAbsence } from '@/test/waitForAbsence'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 const originalSubmit = HTMLFormElement.prototype.submit
@@ -12,7 +13,7 @@ afterEach(() => { globalThis.fetch = originalFetch; HTMLFormElement.prototype.su
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+  const workspace = testWorkspace()
   return render(<QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><GithubPage /></WorkspaceContext.Provider></QueryClientProvider>)
 }
 

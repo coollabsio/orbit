@@ -16065,7 +16065,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, task_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16213,7 +16213,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, task_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20106,7 +20106,8 @@
         "required": [
           "id",
           "email",
-          "display_name"
+          "display_name",
+          "installation_admin"
         ],
         "properties": {
           "display_name": {
@@ -20117,6 +20118,10 @@
           },
           "id": {
             "type": "string"
+          },
+          "installation_admin": {
+            "type": "boolean",
+            "description": "May manage backups, the global audit log and account suspension."
           }
         }
       },
@@ -23475,6 +23480,23 @@
           }
         }
       },
+      "Permission": {
+        "type": "string",
+        "description": "A workspace capability that depends on the member's role. Actions open to\nevery member (tasks, projects, attachments, docs) are not listed here.",
+        "enum": [
+          "workspace.update",
+          "workspace.delete",
+          "workspace.transfer",
+          "members.manage",
+          "audit.view",
+          "api_tokens.manage",
+          "integrations.manage",
+          "teamspaces.delete",
+          "pages.purge",
+          "views.manage_shared",
+          "comments.moderate"
+        ]
+      },
       "PreviewInvitationBody": {
         "type": "object",
         "required": [
@@ -25341,6 +25363,7 @@
           "id",
           "name",
           "role",
+          "permissions",
           "version"
         ],
         "properties": {
@@ -25357,8 +25380,15 @@
           "name": {
             "type": "string"
           },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "description": "What the caller's role may do in this workspace."
+          },
           "role": {
-            "type": "string"
+            "$ref": "#/components/schemas/WorkspaceRole"
           },
           "version": {
             "type": "integer",
@@ -25366,6 +25396,14 @@
             "minimum": 0
           }
         }
+      },
+      "WorkspaceRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "admin",
+          "member"
+        ]
       }
     },
     "securitySchemes": {

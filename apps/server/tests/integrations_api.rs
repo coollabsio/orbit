@@ -1016,6 +1016,96 @@ async fn development_github_registration_uses_the_browser_https_origin() {
     assert_eq!(saved_origin, "https://orbit-tunnel.example");
 }
 
+#[tokio::test]
+async fn members_read_github_settings_but_cannot_change_them() {
+    let fixture = fixture().await;
+    let identity = IdentityRepository::new((*fixture.database).clone());
+    let state = IntegrationState::new(
+        Arc::new(fixture.tokens.clone()),
+        Arc::new(TaskRepository::new((*fixture.database).clone())),
+    )
+    .with_github_settings(
+        Arc::new(identity.clone()),
+        CookieMode::secure(),
+        "https://orbit.test".to_owned(),
+        false,
+        Some([7u8; 32]),
+    );
+    let app = integration_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    let member_id = orbit_platform::Id::new_v7();
+    let now = TimestampMillis::now();
+    sqlx::query(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+         VALUES (?, 'member@example.com', 'member@example.com', 'Member', 'unused', ?, ?)",
+    )
+    .bind(member_id.to_string())
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+    )
+    .bind(orbit_platform::Id::new_v7().to_string())
+    .bind(fixture.workspace_id.to_string())
+    .bind(member_id.to_string())
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let session = identity
+        .create_session(
+            &orbit_platform::AuthenticatedUser {
+                id: member_id,
+                email: "member@example.com".to_owned(),
+                display_name: "Member".to_owned(),
+            },
+            now,
+        )
+        .await
+        .unwrap();
+    let member_cookie = format!("__Host-orbit_session={}", session.token);
+    let workspace_path = format!("/api/v1/workspaces/{}/github", fixture.workspace_id);
+
+    let settings = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&workspace_path)
+                .header(header::COOKIE, &member_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(settings.status(), StatusCode::OK);
+    assert_eq!(response_json(settings).await["can_manage"], false);
+
+    let register = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("{workspace_path}/manifest"))
+                .header(header::COOKIE, &member_cookie)
+                .header(header::ORIGIN, "https://orbit.test")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(register.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        response_json(register).await["code"],
+        "github_manager_required"
+    );
+}
+
 fn encrypt_for_test(key: &[u8; 32], value: &str) -> Vec<u8> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);

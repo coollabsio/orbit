@@ -7,6 +7,7 @@ import { queryKeys } from '@/api/queryKeys'
 import type { User } from '@/features/workspaces/models'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { MembersPage } from './MembersPage'
+import { testWorkspace } from '@/test/workspace'
 
 const member = (id: string, role: User['role']): User => ({
   id, membershipId: `membership-${id}`, name: id, handle: id, email: `${id}@orbit.test`, role,
@@ -21,7 +22,7 @@ test('mounted member management excludes ordinary owner roles and exposes protec
     id: 'accepted', workspace_id: 'workspace-1', email: 'accepted@orbit.test', role: 'member',
     status: 'accepted', delivery: 'manual', created_at: '', expires_at: '2026-09-12T00:00:00Z',
   }], next_cursor: null })
-  const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 7 }
+  const workspace = testWorkspace('owner', { version: 7 })
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider>
   const view = render(<MembersPage />, { wrapper })
 
@@ -37,7 +38,7 @@ test('page size options escape the card and changing size resets pagination', as
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
   client.setQueryData(queryKeys.currentUser, { id: 'member-0' })
   client.setQueryData(queryKeys.members('pagination-workspace'), Array.from({ length: 30 }, (_, i) => member(`member-${i}`, 'Member')))
-  const workspace = { id: 'pagination-workspace', name: 'Orbit', role: 'member', version: 1 }
+  const workspace = testWorkspace('member', { id: 'pagination-workspace' })
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider>
   const view = render(<MembersPage />, { wrapper })
 

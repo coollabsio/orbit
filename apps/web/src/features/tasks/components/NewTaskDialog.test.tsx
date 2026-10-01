@@ -7,6 +7,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { NewTaskDialog } from './NewTaskDialog'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -14,7 +15,7 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true }
 const status = (id: string, name: string, category: string, position: number) => ({ id, project_id: 'project-1', name, description: '', color: '#888', category, position, version: 1 })
 

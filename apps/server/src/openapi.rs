@@ -749,6 +749,9 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     if matches!(operation_id, "update_task" | "bulk_tasks") {
         add_code(responses, "409", "github_content_read_only");
     }
+    if matches!(operation_id, "update_comment" | "delete_comment") {
+        add_code(responses, "403", "task_action_forbidden");
+    }
 }
 
 fn view_operation(operation_id: &str) -> bool {

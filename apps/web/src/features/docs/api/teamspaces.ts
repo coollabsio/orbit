@@ -7,11 +7,6 @@ import { queryKeys } from '@/api/queryKeys'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
-/** Only workspace owners and admins may delete a teamspace (the server answers 403 for members). */
-export function canDeleteTeamspaces(role: string | null | undefined): boolean {
-  return role === 'owner' || role === 'admin'
-}
-
 /** A user-facing sentence for a failed teamspace delete. */
 export function teamspaceDeleteError(error: unknown): string {
   if (error instanceof ApiProblem) {

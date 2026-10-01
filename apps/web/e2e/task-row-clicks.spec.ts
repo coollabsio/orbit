@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 for (const touch of [false, true]) {
   test.describe(touch ? 'touch task rows' : 'mouse task rows', () => {
@@ -19,7 +20,7 @@ for (const touch of [false, true]) {
         if (path.endsWith('/views')) body = []
         if (path.endsWith('/setup/status')) body = { complete: true }
         if (path.endsWith('/auth/me')) body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
-        if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+        if (path === '/api/v1/workspaces') body = [testWorkspace('owner', { id: 'alpha', name: 'Alpha' })]
         if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#123456', version: 1 }], next_cursor: null }
         if (path.endsWith('/statuses')) body = { items: [{ id: 'todo', project_id: 'project-1', name: 'Todo', category: 'unstarted', color: '#123456', position: 0, version: 1 }], next_cursor: null }
         if (path.endsWith('/tasks') || path.endsWith('/tasks/query')) body = { items: tasks, next_cursor: null }

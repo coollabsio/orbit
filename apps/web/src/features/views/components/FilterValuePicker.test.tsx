@@ -8,6 +8,7 @@ import { FILTER_OPTIONS } from '../testFixtures'
 import type { FilterOptions } from '../filterFields'
 import type { Condition } from '../viewState'
 import { FilterValuePicker } from './FilterValuePicker'
+import { testWorkspace } from '@/test/workspace'
 
 function Harness({ initial, onDone = () => {} }: { initial: Condition; onDone?: () => void }) {
   const [condition, setCondition] = useState(initial)
@@ -116,7 +117,7 @@ function renderTaskPicker(initial: Condition, options: FilterOptions = FILTER_OP
     if (path.endsWith('/projects')) return Response.json({ items: FILTER_OPTIONS.projects, next_cursor: null })
     return Response.json({ items: [taskRecord('task-0012', 'Checkout redesign'), taskRecord('task-0031', 'Payment form')], next_cursor: null })
   }) as unknown as typeof fetch
-  const workspace = { id: 'alpha', name: 'Alpha', role: 'owner' as const, version: 1 }
+  const workspace = testWorkspace('owner', { id: 'alpha', name: 'Alpha' })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   function TaskHarness() {
     const [condition, setCondition] = useState(initial)

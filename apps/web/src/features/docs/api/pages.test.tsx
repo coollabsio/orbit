@@ -275,12 +275,10 @@ test('upload failures map to short messages', async () => {
   expect(pageUploadErrorMessage(new Error('offline'))).toBe('Could not upload the file. Try again.')
 })
 
-test('only own private pages, or any page for owners and admins, can be deleted forever', () => {
-  expect(canPurgePage({ private: true }, 'member')).toBeTrue()
-  expect(canPurgePage({ private: false }, 'member')).toBeFalse()
-  expect(canPurgePage({ private: false }, undefined)).toBeFalse()
-  expect(canPurgePage({ private: false }, 'admin')).toBeTrue()
-  expect(canPurgePage({ private: false }, 'owner')).toBeTrue()
+test('only own private pages, or any page with the purge permission, can be deleted forever', () => {
+  expect(canPurgePage({ private: true }, false)).toBeTrue()
+  expect(canPurgePage({ private: false }, false)).toBeFalse()
+  expect(canPurgePage({ private: false }, true)).toBeTrue()
 })
 
 test('deleting forever sends expected_version to /permanent and drops the row from the trash cache', async () => {

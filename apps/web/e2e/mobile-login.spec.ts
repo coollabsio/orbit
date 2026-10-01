@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 test.use({ viewport: { width: 390, height: 740 }, isMobile: true, hasTouch: true })
 
@@ -32,7 +33,7 @@ test('login dismisses field focus and shows both toolbars without refreshing', a
       if (!loggedIn) { await route.fulfill({ status: 401, json: { status: 401, code: 'authentication_required' } }); return }
       body = user
     }
-    if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+    if (path === '/api/v1/workspaces') body = [testWorkspace('owner', { id: 'alpha', name: 'Alpha' })]
     await route.fulfill({ json: body })
   })
   await page.goto('/login')

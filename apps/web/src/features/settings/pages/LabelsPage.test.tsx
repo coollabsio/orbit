@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { registerConfirmationHandler } from '@/components/common/confirmAction'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { LabelsPage } from './LabelsPage'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 const label = { id: 'label-1', workspace_id: 'workspace-1', name: 'Bug', color: '#ef4444', version: 3 }
@@ -21,7 +22,7 @@ function renderPage() {
     return Response.json({ items: [label], next_cursor: null })
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  const workspace = { id: 'workspace-1', name: 'Orbit', role: 'member', version: 1 }
+  const workspace = testWorkspace('member')
   const view = render(<QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><LabelsPage /></WorkspaceContext.Provider></QueryClientProvider>)
   return { view, requests }
 }

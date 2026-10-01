@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { relativeTime, shortDate } from '@/lib/format'
+import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { SettingsCard } from '@/components/common/SettingsCard'
@@ -28,7 +29,7 @@ type ExpirationValue = typeof EXPIRATION_OPTIONS[number]['value']
 
 export function ApiTokensPage() {
   const { workspace } = useWorkspace()
-  const canManage = workspace.role === 'owner' || workspace.role === 'admin'
+  const canManage = useCan('api_tokens.manage')
   const tokens = useApiTokens(workspace.id, canManage)
   const projectsQuery = useProjects(workspace.id, canManage)
   const projects = projectsQuery.data ?? []

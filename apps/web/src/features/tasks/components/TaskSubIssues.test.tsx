@@ -8,6 +8,7 @@ import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { SubIssuesSection, type SubIssuesSectionProps } from './TaskSubIssues'
 import { keepIdentifiersTogether } from '@/lib/toast'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -15,7 +16,7 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1 } as Project
 const todo: TaskStatusDef = { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#888', category: 'unstarted', position: 0, version: 1 }
 const done: TaskStatusDef = { id: 'done', projectId: 'project-1', name: 'Done', description: '', color: '#4cb782', category: 'completed', position: 1, version: 1 }

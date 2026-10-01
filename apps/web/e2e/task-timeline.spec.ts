@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 test.use({ viewport: { width: 1280, height: 800 }, timezoneId: 'Europe/Berlin' })
 
@@ -43,7 +44,7 @@ test('drag a timeline bar, then open the task and come back to the same layout',
     if (path.endsWith('/views')) body = []
     if (path.endsWith('/setup/status')) body = { complete: true }
     if (path.endsWith('/auth/me')) body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
-    if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+    if (path === '/api/v1/workspaces') body = [testWorkspace('owner', { id: 'alpha', name: 'Alpha' })]
     if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#e0457b', version: 1 }], next_cursor: null }
     if (path.endsWith('/statuses')) body = { items: [{ id: 'todo', project_id: 'project-1', name: 'Todo', category: 'unstarted', color: '#888888', position: 0, version: 1 }], next_cursor: null }
     if (path.endsWith('/tasks/query')) body = { items: [task], next_cursor: null }
@@ -99,7 +100,7 @@ test.describe('narrow screens', () => {
       if (path.endsWith('/views')) body = []
       if (path.endsWith('/setup/status')) body = { complete: true }
       if (path.endsWith('/auth/me')) body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
-      if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+      if (path === '/api/v1/workspaces') body = [testWorkspace('owner', { id: 'alpha', name: 'Alpha' })]
       if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#e0457b', version: 1 }], next_cursor: null }
       if (path.endsWith('/statuses')) body = { items: [{ id: 'todo', project_id: 'project-1', name: 'Todo', category: 'unstarted', color: '#888888', position: 0, version: 1 }], next_cursor: null }
       if (path.endsWith('/tasks/query')) body = { items: tasks, next_cursor: null }

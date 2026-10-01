@@ -1,6 +1,4 @@
-use orbit_domain::{
-    Action, Membership, Policy, PolicyError, Role, TargetRole, WorkspaceRole, platform::Id,
-};
+use orbit_domain::{Membership, Permission, Policy, PolicyError, WorkspaceRole, platform::Id};
 
 #[test]
 fn workspace_requires_exactly_one_owner() {
@@ -62,66 +60,35 @@ fn each_workspace_owner_is_valid_in_a_combined_membership_slice() {
 }
 
 #[test]
-fn owner_must_transfer_ownership_before_leaving() {
-    assert_eq!(
-        Policy::authorize(Role::Owner, Action::LeaveWorkspace, TargetRole::Owner),
-        Err(PolicyError::TransferOwnershipRequired)
-    );
+fn owner_holds_every_permission() {
+    assert_eq!(Policy::permissions(WorkspaceRole::Owner), Permission::ALL);
 }
 
 #[test]
-fn admin_cannot_remove_or_change_owner() {
-    assert_eq!(
-        Policy::authorize(Role::Admin, Action::RemoveMembership, TargetRole::Owner),
-        Err(PolicyError::OwnerProtected)
-    );
-    assert_eq!(
-        Policy::authorize(Role::Admin, Action::ChangeMembershipRole, TargetRole::Owner),
-        Err(PolicyError::OwnerProtected)
-    );
-}
-
-#[test]
-fn member_can_create_edit_delete_and_restore_task_content() {
-    let content_actions = [
-        Action::CreateProject,
-        Action::EditProject,
-        Action::DeleteProject,
-        Action::RestoreProject,
-        Action::CreateStatus,
-        Action::EditStatus,
-        Action::DeleteStatus,
-        Action::CreateTask,
-        Action::EditTask,
-        Action::DeleteTask,
-        Action::RestoreTask,
-        Action::CreateComment,
-        Action::EditComment,
-        Action::DeleteComment,
-        Action::CreateAttachment,
-        Action::DeleteAttachment,
-    ];
-
-    for action in content_actions {
+fn admin_holds_every_permission_except_the_owner_only_ones() {
+    let owner_only = [Permission::WorkspaceDelete, Permission::WorkspaceTransfer];
+    for permission in Permission::ALL {
         assert_eq!(
-            Policy::authorize(Role::Member, action, TargetRole::NotApplicable),
-            Ok(()),
-            "member should be allowed to {action:?}"
+            Policy::can(WorkspaceRole::Admin, permission),
+            !owner_only.contains(&permission),
+            "admin and {permission:?}"
         );
     }
 }
 
 #[test]
-fn workspace_authorization_rejects_cross_workspace_access() {
-    let membership = Membership::new(Id::new_v7(), Id::new_v7(), WorkspaceRole::Owner);
+fn member_holds_no_role_permission() {
+    assert_eq!(Policy::permissions(WorkspaceRole::Member), []);
+}
 
-    assert_eq!(
-        Policy::authorize_in_workspace(
-            &membership,
-            Id::new_v7(),
-            Action::CreateTask,
-            TargetRole::NotApplicable,
-        ),
-        Err(PolicyError::WorkspaceMismatch)
-    );
+#[test]
+fn roles_round_trip_through_their_stored_names() {
+    for role in [
+        WorkspaceRole::Owner,
+        WorkspaceRole::Admin,
+        WorkspaceRole::Member,
+    ] {
+        assert_eq!(WorkspaceRole::parse(role.as_str()), Some(role));
+    }
+    assert_eq!(WorkspaceRole::parse("guest"), None);
 }

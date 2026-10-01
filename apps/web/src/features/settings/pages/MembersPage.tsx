@@ -14,6 +14,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCurrentUser } from '@/features/auth/api'
 import { useChangeMemberRole, useCreateInvitation, useInvitations, useMembers, useRemoveMember, useRevokeInvitation, useTransferOwnership } from '@/features/workspaces/api'
+import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { User } from '@/features/workspaces/models'
 import { INVITABLE_ROLES, canManageMember, canTransferOwnership } from '@/features/settings/memberPermissions'
@@ -44,7 +45,8 @@ function initial(user: User) {
 
 export function MembersPage() {
   const { workspace } = useWorkspace()
-  const canManage = workspace.role === 'owner' || workspace.role === 'admin'
+  const canManage = useCan('members.manage')
+  const canTransfer = useCan('workspace.transfer')
   const currentUser = useCurrentUser()
   const membersQuery = useMembers(workspace.id)
   const createInvitation = useCreateInvitation(workspace.id)
@@ -214,7 +216,7 @@ export function MembersPage() {
                     <Badge variant="secondary">{user.role}</Badge>
                   </div>
                   <div className="flex justify-end">
-                    {canManage && canManageMember(workspace.role, currentUser.data?.id, user) ? (
+                    {canManageMember(canManage, currentUser.data?.id, user) ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={<Button variant="outline" size="sm" className="text-[11px]" />}
@@ -230,7 +232,7 @@ export function MembersPage() {
                               Make {role.toLowerCase()}
                             </DropdownMenuItem>
                           ))}
-                          {canTransferOwnership(workspace.role, currentUser.data?.id, user) ? (
+                          {canTransferOwnership(canTransfer, currentUser.data?.id, user) ? (
                             <DropdownMenuItem onClick={async () => {
                               if (await confirmAction({ title: `Transfer ownership of ${workspace.name} to ${user.name}?`, confirmLabel: 'Transfer ownership', danger: true })) {
                                 transferOwnership.mutate({ membershipId: user.membershipId, membershipVersion: user.version, workspaceVersion: workspace.version })

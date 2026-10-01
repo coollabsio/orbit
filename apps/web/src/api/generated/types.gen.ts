@@ -99,6 +99,10 @@ export type AuthUserResponse = {
     display_name: string;
     email: string;
     id: string;
+    /**
+     * May manage backups, the global audit log and account suspension.
+     */
+    installation_admin: boolean;
 };
 
 export type AuthenticatedUser = {
@@ -1274,6 +1278,12 @@ export type PageTaskRecord = {
     next_cursor?: string | null;
 };
 
+/**
+ * A workspace capability that depends on the member's role. Actions open to
+ * every member (tasks, projects, attachments, docs) are not listed here.
+ */
+export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate';
+
 export type PreviewInvitationBody = {
     token: string;
 };
@@ -1879,9 +1889,15 @@ export type WorkspaceRecord = {
     deleted_at?: string | null;
     id: string;
     name: string;
-    role: string;
+    /**
+     * What the caller's role may do in this workspace.
+     */
+    permissions: Array<Permission>;
+    role: WorkspaceRole;
     version: number;
 };
+
+export type WorkspaceRole = 'owner' | 'admin' | 'member';
 
 export type ListGlobalAuditData = {
     body?: never;
@@ -8931,7 +8947,7 @@ export type DeleteCommentErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, task_action_forbidden
      */
     403: TaskProblem;
     /**
@@ -8991,7 +9007,7 @@ export type UpdateCommentErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, task_action_forbidden
      */
     403: TaskProblem;
     /**

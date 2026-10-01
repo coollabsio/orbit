@@ -11,6 +11,7 @@ import type { GroupContext } from '@/features/views/grouping'
 import { DEFAULT_DISPLAY, type GroupBy, type TaskProperty } from '@/features/views/viewState'
 import { TaskTimeline } from './TaskTimeline'
 import { computeRange, dayIndex, rowDates } from './timelineLib'
+import { testWorkspace } from '@/test/workspace'
 
 // set before any fixture below is built, so every local date is a Berlin date (DST-bearing zone)
 const originalTz = process.env.TZ
@@ -55,7 +56,7 @@ function timelineElement(tasks: Task[], extra: Extra = {}) {
 }
 
 function renderTimeline(tasks: Task[], extra: Extra = {}) {
-  const workspace: WorkspaceRecord = { id: 'ws', name: 'Orbit', role: 'owner', version: 1 }
+  const workspace = testWorkspace('owner', { id: 'ws' })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -230,7 +231,7 @@ test('arrow keys move a focused bar; shift+arrow changes the end date; enter ope
 
 test('ctrl+wheel zooms in and plain wheel does not', () => {
   const zooms: number[] = []
-  const workspace = { id: 'ws', name: 'Orbit', role: 'owner', version: 1 } as WorkspaceRecord
+  const workspace = testWorkspace('owner', { id: 'ws' }) as WorkspaceRecord
   const client = new QueryClient()
   const view = render(
     <QueryClientProvider client={client}>

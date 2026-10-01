@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { testWorkspace } from '../src/test/workspace'
 
 for (const mode of ['desktop', 'collapsed', 'mobile']) {
   test(`${mode} sidebar shows the signed-in profile and supports logout retry`, async ({ page }) => {
@@ -30,7 +31,7 @@ for (const mode of ['desktop', 'collapsed', 'mobile']) {
       if (path.endsWith('/views')) body = []
       if (path === '/api/v1/setup/status') body = { complete: true }
       if (path === '/api/v1/auth/me') body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
-      if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+      if (path === '/api/v1/workspaces') body = [testWorkspace('owner', { id: 'alpha', name: 'Alpha' })]
       await route.fulfill({ json: body })
     })
     await page.goto('/tasks?workspace=alpha')

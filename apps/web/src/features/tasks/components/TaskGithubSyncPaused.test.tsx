@@ -6,11 +6,12 @@ import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { TaskDetail } from './TaskDetail'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const task: Task = {
   id: 'task-1', identifier: 'ORB-1', title: 'GitHub task', description: '', sourceUrl: 'https://github.com/acme/repo/issues/12', statusId: 'todo',
   position: 0, priority: 'none', assigneeIds: [], creatorId: 'user-1', projectId: 'project-1',

@@ -6,13 +6,14 @@ import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { render } from '@/test/render'
 import { NewTaskProvider, useCreateTaskDefaults } from './newTask'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const project = (id: string, name: string) => ({ id, workspace_id: 'workspace-1', name, key: name.slice(0, 3).toUpperCase(), color: '#e0457b', created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true })
 
 function api() {

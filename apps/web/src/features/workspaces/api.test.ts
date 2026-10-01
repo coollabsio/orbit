@@ -8,14 +8,14 @@ test('workspaces are loaded through the generated client boundary', async () => 
   const client = createApiClient({
     fetch: async (request) => {
       path = new URL(request.url).pathname
-      return Response.json([{ id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }])
+      return Response.json([{ id: 'workspace-1', name: 'Orbit', role: 'owner', permissions: [], version: 1 }])
     },
   })
 
   const result = await workspacesQueryOptions(client).queryFn()
 
   expect(path).toBe('/api/v1/workspaces')
-  expect(result).toEqual([{ id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }])
+  expect(result).toEqual([{ id: 'workspace-1', name: 'Orbit', role: 'owner', permissions: [], version: 1 }])
 })
 
 test('member records preserve membership versions for protected mutations', () => {

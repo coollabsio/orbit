@@ -46,7 +46,7 @@ function serve(override: (request: Recorded) => Response | Promise<Response> | u
     const answer = await override(entry)
     if (answer) return answer
     const { path } = entry
-    if (path === '/api/v1/workspaces') return Response.json([{ id: 'workspace-1', name: 'Alpha', role: 'owner', version: 1 }])
+    if (path === '/api/v1/workspaces') return Response.json([{ id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 }])
     if (path.endsWith('/auth/me')) return Response.json({ id: 'user-1', display_name: 'Ann', email: 'ann@example.com' })
     if (path.endsWith('/projects')) return Response.json({ items: [
       { id: 'project-1', name: 'Launch', key: 'LCH', color: '#e0457b', version: 1 },
@@ -80,7 +80,7 @@ function GoTo({ to }: { to: string }) {
 function renderAt(url: string, goTo?: string | string[]) {
   // retries stay on (the hooks set them), but run at once
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 }, mutations: { retry: false } } })
-  client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', version: 1 }])
+  client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 }])
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[url]}>

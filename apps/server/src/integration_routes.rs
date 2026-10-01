@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use hmac::{Hmac, Mac};
+use orbit_domain::{Permission, Policy};
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis, generate_opaque_token};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -280,7 +281,7 @@ async fn github_workspace_access(
             request_id,
         )
     })?;
-    Ok((workspace_id, role != "member"))
+    Ok((workspace_id, can_manage_integrations(&role)))
 }
 
 async fn github_project_access(
@@ -321,7 +322,11 @@ async fn github_project_access(
             request_id,
         )
     })?;
-    Ok((workspace_id, project_id, role != "member"))
+    Ok((workspace_id, project_id, can_manage_integrations(&role)))
+}
+
+fn can_manage_integrations(role: &str) -> bool {
+    Policy::stored_role_can(role, Permission::IntegrationsManage)
 }
 
 fn require_github_manager(

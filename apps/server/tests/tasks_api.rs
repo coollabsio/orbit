@@ -1502,6 +1502,72 @@ async fn comments_are_scoped_versioned_and_hard_deleted() {
 }
 
 #[tokio::test]
+async fn only_the_author_edits_a_comment_and_only_the_author_or_a_manager_deletes_it() {
+    let fixture = Fixture::new().await;
+    let (author_id, author_cookie) = add_member(&fixture, "author@example.com").await;
+    let (_, other_cookie) = add_member(&fixture, "other@example.com").await;
+    let task = fixture.create_task("Discuss").await;
+    let uri = format!(
+        "/api/v1/workspaces/{}/tasks/{}/comments",
+        fixture.workspace_id,
+        task["id"].as_str().unwrap()
+    );
+    let comment = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &uri,
+                &author_cookie,
+                json!({"body":"Mine"}),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(comment["author_id"], author_id.to_string());
+    let comment_uri = format!("{uri}/{}", comment["id"].as_str().unwrap());
+    let edit = |cookie: &str| {
+        json_request(
+            "PATCH",
+            &comment_uri,
+            cookie,
+            json!({"body":"Edited", "expected_version":0}),
+        )
+    };
+    let delete = |cookie: &str| {
+        cookie_request(
+            "DELETE",
+            &format!("{comment_uri}?expected_version=0"),
+            cookie,
+        )
+    };
+
+    // A manager moderates by deleting, never by rewriting another member's words.
+    for cookie in [&other_cookie, &fixture.owner_cookie] {
+        let denied = fixture.app.clone().oneshot(edit(cookie)).await.unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response_json(denied).await["code"], "task_action_forbidden");
+    }
+    let denied = fixture
+        .app
+        .clone()
+        .oneshot(delete(&other_cookie))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    let deleted = fixture
+        .app
+        .clone()
+        .oneshot(delete(&fixture.owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
 async fn parent_side_scope_changes_are_rejected_by_the_database() {
     let fixture = Fixture::new().await;
     let foreign_workspace = create_workspace(&fixture, "Foreign scope").await;

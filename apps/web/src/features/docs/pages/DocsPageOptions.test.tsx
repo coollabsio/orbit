@@ -82,7 +82,7 @@ function setup(pageRef: { current: Page }, extra: (call: Call) => Response | und
     return Response.json({ code: 'not_found' }, { status: 404 })
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
-  client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'member', version: 1 }])
+  client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'member', permissions: [], version: 1 }])
   const view = render(
     <QueryClientProvider client={client}>
       <CollabConnectContext value={collab.connect}>

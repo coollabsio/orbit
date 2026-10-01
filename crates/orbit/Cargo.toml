@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 orbit-platform = { path = "../platform" }
+serde = { version = "1", features = ["derive"] }
+utoipa = "5"

@@ -1338,6 +1338,8 @@ name = "orbit-domain"
 version = "0.1.0"
 dependencies = [
  "orbit-platform",
+ "serde",
+ "utoipa",
 ]
 
 [[package]]

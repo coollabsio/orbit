@@ -6,7 +6,6 @@ import type { Teamspace } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import {
-  canDeleteTeamspaces,
   reorderTeamspaces,
   teamspaceDeleteError,
   teamspaceDropIndex,
@@ -117,7 +116,7 @@ test('delete sends expected_version and drops the teamspace; refusals keep it an
   expect(client.getQueryData<Teamspace[]>(key)?.map((item) => item.id)).toEqual(['t1'])
 })
 
-test('error sentences and role gate', () => {
+test('error sentences', () => {
   expect(teamspaceDeleteError(new ApiProblem({ type: 'about:blank', title: 'x', status: 422, code: 'last_teamspace', detail: 'x', instance: '/', request_id: 'r' }))).toBe(
     'A workspace keeps at least one teamspace.',
   )
@@ -125,9 +124,6 @@ test('error sentences and role gate', () => {
     'owners and admins',
   )
   expect(teamspaceDeleteError(new Error('offline'))).toBe('Could not delete the teamspace.')
-  expect(canDeleteTeamspaces('owner')).toBeTrue()
-  expect(canDeleteTeamspaces('admin')).toBeTrue()
-  expect(canDeleteTeamspaces('member')).toBeFalse()
 })
 
 test('drop index: before/after another teamspace, counted without the dragged one; no-op drops are null', () => {

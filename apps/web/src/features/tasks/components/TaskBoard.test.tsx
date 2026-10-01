@@ -3,13 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, createEvent, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
-import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from '@/features/views/grouping'
 import { DEFAULT_DISPLAY, type DisplayOptions } from '@/features/views/viewState'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { TaskBoard } from './TaskBoard'
 import { waitForAbsence } from '@/test/waitForAbsence'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -17,7 +17,7 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
+const workspace = testWorkspace()
 const todo: TaskStatusDef = { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#aaa', category: 'unstarted', position: 0, version: 1 }
 const doing: TaskStatusDef = { id: 'doing', projectId: 'project-1', name: 'Doing', description: '', color: '#bbb', category: 'started', position: 1, version: 1 }
 const duplicate: TaskStatusDef = { id: 'dup', projectId: 'project-1', name: 'Duplicate', description: '', color: '#8b8f98', category: 'duplicate', position: 2, version: 1 }

@@ -7,11 +7,12 @@ import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
 import { TaskDetail } from './TaskDetail'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
-const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner' as const, version: 1 }
+const workspace = testWorkspace()
 const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true }
 const todo: TaskStatusDef = { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#888', category: 'unstarted', position: 0, version: 1 }
 const duplicateStatus: TaskStatusDef = { id: 'dup', projectId: 'project-1', name: 'Duplicate', description: '', color: '#8b8f98', category: 'duplicate', position: 1, version: 1 }

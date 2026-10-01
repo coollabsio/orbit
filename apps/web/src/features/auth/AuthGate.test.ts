@@ -21,7 +21,7 @@ describe('AuthGate state', () => {
     expect(
       authGateState({
         setupComplete: true,
-        user: { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner' },
+        user: { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true },
         userStatus: 'success',
       }),
     ).toBe('authenticated')

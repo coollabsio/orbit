@@ -134,3 +134,8 @@
 
 ## Brand mark
 - The logo is the pink pixel "O" in `apps/web/public/logo.svg` (11x11 grid, pink `#f2458f`, shadow `#742f4d` 1 unit down-right). `favicon.svg`, the PNG app icons and the launch-video `OrbitMark` copy it; change them together. The UI `--primary`/`--sidebar-primary` tokens (both themes) use the same pink, `oklch(0.659 0.216 358.989)`, with white foreground. Show it at multiples of 11px (22, 44…) so pixels stay crisp.
+
+## Permissions
+- Role rules live only in `crates/orbit/src/policy.rs` (`Permission`, `Policy::can`). The server never compares role names elsewhere, and the web app never compares `workspace.role`: it reads `workspace.permissions` through `useCan(...)` and `installation_admin` through `useIsInstallationAdmin()` (`features/workspaces/permissions.ts`). A new role-gated action is a new `Permission` variant plus `just api`.
+- Build workspace fixtures in web tests and e2e mocks with `testWorkspace(role)` (`src/test/workspace.ts`). Hand-written literals passed to `setQueryData` or `Response.json` are untyped, so a new required field breaks them only at run time.
+

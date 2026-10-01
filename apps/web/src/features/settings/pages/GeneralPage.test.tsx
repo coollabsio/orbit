@@ -2,16 +2,19 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { queryKeys } from '@/api/queryKeys'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { GeneralPage } from './GeneralPage'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 beforeEach(() => { globalThis.fetch = (async () => Response.json({ items: [] })) as unknown as typeof fetch })
 afterEach(() => { globalThis.fetch = originalFetch })
 
-function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const workspace = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 7 }
+function renderPage({ installationAdmin = true }: { installationAdmin?: boolean } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client.setQueryData(queryKeys.currentUser, { id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: installationAdmin })
+  const workspace = testWorkspace('owner', { version: 7 })
   return render(
     <QueryClientProvider client={client}>
       <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
@@ -61,14 +64,15 @@ test('creating a backup refreshes the list with a download link', async () => {
   expect(view.getByText('2.0 KB · 3 files · Orbit 0.1.0')).toBeTruthy()
 })
 
-test('a user who is not an installation administrator does not see the Backup card', async () => {
-  globalThis.fetch = (async () => Response.json(
-    { type: 'about:blank', title: 'Installation administrator required', status: 403, code: 'installation_admin_required', detail: 'Denied.' },
-    { status: 403, headers: { 'content-type': 'application/problem+json' } },
-  )) as unknown as typeof fetch
-  const view = renderPage()
+test('a user who is not an installation administrator gets no Backup card and no backup request', async () => {
+  let requests = 0
+  globalThis.fetch = (async () => {
+    requests += 1
+    return Response.json({ items: [] })
+  }) as unknown as typeof fetch
+  const view = renderPage({ installationAdmin: false })
   await view.findByLabelText('Version')
   await new Promise((resolve) => setTimeout(resolve, 20))
   expect(view.queryAllByText('Backup')).toHaveLength(0)
-  expect(view.queryAllByRole('alert')).toHaveLength(0)
+  expect(requests).toBe(0)
 })

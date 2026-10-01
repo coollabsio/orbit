@@ -164,6 +164,9 @@ async fn workspace_memberships_invitations_and_audit_are_path_scoped() {
     let listed = response_json(listed).await;
     assert_eq!(listed[0]["id"], setup.0);
     assert_eq!(listed[0]["role"], "owner");
+    let permissions = listed[0]["permissions"].as_array().unwrap();
+    assert!(permissions.contains(&json!("workspace.delete")));
+    assert!(permissions.contains(&json!("members.manage")));
 
     let created = app
         .clone()

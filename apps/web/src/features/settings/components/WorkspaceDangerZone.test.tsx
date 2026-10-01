@@ -4,13 +4,16 @@ import { fireEvent, render, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
-import type { WorkspaceRecord } from '@/api/generated/types.gen'
+import type { WorkspaceRecord, WorkspaceRole } from '@/api/generated/types.gen'
+import { testWorkspace } from '@/test/workspace'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { waitForAbsence } from '@/test/waitForAbsence'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
+
+const BETA = testWorkspace('owner', { id: 'beta', name: 'Beta' })
 
 function Location() {
   const location = useLocation()
@@ -21,12 +24,12 @@ function SelectedWorkspace() {
   return <output data-testid="selected-workspace">{useWorkspace().workspace.name}</output>
 }
 
-function setup(role = 'owner', last = false) {
+function setup(role: WorkspaceRole = 'owner', last = false) {
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
   client.setQueryData(['workspaces'], [
-    { id: 'alpha', name: 'Alpha', role, version: 7 },
-    ...last ? [] : [{ id: 'beta', name: 'Beta', role: 'owner', version: 1 }],
+    testWorkspace(role, { id: 'alpha', name: 'Alpha', version: 7 }),
+    ...last ? [] : [BETA],
   ])
   const view = render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/settings/danger-zone?workspace=alpha']}>
     <WorkspaceProvider><DangerZonePage /><SelectedWorkspace /></WorkspaceProvider><Location />
@@ -62,7 +65,7 @@ test('confirmed deletion sends the workspace version, removes it and selects ano
   await view.findByText('Beta', { selector: 'output' })
   expect(request?.method).toBe('DELETE')
   expect(request?.url).toBe('http://localhost/api/v1/workspaces/alpha?expected_version=7')
-  expect(client.getQueryData<WorkspaceRecord[]>(['workspaces'])).toEqual([{ id: 'beta', name: 'Beta', role: 'owner', version: 1 }])
+  expect(client.getQueryData<WorkspaceRecord[]>(['workspaces'])).toEqual([BETA])
   expect(view.getByTestId('location').textContent).toBe('/settings?workspace=beta')
   expect(view.queryByRole('dialog')).toBeNull()
 })

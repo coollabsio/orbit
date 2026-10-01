@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { keepIdentifiersTogether } from '../src/lib/toast'
+import { testWorkspace } from '../src/test/workspace'
 
 test.use({ viewport: { width: 1280, height: 800 } })
 
@@ -91,7 +92,7 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
     if (path.endsWith('/views')) body = []
     if (path.endsWith('/setup/status')) body = { complete: true }
     if (path.endsWith('/auth/me')) body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
-    if (path === '/api/v1/workspaces') body = [{ id: 'alpha', name: 'Alpha', role: 'owner', version: 1 }]
+    if (path === '/api/v1/workspaces') body = [testWorkspace('owner', { id: 'alpha', name: 'Alpha' })]
     if (path.endsWith('/projects')) body = { items: [{ id: 'project-1', name: 'Launch', key: 'TEST', color: '#e0457b', version: 1, auto_close_parent: true, auto_close_sub_issues: true }], next_cursor: null }
     if (path.endsWith('/statuses')) {
       body = { items: [

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use orbit_domain::WorkspaceRole;
+use orbit_domain::{Permission, Policy};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -1069,7 +1069,7 @@ impl PageRepository {
             return Err(PageError::NotTrashed);
         }
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, true).await?;
-        if current.teamspace_id.is_some() && role == WorkspaceRole::Member {
+        if current.teamspace_id.is_some() && !Policy::can(role, Permission::PagesPurge) {
             return Err(PageError::Forbidden);
         }
         check_version(expected_version, current.version, &current)?;
@@ -1110,7 +1110,7 @@ impl PageRepository {
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
-        .bind(role != WorkspaceRole::Member)
+        .bind(Policy::can(role, Permission::PagesPurge))
         .fetch_all(&mut *tx)
         .await?
         .into_iter()

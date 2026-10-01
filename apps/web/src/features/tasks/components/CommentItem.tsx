@@ -11,6 +11,7 @@ import type { MentionToken } from '@/lib/mentions'
 import { renderMarkdownBlocks } from '@/lib/markdown'
 import type { TaskComment, TaskViewState } from '@/features/tasks/api/models'
 import { useDeleteTaskComment, useUpdateTaskComment } from '@/features/tasks/api/tasks'
+import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { agoLabel } from '@/features/tasks/tasksLib'
 
@@ -32,6 +33,8 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
   const [confirmDelete, setConfirmDelete] = useState(false)
   const author = state.users.find((u) => u.id === comment.authorId)
   const isAuthor = comment.authorId === state.currentUserId
+  // Only the author edits; a manager may still delete (`comments.moderate`).
+  const canDelete = useCan('comments.moderate') || isAuthor
   const name = author?.name ?? 'Someone'
 
   const commitEdit = () => {
@@ -64,24 +67,24 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
                   <Copy className="size-3.5" />
                 </Button>
                 {isAuthor ? (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="size-6 text-muted-foreground/70"
-                      aria-label="Edit comment"
-                      title="Edit comment"
-                      onClick={() => {
-                        setEditText(comment.body)
-                        setEditing(true)
-                      }}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive" aria-label="Delete comment" title="Delete comment" onClick={() => setConfirmDelete(true)}>
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-6 text-muted-foreground/70"
+                    aria-label="Edit comment"
+                    title="Edit comment"
+                    onClick={() => {
+                      setEditText(comment.body)
+                      setEditing(true)
+                    }}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                ) : null}
+                {canDelete ? (
+                  <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive" aria-label="Delete comment" title="Delete comment" onClick={() => setConfirmDelete(true)}>
+                    <Trash2 className="size-3.5" />
+                  </Button>
                 ) : null}
               </div>
             ) : null}

@@ -4,6 +4,7 @@ import { render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { ApiTokensPage } from './ApiTokensPage'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 
@@ -11,7 +12,7 @@ afterEach(() => { globalThis.fetch = originalFetch })
 
 function renderPage(role: 'owner' | 'admin' | 'member') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  const workspace = { id: 'workspace-1', name: 'Orbit', role, version: 1 }
+  const workspace = testWorkspace(role)
   return render(<QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><ApiTokensPage /></WorkspaceContext.Provider></QueryClientProvider>)
 }
 

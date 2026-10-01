@@ -3,7 +3,7 @@
 //! teamspace is derived, never stored: the lowest `(position, id)` in the workspace, so moving a
 //! teamspace to the top makes it the default.
 
-use orbit_domain::WorkspaceRole;
+use orbit_domain::Permission;
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::Value;
@@ -12,7 +12,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::tasks::{TaskError, record_mutation, require_access, require_access_tx};
-use super::workspaces::{WorkspaceError, require_role};
+use super::workspaces::{WorkspaceError, require_permission};
 
 /// Name of the teamspace every new workspace starts with.
 pub const DEFAULT_TEAMSPACE_NAME: &str = "General";
@@ -83,6 +83,7 @@ impl From<WorkspaceError> for TeamspaceError {
         match error {
             WorkspaceError::Unavailable(error) => Self::Unavailable(error),
             WorkspaceError::NotFound => Self::NotFound,
+            WorkspaceError::Forbidden => Self::Forbidden,
             _ => Self::Corrupt,
         }
     }
@@ -328,9 +329,13 @@ impl TeamspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), TeamspaceError> {
         let mut tx = self.database.immediate_transaction().await?;
-        if require_role(&mut tx, workspace_id, actor_id, false).await? == WorkspaceRole::Member {
-            return Err(TeamspaceError::Forbidden);
-        }
+        require_permission(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            Permission::TeamspacesDelete,
+        )
+        .await?;
         let current = teamspace_in_tx(&mut tx, workspace_id, teamspace_id).await?;
         check_version(expected_version, &current)?;
         let (teamspaces, live_pages): (i64, i64) = sqlx::query_as(

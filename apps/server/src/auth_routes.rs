@@ -127,7 +127,10 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/me", get(me).patch(update_me))
-        .route("/api/v1/auth/shortcuts", get(get_shortcuts).put(put_shortcuts))
+        .route(
+            "/api/v1/auth/shortcuts",
+            get(get_shortcuts).put(put_shortcuts),
+        )
         .route("/api/v1/auth/password", post(change_password))
         .route("/api/v1/auth/recovery/request", post(recovery_request))
         .route("/api/v1/auth/recovery/complete", post(recovery_complete))
@@ -318,6 +321,27 @@ struct AuthUserResponse {
     id: String,
     email: String,
     display_name: String,
+    /// May manage backups, the global audit log and account suspension.
+    installation_admin: bool,
+}
+
+async fn user_response(
+    state: &AuthState,
+    user: AuthenticatedUser,
+    instance: &'static str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<AuthUserResponse, ApiError> {
+    let installation_admin = state
+        .repository
+        .is_installation_admin(user.id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id))?;
+    Ok(AuthUserResponse {
+        id: user.id.to_string(),
+        email: user.email,
+        display_name: user.display_name,
+        installation_admin,
+    })
 }
 
 #[utoipa::path(post, path = "/api/v1/auth/login", request_body = LoginBody, responses((status = 200, body = LoginResponse), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
@@ -461,11 +485,7 @@ async fn login(
         }
     };
     let mut response = Json(LoginResponse {
-        user: AuthUserResponse {
-            id: user.id.to_string(),
-            email: user.email,
-            display_name: user.display_name,
-        },
+        user: user_response(&state, user, "/api/v1/auth/login", request_id.as_ref()).await?,
         session_id: session.id.to_string(),
     })
     .into_response();
@@ -523,12 +543,9 @@ async fn me(
     let session = authenticate(&state, &headers, "/api/v1/auth/me", request_id.as_ref()).await?;
     let token = cookie_value(&headers, cookie_name(state.cookie_mode))
         .expect("authenticate requires the session cookie");
-    let mut response = Json(AuthUserResponse {
-        id: session.user.id.to_string(),
-        email: session.user.email,
-        display_name: session.user.display_name,
-    })
-    .into_response();
+    let mut response =
+        Json(user_response(&state, session.user, "/api/v1/auth/me", request_id.as_ref()).await?)
+            .into_response();
     // Rewrite the cookie on each profile read. A browser that still has the old
     // session cookie then stores it with an expiry before the process stops.
     response.headers_mut().insert(
@@ -580,11 +597,13 @@ async fn update_me(
         )
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-    Ok(Json(AuthUserResponse {
-        id: session.user.id.to_string(),
-        email: session.user.email,
+    let user = AuthenticatedUser {
         display_name,
-    }))
+        ..session.user
+    };
+    Ok(Json(
+        user_response(&state, user, instance, request_id.as_ref()).await?,
+    ))
 }
 
 const MAX_SHORTCUT_BINDINGS: usize = 200;
@@ -1730,6 +1749,7 @@ mod tests {
         assert_eq!(patched.status(), StatusCode::OK);
         let patched: Value = serde_json::from_slice(&body(patched).await).unwrap();
         assert_eq!(patched["display_name"], "Ada Lovelace");
+        assert_eq!(patched["installation_admin"], true);
         assert_eq!(patched["email"], "Owner@Example.com");
         let workspace_event: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM audit_events WHERE action = 'member.profile_updated' AND workspace_id IS NOT NULL",

@@ -5,19 +5,19 @@ import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
-import type { WorkspaceRecord } from '@/api/generated/types.gen'
 import { WorkspaceSwitcher } from '@/app/shell/WorkspaceSwitcher'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { Task, TaskViewState } from '@/features/tasks/api/models'
 import { ProjectRail } from './ProjectRail'
 import { TaskDetail } from './TaskDetail'
+import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-const workspace: WorkspaceRecord = { id: 'workspace-1', name: 'Orbit', role: 'owner', version: 1 }
+const workspace = testWorkspace()
 
 function wrapper(selectWorkspace = mock(() => {})) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -49,7 +49,7 @@ test('workspace creation retry repeats form clearing and workspace selection', a
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     bodies.push(await (input as Request).json())
     calls += 1
-    return calls === 1 ? failure() : Response.json({ id: 'workspace-2', name: 'Second', role: 'owner', version: 0 }, { status: 201 })
+    return calls === 1 ? failure() : Response.json({ id: 'workspace-2', name: 'Second', role: 'owner', permissions: [], version: 0 }, { status: 201 })
   }) as unknown as typeof fetch
   const selectWorkspace = mock(() => {})
   const { Wrapper } = wrapper(selectWorkspace)
