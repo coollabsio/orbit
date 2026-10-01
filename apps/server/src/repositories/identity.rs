@@ -28,6 +28,7 @@ pub struct StoredIdentity {
     pub display_name: String,
     pub password_hash: String,
     pub suspended: bool,
+    pub installation_admin: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -466,8 +467,8 @@ impl IdentityRepository {
         email: &str,
     ) -> Result<Option<StoredIdentity>, IdentityError> {
         let row = sqlx::query(
-            "SELECT id, email, normalized_email, display_name, password_hash, suspended_at \
-             FROM users WHERE normalized_email = ?",
+            "SELECT id, email, normalized_email, display_name, password_hash, suspended_at, \
+             installation_admin FROM users WHERE normalized_email = ?",
         )
         .bind(normalize_email(email))
         .fetch_optional(self.database.pool())
@@ -1288,6 +1289,7 @@ fn decode_identity(row: sqlx::sqlite::SqliteRow) -> Result<StoredIdentity, Ident
         display_name: row.get("display_name"),
         password_hash: row.get("password_hash"),
         suspended: row.get::<Option<i64>, _>("suspended_at").is_some(),
+        installation_admin: row.get("installation_admin"),
     })
 }
 

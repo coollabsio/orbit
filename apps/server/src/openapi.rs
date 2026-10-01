@@ -445,11 +445,17 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         id if attachment_upload_operation(id) => {
             add_code(&mut responses, "400", "invalid_multipart");
+            if id == "upload_comment_attachments" {
+                add_code(&mut responses, "403", "task_action_forbidden");
+            }
             add_code(&mut responses, "404", "attachment_not_found");
             add_code(&mut responses, "413", "upload_too_large");
             add_code(&mut responses, "422", "validation_failed");
         }
         id if attachment_operation(id) => {
+            if id == "delete_comment_attachment" {
+                add_code(&mut responses, "403", "task_action_forbidden");
+            }
             add_code(&mut responses, "404", "attachment_not_found");
         }
         id if view_operation(id) => view_errors(id, &mut responses),

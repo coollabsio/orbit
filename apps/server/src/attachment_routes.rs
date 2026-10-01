@@ -359,16 +359,11 @@ async fn upload_comment_attachments(
     )
     .await?;
     let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
-    require_comment(
-        &state,
-        &session,
-        workspace_id,
-        task_id,
-        comment_id,
-        &instance,
-        request_id.as_ref(),
-    )
-    .await?;
+    state
+        .attachments
+        .require_comment_editor(&session, workspace_id, task_id, comment_id)
+        .await
+        .map_err(|error| AttachmentApiError::repository(error, &instance, request_id.as_ref()))?;
     let records = upload_fields(
         &state,
         request,
@@ -1028,6 +1023,14 @@ impl AttachmentApiError {
     ) -> Self {
         match error {
             AttachmentRepositoryError::NotFound => Self::not_found(instance, request_id),
+            AttachmentRepositoryError::Forbidden => Self::new(
+                StatusCode::FORBIDDEN,
+                "task_action_forbidden",
+                "Action forbidden",
+                "You do not have permission to change this resource.",
+                instance,
+                request_id,
+            ),
             AttachmentRepositoryError::InvalidCursor => Self::invalid_cursor(instance, request_id),
             AttachmentRepositoryError::Upload(error) => Self::upload(error, instance, request_id),
             AttachmentRepositoryError::Database(_) | AttachmentRepositoryError::InvalidRecord => {

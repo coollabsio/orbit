@@ -1,3 +1,4 @@
+use orbit_domain::Actor;
 use orbit_platform::{
     AuthorizedAttachment, BlobDownload, Database, Id, NewAttachmentReference, StagedUpload,
     TimestampMillis, UploadError, UploadService,
@@ -9,6 +10,7 @@ use thiserror::Error;
 use crate::audit::{self, AuditOutcome};
 
 use super::identity::AuthenticatedSession;
+use super::membership;
 use super::tasks::CommentRecord;
 
 const DAY_MILLIS: i64 = 24 * 60 * 60 * 1_000;
@@ -51,6 +53,8 @@ struct AttachmentCursor {
 pub enum AttachmentRepositoryError {
     #[error("attachment target is unavailable")]
     NotFound,
+    #[error("the comment belongs to another member")]
+    Forbidden,
     #[error("attachment cursor is invalid")]
     InvalidCursor,
     #[error("attachment repository contains an invalid record")]
@@ -110,6 +114,20 @@ impl AttachmentRepository {
         } else {
             Err(AttachmentRepositoryError::NotFound)
         }
+    }
+
+    /// As `require_comment`, for a caller who is about to change the comment's attachments.
+    /// Runs before the upload body is read; `finalize` checks again in its transaction.
+    pub async fn require_comment_editor(
+        &self,
+        session: &AuthenticatedSession,
+        workspace_id: Id,
+        task_id: Id,
+        comment_id: Id,
+    ) -> Result<(), AttachmentRepositoryError> {
+        self.authorize_task(session, workspace_id, task_id).await?;
+        let mut connection = self.database.pool().acquire().await?;
+        require_comment_editor(&mut connection, session, workspace_id, task_id, comment_id).await
     }
 
     pub async fn list(
@@ -234,6 +252,10 @@ impl AttachmentRepository {
         {
             return Err(AttachmentRepositoryError::NotFound);
         }
+        if let Some(comment_id) = comment_id {
+            require_comment_editor(&mut transaction, session, workspace_id, task_id, comment_id)
+                .await?;
+        }
         let row = sqlx::query(
             "SELECT blob_id FROM attachment_references WHERE id = ? AND workspace_id = ? \
              AND task_id = ? AND comment_id IS ?",
@@ -303,7 +325,8 @@ impl AttachmentRepository {
                         AttachmentRepositoryError::NotFound => UploadError::Unauthorized,
                         AttachmentRepositoryError::Database(error) => UploadError::Database(error),
                         AttachmentRepositoryError::Upload(error) => error,
-                        AttachmentRepositoryError::InvalidCursor
+                        AttachmentRepositoryError::Forbidden
+                        | AttachmentRepositoryError::InvalidCursor
                         | AttachmentRepositoryError::InvalidRecord => UploadError::Unauthorized,
                     })
             })
@@ -436,17 +459,8 @@ impl AttachmentRepository {
             return Err(AttachmentRepositoryError::NotFound);
         }
         if let Some(comment_id) = comment_id {
-            let exists: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?",
-            )
-            .bind(comment_id.to_string())
-            .bind(workspace_id.to_string())
-            .bind(task_id.to_string())
-            .fetch_one(&mut *transaction)
-            .await?;
-            if exists != 1 {
-                return Err(AttachmentRepositoryError::NotFound);
-            }
+            require_comment_editor(&mut transaction, session, workspace_id, task_id, comment_id)
+                .await?;
         }
 
         let comment = if create_comment {
@@ -545,6 +559,36 @@ where
     .bind(now_millis)
     .fetch_one(executor)
     .await
+}
+
+/// A comment's attachments are part of the comment, so adding or removing one follows the
+/// comment's edit rule. Reading them stays open to every member.
+async fn require_comment_editor(
+    connection: &mut sqlx::SqliteConnection,
+    session: &AuthenticatedSession,
+    workspace_id: Id,
+    task_id: Id,
+    comment_id: Id,
+) -> Result<(), AttachmentRepositoryError> {
+    let actor: Actor = membership::actor(&mut *connection, workspace_id, session.user.id)
+        .await?
+        .ok_or(AttachmentRepositoryError::NotFound)?;
+    let author_id = sqlx::query_scalar::<_, String>(
+        "SELECT author_id FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?",
+    )
+    .bind(comment_id.to_string())
+    .bind(workspace_id.to_string())
+    .bind(task_id.to_string())
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or(AttachmentRepositoryError::NotFound)?
+    .parse()
+    .map_err(|_| AttachmentRepositoryError::InvalidRecord)?;
+    if actor.can_edit_comment(author_id) {
+        Ok(())
+    } else {
+        Err(AttachmentRepositoryError::Forbidden)
+    }
 }
 
 fn attachment_scope(workspace_id: Id, task_id: Id, comment_id: Option<Id>) -> String {

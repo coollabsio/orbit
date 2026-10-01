@@ -84,7 +84,8 @@ test('comment attachment retry resumes the created comment instead of duplicatin
       commentCreates += 1
       return Response.json({
         id: 'comment-1', workspace_id: 'workspace-1', task_id: 'task-1', author_id: 'user-1',
-        body: 'Persist once', created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
+        body: 'Persist once', can_edit: true, can_delete: true,
+        created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
       }, { status: 201 })
     }
     return calls === 3 ? failure() : Response.json(attachment, { status: 201 })

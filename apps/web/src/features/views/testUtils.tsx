@@ -54,7 +54,7 @@ export function stubFetch(handler: (request: Request) => Response | Promise<Resp
 export function renderWithProviders(ui: ReactElement, { route = '/', views = [], role = 'member' }: { route?: string; views?: SavedView[]; role?: WorkspaceRole } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
   const workspace = testWorkspace(role, { id: 'alpha', name: 'Alpha' })
-  client.setQueryData(queryKeys.currentUser, { id: 'user-1', display_name: 'Ada', email: 'ada@orbit.test' })
+  client.setQueryData(queryKeys.currentUser, { id: 'user-1', display_name: 'Ada', email: 'ada@orbit.test', installation_admin: false })
   client.setQueryData(queryKeys.views(workspace.id), views)
   client.setQueryData(queryKeys.members(workspace.id), [member('user-1', 'Ada'), member('user-2', 'Grace')])
   const view = render(

@@ -9178,7 +9178,7 @@ export type UploadCommentAttachmentsErrors = {
      */
     401: AttachmentProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, task_action_forbidden
      */
     403: AttachmentProblem;
     /**
@@ -9243,7 +9243,7 @@ export type DeleteCommentAttachmentErrors = {
      */
     401: AttachmentProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, task_action_forbidden
      */
     403: AttachmentProblem;
     /**

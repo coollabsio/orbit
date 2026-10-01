@@ -16518,7 +16518,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, task_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16669,7 +16669,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, task_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {

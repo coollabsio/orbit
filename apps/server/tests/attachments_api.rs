@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use axum::body::{Body, Bytes, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    AttachmentMutationCoordinator, HttpLimits, HttpPlatformLayer, LocalBlobStore, OriginPolicy,
-    PasswordService, TestDatabase, TimestampMillis, UploadLimits, UploadService,
+    AttachmentMutationCoordinator, AuthenticatedUser, HttpLimits, HttpPlatformLayer, Id,
+    LocalBlobStore, OriginPolicy, PasswordService, TestDatabase, TimestampMillis, UploadLimits,
+    UploadService,
 };
 use orbit_server::attachment_routes::{AttachmentState, attachment_router};
 use orbit_server::auth_routes::CookieMode;
@@ -950,6 +951,129 @@ async fn deleting_last_reference_quarantines_blob_and_attachment_only_comment_is
     let comment = response_json(comment).await;
     assert_eq!(comment["comment"]["body"], "");
     assert_eq!(comment["attachments"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn only_the_author_changes_the_attachments_of_a_comment() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let member_id = Id::new_v7();
+    let now = TimestampMillis::now();
+    sqlx::query(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+         VALUES (?, 'member@example.com', 'member@example.com', 'Member', 'unused', ?, ?)",
+    )
+    .bind(member_id.to_string())
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&fixture.workspace_id)
+    .bind(member_id.to_string())
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let session = fixture
+        .identity
+        .create_session(
+            &AuthenticatedUser {
+                id: member_id,
+                email: "member@example.com".to_owned(),
+                display_name: "Member".to_owned(),
+            },
+            now,
+        )
+        .await
+        .unwrap();
+    let member_cookie = format!("__Host-orbit_session={}", session.token);
+
+    let created = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(multipart_request(
+                &format!(
+                    "/api/v1/workspaces/{}/tasks/{}/comments/attachments",
+                    fixture.workspace_id, fixture.task_id
+                ),
+                &member_cookie,
+                &[("mine.png", PNG)],
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let attachments = format!(
+        "/api/v1/workspaces/{}/tasks/{}/comments/{}/attachments",
+        fixture.workspace_id,
+        fixture.task_id,
+        created["comment"]["id"].as_str().unwrap()
+    );
+    let attachment = format!(
+        "{attachments}/{}",
+        created["attachments"][0]["id"].as_str().unwrap()
+    );
+
+    // The owner may delete the whole comment, but not change what it holds.
+    let upload = fixture
+        .app
+        .clone()
+        .oneshot(multipart_request(
+            &attachments,
+            &fixture.owner_cookie,
+            &[("theirs.png", PNG)],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response_json(upload).await["code"], "task_action_forbidden");
+    let delete = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("DELETE", &attachment, &fixture.owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(delete.status(), StatusCode::FORBIDDEN);
+    let listed = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("GET", &attachments, &fixture.owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(listed).await["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let upload = fixture
+        .app
+        .clone()
+        .oneshot(multipart_request(
+            &attachments,
+            &member_cookie,
+            &[("more.png", PNG)],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::CREATED);
+    let delete = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("DELETE", &attachment, &member_cookie))
+        .await
+        .unwrap();
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
 }
 
 fn multipart_request(uri: &str, cookie: &str, files: &[(&str, &[u8])]) -> Request<Body> {

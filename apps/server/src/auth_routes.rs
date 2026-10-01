@@ -512,8 +512,14 @@ async fn login(
             ));
         }
     };
+    // Nothing here may fail: the session exists, so the response must carry its cookie.
     let mut response = Json(LoginResponse {
-        user: user_response(&state, user, "/api/v1/auth/login", request_id.as_ref()).await?,
+        user: AuthUserResponse {
+            id: user.id.to_string(),
+            email: user.email,
+            display_name: user.display_name,
+            installation_admin: identity.installation_admin,
+        },
         session_id: session.id.to_string(),
     })
     .into_response();
