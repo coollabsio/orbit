@@ -11,7 +11,7 @@ import { LinkifiedText } from './LinkifiedText'
  * The title and description share one look whether read-only, previewed or edited, so switching to the field
  * never shifts the text. `md:` repeats the sizes because Input/Textarea set their own `md:text-sm`.
  */
-const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-foreground outline-none placeholder:text-muted-foreground', {
+export const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-foreground outline-none placeholder:text-muted-foreground', {
   variants: {
     field: {
       title: 'text-2xl leading-8 font-semibold max-[899px]:text-xl max-[899px]:leading-[26px] md:text-2xl md:max-[899px]:text-xl',
@@ -136,7 +136,7 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, childr
   )
 }
 
-function EditablePreview({ className, children, muted, ariaLabel, onEdit }: {
+export function EditablePreview({ className, children, muted, ariaLabel, onEdit }: {
   className: string
   children: ReactNode
   muted?: boolean

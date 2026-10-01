@@ -1,5 +1,8 @@
 import { useRef, useState } from 'react'
-import { Calendar, ChevronRight } from 'reicon-react'
+import { toast } from 'sonner'
+import { Calendar, ChevronRight, Paperclip2 as Paperclip, User as UserIcon, Xmark as X } from 'reicon-react'
+import { apiClient } from '@/api/client'
+import { uploadTaskAttachments } from '@/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -14,10 +17,13 @@ import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { clipboardFiles } from '@/lib/attachmentLib'
+import { renderMarkdownBlocks } from '@/lib/markdown'
 import type { CreateTaskBody, TaskRecord } from '@/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { DatePicker } from '@/components/common/DatePicker'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { uploadFiles } from '@/features/tasks/api/uploadQueue'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useLabels } from '@/features/tasks/api/labels'
@@ -29,6 +35,7 @@ import { resolveStatusId } from '@/features/tasks/tasksLib'
 import { PriorityIcon } from './PriorityIcon'
 import { TaskLabels } from './TaskLabels'
 import { TaskStatusIcon } from './TaskStatusIcon'
+import { EditablePreview, taskTextVariants } from './TaskTextFields'
 
 const CREATE_MORE_KEY = 'orbit:new_task_create_more'
 
@@ -67,6 +74,13 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
   const [createMore, setCreateMore] = useState(() => window.localStorage.getItem(CREATE_MORE_KEY) === '1')
   const [created, setCreated] = useState<TaskRecord>()
   const [dueDateOpen, setDueDateOpen] = useState(false)
+  // like the task page: the description shows as rendered Markdown until it is edited
+  const [editingDescription, setEditingDescription] = useState(false)
+  // files wait here and upload once the task exists
+  const [files, setFiles] = useState<File[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [dropOver, setDropOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
@@ -78,7 +92,11 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
     ?? statusOptions.find((option) => option.id === (project ? resolveStatusId(statuses, project.id, null) : undefined))
     ?? statusOptions[0]
   const assignees = members.filter((member) => draft.assigneeIds.includes(member.id))
-  const canCreate = title.trim() !== '' && project !== undefined && status !== undefined && !createTask.isPending
+  const busy = createTask.isPending || uploading
+  const canCreate = title.trim() !== '' && project !== undefined && status !== undefined && !busy
+  const attach = (added: FileList | File[] | null) => {
+    if (added && added.length > 0) setFiles((current) => [...current, ...Array.from(added)])
+  }
 
   const openTask = (task: TaskRecord) => {
     setOpen(false)
@@ -98,11 +116,24 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
         due_at: draft.dueAt,
         due_start_at: draft.dueStartAt,
       })
+      if (files.length > 0) {
+        setUploading(true)
+        try {
+          await uploadFiles(files, (file) => uploadTaskAttachments({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { file }, throwOnError: true }), () => {})
+        } catch {
+          // the task exists; its page can take the files again
+          toast.error('The task was created, but some files were not attached.')
+        } finally {
+          setUploading(false)
+        }
+      }
       if (!createMore) return openTask(task)
       // the properties stay for the next task of the batch
       setCreated(task)
       setTitle('')
       setDescription('')
+      setEditingDescription(false)
+      setFiles([])
       titleRef.current?.focus()
     } catch {
       // The draft stays; the mutation shows the error beside the create action.
@@ -115,7 +146,7 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
       onOpenChange={(next, details) => {
         if (next) return
         // a request in flight must finish here, and a stray click beside the dialog must not drop a draft
-        if (createTask.isPending || (details.reason === 'outside-press' && (title.trim() || description.trim()))) details.cancel()
+        if (busy || (details.reason === 'outside-press' && (title.trim() || description.trim() || files.length > 0))) details.cancel()
         else setOpen(false)
       }}
       onOpenChangeComplete={(next) => {
@@ -173,27 +204,82 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
               value={title}
               placeholder="Task title"
               aria-label="Task title"
-              readOnly={createTask.isPending}
+              readOnly={busy}
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {
                 // Enter moves on to the description; Cmd/Ctrl+Enter creates (handled by the form)
                 if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
                   event.preventDefault()
+                  setEditingDescription(true)
                   descriptionRef.current?.focus()
                 }
               }}
             />
-            <Textarea
-              ref={descriptionRef}
-              className="block min-h-20 resize-none rounded-none border-0 bg-transparent p-0 text-[13px] leading-5 focus-visible:ring-0 md:text-[13px] dark:bg-transparent"
-              value={description}
-              placeholder="Add a description…"
-              aria-label="Description"
-              readOnly={createTask.isPending}
-              onChange={(event) => setDescription(event.target.value)}
-            />
+            <div
+              className="rounded-lg transition-[box-shadow,background-color] data-drop-over:bg-primary/10 data-drop-over:ring-2 data-drop-over:ring-primary/40"
+              data-drop-over={dropOver || undefined}
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                setDropOver(true)
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropOver(false)
+              }}
+              onDrop={(event) => {
+                if (!event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                setDropOver(false)
+                attach(event.dataTransfer.files)
+              }}
+            >
+              {editingDescription || !description ? (
+                <Textarea
+                  ref={descriptionRef}
+                  className={taskTextVariants({ field: 'description', mode: 'edit', className: 'min-h-20' })}
+                  data-keep-font-size=""
+                  value={description}
+                  placeholder="Add description… (paste or drop images and files)"
+                  aria-label="Description"
+                  autoFocus={editingDescription}
+                  readOnly={busy}
+                  onChange={(event) => setDescription(event.target.value)}
+                  onFocus={() => setEditingDescription(true)}
+                  onBlur={() => setEditingDescription(false)}
+                  onPaste={(event) => {
+                    const pasted = clipboardFiles(event)
+                    if (pasted.length === 0) return
+                    event.preventDefault()
+                    attach(pasted)
+                  }}
+                />
+              ) : (
+                <EditablePreview className={taskTextVariants({ field: 'description', mode: 'preview', className: 'min-h-20' })} ariaLabel="Description" onEdit={() => setEditingDescription(true)}>
+                  {renderMarkdownBlocks(description, 'new-task-description')}
+                </EditablePreview>
+              )}
+              {files.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {files.map((file, index) => (
+                    <span key={`${file.name}:${index}`} className="inline-flex h-6 max-w-56 items-center gap-1 rounded-md border pr-0.5 pl-1.5 text-xs text-muted-foreground">
+                      <Paperclip aria-hidden className="size-3 shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                      <Button type="button" variant="ghost" size="icon-xs" className="size-4 rounded-full" aria-label={`Remove ${file.name}`} disabled={busy} onClick={() => setFiles((current) => current.filter((_, at) => at !== index))}>
+                        <X />
+                      </Button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <input ref={fileInputRef} type="file" multiple hidden aria-label="Attach files" onChange={(event) => { attach(event.target.files); event.target.value = '' }} />
+              <Button type="button" variant="ghost" className="mt-1.5 -ml-2 text-xs text-muted-foreground/70" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                <Paperclip className="size-3.5" />
+                Attach
+              </Button>
+            </div>
           </div>
 
+          <TaskLabels workspaceId={workspace.id} labelIds={draft.labelIds} labels={labels} onChange={(labelIds) => setDraft((current) => ({ ...current, labelIds }))} />
           <div className="flex flex-wrap items-center gap-1.5">
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -252,7 +338,7 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
                       </>
                     ) : (
                       <>
-                        <UserAvatar user={undefined} size={16} name="—" />
+                        <UserIcon aria-hidden="true" className="text-muted-foreground" />
                         Assignee
                       </>
                     )}
@@ -299,7 +385,6 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
                 />
               </PopoverContent>
             </Popover>
-            <TaskLabels workspaceId={workspace.id} labelIds={draft.labelIds} labels={labels} onChange={(labelIds) => setDraft((current) => ({ ...current, labelIds }))} />
           </div>
 
           <DialogFooter className="items-center py-2.5 sm:justify-between">
@@ -330,7 +415,7 @@ export function NewTaskDialog({ defaults = {}, instant, onClose, onOpenTask }: N
                 Create more
               </Label>
               <Button type="submit" disabled={!canCreate} title="Ctrl/⌘ + Enter">
-                {createTask.isPending ? 'Creating…' : 'Create task'}
+                {uploading ? 'Attaching…' : createTask.isPending ? 'Creating…' : 'Create task'}
               </Button>
             </div>
           </DialogFooter>

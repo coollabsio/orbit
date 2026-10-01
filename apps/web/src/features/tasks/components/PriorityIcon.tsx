@@ -20,8 +20,18 @@ export function PriorityIcon({ priority, size = 14 }: { priority: TaskPriority; 
     )
   }
   const active = 'var(--muted-foreground)'
+  // no priority: three dashes, readable on every surface (empty bars vanish on a muted one)
+  if (priority === 'none') {
+    return (
+      <svg {...common} aria-label={PRIORITY_LABEL.none}>
+        <rect x="1.5" y="6.2" width="2.6" height="1.6" rx="0.8" fill={active} opacity="0.6" />
+        <rect x="5.7" y="6.2" width="2.6" height="1.6" rx="0.8" fill={active} opacity="0.6" />
+        <rect x="9.9" y="6.2" width="2.6" height="1.6" rx="0.8" fill={active} opacity="0.6" />
+      </svg>
+    )
+  }
   const inactive = 'var(--muted)'
-  const level = priority === 'high' ? 3 : priority === 'medium' ? 2 : priority === 'low' ? 1 : 0
+  const level = priority === 'high' ? 3 : priority === 'medium' ? 2 : 1
   return (
     <svg {...common} aria-label={PRIORITY_LABEL[priority]}>
       <rect x="1.5" y="8" width="2.6" height="4.5" rx="1" fill={level >= 1 ? active : inactive} />

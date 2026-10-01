@@ -18,7 +18,7 @@ const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', 
 const status = (id: string, name: string, category: string, position: number) => ({ id, project_id: 'project-1', name, description: '', color: '#888', category, position, version: 1 })
 
 /** Records the bodies of the create requests; each one answers with a new task. */
-function api(created: unknown[]) {
+function api(created: unknown[], uploads: string[] = []) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     const url = new URL(request.url)
@@ -29,6 +29,10 @@ function api(created: unknown[]) {
         ...body, id: `task-000${created.length}`, workspace_id: 'workspace-1', position: 0, creator_id: 'user-1', created_at: '', updated_at: '',
         version: 1, duplicate_of: null, blocked: false, parent_task_id: null, parent: null, sub_issue_count: 0, sub_issue_closed_count: 0, auto_closed: [],
       })
+    }
+    if (request.method === 'POST' && url.pathname.endsWith('/attachments')) {
+      uploads.push(url.pathname)
+      return Response.json([])
     }
     if (url.pathname.endsWith('/projects')) return Response.json({ items: [project], next_cursor: null })
     if (url.pathname.endsWith('/statuses')) return Response.json({ items: [status('doing', 'Doing', 'started', 0), status('todo', 'Todo', 'unstarted', 0)], next_cursor: null })
@@ -81,4 +85,18 @@ test('an empty title creates nothing', async () => {
   await userEvent.type(view.getByLabelText('Task title'), '   {Control>}{Enter}{/Control}')
   expect((view.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(true)
   expect(created).toEqual([])
+})
+
+test('attached files upload to the task once it exists', async () => {
+  const created: unknown[] = []
+  const uploads: string[] = []
+  api(created, uploads)
+  const opened: string[] = []
+  const view = render(<NewTaskDialog onClose={() => {}} onOpenTask={(task) => opened.push(task.id)} />, { wrapper: Wrapper })
+  await view.findByRole('button', { name: 'Status: Todo' })
+  await userEvent.upload(view.getByLabelText('Attach files'), new File(['proof'], 'proof.txt', { type: 'text/plain' }))
+  await view.findByText('proof.txt')
+  await userEvent.type(view.getByLabelText('Task title'), 'With a file{Control>}{Enter}{/Control}')
+  await waitFor(() => expect(opened).toEqual(['task-0001']))
+  expect(uploads).toEqual(['/api/v1/workspaces/workspace-1/tasks/task-0001/attachments'])
 })
