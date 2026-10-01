@@ -5,7 +5,7 @@ import { COMMANDS, type Command } from './commands'
 
 const ALL_COMMANDS: readonly Command[] = COMMANDS
 
-type Handler = { run: () => void }
+type Handler = { run: () => void; available?: () => boolean }
 
 /** The handlers that features mounted with `useCommand`. The last mounted handler of a command runs. */
 export class CommandStore {
@@ -34,10 +34,16 @@ export class CommandStore {
 
   getActive = () => this.active
 
-  /** Runs the command; false when no handler is mounted. An error in a handler is reported and does not spread. */
+  /** Whether the command can act at this moment, e.g. a task command with a task to act on. */
+  isAvailable(id: string): boolean {
+    const handler = this.handlers.get(id)?.at(-1)
+    return handler !== undefined && (handler.available?.() ?? true)
+  }
+
+  /** Runs the command; false when it is not available. An error in a handler is reported and does not spread. */
   run(id: string): boolean {
     const handler = this.handlers.get(id)?.at(-1)
-    if (!handler) return false
+    if (!handler || !this.isAvailable(id)) return false
     try {
       handler.run()
     } catch (error) {

@@ -108,9 +108,9 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
 }
 
 /** Ghost button beside Attach: Blocks…, Blocked by…, Related to…, Mark as duplicate of… (each opens the picker). */
-export function AddRelationMenu({ onChoose }: { onChoose: (kind: RelationKind) => void }) {
+export function AddRelationMenu({ open, onOpenChange, onChoose }: { open?: boolean; onOpenChange?: (open: boolean) => void; onChoose: (kind: RelationKind) => void }) {
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
         render={
           <Button variant="ghost" className="text-xs text-muted-foreground/70">

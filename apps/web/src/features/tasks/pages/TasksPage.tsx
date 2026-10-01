@@ -1,4 +1,5 @@
-import { useListNavigation } from '@/shortcuts/taskTarget'
+import { TaskCommands } from '@/features/tasks/TaskCommands'
+import { useListNavigation, useTaskTarget, visibleTaskIds } from '@/shortcuts/taskTarget'
 import { TaskTargetProvider } from '@/shortcuts/TaskTargetProvider'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
@@ -227,8 +228,12 @@ function WorkspaceTasksPage() {
   }
   // keep the current view on screen until the task can render complete (at most OPEN_WAIT_MS)
   const opening = useRef<string | null>(null)
+  const { order } = useTaskTarget()
   const openTask = (id: string) => {
     opening.current = id
+    // the rows as shown now: next and previous in task detail follow this order
+    const shown = visibleTaskIds()
+    if (shown.length > 0) order.current = shown
     const wait = new Promise((resolve) => setTimeout(resolve, OPEN_WAIT_MS))
     void Promise.race([prefetchTaskDetail(queryClient, workspace.id, id), wait]).then(() => {
       if (opening.current === id) navigate(`${basePath}/${id}${detailSearchSuffix}`, { state: originState })
@@ -243,6 +248,13 @@ function WorkspaceTasksPage() {
 
   // Esc closes the task, unless it belongs to a field, an open menu or a dialog
   useCommand('detail.close', taskId ? closeTask : null)
+  const stepTask = (step: 1 | -1) => {
+    const ids = order.current.length > 0 ? order.current : visibleTasks.map((task) => task.id)
+    const next = taskId ? ids[ids.indexOf(taskId) + step] : undefined
+    if (taskId && ids.includes(taskId) && next) openTask(next)
+  }
+  useCommand('detail.next', taskId ? () => stepTask(1) : null)
+  useCommand('detail.prev', taskId ? () => stepTask(-1) : null)
   // list keys work in every layout; rows can be selected in the list only (it has the bulk toolbar)
   useListNavigation(taskId ? null : openTask, { selectable: layout === 'list' })
 
@@ -307,6 +319,7 @@ function WorkspaceTasksPage() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background" data-view={taskId ? 'detail' : 'list'}>
+      <TaskCommands tasks={taskId ? (activeTask ? [activeTask] : []) : visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} groupContext={groupContext} currentUserId={currentUser.data?.id ?? ''} />
       {taskId ? (
         <TaskDetail key={taskId} task={activeTask} project={projects.find((project) => project.id === activeTask?.projectId)} state={state} onBack={closeTask} onOpenTask={openTask} />
       ) : (

@@ -1,3 +1,4 @@
+import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
@@ -125,6 +126,18 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
     }
   }
 
+  const trash = async () => {
+    if (!task) return
+    // the whole subtree goes to trash with it: count every loaded level (the Sub-issues section loads them)
+    const below = descendantCount(task.subIssueCount ?? 0, (id) => queryClient.getQueryData<PageTaskRecord>(subIssuesQuery(workspace.id, id).queryKey)?.items, task.id)
+    if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: trashConfirmDescription(below), confirmLabel: 'Move to trash', danger: true })) return
+    void deleteAndClose({ taskId: task.id, version: task.version })
+  }
+  useCommand('task.trash', task ? () => void trash() : null)
+  useCommand('task.addSubIssue', task ? () => setComposingSubIssue(true) : null)
+  const [relationMenuOpen, setRelationMenuOpen] = useState(false)
+  useCommand('task.addRelation', task ? () => setRelationMenuOpen(true) : null)
+
   return (
     <Pane>
       <PaneHeader>
@@ -134,12 +147,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
         <TaskBreadcrumb ancestors={task?.ancestors ?? []} identifier={task?.identifier ?? 'Task'} onOpen={openTask} />
         {githubSyncPaused ? <Badge variant="secondary">GitHub sync paused</Badge> : null}
         <div className="flex-1" />
-        {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={async () => {
-          // the whole subtree goes to trash with it: count every loaded level (the Sub-issues section loads them)
-          const below = descendantCount(task.subIssueCount ?? 0, (id) => queryClient.getQueryData<PageTaskRecord>(subIssuesQuery(workspace.id, id).queryKey)?.items, task.id)
-          if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: trashConfirmDescription(below), confirmLabel: 'Move to trash', danger: true })) return
-          void deleteAndClose({ taskId: task.id, version: task.version })
-        }}>Delete</Button> : null}
+        {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={() => void trash()}>Delete</Button> : null}
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
           <X className="size-4" />
         </Button>
@@ -185,7 +193,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                   <Paperclip className="size-3.5" />
                   Attach
                 </Button>
-                <AddRelationMenu onChoose={setPicker} />
+                <AddRelationMenu open={relationMenuOpen} onOpenChange={setRelationMenuOpen} onChoose={setPicker} />
                 {(task.subIssueCount ?? 0) === 0 && childIds.length === 0 && !composingSubIssue ? (
                   <Button ref={subIssueAddRef} variant="ghost" className="text-xs text-muted-foreground/70" onClick={() => setComposingSubIssue(true)}>
                     <Hierarchy2 className="size-3.5" aria-hidden="true" />

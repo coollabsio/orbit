@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import type { Overrides } from './bindings'
 import type { CommandId } from './commands'
 import { ShortcutProvider } from './ShortcutProvider'
-import { useActiveCommands, useCommand, useRunCommand } from './useCommand'
+import { useActiveCommands, useAvailableCommands, useCommand, useRunCommand } from './useCommand'
 
 function Probe({ id, run, enabled }: { id: CommandId; run: (() => void) | null; enabled?: boolean }) {
   useCommand(id, run, { enabled })
@@ -132,4 +132,23 @@ test('a held Mod key still keeps the browser from acting, without running the co
   act(() => void document.body.dispatchEvent(event))
   expect(calls).toEqual([])
   expect(event.defaultPrevented).toBe(true)
+})
+
+test('a command that is not available right now leaves the key alone', async () => {
+  let available = false
+  function Target() {
+    useCommand('task.setStatus', record('status'), { available: () => available })
+    return null
+  }
+  const wrapper = ({ children }: { children: ReactNode }) => <ShortcutProvider><Target />{children}</ShortcutProvider>
+  const { result } = renderHook(() => useAvailableCommands(), { wrapper })
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'KeyS', key: 's' })
+  act(() => void document.body.dispatchEvent(event))
+  expect(calls).toEqual([])
+  expect(event.defaultPrevented).toBe(false)
+  expect(result.current()).toEqual([])
+  available = true
+  await userEvent.keyboard('s')
+  expect(calls).toEqual(['status'])
+  expect(result.current().map((command) => command.id)).toEqual(['task.setStatus'])
 })
