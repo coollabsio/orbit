@@ -26,6 +26,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::logout,
         crate::auth_routes::me,
         crate::auth_routes::update_me,
+        crate::auth_routes::get_shortcuts,
+        crate::auth_routes::put_shortcuts,
         crate::auth_routes::change_password,
         crate::auth_routes::recovery_request,
         crate::auth_routes::recovery_complete,
@@ -318,6 +320,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "invalid_password");
         }
         "update_me" => add_code(&mut responses, "422", "invalid_display_name"),
+        "put_shortcuts" => add_code(&mut responses, "422", "invalid_shortcuts"),
         "change_password" => {
             add_code(&mut responses, "401", "invalid_credentials");
             add_code(&mut responses, "422", "invalid_password");
@@ -483,6 +486,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "setup_complete"
             | "login"
             | "update_me"
+            | "put_shortcuts"
             | "change_password"
             | "recovery_request"
             | "recovery_complete"

@@ -1483,6 +1483,16 @@ export type SetupStatus = {
 };
 
 /**
+ * Keyboard shortcut overrides: command id -> keys, or null for "no shortcut".
+ * The web app owns the command ids and the key notation; the server only bounds the size.
+ */
+export type ShortcutsBody = {
+    bindings: {
+        [key: string]: string | null;
+    };
+};
+
+/**
  * Which tasks in a done category (completed, cancelled, duplicate) stay visible.
  */
 export type ShowCompleted = 'all' | 'past_week' | 'past_month' | 'none';
@@ -2680,6 +2690,110 @@ export type RevokeSessionResponses = {
 };
 
 export type RevokeSessionResponse = RevokeSessionResponses[keyof RevokeSessionResponses];
+
+export type GetShortcutsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/shortcuts';
+};
+
+export type GetShortcutsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type GetShortcutsError = GetShortcutsErrors[keyof GetShortcutsErrors];
+
+export type GetShortcutsResponses = {
+    200: ShortcutsBody;
+};
+
+export type GetShortcutsResponse = GetShortcutsResponses[keyof GetShortcutsResponses];
+
+export type PutShortcutsData = {
+    body: ShortcutsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/shortcuts';
+};
+
+export type PutShortcutsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_shortcuts
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type PutShortcutsError = PutShortcutsErrors[keyof PutShortcutsErrors];
+
+export type PutShortcutsResponses = {
+    200: ShortcutsBody;
+};
+
+export type PutShortcutsResponse = PutShortcutsResponses[keyof PutShortcutsResponses];
 
 export type CreateDiscordEventData = {
     body: DiscordEventBody;

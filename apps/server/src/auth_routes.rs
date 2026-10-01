@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::net::{IpAddr, Ipv4Addr};
@@ -126,6 +127,7 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/me", get(me).patch(update_me))
+        .route("/api/v1/auth/shortcuts", get(get_shortcuts).put(put_shortcuts))
         .route("/api/v1/auth/password", post(change_password))
         .route("/api/v1/auth/recovery/request", post(recovery_request))
         .route("/api/v1/auth/recovery/complete", post(recovery_complete))
@@ -583,6 +585,78 @@ async fn update_me(
         email: session.user.email,
         display_name,
     }))
+}
+
+const MAX_SHORTCUT_BINDINGS: usize = 200;
+const MAX_SHORTCUT_ID_CHARS: usize = 64;
+const MAX_SHORTCUT_KEYS_CHARS: usize = 32;
+
+/// Keyboard shortcut overrides: command id -> keys, or null for "no shortcut".
+/// The web app owns the command ids and the key notation; the server only bounds the size.
+#[derive(Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ShortcutsBody {
+    bindings: BTreeMap<String, Option<String>>,
+}
+
+fn shortcuts_within_limits(bindings: &BTreeMap<String, Option<String>>) -> bool {
+    let within = |text: &str, max: usize| (1..=max).contains(&text.chars().count());
+    bindings.len() <= MAX_SHORTCUT_BINDINGS
+        && bindings.iter().all(|(id, keys)| {
+            within(id, MAX_SHORTCUT_ID_CHARS)
+                && keys
+                    .as_deref()
+                    .is_none_or(|keys| within(keys, MAX_SHORTCUT_KEYS_CHARS))
+        })
+}
+
+#[utoipa::path(get, path = "/api/v1/auth/shortcuts", responses((status = 200, body = ShortcutsBody), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+async fn get_shortcuts(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<ShortcutsBody>, ApiError> {
+    let instance = "/api/v1/auth/shortcuts";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let stored = state
+        .repository
+        .shortcut_bindings(session.user.id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    // a stored map that no longer parses reads as "no overrides": shortcuts must never lock a user out
+    let bindings = stored
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    Ok(Json(ShortcutsBody { bindings }))
+}
+
+#[utoipa::path(put, path = "/api/v1/auth/shortcuts", request_body = ShortcutsBody, responses((status = 200, body = ShortcutsBody), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_shortcuts", body = ProblemBody, content_type = "application/problem+json")))]
+async fn put_shortcuts(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ShortcutsBody>,
+) -> Result<Json<ShortcutsBody>, ApiError> {
+    let instance = "/api/v1/auth/shortcuts";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    if !shortcuts_within_limits(&body.bindings) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_shortcuts",
+            "Invalid shortcuts",
+            "Send at most 200 shortcuts, with command ids of 1 to 64 characters and keys of 1 to 32 characters.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let json = serde_json::to_string(&body.bindings)
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    state
+        .repository
+        .set_shortcut_bindings(session.user.id, &json, TimestampMillis::now())
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    Ok(Json(body))
 }
 
 #[derive(Deserialize, ToSchema)]

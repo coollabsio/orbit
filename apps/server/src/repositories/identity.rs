@@ -604,6 +604,35 @@ impl IdentityRepository {
         Ok(())
     }
 
+    /// The user's keyboard shortcut overrides as stored JSON; `None` before the first save.
+    pub async fn shortcut_bindings(&self, user_id: Id) -> Result<Option<String>, IdentityError> {
+        Ok(
+            sqlx::query_scalar("SELECT bindings_json FROM user_shortcuts WHERE user_id = ?")
+                .bind(user_id.to_string())
+                .fetch_optional(self.database.pool())
+                .await?,
+        )
+    }
+
+    /// Replaces the user's keyboard shortcut overrides.
+    pub async fn set_shortcut_bindings(
+        &self,
+        user_id: Id,
+        bindings_json: &str,
+        now: TimestampMillis,
+    ) -> Result<(), IdentityError> {
+        sqlx::query(
+            "INSERT INTO user_shortcuts (user_id, bindings_json, updated_at) VALUES (?, ?, ?) \
+             ON CONFLICT (user_id) DO UPDATE SET bindings_json = excluded.bindings_json, updated_at = excluded.updated_at",
+        )
+        .bind(user_id.to_string())
+        .bind(bindings_json)
+        .bind(now.as_millis())
+        .execute(self.database.pool())
+        .await?;
+        Ok(())
+    }
+
     pub async fn update_display_name_audited(
         &self,
         user_id: Id,

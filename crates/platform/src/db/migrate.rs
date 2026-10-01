@@ -268,6 +268,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0035_mcp_oauth.sql"),
                     false,
                 ),
+                Migration::new(
+                    36,
+                    include_str!("../../../../apps/server/migrations/0036_keyboard_shortcuts.sql"),
+                    false,
+                ),
             ],
         )
     }

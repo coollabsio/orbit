@@ -1740,6 +1740,226 @@
         ]
       }
     },
+    "/api/v1/auth/shortcuts": {
+      "get": {
+        "tags": [
+          "crate::auth_routes"
+        ],
+        "operationId": "get_shortcuts",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShortcutsBody"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "crate::auth_routes"
+        ],
+        "operationId": "put_shortcuts",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShortcutsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShortcutsBody"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_shortcuts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/integrations/discord/events": {
       "post": {
         "tags": [
@@ -23890,6 +24110,28 @@
             "type": "boolean"
           }
         }
+      },
+      "ShortcutsBody": {
+        "type": "object",
+        "description": "Keyboard shortcut overrides: command id -> keys, or null for \"no shortcut\".\nThe web app owns the command ids and the key notation; the server only bounds the size.",
+        "required": [
+          "bindings"
+        ],
+        "properties": {
+          "bindings": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "ShowCompleted": {
         "type": "string",
