@@ -1765,16 +1765,20 @@ impl TaskRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
+        let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
         let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
-        record_mutation(
+        let task_after = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
+        audit::record(
             &mut tx,
             workspace_id,
-            actor_id,
+            Some(actor_id),
             "task.updated",
+            AuditOutcome::Success,
             "task",
-            update.id,
+            Some(update.id),
             request_id,
+            json!({ "changes": updated_fields(update, &task_before, &task_after) }),
             now,
         )
         .await?;
@@ -3073,6 +3077,64 @@ async fn insert_default_statuses(
             .bind(Id::new_v7().to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(name).bind(color).bind(category.as_str()).bind(position as i64).bind(now.as_millis()).bind(now.as_millis()).execute(&mut **tx).await?;
     }
     Ok(())
+}
+
+/// What one update changed, for the activity feed: `{field: {from, to}}`, `{added, removed}` for
+/// assignees and labels, `true` for long text. Parent and duplicate changes have their own events,
+/// and a status that follows a duplicate mark is part of that event.
+fn updated_fields(update: &TaskUpdate, before: &TaskRecord, after: &TaskRecord) -> Value {
+    fn moved(before: &[Id], after: &[Id]) -> Value {
+        let added: Vec<_> = after.iter().filter(|id| !before.contains(id)).collect();
+        let removed: Vec<_> = before.iter().filter(|id| !after.contains(id)).collect();
+        json!({ "added": added, "removed": removed })
+    }
+    let mut changes = serde_json::Map::new();
+    if before.project_id != after.project_id {
+        changes.insert(
+            "project".into(),
+            json!({ "from": before.project_id, "to": after.project_id }),
+        );
+    }
+    if before.status_id != after.status_id && update.changes.duplicate_of_id.is_none() {
+        changes.insert(
+            "status".into(),
+            json!({ "from": before.status_id, "to": after.status_id }),
+        );
+    }
+    if before.priority != after.priority {
+        changes.insert(
+            "priority".into(),
+            json!({ "from": before.priority, "to": after.priority }),
+        );
+    }
+    if before.assignee_ids != after.assignee_ids {
+        changes.insert(
+            "assignees".into(),
+            moved(&before.assignee_ids, &after.assignee_ids),
+        );
+    }
+    if before.label_ids != after.label_ids {
+        changes.insert("labels".into(), moved(&before.label_ids, &after.label_ids));
+    }
+    if before.due_at != after.due_at || before.due_start_at != after.due_start_at {
+        changes.insert(
+            "due".into(),
+            json!({ "start": after.due_start_at, "end": after.due_at }),
+        );
+    }
+    if before.title != after.title {
+        changes.insert(
+            "title".into(),
+            json!({ "from": before.title, "to": after.title }),
+        );
+    }
+    if before.description != after.description {
+        changes.insert("description".into(), json!(true));
+    }
+    if before.source_url != after.source_url {
+        changes.insert("source_url".into(), json!(true));
+    }
+    Value::Object(changes)
 }
 
 #[allow(clippy::too_many_arguments)]

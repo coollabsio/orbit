@@ -77,12 +77,12 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   )
 
   const renderThread = (thread: CommentThread) => (
-    <div key={thread.root.id} className="mt-3 overflow-hidden rounded-[10px] border bg-card">
+    <div key={thread.root.id} className="my-3 overflow-hidden rounded-[10px] border bg-card">
       <CommentItem state={state} taskId={task.id} comment={thread.root} mentionTokens={mentionTokens} />
       {thread.replies.map((reply) => (
         <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
       ))}
-      <div className="border-t px-3 pt-2.5 pb-3">
+      <div className="border-t py-1.5 pr-2 pl-3.5">
         <TaskCommentComposer compact placeholder="Leave a reply…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ body, files, parentId: thread.root.id })} />
       </div>
     </div>

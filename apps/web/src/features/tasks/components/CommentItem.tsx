@@ -44,14 +44,14 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
     <>
       <article
         className={cn(
-          'group/comment flex gap-2.5 px-3.5 py-3 transition-colors hover:bg-muted/40 focus-within:bg-muted/40',
-          reply && 'border-t pl-[52px] max-[899px]:pl-10',
+          'group/comment flex gap-2 px-3.5 py-2.5 transition-colors hover:bg-muted/40 focus-within:bg-muted/40',
+          reply && 'border-t',
         )}
         data-reply={reply || undefined}
       >
-        <UserAvatar user={author} size={reply ? 22 : 28} name={name} />
+        <UserAvatar user={author} size={20} name={name} />
         <div className="min-w-0 flex-1">
-          <div className="flex min-h-[22px] items-center gap-1.5">
+          <div className="flex min-h-5 items-center gap-1.5">
             <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{name}</span>
             <span className="shrink-0 text-[11px] leading-none text-muted-foreground/70" aria-hidden="true">·</span>
             <time className="shrink-0 text-[11px] font-medium text-muted-foreground" dateTime={comment.createdAt}>
