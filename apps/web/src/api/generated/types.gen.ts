@@ -305,17 +305,27 @@ export type ChatFollowBody = {
     following: boolean;
 };
 
-/**
- * Exactly one of `category_id` and `conversation_id`.
- */
 export type ChatMoveBody = {
-    category_id?: string | null;
-    conversation_id?: string | null;
-    direction: MoveDirection;
+    /**
+     * The category to put it before; null for the end.
+     */
+    before_id?: string | null;
+    category_id: string;
 };
 
 export type ChatPinBody = {
     pinned: boolean;
+};
+
+export type ChatPlaceBody = {
+    /**
+     * The channel of that category to put it before; null for the end.
+     */
+    before_id?: string | null;
+    /**
+     * The category to put the channel in; null for the channels without a category.
+     */
+    category_id?: string | null;
 };
 
 /**
@@ -967,8 +977,6 @@ export type MessageRecord = {
      */
     thread_root_id: string | null;
 };
-
-export type MoveDirection = 'up' | 'down';
 
 export type MoveFavoriteBody = {
     /**
@@ -5345,6 +5353,69 @@ export type ListChatPinsResponses = {
 };
 
 export type ListChatPinsResponse = ListChatPinsResponses[keyof ListChatPinsResponses];
+
+export type PlaceChatChannelData = {
+    body: ChatPlaceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/place';
+};
+
+export type PlaceChatChannelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PlaceChatChannelError = PlaceChatChannelErrors[keyof PlaceChatChannelErrors];
+
+export type PlaceChatChannelResponses = {
+    200: ChatEvents;
+};
+
+export type PlaceChatChannelResponse = PlaceChatChannelResponses[keyof PlaceChatChannelResponses];
 
 export type ReadChatConversationData = {
     body?: never;

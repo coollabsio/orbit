@@ -8,8 +8,7 @@ use utoipa::ToSchema;
 
 use super::{Call, ChatEvents, ChatState, ChatWrite, RequestIdExtension};
 use crate::repositories::chat::{
-    CategoryRecord, ChannelCreate, ChannelUpdate, ChatError, ConversationKind, ConversationRecord,
-    MoveDirection, MoveTarget,
+    CategoryRecord, ChannelCreate, ChannelUpdate, ConversationKind, ConversationRecord,
 };
 use crate::task_routes::{ApiError, ApiJson, deserialize_source_patch};
 
@@ -56,13 +55,21 @@ pub(crate) struct ChatCategoryBody {
     name: String,
 }
 
-/// Exactly one of `category_id` and `conversation_id`.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChatMoveBody {
+    category_id: String,
+    /// The category to put it before; null for the end.
+    before_id: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChatPlaceBody {
+    /// The category to put the channel in; null for the channels without a category.
     category_id: Option<String>,
-    conversation_id: Option<String>,
-    direction: MoveDirection,
+    /// The channel of that category to put it before; null for the end.
+    before_id: Option<String>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/chat/conversations", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<ConversationRecord>)))]
@@ -341,7 +348,7 @@ pub(crate) async fn delete_chat_category(
     .await
 }
 
-/// Moves a category or a channel one step up or down among its siblings.
+/// Puts a category before another category or at the end (drag and drop).
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/move", params(("workspace_id" = String, Path)), request_body = ChatMoveBody, responses((status = 200, body = ChatEvents)))]
 pub(crate) async fn move_chat_item(
     State(state): State<ChatState>,
@@ -352,20 +359,52 @@ pub(crate) async fn move_chat_item(
     ApiJson(body): ApiJson<ChatMoveBody>,
 ) -> Result<Json<ChatEvents>, ApiError> {
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
-    let target = match (&body.category_id, &body.conversation_id) {
-        (Some(id), None) => MoveTarget::Category(call.body_id(id, "category_id")?),
-        (None, Some(id)) => MoveTarget::Conversation(call.body_id(id, "conversation_id")?),
-        _ => {
-            return Err(call.problem(ChatError::Invalid {
-                field: "conversation_id",
-            }));
-        }
-    };
+    let category_id = call.body_id(&body.category_id, "category_id")?;
+    let before_id = body
+        .before_id
+        .as_deref()
+        .map(|id| call.body_id(id, "before_id"))
+        .transpose()?;
     call.events(
         &state,
         state
             .chat
-            .move_item(call.workspace_id, call.actor_id, target, body.direction),
+            .place_category(call.workspace_id, call.actor_id, category_id, before_id),
+    )
+    .await
+}
+
+/// Puts a channel into a category, before another channel or at the end (drag and drop).
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/place", params(("workspace_id" = String, Path), ("conversation_id" = String, Path)), request_body = ChatPlaceBody, responses((status = 200, body = ChatEvents)))]
+pub(crate) async fn place_chat_channel(
+    State(state): State<ChatState>,
+    Path((workspace, conversation)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<ChatPlaceBody>,
+) -> Result<Json<ChatEvents>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let conversation_id = call.id(&conversation)?;
+    let category_id = body
+        .category_id
+        .as_deref()
+        .map(|id| call.body_id(id, "category_id"))
+        .transpose()?;
+    let before_id = body
+        .before_id
+        .as_deref()
+        .map(|id| call.body_id(id, "before_id"))
+        .transpose()?;
+    call.events(
+        &state,
+        state.chat.place_channel(
+            call.workspace_id,
+            call.actor_id,
+            conversation_id,
+            category_id,
+            before_id,
+        ),
     )
     .await
 }

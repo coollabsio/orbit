@@ -30,7 +30,7 @@ use utoipa::ToSchema;
 use super::membership;
 pub use crate::live::Recipients;
 
-pub use conversations::{ChannelCreate, ChannelUpdate, MoveDirection, MoveTarget};
+pub use conversations::{ChannelCreate, ChannelUpdate};
 pub use messages::{MessageCursor, SendInput};
 pub use search::{SearchHitRecord, SearchInput, SearchPage};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};

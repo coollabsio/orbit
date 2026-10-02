@@ -6,7 +6,7 @@ import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions } from '
 import { applyChatEvent, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
-import type { Attachment, ChatEvent, Conversation, ConversationState, Message, NotifyLevel, ThreadState } from './types'
+import type { Attachment, Category, ChatEvent, Conversation, ConversationState, Message, NotifyLevel, ThreadState } from './types'
 
 const TYPING_INTERVAL = 8000
 /** When the typing signal was last sent, for each composer (conversation or thread). */
@@ -288,12 +288,49 @@ export function useDeleteCategory() {
   return useChatMutation((client, categoryId: string) => client.deleteCategory(categoryId))
 }
 
-/** One step up or down: a category among categories, a channel among the channels of its category. */
-export function useMoveChatItem() {
-  return useChatMutation(
-    (client, input: { target: { categoryId: string } | { conversationId: string }; direction: 'up' | 'down' }) =>
-      client.move(input.target, input.direction),
-  )
+/** A category dropped before the category `beforeId`, or at the end. The sidebar shows it there at once. */
+export function usePlaceCategory() {
+  const { client, workspaceId } = useChatContext()
+  const queryClient = useQueryClient()
+  const key = chatKeys.categories(workspaceId)
+  return useMutation<void, Error, { categoryId: string; beforeId: string | null }>({
+    mutationFn: (input) => requireClient(client).placeCategory(input.categoryId, input.beforeId),
+    onMutate: ({ categoryId, beforeId }) => {
+      queryClient.setQueryData<Category[]>(key, (categories) => {
+        const moved = categories?.find((category) => category.id === categoryId)
+        if (!categories || !moved) return categories
+        const order = categories.filter((category) => category.id !== categoryId).sort((a, b) => a.position - b.position)
+        const at = order.findIndex((category) => category.id === beforeId)
+        order.splice(at === -1 ? order.length : at, 0, moved)
+        return order.map((category, position) => ({ ...category, position }))
+      })
+    },
+    onError: () => void queryClient.invalidateQueries({ queryKey: key }),
+  })
+}
+
+/**
+ * A channel dropped into a category (`null`: no category), before the channel `beforeId` or at the end. The sidebar
+ * shows it there at once; the server's events then give every channel of the category its position.
+ */
+export function usePlaceChannel() {
+  const { client, workspaceId } = useChatContext()
+  const queryClient = useQueryClient()
+  const key = chatKeys.conversations(workspaceId)
+  return useMutation<void, Error, { conversationId: string; categoryId: string | null; beforeId: string | null }>({
+    mutationFn: (input) => requireClient(client).placeChannel(input.conversationId, input.categoryId, input.beforeId),
+    onMutate: ({ conversationId, categoryId, beforeId }) => {
+      queryClient.setQueryData<Conversation[]>(key, (conversations) => {
+        if (!conversations) return conversations
+        const siblings = conversations.filter((item) => item.kind !== 'dm' && item.categoryId === categoryId && item.id !== conversationId)
+        const before = siblings.find((item) => item.id === beforeId)
+        // Between two whole positions, or after the last one.
+        const position = before ? before.position - 0.5 : Math.max(-1, ...siblings.map((item) => item.position)) + 1
+        return conversations.map((item) => (item.id === conversationId ? { ...item, categoryId, position } : item))
+      })
+    },
+    onError: () => void queryClient.invalidateQueries({ queryKey: key }),
+  })
 }
 
 /** Not a mutation: the composer tracks each file's progress and abort signal itself. */

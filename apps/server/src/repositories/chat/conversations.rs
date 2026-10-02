@@ -4,9 +4,7 @@ use std::collections::HashMap;
 
 use orbit_domain::{Actor, Permission};
 use orbit_platform::{Id, TimestampMillis};
-use serde::Deserialize;
 use sqlx::{Row, SqliteConnection};
-use utoipa::ToSchema;
 
 use super::messages::add_system_row;
 use super::state::emit_state;
@@ -42,19 +40,6 @@ pub struct ChannelUpdate {
     /// `None`: unchanged. `Some(None)`: no category.
     pub category_id: Option<Option<Id>>,
     pub kind: Option<ConversationKind>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum MoveTarget {
-    Category(Id),
-    Conversation(Id),
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MoveDirection {
-    Up,
-    Down,
 }
 
 impl ChatRepository {
@@ -561,82 +546,103 @@ impl ChatRepository {
         finish(tx, events, ()).await
     }
 
-    /// One step up or down: a category among the categories, a channel among the channels of
-    /// its category that the caller is in. Nothing happens at the end of the list.
-    pub async fn move_item(
+    /// Puts a category before the category `before_id`, or at the end. The categories get new
+    /// positions in order.
+    pub async fn place_category(
         &self,
         workspace_id: Id,
         actor_id: Id,
-        target: MoveTarget,
-        direction: MoveDirection,
+        category_id: Id,
+        before_id: Option<Id>,
     ) -> Result<Written<()>, ChatError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
-        let mut events = Events::default();
-        let (table, moved, siblings) = match target {
-            MoveTarget::Category(id) => {
-                require_category(&mut tx, workspace_id, Some(id)).await?;
-                let siblings = sqlx::query(
-                    "SELECT id, position FROM chat_categories WHERE workspace_id = ? ORDER BY position, id",
-                )
-                .bind(workspace_id.to_string())
-                .fetch_all(&mut *tx)
-                .await?;
-                ("chat_categories", id, siblings)
-            }
-            MoveTarget::Conversation(id) => {
-                let access = load_access(&mut tx, workspace_id, actor_id, id).await?;
-                let siblings = sqlx::query(
-                    "SELECT c.id, c.position FROM chat_conversations c \
-                     JOIN chat_members m ON m.conversation_id = c.id AND m.user_id = ? \
-                     WHERE c.workspace_id = ? AND c.kind <> 'dm' AND c.archived_at IS NULL \
-                     AND c.category_id IS ? ORDER BY c.position, c.id",
-                )
-                .bind(actor_id.to_string())
-                .bind(workspace_id.to_string())
-                .bind(access.conversation.category_id.map(|id| id.to_string()))
-                .fetch_all(&mut *tx)
-                .await?;
-                ("chat_conversations", id, siblings)
-            }
-        };
-        let siblings = siblings
-            .iter()
-            .map(|row| Ok((parse_id(row.get("id"))?, row.get::<i64, _>("position"))))
-            .collect::<Result<Vec<_>, ChatError>>()?;
-        let index = siblings.iter().position(|(id, _)| *id == moved);
-        let neighbour = index
-            .and_then(|index| match direction {
-                MoveDirection::Up => index.checked_sub(1),
-                MoveDirection::Down => index.checked_add(1),
-            })
-            .and_then(|index| siblings.get(index));
-        let (Some(index), Some(&(neighbour_id, neighbour_position))) = (index, neighbour) else {
-            return Ok(events.written(()));
-        };
-        let moved_position = siblings[index].1;
-        for (id, position) in [(moved, neighbour_position), (neighbour_id, moved_position)] {
-            sqlx::query(&format!("UPDATE {table} SET position = ? WHERE id = ?"))
+        require_category(&mut tx, workspace_id, Some(category_id)).await?;
+        let mut order = sqlx::query(
+            "SELECT id FROM chat_categories WHERE workspace_id = ? AND id <> ? ORDER BY position, id",
+        )
+        .bind(workspace_id.to_string())
+        .bind(category_id.to_string())
+        .fetch_all(&mut *tx)
+        .await?
+        .iter()
+        .map(|row| parse_id(row.get("id")))
+        .collect::<Result<Vec<_>, ChatError>>()?;
+        // A `before_id` that is not a category (the list of the caller was old) means the end.
+        let at = before_id
+            .and_then(|before| order.iter().position(|id| *id == before))
+            .unwrap_or(order.len());
+        order.insert(at, category_id);
+        for (position, id) in (0_i64..).zip(order) {
+            sqlx::query("UPDATE chat_categories SET position = ? WHERE id = ?")
                 .bind(position)
                 .bind(id.to_string())
                 .execute(&mut *tx)
                 .await?;
         }
-        match target {
-            MoveTarget::Category(_) => events.workspace(ChatEvent::CategoriesChanged {
-                categories: categories(&mut tx, workspace_id).await?,
-            }),
-            MoveTarget::Conversation(_) => {
-                for id in [moved, neighbour_id] {
-                    let record = current_conversation_record(&mut tx, workspace_id, id).await?;
-                    events.conversation(
-                        id,
-                        ChatEvent::ConversationChanged {
-                            conversation: record,
-                        },
-                    );
-                }
+        let mut events = Events::default();
+        events.workspace(ChatEvent::CategoriesChanged {
+            categories: categories(&mut tx, workspace_id).await?,
+        });
+        finish(tx, events, ()).await
+    }
+
+    /// Puts a channel into a category (`None`: the channels without one), before the channel
+    /// `before_id` or at the end. The channels of that category get new positions in order.
+    pub async fn place_channel(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        conversation_id: Id,
+        category_id: Option<Id>,
+        before_id: Option<Id>,
+    ) -> Result<Written<()>, ChatError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
+        let access = load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
+        if access.conversation.kind == ConversationKind::Dm {
+            return Err(ChatError::NotFound);
+        }
+        access.require_open()?;
+        require_category(&mut tx, workspace_id, category_id).await?;
+        let siblings = sqlx::query(
+            "SELECT id, position FROM chat_conversations WHERE workspace_id = ? AND kind <> 'dm' \
+             AND archived_at IS NULL AND category_id IS ? AND id <> ? ORDER BY position, id",
+        )
+        .bind(workspace_id.to_string())
+        .bind(category_id.map(|id| id.to_string()))
+        .bind(conversation_id.to_string())
+        .fetch_all(&mut *tx)
+        .await?
+        .iter()
+        .map(|row| Ok((parse_id(row.get("id"))?, row.get::<i64, _>("position"))))
+        .collect::<Result<Vec<_>, ChatError>>()?;
+        // A `before_id` that is not in the category (the list of the caller was old) means the end.
+        let at = before_id
+            .and_then(|before| siblings.iter().position(|(id, _)| *id == before))
+            .unwrap_or(siblings.len());
+        let mut order = siblings;
+        order.insert(at, (conversation_id, -1));
+
+        let mut events = Events::default();
+        for (position, (id, old)) in (0_i64..).zip(order) {
+            if old == position {
+                continue;
             }
+            sqlx::query("UPDATE chat_conversations SET position = ?, category_id = CASE WHEN id = ? THEN ? ELSE category_id END WHERE id = ?")
+                .bind(position)
+                .bind(conversation_id.to_string())
+                .bind(category_id.map(|id| id.to_string()))
+                .bind(id.to_string())
+                .execute(&mut *tx)
+                .await?;
+            let record = current_conversation_record(&mut tx, workspace_id, id).await?;
+            events.conversation(
+                id,
+                ChatEvent::ConversationChanged {
+                    conversation: record,
+                },
+            );
         }
         finish(tx, events, ()).await
     }

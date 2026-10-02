@@ -112,7 +112,10 @@ export interface ChatClient {
   /** Its channels move to no category. */
   deleteCategory(categoryId: string): Promise<void>
   /** One step up or down among its siblings. */
-  move(target: { categoryId: string } | { conversationId: string }, direction: 'up' | 'down'): Promise<void>
+  /** Puts a category before the category `beforeId`, or at the end. */
+  placeCategory(categoryId: string, beforeId: string | null): Promise<void>
+  /** Puts a channel into a category (`null`: no category), before the channel `beforeId` or at the end. */
+  placeChannel(conversationId: string, categoryId: string | null, beforeId: string | null): Promise<void>
 
   uploadAttachment(file: File, options?: UploadOptions): Promise<Attachment>
   sendTyping(conversationId: string, threadRootId?: string | null): void

@@ -168,6 +168,10 @@ fn json_router(state: ChatState) -> Router {
             post(conversations::move_chat_item),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/place",
+            post(conversations::place_chat_channel),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/messages",
             get(messages::list_chat_messages).post(messages::send_chat_message),
         )

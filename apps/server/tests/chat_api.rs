@@ -1081,7 +1081,7 @@ async fn categories_and_channel_order_are_for_managers() {
             &fixture.owner,
             "POST",
             "/move",
-            Some(json!({ "category_id": company, "direction": "up" })),
+            Some(json!({ "category_id": company, "before_id": product })),
         )
         .await;
     let order: Vec<&str> = moved["events"][0]["categories"]
@@ -1091,6 +1091,60 @@ async fn categories_and_channel_order_are_for_managers() {
         .map(|category| category["name"].as_str().unwrap())
         .collect();
     assert_eq!(order, ["Company", "Product"]);
+
+    // A channel goes into a category before another channel, or to its end. Only a manager moves it.
+    let general = fixture.general().await;
+    let design = fixture
+        .channel(&fixture.owner, "design", "public", &[&ada])
+        .await;
+    let docs = fixture
+        .channel(&fixture.owner, "docs", "public", &[&ada])
+        .await;
+    let place = |category: Value, before: Value| {
+        Some(json!({ "category_id": category, "before_id": before }))
+    };
+    let (status, _) = fixture
+        .call(
+            &ada,
+            "POST",
+            &format!("/conversations/{design}/place"),
+            place(json!(company), Value::Null),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    for (channel, before) in [(&design, Value::Null), (&docs, json!(design))] {
+        fixture
+            .ok(
+                &fixture.owner,
+                "POST",
+                &format!("/conversations/{channel}/place"),
+                place(json!(company), before),
+            )
+            .await;
+    }
+    // Back to the channels without a category, before the default channel.
+    let placed = fixture
+        .ok(
+            &fixture.owner,
+            "POST",
+            &format!("/conversations/{design}/place"),
+            place(Value::Null, json!(general)),
+        )
+        .await;
+    assert!(!placed["events"].as_array().unwrap().is_empty());
+    let listed = fixture.ok(&ada, "GET", "/conversations", None).await;
+    let at = |id: &str| {
+        let channel = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|conversation| conversation["id"] == id)
+            .unwrap();
+        (channel["category_id"].clone(), channel["position"].clone())
+    };
+    assert_eq!(at(&design), (Value::Null, json!(0)));
+    assert_eq!(at(&general), (Value::Null, json!(1)));
+    assert_eq!(at(&docs), (json!(company), json!(0)));
 
     // A channel of a deleted category goes to the channels without one.
     let created = fixture
@@ -1118,7 +1172,10 @@ async fn categories_and_channel_order_are_for_managers() {
         .find(|conversation| conversation["name"] == "roadmap")
         .unwrap();
     assert!(roadmap["category_id"].is_null());
-    assert_eq!(roadmap["position"], 1, "after the default channel");
+    assert_eq!(
+        roadmap["position"], 2,
+        "after the channels without a category"
+    );
     let categories = fixture.ok(&ada, "GET", "/categories", None).await;
     assert_eq!(categories.as_array().unwrap().len(), 1);
 }

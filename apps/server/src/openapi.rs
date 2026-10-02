@@ -182,6 +182,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::conversations::rename_chat_category,
         crate::chat_routes::conversations::delete_chat_category,
         crate::chat_routes::conversations::move_chat_item,
+        crate::chat_routes::conversations::place_chat_channel,
         crate::chat_routes::messages::list_chat_messages,
         crate::chat_routes::messages::send_chat_message,
         crate::chat_routes::messages::edit_chat_message,

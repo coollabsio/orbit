@@ -171,3 +171,13 @@ export function sortFollowedThreads(threads: readonly FollowedThread[]): Followe
       (a.root.id < b.root.id ? 1 : -1),
   )
 }
+
+/**
+ * Where a dragged item goes when it is dropped on a row of `items` (the channels of one section, or the categories,
+ * in order): the id of the item that it comes before, or `null` for the end.
+ */
+export function dropBefore(items: readonly { id: string }[], dragId: string, rowId: string, zone: 'before' | 'after'): string | null {
+  const others = items.filter((item) => item.id !== dragId)
+  const index = others.findIndex((item) => item.id === rowId) + (zone === 'after' ? 1 : 0)
+  return others[index]?.id ?? null
+}

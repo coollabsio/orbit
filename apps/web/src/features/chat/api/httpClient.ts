@@ -23,6 +23,7 @@ import {
   listFollowedChatThreads,
   markChatMessageUnread,
   moveChatItem,
+  placeChatChannel,
   openChatDm,
   pinChatMessage,
   readAllChat,
@@ -341,9 +342,11 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     async deleteCategory(categoryId) {
       await write(deleteChatCategory(at({ category_id: categoryId })))
     },
-    async move(target, direction) {
-      const body = 'categoryId' in target ? { category_id: target.categoryId, direction } : { conversation_id: target.conversationId, direction }
-      await write(moveChatItem({ ...at({}), body }))
+    async placeCategory(categoryId, beforeId) {
+      await write(moveChatItem({ ...at({}), body: { category_id: categoryId, before_id: beforeId } }))
+    },
+    async placeChannel(conversationId, categoryId, beforeId) {
+      await write(placeChatChannel({ ...at({ conversation_id: conversationId }), body: { category_id: categoryId, before_id: beforeId } }))
     },
 
     /**

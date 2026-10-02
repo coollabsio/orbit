@@ -6305,6 +6305,159 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/place": {
+      "post": {
+        "tags": [
+          "crate::chat_routes::conversations"
+        ],
+        "summary": "Puts a channel into a category, before another channel or at the end (drag and drop).",
+        "operationId": "place_chat_channel",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatPlaceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatEvents"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, chat_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/read": {
       "post": {
         "tags": [
@@ -8090,7 +8243,7 @@
         "tags": [
           "crate::chat_routes::conversations"
         ],
-        "summary": "Moves a category or a channel one step up or down among its siblings.",
+        "summary": "Puts a category before another category or at the end (drag and drop).",
         "operationId": "move_chat_item",
         "parameters": [
           {
@@ -26088,25 +26241,19 @@
       },
       "ChatMoveBody": {
         "type": "object",
-        "description": "Exactly one of `category_id` and `conversation_id`.",
         "required": [
-          "direction"
+          "category_id"
         ],
         "properties": {
+          "before_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The category to put it before; null for the end."
+          },
           "category_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "conversation_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "direction": {
-            "$ref": "#/components/schemas/MoveDirection"
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -26119,6 +26266,26 @@
         "properties": {
           "pinned": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatPlaceBody": {
+        "type": "object",
+        "properties": {
+          "before_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The channel of that category to put it before; null for the end."
+          },
+          "category_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The category to put the channel in; null for the channels without a category."
           }
         },
         "additionalProperties": false
@@ -27971,13 +28138,6 @@
             "description": "Set on a thread reply."
           }
         }
-      },
-      "MoveDirection": {
-        "type": "string",
-        "enum": [
-          "up",
-          "down"
-        ]
       },
       "MoveFavoriteBody": {
         "type": "object",

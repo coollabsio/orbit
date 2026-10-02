@@ -1,7 +1,7 @@
 import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
 import { useChatContext } from '@/features/chat/api/chatContext'
-import { useArchiveChannel, useLeaveChannel, useMarkRead, useMoveChatItem, useSetFavorite, useSetNotify } from '@/features/chat/api/mutations'
+import { useArchiveChannel, useLeaveChannel, useMarkRead, useSetFavorite, useSetNotify } from '@/features/chat/api/mutations'
 import { useConversationState } from '@/features/chat/api/queries'
 import type { Conversation, NotifyLevel } from '@/features/chat/api/types'
 import { conversationPath } from '@/features/chat/chatRoutes'
@@ -27,7 +27,6 @@ export function useConversationActions(conversation: Conversation) {
   const setNotify = useSetNotify()
   const leaveChannel = useLeaveChannel()
   const archiveChannel = useArchiveChannel()
-  const moveItem = useMoveChatItem()
 
   const id = conversation.id
   const channel = conversation.kind !== 'dm'
@@ -36,14 +35,13 @@ export function useConversationActions(conversation: Conversation) {
 
   return {
     state,
-    /** Edit, move up and move down. */
+    /** Edit the channel. */
     canManage,
     canArchive: canManage && !conversation.isDefault,
     canLeave: channel && conversation.isMember && !conversation.isDefault,
     markRead: () => markRead.mutate(id, { onError: failed('mark as read') }),
     toggleFavorite: () => setFavorite.mutate({ conversationId: id, favorite: !state?.favorite }, { onError: failed(state?.favorite ? 'remove the star' : 'add the star') }),
     setNotify: (notify: NotifyLevel) => setNotify.mutate({ conversationId: id, notify }, { onError: failed('change the notification setting') }),
-    move: (direction: 'up' | 'down') => moveItem.mutate({ target: { conversationId: id }, direction }, { onError: failed('move the channel') }),
     copyLink: () => {
       navigator.clipboard
         .writeText(`${window.location.origin}${conversationPath(id)}`)

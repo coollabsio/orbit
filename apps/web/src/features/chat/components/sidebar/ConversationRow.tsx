@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type PointerEvent } from 'react'
 import { Edit, MoreH } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -13,6 +13,14 @@ import { ConversationIcon } from './ConversationIcon'
 import { ConversationMenuItems } from './ConversationMenuItems'
 import { rowLabel } from './sidebarRows'
 import { useConversationActions } from './useConversationActions'
+import type { DropZone } from './useSidebarDrag'
+
+/** A row that can be dragged to another place or category, and takes a dragged channel above or below it. */
+export interface ConversationRowDrag {
+  dragging: boolean
+  drop: DropZone | undefined
+  onPointerDown: (event: PointerEvent) => void
+}
 
 /**
  * One conversation in the sidebar. Unread: bold name and the pink square, or a count in its place. Muted: muted text.
@@ -22,12 +30,14 @@ export function ConversationRow({
   conversation,
   people,
   active,
+  drag,
   onEdit,
 }: {
   conversation: Conversation
   people: readonly User[]
   /** The open conversation, also while one of its threads is in full view. */
   active: boolean
+  drag?: ConversationRowDrag
   onEdit: (conversationId: string) => void
 }) {
   const { workspaceId, currentUserId } = useChatContext()
@@ -44,6 +54,10 @@ export function ConversationRow({
       data-active={active}
       data-unread={badge.bold}
       data-muted={actions.state?.notify === 'muted'}
+      data-drop-row={drag ? conversation.id : undefined}
+      data-dragging={drag?.dragging || undefined}
+      data-drop={drag?.drop}
+      className="data-[dragging]:opacity-60 data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-1.5 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-[''] data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-1.5 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-['']"
       onContextMenu={(event) => {
         event.preventDefault()
         setMenuOpen(true)
@@ -51,6 +65,10 @@ export function ConversationRow({
     >
       <ChatRowLink
         to={conversationPath(conversation.id)}
+        // The handle of the drag. The browser's own drag of a link, and the callout of a held link on a phone, are off.
+        draggable={drag ? false : undefined}
+        className={drag ? 'select-none [-webkit-touch-callout:none]' : undefined}
+        onPointerDown={drag?.onPointerDown}
         aria-current={active ? 'page' : undefined}
         aria-label={rowLabel(title, badge, actions.state?.notify, draft)}
       >

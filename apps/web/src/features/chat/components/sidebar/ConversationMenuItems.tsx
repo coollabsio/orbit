@@ -1,4 +1,4 @@
-import { Archive, ArrowDown, ArrowUp, Edit, Link2, Logout, Notification, Star, TickCircle } from 'reicon-react'
+import { Archive, Edit, Link2, Logout, Notification, Star, TickCircle } from 'reicon-react'
 import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
@@ -13,7 +13,7 @@ import type { ConversationActions } from './useConversationActions'
 
 /**
  * The items of a conversation's `…` menu, inside a `DropdownMenuContent`. The sidebar row (`placement="row"`) also has
- * "Mark as read" and the move actions; the header has neither.
+ * "Mark as read"; the header does not.
  */
 export function ConversationMenuItems({ actions, placement, onEdit }: { actions: ConversationActions; placement: 'row' | 'header'; onEdit: () => void }) {
   const { state } = actions
@@ -58,18 +58,6 @@ export function ConversationMenuItems({ actions, placement, onEdit }: { actions:
             <Edit />
             Edit channel
           </DropdownMenuItem>
-          {row ? (
-            <>
-              <DropdownMenuItem onClick={() => actions.move('up')}>
-                <ArrowUp />
-                Move up
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => actions.move('down')}>
-                <ArrowDown />
-                Move down
-              </DropdownMenuItem>
-            </>
-          ) : null}
         </>
       ) : null}
       {actions.canLeave || actions.canArchive ? <DropdownMenuSeparator /> : null}
