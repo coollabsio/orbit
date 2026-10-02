@@ -1016,14 +1016,19 @@ export type NewTaskRelationType = 'blocks' | 'blocked_by' | 'related';
 export type NotificationRecord = {
     actor_user_id: string;
     /**
+     * Conversation and message of a `chat_mentioned` notification.
+     */
+    chat_conversation_id?: string | null;
+    chat_message_id?: string | null;
+    /**
      * The task comment of a `comment_mentioned` notification.
      */
     comment_id?: string | null;
     created_at: string;
     id: string;
     /**
-     * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or
-     * `page_mentioned` (an @mention in a page body).
+     * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
+     * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
      */
     kind: string;
     /**
@@ -1661,14 +1666,19 @@ export type PageNotificationRecord = {
     items: Array<{
         actor_user_id: string;
         /**
+         * Conversation and message of a `chat_mentioned` notification.
+         */
+        chat_conversation_id?: string | null;
+        chat_message_id?: string | null;
+        /**
          * The task comment of a `comment_mentioned` notification.
          */
         comment_id?: string | null;
         created_at: string;
         id: string;
         /**
-         * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or
-         * `page_mentioned` (an @mention in a page body).
+         * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
+         * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
          */
         kind: string;
         /**

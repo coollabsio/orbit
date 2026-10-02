@@ -65,8 +65,12 @@ export function useMarkAllNotificationsRead(workspaceId: string) {
   })
 }
 
-/** Where a notification leads: the task, the page with the comment thread open, or the page at the mention. */
+/** Where a notification leads: the task, the page with the comment thread open, the page at the mention, or the chat message. */
 export function notificationTarget(notification: NotificationRecord): string | null {
+  if (notification.kind === 'chat_mentioned' && notification.chat_conversation_id) {
+    const message = notification.chat_message_id ? `?m=${encodeURIComponent(notification.chat_message_id)}` : ''
+    return `/chat/${notification.chat_conversation_id}${message}`
+  }
   if (notification.kind === 'page_mentioned' && notification.page_id) {
     const block = notification.page_block_id ? `?block=${encodeURIComponent(notification.page_block_id)}` : ''
     return `/docs/${notification.page_id}${block}`
@@ -78,12 +82,15 @@ export function notificationTarget(notification: NotificationRecord): string | n
   return notification.task_id ? `/tasks/${notification.task_id}` : null
 }
 
-/** Mentions in task comments, page comments and page bodies. */
+/** Mentions in task comments, page comments, page bodies and chat. */
 export function isMention(notification: NotificationRecord): boolean {
-  return notification.kind === 'comment_mentioned' || notification.kind === 'page_comment_mentioned' || notification.kind === 'page_mentioned'
+  return ['comment_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(notification.kind)
 }
 
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
+  if (notification.kind === 'chat_mentioned') {
+    return { title: `${actorName ?? 'Someone'} mentioned you in chat`, body: 'Open the conversation to see the message.' }
+  }
   if (notification.kind === 'page_mentioned') {
     const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`
     return { title: `${actorName ?? 'Someone'} mentioned you in ${page}`, body: 'Open the page to see where.' }

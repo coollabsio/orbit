@@ -44,6 +44,8 @@ pub struct SendInput {
     pub body: String,
     /// Files the sender uploaded for this message.
     pub file_ids: Vec<Id>,
+    /// Who is online now: `@here` notifies these members only.
+    pub online: Vec<Id>,
     pub also_in_channel: bool,
     pub nonce: String,
 }
@@ -318,8 +320,12 @@ impl ChatRepository {
             if message.mentions.channel || message.mentions.here {
                 adjust_broadcast(&mut tx, &message, 1).await?;
             }
+            events.inbox =
+                notify_mentions(&mut tx, &access, &message, &mentioned, &input.online).await?;
             // Sending a message reads the conversation up to it.
-            mark_read_to(&mut tx, conversation_id, actor_id, Some(message.id)).await?;
+            if mark_read_to(&mut tx, conversation_id, actor_id, Some(message.id)).await? {
+                events.inbox.push(actor_id);
+            }
         }
         if let Some(root) = &root {
             events.replied = Some(root.id);
@@ -475,6 +481,10 @@ impl ChatRepository {
         events.replied = message.thread_root_id;
 
         if message.thread_root_id.is_none() && message.reply_count > 0 {
+            sqlx::query("DELETE FROM notifications WHERE chat_message_id = ?")
+                .bind(message.id.to_string())
+                .execute(&mut *tx)
+                .await?;
             for table in [
                 "chat_message_mentions",
                 "chat_reactions",
@@ -857,12 +867,13 @@ pub(super) async fn add_system_row(
 }
 
 /// Moves a member's cursor to the newest message: nothing is unread after it.
+/// Returns whether that also marked inbox notifications of chat mentions as read.
 pub(super) async fn mark_read_to(
     conn: &mut SqliteConnection,
     conversation_id: Id,
     user_id: Id,
     message_id: Option<Id>,
-) -> Result<(), ChatError> {
+) -> Result<bool, ChatError> {
     sqlx::query(
         "UPDATE chat_members SET last_read_message_id = ?, mention_count = 0, broadcast_count = 0, \
          read_count = (SELECT message_count FROM chat_conversations \
@@ -874,7 +885,73 @@ pub(super) async fn mark_read_to(
     .bind(user_id.to_string())
     .execute(&mut *conn)
     .await?;
-    Ok(())
+    let marked = sqlx::query(
+        "UPDATE notifications SET read_at = ? \
+         WHERE chat_conversation_id = ? AND recipient_user_id = ? AND read_at IS NULL",
+    )
+    .bind(TimestampMillis::now().as_millis())
+    .bind(conversation_id.to_string())
+    .bind(user_id.to_string())
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(marked > 0)
+}
+
+/// Inbox notifications for a message in the main list of a channel: for the members it
+/// mentions, and with `@channel` for every member who has not muted the channel (`@here`: of
+/// those, the members who are online). Returns who was notified.
+async fn notify_mentions(
+    conn: &mut SqliteConnection,
+    access: &Access,
+    message: &MessageRecord,
+    mentioned: &[Id],
+    online: &[Id],
+) -> Result<Vec<Id>, ChatError> {
+    let conversation = &access.conversation;
+    if conversation.kind == ConversationKind::Dm || message.thread_root_id.is_some() {
+        return Ok(Vec::new());
+    }
+    let mut recipients = mentioned.to_vec();
+    if message.mentions.channel || message.mentions.here {
+        let listening = sqlx::query_scalar::<_, String>(
+            "SELECT user_id FROM chat_members WHERE conversation_id = ? AND user_id <> ? \
+             AND notify <> 'muted'",
+        )
+        .bind(conversation.id.to_string())
+        .bind(message.author_id.to_string())
+        .fetch_all(&mut *conn)
+        .await?;
+        for user_id in listening {
+            let user_id = parse_id(user_id)?;
+            if message.mentions.channel || online.contains(&user_id) {
+                recipients.push(user_id);
+            }
+        }
+    }
+    recipients.sort_unstable();
+    recipients.dedup();
+    for recipient in &recipients {
+        sqlx::query(
+            "INSERT OR IGNORE INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, \
+             kind, chat_conversation_id, chat_message_id, dedupe_key, created_at) \
+             VALUES (?, ?, ?, ?, 'chat_mentioned', ?, ?, ?, ?)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(conversation.workspace_id.to_string())
+        .bind(recipient.to_string())
+        .bind(message.author_id.to_string())
+        .bind(conversation.id.to_string())
+        .bind(message.id.to_string())
+        .bind(format!(
+            "{}:{recipient}:chat_mentioned:{}",
+            conversation.workspace_id, message.id
+        ))
+        .bind(message.created_at.as_millis())
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(recipients)
 }
 
 /// The members of the conversation among `user_ids`, without `except` (nobody mentions themselves).

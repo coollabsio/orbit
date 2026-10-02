@@ -397,6 +397,8 @@ pub struct Written<T> {
     /// A thread root whose followers have a new unread count, in the same way
     /// (`ChatRepository::thread_states_for`).
     pub replied: Option<Id>,
+    /// Members whose inbox changed: a mention made a notification, or a read marked one.
+    pub inbox: Vec<Id>,
 }
 
 impl<T> Written<T> {
@@ -416,6 +418,7 @@ struct Events {
     events: Vec<(Audience, ChatEvent)>,
     counted: Option<Id>,
     replied: Option<Id>,
+    inbox: Vec<Id>,
 }
 
 impl Events {
@@ -456,6 +459,7 @@ impl Events {
             events,
             counted: None,
             replied: None,
+            inbox: Vec::new(),
         }
     }
 }
@@ -504,6 +508,7 @@ async fn finish<T>(
         events: emitted,
         counted: events.counted,
         replied: events.replied,
+        inbox: events.inbox,
     })
 }
 

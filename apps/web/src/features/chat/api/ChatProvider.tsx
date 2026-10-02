@@ -1,4 +1,5 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '@/api/queryKeys'
 import { type ReactNode, useEffect } from 'react'
 import { useCurrentUser } from '@/features/auth/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -12,11 +13,16 @@ import { clearTyping, noteTyping, resetLiveStore, setConnectionStatus, setOnline
 const clients = new Map<string, ChatClient>()
 
 /** The only place that picks the implementation. */
-function clientFor(workspaceId: string, currentUserId: string): ChatClient {
+function clientFor(workspaceId: string, currentUserId: string, queryClient: QueryClient): ChatClient {
   const key = `${workspaceId}:${currentUserId}`
   let client = clients.get(key)
   if (!client) {
-    client = createHttpChatClient({ workspaceId, currentUserId })
+    client = createHttpChatClient({
+      workspaceId,
+      currentUserId,
+      // Chat writes are not in the workspace's change feed, so the inbox learns of a chat mention here.
+      onInboxChanged: () => void queryClient.invalidateQueries({ queryKey: [...queryKeys.workspace(workspaceId), 'notifications'] }),
+    })
     clients.set(key, client)
   }
   return client
@@ -30,7 +36,7 @@ export function ChatProvider({ enabled = true, children }: { enabled?: boolean; 
   const queryClient = useQueryClient()
   const workspaceId = useWorkspace().workspace.id
   const currentUserId = useCurrentUser().data?.id ?? null
-  const client = enabled && currentUserId ? clientFor(workspaceId, currentUserId) : null
+  const client = enabled && currentUserId ? clientFor(workspaceId, currentUserId, queryClient) : null
 
   useEffect(() => {
     if (!client) return

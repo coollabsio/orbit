@@ -28078,6 +28078,19 @@
           "actor_user_id": {
             "type": "string"
           },
+          "chat_conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Conversation and message of a `chat_mentioned` notification."
+          },
+          "chat_message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "comment_id": {
             "type": [
               "string",
@@ -28094,7 +28107,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or\n`page_mentioned` (an @mention in a page body)."
+            "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
           },
           "page_block_id": {
             "type": [
@@ -29730,6 +29743,19 @@
                 "actor_user_id": {
                   "type": "string"
                 },
+                "chat_conversation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Conversation and message of a `chat_mentioned` notification."
+                },
+                "chat_message_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "comment_id": {
                   "type": [
                     "string",
@@ -29746,7 +29772,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or\n`page_mentioned` (an @mention in a page body)."
+                  "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
                 },
                 "page_block_id": {
                   "type": [

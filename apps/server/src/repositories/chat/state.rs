@@ -87,13 +87,16 @@ impl ChatRepository {
         if read {
             return Ok(events.written(member.state(&access.conversation)));
         }
-        mark_read_to(
+        if mark_read_to(
             &mut tx,
             conversation_id,
             actor_id,
             newest.or(member.last_read_message_id),
         )
-        .await?;
+        .await?
+        {
+            events.inbox.push(actor_id);
+        }
         let state = emit_state(
             &mut tx,
             workspace_id,
@@ -249,13 +252,17 @@ impl ChatRepository {
         .collect::<Result<Vec<_>, ChatError>>()?;
         for state in &states {
             let newest = newest_main_id(&mut tx, state.conversation_id).await?;
-            mark_read_to(
+            if mark_read_to(
                 &mut tx,
                 state.conversation_id,
                 actor_id,
                 newest.or(state.last_read_message_id),
             )
-            .await?;
+            .await?
+                && !events.inbox.contains(&actor_id)
+            {
+                events.inbox.push(actor_id);
+            }
             emit_state(
                 &mut tx,
                 workspace_id,

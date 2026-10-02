@@ -168,8 +168,8 @@ pub struct NotificationRecord {
     pub recipient_user_id: Id,
     #[schema(value_type = String)]
     pub actor_user_id: Id,
-    /// `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned` or
-    /// `page_mentioned` (an @mention in a page body).
+    /// `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
+    /// `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
     pub kind: String,
     /// Set for task notifications.
     #[schema(value_type = Option<String>)]
@@ -187,6 +187,11 @@ pub struct NotificationRecord {
     pub page_comment_id: Option<Id>,
     /// The block with the mention of a `page_mentioned` notification (a deep link anchor).
     pub page_block_id: Option<String>,
+    /// Conversation and message of a `chat_mentioned` notification.
+    #[schema(value_type = Option<String>)]
+    pub chat_conversation_id: Option<Id>,
+    #[schema(value_type = Option<String>)]
+    pub chat_message_id: Option<Id>,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub read_at: Option<TimestampMillis>,
     #[schema(value_type = String, format = DateTime)]
@@ -2318,7 +2323,7 @@ impl TaskRepository {
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, read_at, created_at FROM notifications WHERE workspace_id = ",
+             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, read_at, created_at FROM notifications WHERE workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
@@ -2330,6 +2335,14 @@ impl TaskRepository {
                 " AND (page_id IS NULL OR EXISTS (SELECT 1 FROM pages WHERE pages.id = notifications.page_id \
                  AND pages.deleted_at IS NULL \
                  AND (pages.teamspace_id IS NOT NULL OR pages.owner_id = notifications.recipient_user_id)))",
+            )
+            // Chat mentions stay hidden once the recipient cannot read the conversation
+            // (it left a private channel).
+            .push(
+                " AND (chat_conversation_id IS NULL OR EXISTS (SELECT 1 FROM chat_conversations c \
+                 WHERE c.id = notifications.chat_conversation_id AND (c.kind = 'public' \
+                 OR EXISTS (SELECT 1 FROM chat_members WHERE chat_members.conversation_id = c.id \
+                 AND chat_members.user_id = notifications.recipient_user_id))))",
             );
         if unread_only {
             query.push(" AND read_at IS NULL");
@@ -2384,7 +2397,7 @@ impl TaskRepository {
         .await?;
         let row = sqlx::query(
             "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, read_at, created_at FROM notifications WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
+             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, read_at, created_at FROM notifications WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
         )
         .bind(notification_id.to_string())
         .bind(workspace_id.to_string())
@@ -3533,6 +3546,8 @@ fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRec
         page_thread_id: optional_id(row.get("page_thread_id"))?,
         page_comment_id: optional_id(row.get("page_comment_id"))?,
         page_block_id: row.get("page_block_id"),
+        chat_conversation_id: optional_id(row.get("chat_conversation_id"))?,
+        chat_message_id: optional_id(row.get("chat_message_id"))?,
         read_at: row
             .get::<Option<i64>, _>("read_at")
             .map(TimestampMillis::from_millis),

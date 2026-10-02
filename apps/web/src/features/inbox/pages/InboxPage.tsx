@@ -99,7 +99,7 @@ export function InboxPage() {
                     if (!notification.read_at) markRead.mutate(notification.id)
                     const target = notificationTarget(notification)
                     if (!target) return
-                    if (notification.page_id) {
+                    if (notification.page_id || notification.chat_conversation_id) {
                       navigate(target)
                       return
                     }

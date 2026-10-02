@@ -125,6 +125,7 @@ pub(crate) async fn send_chat_message(
             .map(|id| call.body_id(id, "thread_root_id"))
             .transpose()?,
         file_ids: call.body_ids(&body.file_ids, "file_ids")?,
+        online: state.hub.online(call.workspace_id),
         body: body.body,
         also_in_channel: body.also_in_channel,
         nonce: body.nonce,

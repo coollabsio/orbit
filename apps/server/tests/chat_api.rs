@@ -1484,6 +1484,103 @@ async fn search_finds_messages_in_readable_conversations_only() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn a_mention_in_a_channel_makes_an_inbox_item_that_reading_the_channel_clears() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    let general = fixture.general().await;
+    // (recipient, read) of every chat notification, oldest first.
+    let inbox = || async {
+        sqlx::query_as::<_, (String, bool)>(
+            "SELECT recipient_user_id, read_at IS NOT NULL FROM notifications \
+             WHERE kind = 'chat_mentioned' ORDER BY created_at, recipient_user_id",
+        )
+        .fetch_all(fixture.database.pool())
+        .await
+        .unwrap()
+    };
+
+    // `@user` notifies that member, not the author and not the others.
+    let message = fixture
+        .send(
+            &fixture.owner,
+            &general,
+            &format!("<@{}> and <@{}>", ada.id, fixture.owner.id),
+        )
+        .await;
+    assert_eq!(inbox().await, [(ada.id.to_string(), false)]);
+
+    // A thread reply and a direct message never go to the inbox.
+    fixture
+        .reply(
+            &fixture.owner,
+            &general,
+            &message,
+            &format!("<@{}> in a thread", bob.id),
+        )
+        .await;
+    let dm = fixture
+        .ok(
+            &fixture.owner,
+            "POST",
+            "/dms",
+            Some(json!({ "user_ids": [bob.id] })),
+        )
+        .await["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fixture
+        .send(&fixture.owner, &dm, &format!("<@{}> hi", bob.id))
+        .await;
+    assert_eq!(inbox().await.len(), 1);
+
+    // Reading the channel in chat reads the inbox item.
+    fixture
+        .ok(
+            &ada,
+            "POST",
+            &format!("/conversations/{general}/read"),
+            None,
+        )
+        .await;
+    assert_eq!(inbox().await, [(ada.id.to_string(), true)]);
+
+    // `@channel` notifies every member who has not muted the channel; `@here` only the
+    // members who are online (nobody is, without a live socket).
+    fixture
+        .ok(
+            &bob,
+            "PATCH",
+            &format!("/conversations/{general}/state"),
+            Some(json!({ "notify": "muted" })),
+        )
+        .await;
+    let broadcast = fixture
+        .send(&fixture.owner, &general, "<!channel> all")
+        .await;
+    fixture.send(&fixture.owner, &general, "<!here> now").await;
+    let unread: Vec<String> = inbox()
+        .await
+        .into_iter()
+        .filter(|(_, read)| !read)
+        .map(|(recipient, _)| recipient)
+        .collect();
+    assert_eq!(unread, [ada.id.to_string()]);
+
+    // A deleted message takes its inbox items along.
+    fixture
+        .ok(
+            &fixture.owner,
+            "DELETE",
+            &format!("/messages/{broadcast}"),
+            None,
+        )
+        .await;
+    assert!(inbox().await.iter().all(|(_, read)| *read));
+}
+
 /// Half a million messages in one channel: every call that a page or a click makes must stay
 /// fast. Run by hand: `cargo test -p orbit-server --test chat_api scale -- --ignored --nocapture`.
 #[tokio::test]

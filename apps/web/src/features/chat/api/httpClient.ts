@@ -61,6 +61,8 @@ export interface HttpChatClientOptions {
   client?: ApiClient
   /** A "mark as read" for one conversation goes out at most once in this time; default 1000. `0` turns it off. */
   readIntervalMs?: number
+  /** The user's inbox changed on the server (a chat mention arrived, or reading a conversation read one). */
+  onInboxChanged?: () => void
   /** Opens the live socket; tests put their own in. */
   openSocket?: (options: LiveSocketOptions) => LiveSocket
   /** How long a send that could not reach the server waits for the connection to come back. Default 60000. */
@@ -135,6 +137,8 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
           if (isOnline) online?.add(userId)
           else online?.delete(userId)
           emit({ type: 'presence', userId, online: isOnline })
+        } else if (topic === 'inbox') {
+          options.onInboxChanged?.()
         } else if (topic === 'chat') {
           const wire = event as WireEvent | WireTyping
           if (wire.type === 'typing') {

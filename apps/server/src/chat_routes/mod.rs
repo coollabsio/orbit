@@ -60,6 +60,14 @@ impl ChatState {
             self.hub
                 .publish(workspace_id, &emitted.recipients, TOPIC, &emitted.event);
         }
+        if !written.inbox.is_empty() {
+            self.hub.signal(
+                workspace_id,
+                &Recipients::Users(written.inbox.clone()),
+                "inbox",
+                &serde_json::json!({ "type": "changed" }),
+            );
+        }
         // The write changed counters of other members. Their states are read here, for the
         // members who are connected only, so a send costs the same in a channel of any size.
         let others: Vec<Id> = self

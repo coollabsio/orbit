@@ -315,6 +315,10 @@ async fn chat_events_go_to_the_members_who_may_see_them() {
     assert_eq!(frame["topic"], "chat");
     assert_eq!(frame["event"]["type"], "message.created");
     assert_eq!(frame["event"]["message"]["id"], message.as_str());
+    // The mention made an inbox item: Ada's inbox is told to refresh. Bob's is not.
+    let inbox = next(&mut ada_socket).await.unwrap();
+    assert_eq!(inbox["topic"], "inbox");
+    assert_eq!(inbox["event"]["type"], "changed");
     let state = next(&mut ada_socket).await.unwrap();
     assert_eq!(state["event"]["type"], "state.changed");
     assert_eq!(state["event"]["state"]["unread_count"], 1);

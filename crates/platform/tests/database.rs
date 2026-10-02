@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        39
+        40
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 39
+            binary_version: 40
         }
     ));
 }
@@ -1524,7 +1524,7 @@ async fn page_mentions_migration_keeps_notifications_and_adds_the_kind() {
         // The page is its owner's private page: nobody else may be notified about it.
         (
             insert("private", other_user, private, "NULL", "NULL"),
-            "notification must belong to the workspace task or a page the recipient can see",
+            "notification must belong to the workspace task, a page the recipient can see",
         ),
         (
             insert("thread", user, page, &format!("'{thread}'"), "NULL"),
