@@ -6,7 +6,9 @@ Milestone one persists setup, login and recovery, sessions, workspaces, membersh
 
 Docs pages persist too (tree, content, trash, search; see Docs below).
 
-Home, Mail, Chat, direct messages, Inbox, Profile, webhooks, custom emoji administration, typing, and realtime behavior still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP, mailboxes, WebSockets, presence, and typing transport are follow-up milestones.
+Chat persists too (channels, direct messages, threads, files, search; see Chat below).
+
+Home, Mail, Profile and webhooks still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP and mailboxes are follow-up milestones.
 
 ## Global shell
 
@@ -387,37 +389,26 @@ This feature is mock-backed. No outbound or inbound SMTP service runs in milesto
 - Reply composer is hidden until Reply is clicked; it is free-flow rather than boxed.
 - Replies support text, attachment-only sending, file picker, paste, drop, compact file chips, inline images, removal, discard, and Cmd/Ctrl+Enter.
 
-## Channel chat
+## Chat
 
-Core files: `ChatPage.tsx`, `components/ChannelSidebar.tsx`, `components/ChatArea.tsx`, `components/Message*`, `components/Thread*`.
+Core files: `features/chat/pages/ChatPage.tsx`, `features/chat/components/*`, `features/chat/api/*`.
+Design: `docs/superpowers/specs/2026-10-01-chat-redesign-design.md` (UI) and
+`2026-10-02-chat-backend-design.md` (backend); both are local files.
 
-This feature is mock-backed. WebSocket delivery, replay, presence, and typing transport are deferred.
+Chat runs on the server. It is on in development builds only (`lib/chatEnabled.ts`); production
+shows "Coming soon" until that gate is removed.
 
-- Resizable category/channel sidebar; width persists.
-- Editable/reorderable categories and channels with emoji.
-- Timeline groups messages, supports compact consecutive rows and day separators.
-- Markdown supports headings, lists, quotes, inline/fenced code, links, mentions, channel mentions, custom emoji, embeds, and GitHub link chips.
-- Channel mentions navigate in-app; internal application links use client navigation.
-- Hover toolbar intentionally shows only three quick reactions plus `…`; the context menu owns all other actions.
-- Add Reaction opens the full shared emoji picker.
-- Reactions, replies, edit/delete, pin/unpin, copy, threads, attachments, image viewer, files view, search, and typing indicators work.
-- Thread roots are messages; followed threads appear under channels.
-- Chat Settings replaces the channel sidebar and contains Roles, Webhooks, and Emoji. There is no chat Danger Zone.
-- Custom emoji can be uploaded, renamed, deleted, selected, and rendered app-wide.
-- On mobile, `/chat` is the channel list and a conversation's Back button returns there; desktop still opens the first channel automatically.
-
-## Direct messages
-
-`features/chat/DMPage.tsx` deliberately reuses channel-chat components.
-
-This feature is mock-backed.
-
-- DM entry lives under Personal in the first sidebar.
-- Resizable conversation sidebar persists under `orbit:dm_sidebar_width`.
-- Rows show avatar, fixed online/offline status dot, latest preview/time, active state, and unread count.
-- New message modal searches users by name/handle and intentionally has no status dots.
-- DM header shows only avatar, presence, and user name—never profile title/description.
-- Conversation behavior reuses messages, composer, attachments, emoji, reactions, replies, search, files, pins, and threads.
+- One chat space for each workspace: public and private channels, direct messages (1:1 and
+  group), shared categories, personal favorites. `#general` has every member.
+- Threads are the only reply model (side pane and full view), with follow state for each member.
+- Reactions, pins, files, mentions (`@user`, `@channel`, `@here`, `#channel`), search, the
+  Unreads and Threads views, a notify level for each conversation.
+- Unread and mention counts come from the server (counters, not count queries).
+- Live updates, typing and presence come over the workspace's live socket
+  (`GET /api/v1/workspaces/{id}/live`).
+- A mention in a channel makes an Inbox item; reading the channel reads it.
+- `features/chat/api/client.ts` is the contract. `httpClient.ts` is the implementation;
+  `mockClient.ts` is an in-memory one that only tests use.
 
 ## Notifications, profile, and settings
 

@@ -476,6 +476,175 @@ fn require_development(config: &Config) -> Result<(), CliError> {
     }
 }
 
+/// A few channels and messages, so chat is not empty in development: a category, a thread, a
+/// mention that is unread for the developer, a private channel and a direct message. Does
+/// nothing once the default channel has a message.
+async fn seed_chat(
+    database: &Database,
+    workspace_id: orbit_platform::Id,
+    developer: orbit_platform::Id,
+    member: orbit_platform::Id,
+) -> Result<(), CliError> {
+    use orbit_server::repositories::chat::{
+        ChannelCreate, ChatRepository, ConversationKind, SendInput,
+    };
+
+    let general: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM chat_conversations WHERE workspace_id = ? AND is_default = 1 \
+         AND message_count = 0",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_optional(database.pool())
+    .await
+    .map_err(operation)?;
+    let Some(general) = general else {
+        return Ok(());
+    };
+    let general: orbit_platform::Id = general.parse().map_err(operation)?;
+    // The seed sends text only, so the blob store is never written to.
+    let chat = ChatRepository::new(
+        database.clone(),
+        orbit_platform::UploadService::new(
+            database.clone(),
+            std::sync::Arc::new(orbit_platform::LocalBlobStore::new(std::env::temp_dir())),
+            orbit_platform::AttachmentMutationCoordinator::default(),
+            orbit_platform::UploadLimits::default(),
+        ),
+    );
+    let mut sent = 0_u32;
+    let mut send = async |author, conversation_id, thread_root_id, body: String| {
+        sent += 1;
+        chat.send_message(
+            workspace_id,
+            author,
+            SendInput {
+                conversation_id,
+                thread_root_id,
+                body,
+                file_ids: Vec::new(),
+                online: Vec::new(),
+                also_in_channel: false,
+                nonce: format!("development-seed-{sent}"),
+            },
+        )
+        .await
+        .map(|written| written.value.id)
+        .map_err(operation)
+    };
+    let channel = async |name: &str, topic: &str, kind, category_id, member_ids| {
+        chat.create_channel(
+            workspace_id,
+            developer,
+            ChannelCreate {
+                name: name.to_owned(),
+                topic: topic.to_owned(),
+                category_id,
+                kind,
+                member_ids,
+            },
+        )
+        .await
+        .map(|written| written.value.id)
+        .map_err(operation)
+    };
+
+    let product = chat
+        .create_category(workspace_id, developer, "Product")
+        .await
+        .map_err(operation)?
+        .value
+        .id;
+    let engineering = channel(
+        "engineering",
+        "Code, reviews and incidents",
+        ConversationKind::Public,
+        Some(product),
+        vec![member],
+    )
+    .await?;
+    channel(
+        "design",
+        "Screens, flows and words",
+        ConversationKind::Public,
+        Some(product),
+        Vec::new(),
+    )
+    .await?;
+    let leadership = channel(
+        "leadership",
+        "Planning and hiring",
+        ConversationKind::Private,
+        None,
+        Vec::new(),
+    )
+    .await?;
+
+    send(
+        developer,
+        general,
+        None,
+        "Morning. The release branch is cut, the changelog is in the doc.".to_owned(),
+    )
+    .await?;
+    let question = send(
+        member,
+        general,
+        None,
+        "Should the import run in the background, or keep the dialog open until it ends?"
+            .to_owned(),
+    )
+    .await?;
+    send(
+        developer,
+        general,
+        Some(question),
+        "Background. A dialog that stays open for minutes gets closed by accident.".to_owned(),
+    )
+    .await?;
+    send(
+        member,
+        general,
+        Some(question),
+        "Agreed. I will add a toast with a link when it ends.".to_owned(),
+    )
+    .await?;
+    send(
+        developer,
+        engineering,
+        None,
+        "The migration for task labels is ready for review.".to_owned(),
+    )
+    .await?;
+    send(
+        member,
+        engineering,
+        None,
+        format!("<@{developer}> can you check the import on staging? It uses your parser."),
+    )
+    .await?;
+    send(
+        developer,
+        leadership,
+        None,
+        "Budget for the next quarter is in the doc. Comments by Friday.".to_owned(),
+    )
+    .await?;
+    let dm = chat
+        .open_dm(workspace_id, member, vec![developer])
+        .await
+        .map_err(operation)?
+        .value
+        .id;
+    send(
+        member,
+        dm,
+        None,
+        "Do you have ten minutes for the import question?".to_owned(),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn install_seed_data(database: Database) -> Result<String, CliError> {
     const EMAIL: &str = "test@example.com";
     const SECOND_EMAIL: &str = "member@example.com";
@@ -626,6 +795,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     .fetch_one(database.pool())
     .await
     .map_err(operation)?;
+    seed_chat(&database, workspace_id, user_id, member_id).await?;
     if already_seeded == 0 {
         let status_id: String = sqlx::query_scalar(
             "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
@@ -1322,6 +1492,21 @@ mod tests {
                 .await
                 .unwrap(),
             2
+        );
+        // The chat seed ran once: the second run found messages and left chat alone.
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM chat_messages WHERE kind = 'message'")
+                .await
+                .unwrap(),
+            8
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT COUNT(*) FROM notifications WHERE kind = 'chat_mentioned'")
+                .await
+                .unwrap(),
+            1
         );
         assert_eq!(
             database

@@ -12,6 +12,8 @@ The Cargo workspace has three crates with one-way dependencies:
 
 `router.rs` merges independent auth, workspace, task, and attachment routers. It also adds liveness, readiness, embedded assets, SPA fallback, and the common Tower platform layer. Unknown `/api/*` paths return RFC 9457 Problem Details. Only non-API browser routes receive `index.html`.
 
+Chat (`repositories/chat/`, `chat_routes/`) keeps each member's unread count as counters that change in the transaction of the message, and makes no audit rows, so a message does not trigger a workspace refetch. `live/` is the live socket of a workspace (`GET /api/v1/workspaces/{id}/live`): an in-memory hub numbers events, keeps the newest 1,000 for a client that reconnects, and knows who is online. A chat write holds the hub's write lock from before its transaction until its events are published, so events go out in commit order.
+
 The public router records bounded request counters. When `metrics.listen` is configured, a separate private listener exposes those identifier-free Prometheus metrics; it is disabled by default and never mounts `/metrics` on the public listener.
 
 On shutdown, the HTTP server stops accepting new connections and drains active requests. Orbit then cancels retention and attachment reconciliation services. Durable job handlers get up to 30 seconds to finish before local tasks are aborted and leases recover naturally.
@@ -32,7 +34,9 @@ On shutdown, the HTTP server stops accepting new connections and drains active r
 
 React Query and the generated OpenAPI client own persistent server state. Query keys begin with `['workspace', workspaceId]` for workspace-scoped data. Optimistic task writes snapshot relevant caches, roll back rejected requests, and refresh conflict state.
 
-Identity, workspaces, tasks, comments, attachments, trash, and sessions use the API. Docs, mail, chat, DMs, inbox, profile, and home summaries keep their isolated in-memory mock domains. `MockFeatureBadge` labels those routes in development and production.
+Identity, workspaces, tasks, comments, attachments, trash, sessions, docs, the inbox and chat use the API. Mail, profile, and home summaries keep their isolated in-memory mock domains. `MockFeatureBadge` labels those routes in development and production.
+
+Chat is the exception to the query-key rule: its keys begin with `['chat', workspaceId]`, outside the workspace prefix, because chat is not in the workspace change feed. `features/chat/api/httpClient.ts` implements the `ChatClient` contract; every write returns the chat events it caused, and the same events arrive for other members over the live socket (`liveSocket.ts`). `applyChatEvent` writes both into the cache.
 
 ## Frontend stack
 
