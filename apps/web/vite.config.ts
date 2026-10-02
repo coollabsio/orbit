@@ -15,14 +15,15 @@ if (!bootstrapScript) throw new Error('theme bootstrap script is missing')
 const cspScriptHash = `sha256-${createHash('sha256').update(bootstrapScript).digest('base64')}`
 
 /**
- * Emoji files that Orbit serves itself (the production CSP has no CDN): the Twemoji images at `/twemoji/<code>.svg`
- * and the emoji data at `/emojibase/en/{data,messages}.json` and `/emojibase/en/shortcodes/github.json`. They stay in `node_modules`: the dev server
+ * Emoji files that Orbit serves itself (the production CSP has no CDN): the Twemoji images at `/assets/twemoji-<version>/<code>.svg`
+ * and the emoji data at `/assets/emojibase-<version>/en/…`. The version in the path makes them immutable: the server
+ * caches `/assets` for a year, so a browser downloads each file once. They stay in `node_modules`: the dev server
  * reads them from there and the build copies them into `dist`.
  */
 const emojiAssets = [
-  { url: '/twemoji/', dir: fileURLToPath(new URL('./node_modules/@twemoji/svg/', import.meta.url)), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
-  { url: '/emojibase/en/shortcodes/', dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/shortcodes/', import.meta.url)), files: /^github\.json$/, type: 'application/json' },
-  { url: '/emojibase/en/', dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/', import.meta.url)), files: /^(data|messages)\.json$/, type: 'application/json' },
+  { url: '/assets/twemoji-15.0.0/', dir: fileURLToPath(new URL('./node_modules/@twemoji/svg/', import.meta.url)), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
+  { url: '/assets/emojibase-17.0.0/en/shortcodes/', dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/shortcodes/', import.meta.url)), files: /^github\.json$/, type: 'application/json' },
+  { url: '/assets/emojibase-17.0.0/en/', dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/', import.meta.url)), files: /^(data|messages)\.json$/, type: 'application/json' },
 ]
 
 // https://vite.dev/config/
@@ -45,7 +46,8 @@ export default defineConfig({
           const name = asset ? basename(path) : ''
           if (!asset || !asset.files.test(name) || !existsSync(asset.dir + name)) return next()
           response.setHeader('Content-Type', asset.type)
-          response.setHeader('Cache-Control', 'public, max-age=3600')
+          response.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+          response.setHeader('ETag', `"${asset.url}"`)
           response.end(readFileSync(asset.dir + name))
         })
       },

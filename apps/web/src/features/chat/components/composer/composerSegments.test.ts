@@ -16,7 +16,7 @@ test('mentions and emoji are cut out of the text, and the pieces join back to it
     { kind: 'text', text: ', see ' },
     { kind: 'mention', text: '#design' },
     { kind: 'text', text: ' ' },
-    { kind: 'emoji', text: '🎉', url: '/twemoji/1f389.svg' },
+    { kind: 'emoji', text: '🎉', url: '/assets/twemoji-15.0.0/1f389.svg' },
     { kind: 'text', text: ' now' },
   ])
   expect(segments.map((segment) => segment.text).join('')).toBe(text)

@@ -2,13 +2,14 @@ import { parse } from '@twemoji/parser'
 
 /**
  * Emoji show as Twemoji images, so they look the same on every device. The SVG files are served by Orbit itself
- * (`vite.config.ts` copies them from `@twemoji/svg` to `/twemoji`): the production CSP has no CDN, and a self-hosted
- * Orbit must work without one. Graphics © Twitter, Inc. and other contributors, CC-BY 4.0.
+ * (`vite.config.ts` copies them from `@twemoji/svg`): the production CSP has no CDN, and a self-hosted Orbit must work
+ * without one. The paths are under `/assets` and carry the package version, so the server sends them as immutable: a
+ * browser downloads each file once and then never asks again. Graphics © Twitter, Inc. and other contributors, CC-BY 4.0.
  */
-const TWEMOJI_PATH = '/twemoji'
+const TWEMOJI_PATH = '/assets/twemoji-15.0.0'
 
 /** The emoji data that the picker loads, also served by Orbit (from `emojibase-data`). */
-export const EMOJIBASE_PATH = '/emojibase'
+export const EMOJIBASE_PATH = '/assets/emojibase-17.0.0'
 
 /**
  * The Unicode emoji version of the bundled images. The picker offers only emoji up to this version; a newer emoji
