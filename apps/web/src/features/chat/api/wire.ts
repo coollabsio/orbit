@@ -153,8 +153,8 @@ const CODE_BY_STATUS: Partial<Record<number, ChatErrorCode>> = { 403: 'forbidden
  */
 export function toChatError(error: unknown): ChatError {
   if (error instanceof ChatError) return error
-  if (!(error instanceof ApiProblem)) return new ChatError('offline', 'The server could not be reached.')
+  if (!(error instanceof ApiProblem)) return new ChatError('offline', 'The server could not be reached.', true)
   const code =
     error.status === 422 ? (error.code === 'chat_message_too_long' ? 'too_long' : 'conflict') : (CODE_BY_STATUS[error.status] ?? 'offline')
-  return new ChatError(code, error.detail)
+  return new ChatError(code, error.detail, [502, 503, 504].includes(error.status))
 }

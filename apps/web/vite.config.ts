@@ -18,12 +18,17 @@ const cspScriptHash = `sha256-${createHash('sha256').update(bootstrapScript).dig
  * Emoji files that Orbit serves itself (the production CSP has no CDN): the Twemoji images at `/assets/twemoji-<version>/<code>.svg`
  * and the emoji data at `/assets/emojibase-<version>/en/…`. The version in the path makes them immutable: the server
  * caches `/assets` for a year, so a browser downloads each file once. They stay in `node_modules`: the dev server
- * reads them from there and the build copies them into `dist`.
+ * reads them from there and the build copies them into `dist`. The versions are those of the installed packages, as in
+ * `src/lib/twemoji.ts`. The images are the `jdecked/twemoji` repository: its npm package of images stops at 15.0.0.
  */
+const packageVersion = (name: string): string =>
+  JSON.parse(readFileSync(new URL(`./node_modules/${name}/package.json`, import.meta.url), 'utf8')).version
+const twemojiVersion = packageVersion('twemoji-assets')
+const emojibaseVersion = packageVersion('emojibase-data')
 const emojiAssets = [
-  { url: '/assets/twemoji-15.0.0/', dir: fileURLToPath(new URL('./node_modules/@twemoji/svg/', import.meta.url)), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
-  { url: '/assets/emojibase-17.0.0/en/shortcodes/', dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/shortcodes/', import.meta.url)), files: /^github\.json$/, type: 'application/json' },
-  { url: '/assets/emojibase-17.0.0/en/', dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/', import.meta.url)), files: /^(data|messages)\.json$/, type: 'application/json' },
+  { url: `/assets/twemoji-${twemojiVersion}/`, dir: fileURLToPath(new URL('./node_modules/twemoji-assets/assets/svg/', import.meta.url)), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
+  { url: `/assets/emojibase-${emojibaseVersion}/en/shortcodes/`, dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/shortcodes/', import.meta.url)), files: /^github\.json$/, type: 'application/json' },
+  { url: `/assets/emojibase-${emojibaseVersion}/en/`, dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/', import.meta.url)), files: /^(data|messages)\.json$/, type: 'application/json' },
 ]
 
 // https://vite.dev/config/

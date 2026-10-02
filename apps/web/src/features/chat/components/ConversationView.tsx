@@ -1,9 +1,11 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useChatContext } from '../api/chatContext'
+import { chatKeys } from '../api/keys'
 import { useJoinChannel, useMarkRead } from '../api/mutations'
-import { flattenMessages, useConversation, useConversationState, useMessages } from '../api/queries'
+import { flattenMessages, useConversation, useConversationState, useMessages, useUnconfirmedMessages } from '../api/queries'
 import type { Conversation, ConversationState } from '../api/types'
 import { useChatLocation, useChatNavigation } from '../useChatNavigation'
 import { Composer, type ComposerHandle } from './composer/Composer'
@@ -42,7 +44,8 @@ interface ColumnProps {
 
 /** Mounted once for each opened conversation (keyed by id), so what it captures on open lasts until the user leaves. */
 function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps) {
-  const { currentUserId } = useChatContext()
+  const { currentUserId, workspaceId } = useChatContext()
+  const queryClient = useQueryClient()
   const people = useChatPeople()
   const location = useChatLocation()
   const { closePane } = useChatNavigation()
@@ -56,9 +59,10 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
   // The read cursor at the moment of opening: the "New" line stays there while the conversation is open.
   const [openCursor] = useState(() => (state && state.unreadCount > 0 ? state.lastReadMessageId : undefined))
   // Which messages are loaded: a window around a message (a jump, the first unread), or the newest ones.
-  const [view, setView] = useState<{ around: string | null; openAt: 'unread' | 'bottom' }>(() => ({
+  const [view, setView] = useState<{ around: string | null; openAt: 'unread' | 'bottom'; turn: number }>(() => ({
     around: focusMessageId ?? (typeof openCursor === 'string' ? openCursor : null),
     openAt: focusMessageId ? 'bottom' : 'unread',
+    turn: 0,
   }))
   const [seenFocus, setSeenFocus] = useState(focusMessageId)
   const [atBottom, setAtBottom] = useState(false)
@@ -67,13 +71,25 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
   const [dragging, setDragging] = useState(false)
 
   const query = useMessages(conversationId, { around: view.around })
-  const messages = flattenMessages(query.data)
+  const messages = [...flattenMessages(query.data), ...useUnconfirmedMessages(conversationId)]
+
+  /** Shows the newest messages. The list of the newest messages loads again if a long scroll back made it drop them. */
+  function toLatest() {
+    if (view.around === null) void queryClient.resetQueries({ queryKey: chatKeys.messages(workspaceId, conversationId), exact: true })
+    setView({ around: null, openAt: 'bottom', turn: view.turn + 1 })
+  }
+  // The conversation was left far back in its history: it opens at the newest messages again.
+  useEffect(() => {
+    if (view.around === null && query.hasNextPage) toLatest()
+    // Only for the list that the cache had at the moment of opening.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // A new `?m=` while the conversation is open: load around that message unless it is already here.
   if (focusMessageId !== seenFocus) {
     setSeenFocus(focusMessageId)
     if (focusMessageId && !messages.some((message) => message.id === focusMessageId)) {
-      setView({ around: focusMessageId, openAt: 'bottom' })
+      setView({ around: focusMessageId, openAt: 'bottom', turn: view.turn })
     }
   }
 
@@ -135,7 +151,7 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
         </div>
       ) : (
         <MessageList
-          key={view.around ?? 'latest'}
+          key={`${view.around ?? 'latest'}-${view.turn}`}
           ref={list}
           label={`Messages in ${title}`}
           messages={messages}
@@ -152,8 +168,8 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
           start={<ConversationStart conversation={conversation} />}
           announce
           onAtBottomChange={setAtBottom}
-          onJumpToLatest={() => setView({ around: null, openAt: 'bottom' })}
-          onJumpToFirstUnread={typeof cursor === 'string' ? () => setView({ around: cursor, openAt: 'unread' }) : undefined}
+          onJumpToLatest={toLatest}
+          onJumpToFirstUnread={typeof cursor === 'string' ? () => setView({ around: cursor, openAt: 'unread', turn: view.turn }) : undefined}
           onMarkUnread={() => setSuspended(true)}
           onFocusComposer={() => composer.current?.focus()}
         />
@@ -170,7 +186,7 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
             onFocusList={() => list.current?.focusLast() ?? false}
             onSent={() => {
               // In a window around an old message the new message would not show: go to the newest messages.
-              if (query.hasNextPage) setView({ around: null, openAt: 'bottom' })
+              if (query.hasNextPage) toLatest()
             }}
           />
         </>

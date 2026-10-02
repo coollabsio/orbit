@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { QueryClient } from '@tanstack/react-query'
+import { InfiniteQueryObserver, QueryClient } from '@tanstack/react-query'
 import { testMessage } from '../lib/testMessage'
-import { applyChatEvent, type MessagePages, type ThreadPages } from './events'
+import { applyChatEvent, type MessagePages, type ThreadPages, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import type { Category, Conversation, ConversationState, FollowedThread, Message, ThreadState } from './types'
 
@@ -53,19 +53,47 @@ test('message.created is not appended to a window that does not reach the newest
   expect(ids()).toEqual(['m1', 'm2', 'm3'])
 })
 
-test('the echo replaces the optimistic row by nonce and sorts before rows still sending', () => {
-  const { client, ids, find } = setup()
-  client.setQueryData(
-    chatKeys.messages(W, 'c1'),
-    pages([
-      testMessage({ id: 'm1' }),
-      testMessage({ id: '~001-n1', nonce: 'n1', sendState: 'sending' }),
-      testMessage({ id: '~002-n2', nonce: 'n2', sendState: 'sending' }),
-    ]),
-  )
+test('the confirmed message takes the place of the row in the outbox with its nonce', () => {
+  const { client, ids } = setup()
+  const outbox = () => client.getQueryData<Message[]>(chatKeys.outbox(W))?.map((message) => message.id)
+  updateOutbox(client, W, () => [
+    testMessage({ id: '~001-n1', nonce: 'n1', sendState: 'sending' }),
+    testMessage({ id: '~002-n2', nonce: 'n2', sendState: 'failed' }),
+  ])
   applyChatEvent(client, W, { type: 'message.created', message: testMessage({ id: 'm5', nonce: 'n2', body: 'second' }) })
-  expect(ids()).toEqual(['m1', 'm5', '~001-n1'])
-  expect(find('m5')?.sendState).toBeUndefined()
+  expect(ids()).toEqual(['m1', 'm2', 'm5'])
+  expect(outbox()).toEqual(['~001-n1'])
+  // A resync asks the lists again and leaves the outbox alone.
+  applyChatEvent(client, W, { type: 'resync' })
+  expect(outbox()).toEqual(['~001-n1'])
+})
+
+test('a list that loads while an event comes loads once more', async () => {
+  const client = new QueryClient()
+  let calls = 0
+  let release = () => {}
+  // An open list: only a query that someone looks at loads again.
+  const observer = new InfiniteQueryObserver(client, {
+    queryKey: chatKeys.messages(W, 'c1'),
+    initialPageParam: {},
+    getNextPageParam: () => undefined,
+    staleTime: Infinity,
+    queryFn: async () => {
+      calls += 1
+      if (calls === 1) await new Promise<void>((resolve) => (release = resolve))
+      return { items: calls === 1 ? [] : [testMessage({ id: 'm1' })], before: null, after: null }
+    },
+  })
+  const stop = observer.subscribe(() => {})
+  await Promise.resolve()
+  // No data yet: the event itself changes nothing.
+  applyChatEvent(client, W, { type: 'message.created', message: testMessage({ id: 'm1' }) })
+  applyChatEvent(client, W, { type: 'message.updated', message: testMessage({ id: 'm1' }) })
+  release()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  stop()
+  expect(calls).toBe(2)
+  expect(client.getQueryData<MessagePages>(chatKeys.messages(W, 'c1'))?.pages[0].items.map((message) => message.id)).toEqual(['m1'])
 })
 
 test('a reply goes to its thread and updates the root’s summary in the conversation list, once', () => {

@@ -23,4 +23,6 @@ export const chatKeys = {
   files: (workspaceId: string, conversationId: string) => ['chat', workspaceId, 'files', conversationId] as const,
   searches: (workspaceId: string) => ['chat', workspaceId, 'search'] as const,
   search: (workspaceId: string, input: Omit<SearchInput, 'cursor'>) => ['chat', workspaceId, 'search', input] as const,
+  /** Outside the `all` prefix: a resync must not touch the messages that only this tab has. */
+  outbox: (workspaceId: string) => ['chat-outbox', workspaceId] as const,
 }

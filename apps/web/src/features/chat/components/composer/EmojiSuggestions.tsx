@@ -2,14 +2,19 @@ import { Emoji } from '@/components/common/Emoji'
 import { Button } from '@/components/ui/button'
 import type { EmojiShortcode } from '../../lib/emojiSearch'
 
-/** The list above the message box for `:name`. `onMouseDown` keeps the focus in the text field. */
+/**
+ * The list above the message box for `:name`. `onMouseDown` keeps the focus in the text field, which names this list
+ * (`aria-controls`) and its active option (`aria-activedescendant`, `${id}-${index}`) for a screen reader.
+ */
 export function EmojiSuggestions({
+  id,
   query,
   suggestions,
   activeIndex,
   onSelect,
   onHover,
 }: {
+  id: string
   query: string
   suggestions: EmojiShortcode[]
   activeIndex: number
@@ -19,14 +24,14 @@ export function EmojiSuggestions({
   return (
     <div
       data-slot="emoji-suggestions"
-      role="listbox"
-      aria-label={`Emoji matching ${query}`}
       className="absolute right-0 bottom-full left-0 z-50 mb-3 max-h-80 overflow-y-auto overscroll-contain rounded-lg border border-border bg-popover py-2 text-popover-foreground shadow-xl"
     >
-      <div className="px-3 pb-1 text-xs font-medium text-muted-foreground">Emoji matching :{query}</div>
+      <div aria-hidden="true" className="px-3 pb-1 text-xs font-medium text-muted-foreground">Emoji matching :{query}</div>
+      <div id={id} role="listbox" aria-label={`Emoji matching ${query}`}>
       {suggestions.map((suggestion, index) => (
         <Button
           key={suggestion.emoji}
+          id={`${id}-${index}`}
           type="button"
           role="option"
           variant="ghost"
@@ -45,6 +50,7 @@ export function EmojiSuggestions({
           <span className="min-w-0 flex-1 truncate text-sm">:{suggestion.name}:</span>
         </Button>
       ))}
+      </div>
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { useChatContext } from '../../api/chatContext'
 import { useMarkThreadRead } from '../../api/mutations'
-import { flattenMessages, useConversation, useThread, useThreadState } from '../../api/queries'
+import { flattenMessages, useConversation, useThread, useThreadState, useUnconfirmedMessages } from '../../api/queries'
 import type { Conversation, Message, ThreadState } from '../../api/types'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { useChatNavigation } from '../../useChatNavigation'
@@ -44,7 +44,7 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
   const focused = useWindowFocused()
   const { mutate: markThreadRead } = useMarkThreadRead()
   const composer = useRef<ComposerHandle>(null)
-  const replies = flattenMessages(thread.data)
+  const replies = [...flattenMessages(thread.data), ...useUnconfirmedMessages(conversation.id, root.id)]
   const rootId = root.id
 
   // The read cursor at the moment of opening: the "New" line stays there while the thread is open.

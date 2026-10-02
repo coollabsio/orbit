@@ -49,7 +49,6 @@
     "@rolldown/plugin-babel": "^0.2.3",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
-    "@twemoji/svg": "15.0.0",
     "@types/babel__core": "^7.20.5",
     "@types/bun": "^1.4.1",
     "@types/node": "^24.13.3",
@@ -60,6 +59,7 @@
     "emojibase-data": "17.0.0",
     "happy-dom": "^20.14.0",
     "oxlint": "^1.75.0",
+    "twemoji-assets": "github:jdecked/twemoji#v17.0.3",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
   }

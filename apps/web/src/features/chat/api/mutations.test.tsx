@@ -78,7 +78,11 @@ async function setup(overrides: Partial<ChatClient> = {}) {
       <ChatContext.Provider value={{ client, workspaceId: W, currentUserId: 'u1' }}>{children}</ChatContext.Provider>
     </QueryClientProvider>
   )
-  const messages = () => queryClient.getQueryData<MessagePages>(chatKeys.messages(W, general.id))!.pages.flatMap((page) => page.items)
+  /** As the list shows them: the confirmed messages, then the outbox. */
+  const messages = () => [
+    ...queryClient.getQueryData<MessagePages>(chatKeys.messages(W, general.id))!.pages.flatMap((page) => page.items),
+    ...(queryClient.getQueryData<Message[]>(chatKeys.outbox(W)) ?? []),
+  ]
   const favorite = () =>
     queryClient.getQueryData<ConversationState[]>(chatKeys.states(W))!.find((state) => state.conversationId === general.id)!.favorite
   return { mock: server, wrapper, general, messages, favorite }

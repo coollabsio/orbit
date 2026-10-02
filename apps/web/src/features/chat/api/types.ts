@@ -148,11 +148,14 @@ export type ChatErrorCode = 'not_found' | 'forbidden' | 'too_long' | 'conflict' 
 
 export class ChatError extends Error {
   readonly code: ChatErrorCode
+  /** The request did not reach the server, or a proxy answered for it: the same request can go again. */
+  readonly unreached: boolean
 
-  constructor(code: ChatErrorCode, message: string) {
+  constructor(code: ChatErrorCode, message: string, unreached = false) {
     super(message)
     this.name = 'ChatError'
     this.code = code
+    this.unreached = unreached
   }
 }
 

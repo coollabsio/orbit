@@ -7,6 +7,7 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
   type Ref,
+  useId,
 } from 'react'
 import { At, Paperclip2, Send2, SmileCircle } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
@@ -98,6 +99,7 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
       ]
   const mention = useMentionAutocomplete([...candidates, ...everyone], text, setText, input, undefined, undefined, people.channels)
   const emoji = useEmojiAutocomplete(text, setText, input)
+  const emojiListId = useId()
 
   useEffect(() => {
     const element = input.current
@@ -210,7 +212,7 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
         {mention.open ? (
           <MentionPopover suggestions={mention.suggestions} activeIndex={mention.activeIndex} onSelect={mention.insert} onHover={mention.setActiveIndex} />
         ) : emoji.open ? (
-          <EmojiSuggestions query={emoji.query} suggestions={emoji.suggestions} activeIndex={emoji.activeIndex} onSelect={emoji.insert} onHover={emoji.setActiveIndex} />
+          <EmojiSuggestions id={emojiListId} query={emoji.query} suggestions={emoji.suggestions} activeIndex={emoji.activeIndex} onSelect={emoji.insert} onHover={emoji.setActiveIndex} />
         ) : null}
         <div
           data-slot="composer-box"
@@ -223,6 +225,8 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
             conversations={people.channels}
             rows={1}
             aria-label={inThread ? 'Reply in thread' : `Message ${title}`}
+            aria-controls={emoji.open ? emojiListId : undefined}
+            aria-activedescendant={emoji.open ? `${emojiListId}-${emoji.activeIndex}` : undefined}
             placeholder={inThread ? 'Reply…' : `Message ${title}`}
             className="min-h-10 shrink resize-none rounded-none border-0 bg-transparent px-3 pt-2.5 pb-1 text-[15px] leading-[1.5] focus-visible:ring-0 md:text-[15px] dark:bg-transparent"
             onChange={onChange}

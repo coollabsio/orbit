@@ -8,7 +8,8 @@ const index = buildEmojiIndex(
     { hexcode: '1F44D', emoji: '👍', version: 0.6 },
     { hexcode: '1FAE0', emoji: '🫠', version: 14 },
     { hexcode: '1FAE8', emoji: '🫨', version: 15 },
-    { hexcode: '1FAC6', emoji: '🫆', version: 16 },
+    // Newer than the images: left out.
+    { hexcode: '1FAC6', emoji: '🫆', version: 18 },
     { hexcode: '1F600', emoji: '😀', version: 1 },
   ],
   { '1F602': 'joy', '1F639': 'joy_cat', '1F44D': ['+1', 'thumbsup'], '1FAE0': 'melting_face', '1FAE8': 'shaking_face', '1FAC6': 'fingerprint' },

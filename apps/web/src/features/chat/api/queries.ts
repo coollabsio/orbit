@@ -5,10 +5,7 @@ import type { ChatClient, MessageCursor, SearchInput } from './client'
 import { chatKeys } from './keys'
 import { ChatError, type Conversation, type ConversationState, type FollowedThread, type Message, type MessagePage } from './types'
 
-/**
- * Chat queries never go stale on their own: `applyChatEvent` keeps them current, and a refetch would drop unconfirmed
- * (sending or failed) rows. `resync` invalidates them.
- */
+/** Chat queries never go stale on their own: `applyChatEvent` keeps them current. `resync` invalidates them. */
 const LIVE = { staleTime: Infinity } as const
 
 /** Queries are disabled until the client exists; this guards the direct calls. */
@@ -87,6 +84,9 @@ export function useConversationState(conversationId: string | null | undefined) 
  * The main list of a conversation, paged in both directions. Without `around` it starts at the newest page; with it,
  * at a window around that message (jump to message, first unread). `fetchPreviousPage` loads older messages,
  * `fetchNextPage` newer ones. New messages are appended by events only when the newest page is loaded.
+ *
+ * The list holds `MAX_MESSAGE_PAGES` pages: one more page at one end drops the page at the other end, so a long
+ * scroll through the history does not keep every message in memory and on the page.
  */
 export function useMessages(conversationId: string | null | undefined, options: { around?: string | null } = {}) {
   const { client, workspaceId } = useChatContext()
@@ -96,6 +96,7 @@ export function useMessages(conversationId: string | null | undefined, options: 
     queryKey: chatKeys.messages(workspaceId, conversationId ?? '', around),
     enabled: client !== null && Boolean(conversationId),
     initialPageParam: (around ? { around } : {}) as MessageCursor,
+    maxPages: MAX_MESSAGE_PAGES,
     queryFn: ({ pageParam }) => requireClient(client).listMessages(conversationId ?? '', pageParam),
     getPreviousPageParam: (first): MessageCursor | undefined => (first.before ? { before: first.before } : undefined),
     getNextPageParam: (last): MessageCursor | undefined => (last.after ? { after: last.after } : undefined),
@@ -119,6 +120,34 @@ export function useThread(rootId: string | null | undefined) {
 /** All pages of `useMessages` or `useThread` as one ascending list. */
 export function flattenMessages(data: InfiniteData<MessagePage, unknown> | undefined): Message[] {
   return data ? data.pages.flatMap((page) => page.items) : []
+}
+
+/** 8 pages of 50 messages. */
+const MAX_MESSAGE_PAGES = 8
+
+const NONE: Message[] = []
+
+/**
+ * The user's messages that the server has not confirmed (sending or failed) for one list: a conversation's main list,
+ * or a thread with `rootId`. They go under the confirmed messages.
+ */
+export function useUnconfirmedMessages(conversationId: string, rootId: string | null = null): Message[] {
+  const { workspaceId } = useChatContext()
+  const { data } = useQuery({
+    queryKey: chatKeys.outbox(workspaceId),
+    // Only `updateOutbox` writes it; with data from the start there is no fetch.
+    queryFn: () => NONE,
+    initialData: NONE,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    select: (waiting: Message[]) =>
+      waiting.filter((message) =>
+        rootId === null
+          ? message.conversationId === conversationId && (message.threadRootId === null || message.alsoInChannel)
+          : message.threadRootId === rootId,
+      ),
+  })
+  return data.length > 0 ? data : NONE
 }
 
 /** Roots that have replies in one conversation, newest reply first (the Threads pane). */

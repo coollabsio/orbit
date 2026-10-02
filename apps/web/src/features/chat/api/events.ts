@@ -34,13 +34,23 @@ function patchPages<T extends MessagePage>(data: InfiniteData<T, MessageCursor> 
 }
 
 /**
- * Puts a message into a paged list: over the row with the same id, else over the optimistic row with the same nonce,
- * else at the end, and only when the last page is the live tail (`after === null`). Unconfirmed rows have ids that
- * sort last, so they stay under confirmed messages.
+ * The messages that the server has not confirmed: sending or failed. They are kept apart from the lists, which hold
+ * only what the server has, so a refetch, a resync or a list that is not at its newest page cannot lose one. They
+ * live as long as the tab.
+ */
+export function updateOutbox(queryClient: QueryClient, workspaceId: string, update: (messages: Message[]) => Message[]) {
+  const key = chatKeys.outbox(workspaceId)
+  queryClient.setQueryDefaults(key, { gcTime: Infinity })
+  queryClient.setQueryData<Message[]>(key, (messages) => update(messages ?? []))
+}
+
+/**
+ * Puts a confirmed message into a paged list: over the row with the same id, else at the end, and only when the last
+ * page is the live tail (`after === null`).
  */
 function upsertPages<T extends MessagePage>(data: InfiniteData<T, MessageCursor> | undefined, message: Message) {
   if (!data || data.pages.length === 0) return data
-  const matches = (item: Message) => item.id === message.id || (message.nonce !== null && item.nonce === message.nonce)
+  const matches = (item: Message) => item.id === message.id
   const last = data.pages.length - 1
   const found = data.pages.some((page) => page.items.some(matches))
   if (!found && data.pages[last].after !== null) return data
@@ -52,7 +62,7 @@ function upsertPages<T extends MessagePage>(data: InfiniteData<T, MessageCursor>
 }
 
 /** The lists a message shows in: the conversation's main list, its thread, or both for an "also in channel" reply. */
-export function upsertMessage(queryClient: QueryClient, workspaceId: string, message: Message) {
+function upsertMessage(queryClient: QueryClient, workspaceId: string, message: Message) {
   if (message.threadRootId === null || message.alsoInChannel) {
     queryClient.setQueriesData<MessagePages>(
       { queryKey: chatKeys.messagesOf(workspaceId, message.conversationId) },
@@ -112,6 +122,8 @@ function upsertById<T>(items: T[] | undefined, item: T, idOf: (item: T) => strin
 
 function messageCreated(queryClient: QueryClient, workspaceId: string, message: Message) {
   const { conversationId, threadRootId } = message
+  // The confirmed message takes the place of the row that waited for it.
+  if (message.nonce !== null) updateOutbox(queryClient, workspaceId, (waiting) => waiting.filter((item) => item.nonce !== message.nonce))
   upsertMessage(queryClient, workspaceId, message)
 
   if (threadRootId === null || message.alsoInChannel) {
@@ -151,10 +163,7 @@ function messageCreated(queryClient: QueryClient, workspaceId: string, message: 
 
 function messageUpdated(queryClient: QueryClient, workspaceId: string, message: Message) {
   const { conversationId, threadRootId } = message
-  patchMessage(queryClient, workspaceId, { conversationId, messageId: message.id, threadRootId }, (current) =>
-    // An unconfirmed row keeps its send state; everything else comes from the event.
-    current.sendState ? { ...message, sendState: current.sendState } : message,
-  )
+  patchMessage(queryClient, workspaceId, { conversationId, messageId: message.id, threadRootId }, () => message)
   queryClient.setQueryData<Message[]>(chatKeys.pins(workspaceId, conversationId), (pins) => {
     if (!pins) return pins
     const others = pins.filter((pin) => pin.id !== message.id)
@@ -163,10 +172,46 @@ function messageUpdated(queryClient: QueryClient, workspaceId: string, message: 
 }
 
 /**
+ * An event for a query that is loading can be lost: the query has no data to change yet, or the response that
+ * comes was read before the event and takes its place. Such a query loads once more when it ends.
+ */
+function refetchAfterFetch(queryClient: QueryClient, queryKey: readonly unknown[]) {
+  for (const query of queryClient.getQueryCache().findAll({ queryKey, fetchStatus: 'fetching' })) {
+    const again = () => void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true }, { cancelRefetch: false })
+    // More events in one fetch ask once: the later calls join the refetch that the first one started.
+    query.promise?.then(again, again)
+  }
+}
+
+/** The queries that an event changes in place. */
+function changedKeys(workspaceId: string, event: ChatEvent): (readonly unknown[])[] {
+  switch (event.type) {
+    case 'message.created':
+    case 'message.updated':
+      return [
+        chatKeys.messagesOf(workspaceId, event.message.conversationId),
+        chatKeys.thread(workspaceId, event.message.threadRootId ?? event.message.id),
+      ]
+    case 'message.deleted':
+      return [chatKeys.messagesOf(workspaceId, event.conversationId), chatKeys.thread(workspaceId, event.threadRootId ?? event.messageId)]
+    case 'conversation.changed':
+    case 'conversation.removed':
+      return [chatKeys.conversations(workspaceId)]
+    case 'state.changed':
+      return [chatKeys.states(workspaceId)]
+    case 'thread.changed':
+      return [chatKeys.thread(workspaceId, event.state.rootId), chatKeys.followedThreads(workspaceId)]
+    default:
+      return []
+  }
+}
+
+/**
  * Writes one client event into the React Query cache. Typing, presence and connection events are not cached: the
  * provider sends those to the live stores.
  */
 export function applyChatEvent(queryClient: QueryClient, workspaceId: string, event: ChatEvent) {
+  for (const key of changedKeys(workspaceId, event)) refetchAfterFetch(queryClient, key)
   switch (event.type) {
     case 'message.created':
       messageCreated(queryClient, workspaceId, event.message)

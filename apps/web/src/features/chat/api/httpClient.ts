@@ -239,9 +239,10 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
       } catch (error) {
         // The request did not reach the server. The message waits for the connection and goes again; the nonce
         // makes that safe even if the first request did arrive.
-        if (!(error instanceof ChatError) || error.code !== 'offline' || !socket) throw error
+        if (!(error instanceof ChatError) || !error.unreached || !socket) throw error
         const wait = new Promise<never>((_, reject) => setTimeout(() => reject(error), options.sendWaitMs ?? 60_000))
-        await Promise.race([socket.connected(), wait])
+        // The socket may not know yet that the connection is gone: a new connection is the proof that it is back.
+        await Promise.race([socket.reconnected(), wait])
         return toMessage((await send()).result)
       }
     },

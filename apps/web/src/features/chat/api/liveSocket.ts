@@ -29,8 +29,8 @@ export interface LiveSocketOptions {
 export interface LiveSocket {
   /** Sends a frame if the socket is open; a signal that cannot go out is dropped. */
   send(frame: object): void
-  /** Resolves when the socket is connected (at once if it is). */
-  connected(): Promise<void>
+  /** Drops the connection and resolves when a new one is there. */
+  reconnected(): Promise<void>
   close(): void
 }
 
@@ -118,7 +118,15 @@ export function openLiveSocket(options: LiveSocketOptions): LiveSocket {
     send(frame) {
       if (open) socket?.send(JSON.stringify(frame))
     },
-    connected: () => (open ? Promise.resolve() : new Promise((resolve) => waiting.push(resolve))),
+    reconnected() {
+      if (open) {
+        // Not through `onclose`: on a dead network the browser reports the close only much later.
+        const current = socket
+        dropped(1006)
+        current?.close()
+      }
+      return new Promise((resolve) => waiting.push(resolve))
+    },
     close() {
       closed = true
       clearTimeout(retry)

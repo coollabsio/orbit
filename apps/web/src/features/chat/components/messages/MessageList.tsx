@@ -89,6 +89,18 @@ interface MessageListProps {
 
 type Overlay = { kind: 'menu' | 'picker' | 'sheet'; messageId: string; anchor: MenuAnchor; align: 'start' | 'end' }
 
+/** The first of the rows (in document order) that ends below `top`: a binary search, for a scroll handler. */
+function firstRowBelow(rows: NodeListOf<HTMLElement>, top: number): HTMLElement | undefined {
+  let low = 0
+  let high = rows.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (rows[middle].getBoundingClientRect().bottom > top) high = middle
+    else low = middle + 1
+  }
+  return rows[low]
+}
+
 /**
  * A scrolling list of messages: day chips, the "New" line, grouped rows, paging in both directions with the scroll
  * position kept, the jump buttons, roving keyboard focus, and the one menu, emoji picker and action sheet that all
@@ -133,6 +145,8 @@ export function MessageList({
     positioned: false,
     atBottom: false,
     fromBottom: 0,
+    /** The first row in view and where it is under the top of the list, to keep it there when pages come and go. */
+    anchor: null as { id: string; top: number } | null,
     firstKey: null as string | null,
     lastKey: null as string | null,
     hasOlder: false,
@@ -234,6 +248,9 @@ export function MessageList({
     if (!element || !state.positioned) return
     const fromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
     state.fromBottom = fromBottom
+    const top = element.getBoundingClientRect().top
+    const first = firstRowBelow(element.querySelectorAll<HTMLElement>('[data-message-row]'), top)
+    state.anchor = first?.dataset.messageId ? { id: first.dataset.messageId, top: first.getBoundingClientRect().top - top } : null
     const bottom = fromBottom <= BOTTOM_SLACK && !hasNewer
     if (bottom !== state.atBottom) {
       state.atBottom = bottom
@@ -274,10 +291,15 @@ export function MessageList({
       if (initialFromBottom !== undefined) element.scrollTop = element.scrollHeight - element.clientHeight - initialFromBottom
       else element.scrollTop = line ? line.offsetTop - 48 : element.scrollHeight
     } else {
-      // An older page came in above (or the start of the history took the spinner's place): the distance to the end
-      // is what stays the same.
+      // The top of the list changed: an older page came in, a newer page pushed the oldest one out, or the start of
+      // the history took the spinner's place. The row that the user looked at stays where it was.
       if ((state.firstKey !== null && firstKey !== state.firstKey) || hasOlder !== state.hasOlder) {
-        element.scrollTop = element.scrollHeight - element.clientHeight - state.fromBottom
+        const row = state.anchor ? rowElement(state.anchor.id) : null
+        if (row && state.anchor) {
+          element.scrollTop += row.getBoundingClientRect().top - element.getBoundingClientRect().top - state.anchor.top
+        } else {
+          element.scrollTop = element.scrollHeight - element.clientHeight - state.fromBottom
+        }
       }
       if (lastKey !== state.lastKey && !hasNewer) {
         const arrived = messagesAfter(messages, state.lastKey, messageKey, currentUserId)

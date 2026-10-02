@@ -17,7 +17,7 @@ function setup(respond: (path: string) => Response) {
     readIntervalMs: 40,
     openSocket: (options) => {
       live = options
-      return { send: (frame) => sent.push(frame), connected: () => Promise.resolve(), close() {} }
+      return { send: (frame) => sent.push(frame), reconnected: () => Promise.resolve(), close() {} }
     },
     client: createApiClient({
       fetch: async (request) => {
@@ -99,4 +99,12 @@ test('a send that cannot reach the server goes again when the connection is back
   const sentMessage = await client.sendMessage({ conversationId: 'c1', body: 'Hi', nonce: 'n1' })
   expect(sentMessage.id).toBe('m1')
   expect(requests.length).toBe(2)
+})
+
+test('a send that the server refused does not go again', async () => {
+  const problem = { type: 'about:blank', title: 'Too many requests', status: 429, code: 'rate_limited', detail: 'Slow down.', instance: '/x', request_id: 'r' }
+  const { client, requests } = setup(() => Response.json(problem, { status: 429, headers: { 'content-type': 'application/problem+json' } }))
+  expect(client.sendMessage({ conversationId: 'c1', body: 'Hi', nonce: 'n1' })).rejects.toMatchObject({ name: 'ChatError', unreached: false })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(requests.length).toBe(1)
 })

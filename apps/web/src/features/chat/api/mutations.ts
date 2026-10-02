@@ -3,7 +3,7 @@ import { extractMentions } from '../lib/mentionTokens'
 import { hasReaction, toggleReaction } from '../lib/reactions'
 import { useChatContext } from './chatContext'
 import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions } from './client'
-import { applyChatEvent, patchMessage, upsertMessage } from './events'
+import { applyChatEvent, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
 import type { Attachment, ChatEvent, Conversation, ConversationState, Message, NotifyLevel, ThreadState } from './types'
@@ -80,8 +80,8 @@ function optimisticMessage(input: SendMessageInput, authorId: string): Message {
 }
 
 /**
- * Optimistic send. The message shows at once with `sendState: 'sending'`, is replaced by the confirmed one (matched by
- * nonce), or turns `'failed'` and stays until `retry` or `discard`.
+ * Optimistic send. The message goes to the outbox with `sendState: 'sending'` and shows at once. The confirmed one
+ * (matched by nonce) takes its place, or it turns `'failed'` and stays until `retry` or `discard`.
  */
 export function useSendMessage() {
   const { client, workspaceId, currentUserId } = useChatContext()
@@ -90,7 +90,8 @@ export function useSendMessage() {
     mutationFn: (input) => requireClient(client).sendMessage(input),
     onMutate: (input) => {
       const optimistic = optimisticMessage(input, currentUserId ?? '')
-      upsertMessage(queryClient, workspaceId, optimistic)
+      // A retry has the nonce of its failed row and takes its place.
+      updateOutbox(queryClient, workspaceId, (waiting) => [...waiting.filter((item) => item.nonce !== input.nonce), optimistic])
       // The typing signal ends with the message, so the next keystroke sends a new one.
       typingSentAt.delete(typingKey(input.conversationId, input.threadRootId))
       return optimistic
@@ -98,11 +99,9 @@ export function useSendMessage() {
     onSuccess: (message) => applyChatEvent(queryClient, workspaceId, { type: 'message.created', message }),
     onError: (_error, _input, optimistic) => {
       if (!optimistic) return
-      const { conversationId, id: messageId, threadRootId } = optimistic
-      patchMessage(queryClient, workspaceId, { conversationId, messageId, threadRootId }, (message) => ({
-        ...message,
-        sendState: 'failed',
-      }))
+      updateOutbox(queryClient, workspaceId, (waiting) =>
+        waiting.map((item) => (item.id === optimistic.id ? { ...item, sendState: 'failed' } : item)),
+      )
     },
   })
   return {
@@ -120,8 +119,7 @@ export function useSendMessage() {
     },
     /** Removes a failed message. */
     discard: (message: Message) => {
-      const { conversationId, id: messageId, threadRootId } = message
-      patchMessage(queryClient, workspaceId, { conversationId, messageId, threadRootId }, () => null)
+      updateOutbox(queryClient, workspaceId, (waiting) => waiting.filter((item) => item.id !== message.id))
     },
   }
 }
