@@ -8,10 +8,11 @@ use utoipa::ToSchema;
 
 use super::messages::{mark_read_to, upsert_thread_member};
 use super::{
-    CONVERSATION_COLUMNS, ChatError, ChatEvent, ChatRepository, Conversation,
-    ConversationStateRecord, Events, MEMBER_COLUMNS, MessageRecord, NotifyLevel, ThreadMember,
-    ThreadStateRecord, Written, conversation_from_row, current_state, load_access, load_actor,
-    load_message, load_message_access, load_thread_member, member_from_row, parse_id,
+    CONVERSATION_COLUMNS, ChatError, ChatEvent, ChatRepository, Conversation, ConversationKind,
+    ConversationStateRecord, Events, MEMBER_COLUMNS, MessageRecord, NotifyLevel, Recipients,
+    ThreadMember, ThreadStateRecord, Written, conversation_from_row, current_state, finish,
+    id_list, load_access, load_actor, load_message, load_message_access, load_thread_member,
+    member_from_row, member_ids, parse_id, parse_optional_id,
 };
 
 /// Cursors that one `restore_read` call may put back.
@@ -101,8 +102,7 @@ impl ChatRepository {
             &mut events,
         )
         .await?;
-        tx.commit().await?;
-        Ok(events.written(state))
+        finish(tx, events, state).await
     }
 
     /// Moves the read cursor to just before the message. For a thread reply it is the thread's
@@ -160,8 +160,7 @@ impl ChatRepository {
             &mut events,
         )
         .await?;
-        tx.commit().await?;
-        Ok(events.written(state))
+        finish(tx, events, state).await
     }
 
     /// Reads a thread up to its newest reply. It does not make the caller follow the thread.
@@ -191,8 +190,7 @@ impl ChatRepository {
         .await?;
         let mut events = Events::default();
         let state = emit_thread_state(&mut tx, &root, actor_id, &mut events).await?;
-        tx.commit().await?;
-        Ok(events.written(state))
+        finish(tx, events, state).await
     }
 
     /// Following starts from now: older replies do not turn unread.
@@ -222,8 +220,7 @@ impl ChatRepository {
         upsert_thread_member(&mut tx, workspace_id, &root, actor_id, &member).await?;
         let mut events = Events::default();
         let state = emit_thread_state(&mut tx, &root, actor_id, &mut events).await?;
-        tx.commit().await?;
-        Ok(events.written(state))
+        finish(tx, events, state).await
     }
 
     /// Reads every conversation and followed thread that has something unread. Returns their
@@ -303,8 +300,7 @@ impl ChatRepository {
             .await?;
             emit_thread_state(&mut tx, &root, actor_id, &mut events).await?;
         }
-        tx.commit().await?;
-        Ok(events.written(ReadSnapshot { states, threads }))
+        finish(tx, events, ReadSnapshot { states, threads }).await
     }
 
     /// Puts read cursors back (the undo of `mark_all_read`) and counts again from them. Cursors
@@ -368,8 +364,7 @@ impl ChatRepository {
             .await?;
             emit_thread_state(&mut tx, &root, actor_id, &mut events).await?;
         }
-        tx.commit().await?;
-        Ok(events.written(()))
+        finish(tx, events, ()).await
     }
 
     /// The notify level and the favorite flag. A change of the notify level needs no recount:
@@ -402,8 +397,94 @@ impl ChatRepository {
             &mut events,
         )
         .await?;
-        tx.commit().await?;
-        Ok(events.written(state))
+        finish(tx, events, state).await
+    }
+}
+
+/// What the live socket needs after a write, outside the write's transaction. The states are
+/// absolute, so one that is read a moment later is still right.
+impl ChatRepository {
+    /// The states of `user_ids` in a conversation, for those who are members of it.
+    pub async fn states_for(
+        &self,
+        conversation_id: Id,
+        user_ids: &[Id],
+    ) -> Result<Vec<(Id, ConversationStateRecord)>, ChatError> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        sqlx::query(&format!(
+            "SELECT m.user_id, {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
+             JOIN chat_conversations c ON c.id = m.conversation_id \
+             WHERE m.conversation_id = ? AND m.user_id IN (SELECT value FROM json_each(?))"
+        ))
+        .bind(conversation_id.to_string())
+        .bind(id_list(user_ids.iter().copied()))
+        .fetch_all(self.database.pool())
+        .await?
+        .iter()
+        .map(|row| {
+            Ok((
+                parse_id(row.get("user_id"))?,
+                member_from_row(row)?.state(&conversation_from_row(row)?),
+            ))
+        })
+        .collect()
+    }
+
+    /// The thread states of those of `user_ids` who follow the thread.
+    pub async fn thread_states_for(
+        &self,
+        root_id: Id,
+        user_ids: &[Id],
+    ) -> Result<Vec<(Id, ThreadStateRecord)>, ChatError> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.database.pool().acquire().await?;
+        let Some(root) = load_message(&mut conn, root_id).await? else {
+            return Ok(Vec::new());
+        };
+        sqlx::query(
+            "SELECT user_id, last_read_reply_id, read_reply_count, mention_count \
+             FROM chat_thread_members WHERE root_id = ? AND following = 1 \
+             AND user_id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(root_id.to_string())
+        .bind(id_list(user_ids.iter().copied()))
+        .fetch_all(&mut *conn)
+        .await?
+        .iter()
+        .map(|row| {
+            let member = ThreadMember {
+                following: true,
+                last_read_reply_id: parse_optional_id(row.get("last_read_reply_id"))?,
+                read_reply_count: row.get("read_reply_count"),
+                mention_count: row.get("mention_count"),
+            };
+            Ok((parse_id(row.get("user_id"))?, member.state(&root)))
+        })
+        .collect()
+    }
+
+    /// Who sees that `actor_id` types in a conversation. Only a member may say so.
+    pub async fn typing_recipients(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        conversation_id: Id,
+    ) -> Result<Recipients, ChatError> {
+        let mut conn = self.database.pool().acquire().await?;
+        let access = load_access(&mut conn, workspace_id, actor_id, conversation_id).await?;
+        access.require_member()?;
+        access.require_open()?;
+        if access.conversation.kind == ConversationKind::Public {
+            Ok(Recipients::Workspace)
+        } else {
+            Ok(Recipients::Users(
+                member_ids(&mut conn, conversation_id).await?,
+            ))
+        }
     }
 }
 

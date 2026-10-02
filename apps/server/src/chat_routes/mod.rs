@@ -16,15 +16,17 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::auth_routes::CookieMode;
+use crate::live::{LiveHub, Recipients};
 use crate::repositories::chat::{ChatError, ChatEvent, ChatRepository, Written};
 use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::{ApiError, authenticate_session, validation};
 
 #[derive(Clone)]
 pub struct ChatState {
-    identity: Arc<IdentityRepository>,
-    chat: Arc<ChatRepository>,
-    cookie_mode: CookieMode,
+    pub(crate) identity: Arc<IdentityRepository>,
+    pub(crate) chat: Arc<ChatRepository>,
+    pub(crate) hub: LiveHub,
+    pub(crate) cookie_mode: CookieMode,
 }
 
 impl ChatState {
@@ -32,11 +34,71 @@ impl ChatState {
     pub fn new(identity: Arc<IdentityRepository>, cookie_mode: CookieMode) -> Self {
         Self {
             chat: Arc::new(ChatRepository::new(identity.database().clone())),
+            hub: LiveHub::of(identity.database()),
             identity,
             cookie_mode,
         }
     }
+
+    /// Runs a write and sends its events to the live sockets. The hub's write lock is held
+    /// from before the write's transaction until the events are out, so the events of a
+    /// workspace are published in commit order.
+    async fn publish<T>(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        write: impl Future<Output = Result<Written<T>, ChatError>>,
+    ) -> Result<Written<T>, ChatError> {
+        let _order = self.hub.write_lock(workspace_id).await;
+        let written = write.await?;
+        for emitted in &written.events {
+            self.hub
+                .publish(workspace_id, &emitted.recipients, TOPIC, &emitted.event);
+        }
+        // The write changed counters of other members. Their states are read here, for the
+        // members who are connected only, so a send costs the same in a channel of any size.
+        let others: Vec<Id> = self
+            .hub
+            .online(workspace_id)
+            .into_iter()
+            .filter(|user_id| *user_id != actor_id)
+            .collect();
+        if let Some(conversation_id) = written.counted {
+            match self.chat.states_for(conversation_id, &others).await {
+                Ok(states) => {
+                    for (user_id, state) in states {
+                        self.hub.publish(
+                            workspace_id,
+                            &Recipients::Users(vec![user_id]),
+                            TOPIC,
+                            &ChatEvent::StateChanged { state },
+                        );
+                    }
+                }
+                Err(error) => tracing::warn!(error = %error, "chat states for the live socket"),
+            }
+        }
+        if let Some(root_id) = written.replied {
+            match self.chat.thread_states_for(root_id, &others).await {
+                Ok(states) => {
+                    for (user_id, state) in states {
+                        self.hub.publish(
+                            workspace_id,
+                            &Recipients::Users(vec![user_id]),
+                            TOPIC,
+                            &ChatEvent::ThreadChanged { state },
+                        );
+                    }
+                }
+                Err(error) => tracing::warn!(error = %error, "thread states for the live socket"),
+            }
+        }
+        Ok(written)
+    }
 }
+
+/// The topic of chat events on the live socket.
+const TOPIC: &str = "chat";
 
 pub fn chat_router(state: ChatState) -> Router {
     Router::new()
@@ -231,11 +293,15 @@ impl<'a> Call<'a> {
         result.map(Json).map_err(|error| self.problem(error))
     }
 
-    fn write<T>(
+    async fn write<T>(
         &self,
-        result: Result<Written<T>, ChatError>,
+        state: &ChatState,
+        write: impl Future<Output = Result<Written<T>, ChatError>>,
     ) -> Result<Json<ChatWrite<T>>, ApiError> {
-        let written = result.map_err(|error| self.problem(error))?;
+        let written = state
+            .publish(self.workspace_id, self.actor_id, write)
+            .await
+            .map_err(|error| self.problem(error))?;
         let events = written.events_for(self.actor_id);
         Ok(Json(ChatWrite {
             result: written.value,
@@ -243,8 +309,15 @@ impl<'a> Call<'a> {
         }))
     }
 
-    fn events(&self, result: Result<Written<()>, ChatError>) -> Result<Json<ChatEvents>, ApiError> {
-        let written = result.map_err(|error| self.problem(error))?;
+    async fn events(
+        &self,
+        state: &ChatState,
+        write: impl Future<Output = Result<Written<()>, ChatError>>,
+    ) -> Result<Json<ChatEvents>, ApiError> {
+        let written = state
+            .publish(self.workspace_id, self.actor_id, write)
+            .await
+            .map_err(|error| self.problem(error))?;
         Ok(Json(ChatEvents {
             events: written.events_for(self.actor_id),
         }))

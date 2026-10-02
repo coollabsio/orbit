@@ -124,11 +124,12 @@ pub(crate) async fn send_chat_message(
         nonce: body.nonce,
     };
     call.write(
+        &state,
         state
             .chat
-            .send_message(call.workspace_id, call.actor_id, input)
-            .await,
+            .send_message(call.workspace_id, call.actor_id, input),
     )
+    .await
 }
 
 #[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}", params(("workspace_id" = String, Path), ("message_id" = String, Path)), request_body = ChatEditBody, responses((status = 200, body = ChatWrite<MessageRecord>)))]
@@ -143,11 +144,12 @@ pub(crate) async fn edit_chat_message(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let message_id = call.id(&message)?;
     call.write(
+        &state,
         state
             .chat
-            .edit_message(call.workspace_id, call.actor_id, message_id, &body.body)
-            .await,
+            .edit_message(call.workspace_id, call.actor_id, message_id, &body.body),
     )
+    .await
 }
 
 /// A root that has replies stays in the list with an empty body; every other message is removed.
@@ -162,11 +164,12 @@ pub(crate) async fn delete_chat_message(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let message_id = call.id(&message)?;
     call.events(
+        &state,
         state
             .chat
-            .delete_message(call.workspace_id, call.actor_id, message_id)
-            .await,
+            .delete_message(call.workspace_id, call.actor_id, message_id),
     )
+    .await
 }
 
 #[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/reactions/{emoji}", params(("workspace_id" = String, Path), ("message_id" = String, Path), ("emoji" = String, Path)), responses((status = 200, body = ChatWrite<MessageRecord>)))]
@@ -180,11 +183,12 @@ pub(crate) async fn add_chat_reaction(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let message_id = call.id(&message)?;
     call.write(
+        &state,
         state
             .chat
-            .set_reaction(call.workspace_id, call.actor_id, message_id, &emoji, true)
-            .await,
+            .set_reaction(call.workspace_id, call.actor_id, message_id, &emoji, true),
     )
+    .await
 }
 
 #[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/reactions/{emoji}", params(("workspace_id" = String, Path), ("message_id" = String, Path), ("emoji" = String, Path)), responses((status = 200, body = ChatWrite<MessageRecord>)))]
@@ -198,11 +202,12 @@ pub(crate) async fn remove_chat_reaction(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let message_id = call.id(&message)?;
     call.write(
+        &state,
         state
             .chat
-            .set_reaction(call.workspace_id, call.actor_id, message_id, &emoji, false)
-            .await,
+            .set_reaction(call.workspace_id, call.actor_id, message_id, &emoji, false),
     )
+    .await
 }
 
 /// Pinning adds a system row to the conversation.
@@ -218,11 +223,12 @@ pub(crate) async fn pin_chat_message(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let message_id = call.id(&message)?;
     call.write(
+        &state,
         state
             .chat
-            .set_pinned(call.workspace_id, call.actor_id, message_id, body.pinned)
-            .await,
+            .set_pinned(call.workspace_id, call.actor_id, message_id, body.pinned),
     )
+    .await
 }
 
 /// Pinned messages, newest message first (at most 100).

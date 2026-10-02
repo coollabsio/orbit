@@ -82,11 +82,12 @@ pub(crate) async fn update_chat_state(
         favorite: body.favorite,
     };
     call.write(
+        &state,
         state
             .chat
-            .update_state(call.workspace_id, call.actor_id, conversation_id, update)
-            .await,
+            .update_state(call.workspace_id, call.actor_id, conversation_id, update),
     )
+    .await
 }
 
 /// Reads the conversation up to its newest message.
@@ -101,11 +102,12 @@ pub(crate) async fn read_chat_conversation(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let conversation_id = call.id(&conversation)?;
     call.write(
+        &state,
         state
             .chat
-            .mark_read(call.workspace_id, call.actor_id, conversation_id)
-            .await,
+            .mark_read(call.workspace_id, call.actor_id, conversation_id),
     )
+    .await
 }
 
 /// Moves the read cursor to just before the message. For a thread reply the thread's cursor
@@ -121,11 +123,12 @@ pub(crate) async fn mark_chat_message_unread(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let message_id = call.id(&message)?;
     call.write(
+        &state,
         state
             .chat
-            .mark_unread(call.workspace_id, call.actor_id, message_id)
-            .await,
+            .mark_unread(call.workspace_id, call.actor_id, message_id),
     )
+    .await
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}/read", params(("workspace_id" = String, Path), ("root_id" = String, Path)), responses((status = 200, body = ChatWrite<ThreadStateRecord>)))]
@@ -139,11 +142,12 @@ pub(crate) async fn read_chat_thread(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let root_id = call.id(&root)?;
     call.write(
+        &state,
         state
             .chat
-            .mark_thread_read(call.workspace_id, call.actor_id, root_id)
-            .await,
+            .mark_thread_read(call.workspace_id, call.actor_id, root_id),
     )
+    .await
 }
 
 /// Following starts from now: older replies do not turn unread.
@@ -159,11 +163,12 @@ pub(crate) async fn follow_chat_thread(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let root_id = call.id(&root)?;
     call.write(
+        &state,
         state
             .chat
-            .set_thread_follow(call.workspace_id, call.actor_id, root_id, body.following)
-            .await,
+            .set_thread_follow(call.workspace_id, call.actor_id, root_id, body.following),
     )
+    .await
 }
 
 /// Reads every conversation and followed thread. `result` holds the states as they were, for
@@ -178,11 +183,10 @@ pub(crate) async fn read_all_chat(
 ) -> Result<Json<ChatWrite<ReadSnapshot>>, ApiError> {
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     call.write(
-        state
-            .chat
-            .mark_all_read(call.workspace_id, call.actor_id)
-            .await,
+        &state,
+        state.chat.mark_all_read(call.workspace_id, call.actor_id),
     )
+    .await
 }
 
 /// Puts read cursors back and counts again from them: the undo of `read-all`.
@@ -223,9 +227,10 @@ pub(crate) async fn restore_chat_read(
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     call.events(
+        &state,
         state
             .chat
-            .restore_read(call.workspace_id, call.actor_id, states, threads)
-            .await,
+            .restore_read(call.workspace_id, call.actor_id, states, threads),
     )
+    .await
 }

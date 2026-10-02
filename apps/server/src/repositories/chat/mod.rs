@@ -15,15 +15,18 @@ mod conversations;
 mod messages;
 mod state;
 
+use std::collections::HashMap;
+
 use orbit_domain::Actor;
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqliteConnection};
+use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::membership;
+pub use crate::live::Recipients;
 
 pub use conversations::{ChannelCreate, ChannelUpdate, MoveDirection, MoveTarget};
 pub use messages::{MessageCursor, SendInput};
@@ -338,20 +341,23 @@ pub enum ChatEvent {
     ThreadChanged { state: ThreadStateRecord },
 }
 
-/// Who an event is for.
+/// Who an event is for, as the write that made it sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Audience {
+enum Audience {
     /// Every workspace member.
     Workspace,
     /// Everyone who can read the conversation: its members, and for a public channel every
     /// workspace member.
     Conversation(Id),
+    /// Workspace members who are not in the conversation (it became private: it is gone
+    /// for them).
+    Outsiders(Id),
     User(Id),
 }
 
 #[derive(Clone, Debug)]
 pub struct Emitted {
-    pub audience: Audience,
+    pub recipients: Recipients,
     pub event: ChatEvent,
 }
 
@@ -360,53 +366,121 @@ pub struct Emitted {
 pub struct Written<T> {
     pub value: T,
     pub events: Vec<Emitted>,
+    /// A conversation whose unread or mention counters changed for members other than the
+    /// caller. Their states are not in `events`: the live socket asks for the states of the
+    /// members who are connected (`ChatRepository::states_for`).
+    pub counted: Option<Id>,
+    /// A thread root whose followers have a new unread count, in the same way
+    /// (`ChatRepository::thread_states_for`).
+    pub replied: Option<Id>,
 }
 
 impl<T> Written<T> {
-    /// The events the caller itself sees: everything but another member's personal events.
+    /// The events the caller itself sees.
     #[must_use]
     pub fn events_for(&self, user_id: Id) -> Vec<ChatEvent> {
         self.events
             .iter()
-            .filter(
-                |emitted| !matches!(emitted.audience, Audience::User(other) if other != user_id),
-            )
+            .filter(|emitted| emitted.recipients.includes(user_id))
             .map(|emitted| emitted.event.clone())
             .collect()
     }
 }
 
 #[derive(Default)]
-struct Events(Vec<Emitted>);
+struct Events {
+    events: Vec<(Audience, ChatEvent)>,
+    counted: Option<Id>,
+    replied: Option<Id>,
+}
 
 impl Events {
     fn conversation(&mut self, conversation_id: Id, event: ChatEvent) {
-        self.0.push(Emitted {
-            audience: Audience::Conversation(conversation_id),
-            event,
-        });
+        self.events
+            .push((Audience::Conversation(conversation_id), event));
+    }
+
+    fn outsiders(&mut self, conversation_id: Id, event: ChatEvent) {
+        self.events
+            .push((Audience::Outsiders(conversation_id), event));
     }
 
     fn workspace(&mut self, event: ChatEvent) {
-        self.0.push(Emitted {
-            audience: Audience::Workspace,
-            event,
-        });
+        self.events.push((Audience::Workspace, event));
     }
 
     fn user(&mut self, user_id: Id, event: ChatEvent) {
-        self.0.push(Emitted {
-            audience: Audience::User(user_id),
-            event,
-        });
+        self.events.push((Audience::User(user_id), event));
     }
 
+    /// The result of a call that changed nothing, or nothing that another member sees: only
+    /// events for single users are kept.
     fn written<T>(self, value: T) -> Written<T> {
+        let events = self
+            .events
+            .into_iter()
+            .filter_map(|(audience, event)| match audience {
+                Audience::User(user_id) => Some(Emitted {
+                    recipients: Recipients::Users(vec![user_id]),
+                    event,
+                }),
+                _ => None,
+            })
+            .collect();
         Written {
             value,
-            events: self.0,
+            events,
+            counted: None,
+            replied: None,
         }
     }
+}
+
+/// Commits a write. The audiences become user ids first, inside the transaction, so they are
+/// the readers of each conversation as this write left them.
+async fn finish<T>(
+    mut tx: Transaction<'_, Sqlite>,
+    events: Events,
+    value: T,
+) -> Result<Written<T>, ChatError> {
+    let mut members: HashMap<Id, (bool, Vec<Id>)> = HashMap::new();
+    let mut emitted = Vec::with_capacity(events.events.len());
+    for (audience, event) in events.events {
+        let recipients = match audience {
+            Audience::Workspace => Recipients::Workspace,
+            Audience::User(user_id) => Recipients::Users(vec![user_id]),
+            Audience::Conversation(id) | Audience::Outsiders(id) => {
+                let (public, users) = match members.get(&id) {
+                    Some(readers) => readers,
+                    None => {
+                        let public: Option<bool> = sqlx::query_scalar(
+                            "SELECT kind = 'public' FROM chat_conversations WHERE id = ?",
+                        )
+                        .bind(id.to_string())
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                        let users = member_ids(&mut tx, id).await?;
+                        members
+                            .entry(id)
+                            .or_insert((public.unwrap_or(false), users))
+                    }
+                };
+                match audience {
+                    Audience::Outsiders(_) => Recipients::WorkspaceExcept(users.clone()),
+                    _ if *public => Recipients::Workspace,
+                    _ => Recipients::Users(users.clone()),
+                }
+            }
+        };
+        emitted.push(Emitted { recipients, event });
+    }
+    tx.commit().await?;
+    Ok(Written {
+        value,
+        events: emitted,
+        counted: events.counted,
+        replied: events.replied,
+    })
 }
 
 #[derive(Clone)]

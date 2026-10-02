@@ -68,6 +68,7 @@ pub fn production_router(
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))
         .merge(import_router(api.imports))
+        .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
         .merge(
             Router::new()

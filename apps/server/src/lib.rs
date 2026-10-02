@@ -8,6 +8,7 @@ pub mod export;
 pub mod export_routes;
 pub mod import_routes;
 pub mod integration_routes;
+pub mod live;
 pub mod mcp;
 pub mod metrics;
 pub mod notion;

@@ -7,9 +7,9 @@ use sqlx::{Row, SqliteConnection};
 use super::{
     Access, ChatError, ChatEvent, ChatRepository, ConversationKind, Events, FollowedThreadRecord,
     MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord, MessageKind, MessagePage, MessageRecord,
-    ThreadMember, ThreadPage, Written, current_state, hydrate, id_list, load_access, load_actor,
-    load_message, load_message_access, load_thread_member, mentioned_user_ids, parse_id,
-    parse_optional_id,
+    ThreadMember, ThreadPage, Written, current_state, finish, hydrate, id_list, load_access,
+    load_actor, load_message, load_message_access, load_thread_member, mentioned_user_ids,
+    parse_id, parse_optional_id,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -241,8 +241,8 @@ impl ChatRepository {
             let message = load_message(&mut tx, parse_id(existing)?)
                 .await?
                 .ok_or(ChatError::NotFound)?;
-            events.conversation(
-                conversation_id,
+            events.user(
+                actor_id,
                 ChatEvent::MessageCreated {
                     message: message.clone(),
                 },
@@ -298,6 +298,7 @@ impl ChatRepository {
         );
 
         if message.in_main() {
+            events.counted = Some(conversation_id);
             sqlx::query(
                 "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = ? \
                  WHERE id = ?",
@@ -313,19 +314,19 @@ impl ChatRepository {
             mark_read_to(&mut tx, conversation_id, actor_id, Some(message.id)).await?;
         }
         if let Some(root) = &root {
-            let changed = after_reply(&mut tx, &access, root, &message, &mentioned).await?;
+            events.replied = Some(root.id);
+            after_reply(&mut tx, &access, root, &message, &mentioned).await?;
             let root = load_message(&mut tx, root.id)
                 .await?
                 .ok_or(ChatError::NotFound)?;
-            for user_id in changed {
-                if let Some(member) = load_thread_member(&mut tx, root.id, user_id).await? {
-                    events.user(
-                        user_id,
-                        ChatEvent::ThreadChanged {
-                            state: member.state(&root),
-                        },
-                    );
-                }
+            // The other followers get their states from the live socket (`replied`).
+            if let Some(member) = load_thread_member(&mut tx, root.id, actor_id).await? {
+                events.user(
+                    actor_id,
+                    ChatEvent::ThreadChanged {
+                        state: member.state(&root),
+                    },
+                );
             }
             events.conversation(conversation_id, ChatEvent::MessageUpdated { message: root });
         }
@@ -335,8 +336,7 @@ impl ChatRepository {
         {
             events.user(actor_id, ChatEvent::StateChanged { state });
         }
-        tx.commit().await?;
-        Ok(events.written(message))
+        finish(tx, events, message).await
     }
 
     /// Only the author edits a message.
@@ -381,6 +381,7 @@ impl ChatRepository {
             .filter(|id| !before.contains(id))
             .collect();
         adjust_mentions(&mut tx, &message, &removed, -1).await?;
+        let removed_any = !removed.is_empty();
         sqlx::query(
             "DELETE FROM chat_message_mentions WHERE message_id = ? \
              AND user_id IN (SELECT value FROM json_each(?))",
@@ -399,6 +400,11 @@ impl ChatRepository {
         if was_broadcast != (channel || here) {
             adjust_broadcast(&mut tx, &message, if was_broadcast { -1 } else { 1 }).await?;
         }
+        let mut events = Events::default();
+        if removed_any || !added.is_empty() || was_broadcast != (channel || here) {
+            events.counted = message.in_main().then_some(conversation_id);
+            events.replied = message.thread_root_id;
+        }
         sqlx::query(
             "UPDATE chat_messages SET body = ?, mention_channel = ?, mention_here = ?, edited_at = ? \
              WHERE id = ?",
@@ -411,7 +417,6 @@ impl ChatRepository {
         .execute(&mut *tx)
         .await?;
 
-        let mut events = Events::default();
         let next = load_message(&mut tx, message.id)
             .await?
             .ok_or(ChatError::NotFound)?;
@@ -428,8 +433,7 @@ impl ChatRepository {
         {
             events.conversation(conversation_id, ChatEvent::MessageUpdated { message: root });
         }
-        tx.commit().await?;
-        Ok(events.written(next))
+        finish(tx, events, next).await
     }
 
     /// The author and chat managers delete a message. A root that has replies stays in the list
@@ -457,8 +461,10 @@ impl ChatRepository {
         let mentioned = mention_row_users(&mut tx, message.id).await?;
         adjust_mentions(&mut tx, &message, &mentioned, -1).await?;
         if message.in_main() {
+            events.counted = Some(conversation_id);
             uncount_main(&mut tx, &message).await?;
         }
+        events.replied = message.thread_root_id;
 
         if message.thread_root_id.is_none() && message.reply_count > 0 {
             for table in ["chat_message_mentions", "chat_reactions"] {
@@ -500,8 +506,7 @@ impl ChatRepository {
         {
             events.user(actor_id, ChatEvent::StateChanged { state });
         }
-        tx.commit().await?;
-        Ok(events.written(()))
+        finish(tx, events, ()).await
     }
 
     /// Adds (`on`) or removes the caller's reaction. Both are idempotent.
@@ -569,8 +574,7 @@ impl ChatRepository {
                 message: next.clone(),
             },
         );
-        tx.commit().await?;
-        Ok(events.written(next))
+        finish(tx, events, next).await
     }
 
     /// Pinning adds a system row to the conversation; unpinning does not.
@@ -620,8 +624,7 @@ impl ChatRepository {
                 events.user(actor_id, ChatEvent::StateChanged { state });
             }
         }
-        tx.commit().await?;
-        Ok(events.written(next))
+        finish(tx, events, next).await
     }
 }
 
@@ -1037,14 +1040,13 @@ async fn delete_row(
 }
 
 /// The thread's side of a new reply: the root's summary, and who follows the thread now.
-/// Returns the members whose thread state changed.
 async fn after_reply(
     conn: &mut SqliteConnection,
     access: &Access,
     root: &MessageRecord,
     reply: &MessageRecord,
     mentioned: &[Id],
-) -> Result<Vec<Id>, ChatError> {
+) -> Result<(), ChatError> {
     let conversation = &access.conversation;
     let reply_count = root.reply_count + 1;
     let mut authors = root.reply_user_ids.clone();
@@ -1075,7 +1077,6 @@ async fn after_reply(
         },
     )
     .await?;
-    let mut changed = vec![reply.author_id];
 
     // Members who start to follow with this reply: mentioned in it, or (if they have no
     // thread state yet) the root's author, members the root mentions, and both sides of a
@@ -1115,11 +1116,8 @@ async fn after_reply(
             )
             .await?;
         }
-        if starts || is_mentioned {
-            changed.push(user_id);
-        }
     }
-    Ok(changed)
+    Ok(())
 }
 
 /// Writes a member's state in a thread.

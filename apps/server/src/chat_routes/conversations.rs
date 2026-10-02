@@ -104,11 +104,12 @@ pub(crate) async fn create_chat_channel(
         member_ids: call.body_ids(&body.member_ids, "member_ids")?,
     };
     call.write(
+        &state,
         state
             .chat
-            .create_channel(call.workspace_id, call.actor_id, input)
-            .await,
+            .create_channel(call.workspace_id, call.actor_id, input),
     )
+    .await
 }
 
 #[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}", params(("workspace_id" = String, Path), ("conversation_id" = String, Path)), request_body = ChatChannelUpdateBody, responses((status = 200, body = ChatWrite<ConversationRecord>)))]
@@ -134,11 +135,12 @@ pub(crate) async fn update_chat_channel(
         kind: body.kind,
     };
     call.write(
+        &state,
         state
             .chat
-            .update_channel(call.workspace_id, call.actor_id, conversation_id, update)
-            .await,
+            .update_channel(call.workspace_id, call.actor_id, conversation_id, update),
     )
+    .await
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/archive", params(("workspace_id" = String, Path), ("conversation_id" = String, Path)), responses((status = 200, body = ChatWrite<ConversationRecord>)))]
@@ -152,11 +154,12 @@ pub(crate) async fn archive_chat_channel(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let conversation_id = call.id(&conversation)?;
     call.write(
+        &state,
         state
             .chat
-            .archive_channel(call.workspace_id, call.actor_id, conversation_id)
-            .await,
+            .archive_channel(call.workspace_id, call.actor_id, conversation_id),
     )
+    .await
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/join", params(("workspace_id" = String, Path), ("conversation_id" = String, Path)), responses((status = 200, body = ChatWrite<ConversationRecord>)))]
@@ -170,11 +173,12 @@ pub(crate) async fn join_chat_channel(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let conversation_id = call.id(&conversation)?;
     call.write(
+        &state,
         state
             .chat
-            .join_channel(call.workspace_id, call.actor_id, conversation_id)
-            .await,
+            .join_channel(call.workspace_id, call.actor_id, conversation_id),
     )
+    .await
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/leave", params(("workspace_id" = String, Path), ("conversation_id" = String, Path)), responses((status = 200, body = ChatEvents)))]
@@ -188,11 +192,12 @@ pub(crate) async fn leave_chat_channel(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let conversation_id = call.id(&conversation)?;
     call.events(
+        &state,
         state
             .chat
-            .leave_channel(call.workspace_id, call.actor_id, conversation_id)
-            .await,
+            .leave_channel(call.workspace_id, call.actor_id, conversation_id),
     )
+    .await
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/members", params(("workspace_id" = String, Path), ("conversation_id" = String, Path)), request_body = ChatUserIdsBody, responses((status = 200, body = ChatWrite<ConversationRecord>)))]
@@ -208,11 +213,12 @@ pub(crate) async fn add_chat_members(
     let conversation_id = call.id(&conversation)?;
     let user_ids = call.body_ids(&body.user_ids, "user_ids")?;
     call.write(
+        &state,
         state
             .chat
-            .add_channel_members(call.workspace_id, call.actor_id, conversation_id, user_ids)
-            .await,
+            .add_channel_members(call.workspace_id, call.actor_id, conversation_id, user_ids),
     )
+    .await
 }
 
 #[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/members/{user_id}", params(("workspace_id" = String, Path), ("conversation_id" = String, Path), ("user_id" = String, Path)), responses((status = 200, body = ChatWrite<ConversationRecord>)))]
@@ -227,11 +233,15 @@ pub(crate) async fn remove_chat_member(
     let conversation_id = call.id(&conversation)?;
     let user_id = call.id(&user)?;
     call.write(
-        state
-            .chat
-            .remove_channel_member(call.workspace_id, call.actor_id, conversation_id, user_id)
-            .await,
+        &state,
+        state.chat.remove_channel_member(
+            call.workspace_id,
+            call.actor_id,
+            conversation_id,
+            user_id,
+        ),
     )
+    .await
 }
 
 /// Returns the DM of exactly these members and the caller, or makes it.
@@ -247,11 +257,12 @@ pub(crate) async fn open_chat_dm(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let user_ids = call.body_ids(&body.user_ids, "user_ids")?;
     call.write(
+        &state,
         state
             .chat
-            .open_dm(call.workspace_id, call.actor_id, user_ids)
-            .await,
+            .open_dm(call.workspace_id, call.actor_id, user_ids),
     )
+    .await
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/chat/categories", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<CategoryRecord>)))]
@@ -282,11 +293,12 @@ pub(crate) async fn create_chat_category(
 ) -> Result<Json<ChatWrite<CategoryRecord>>, ApiError> {
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     call.write(
+        &state,
         state
             .chat
-            .create_category(call.workspace_id, call.actor_id, &body.name)
-            .await,
+            .create_category(call.workspace_id, call.actor_id, &body.name),
     )
+    .await
 }
 
 #[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/chat/categories/{category_id}", params(("workspace_id" = String, Path), ("category_id" = String, Path)), request_body = ChatCategoryBody, responses((status = 200, body = ChatWrite<CategoryRecord>)))]
@@ -301,11 +313,12 @@ pub(crate) async fn rename_chat_category(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let category_id = call.id(&category)?;
     call.write(
+        &state,
         state
             .chat
-            .rename_category(call.workspace_id, call.actor_id, category_id, &body.name)
-            .await,
+            .rename_category(call.workspace_id, call.actor_id, category_id, &body.name),
     )
+    .await
 }
 
 /// The category's channels move to the channels without a category.
@@ -320,11 +333,12 @@ pub(crate) async fn delete_chat_category(
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let category_id = call.id(&category)?;
     call.events(
+        &state,
         state
             .chat
-            .delete_category(call.workspace_id, call.actor_id, category_id)
-            .await,
+            .delete_category(call.workspace_id, call.actor_id, category_id),
     )
+    .await
 }
 
 /// Moves a category or a channel one step up or down among its siblings.
@@ -348,9 +362,10 @@ pub(crate) async fn move_chat_item(
         }
     };
     call.events(
+        &state,
         state
             .chat
-            .move_item(call.workspace_id, call.actor_id, target, body.direction)
-            .await,
+            .move_item(call.workspace_id, call.actor_id, target, body.direction),
     )
+    .await
 }

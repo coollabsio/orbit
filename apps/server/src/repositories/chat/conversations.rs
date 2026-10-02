@@ -13,8 +13,8 @@ use super::state::emit_state;
 use super::{
     Access, CONVERSATION_COLUMNS, CategoryRecord, ChatError, ChatEvent, ChatRepository,
     ConversationKind, ConversationRecord, Events, MessageKind, NotifyLevel, Written,
-    conversation_from_row, conversation_record, current_conversation_record, id_list, load_access,
-    load_actor, parse_id,
+    conversation_from_row, conversation_record, current_conversation_record, finish, id_list,
+    load_access, load_actor, parse_id,
 };
 
 const NAME_MAX_CHARS: usize = 80;
@@ -161,8 +161,7 @@ impl ChatRepository {
         add_members(&mut tx, id, &members, NotifyLevel::Mentions, now).await?;
         let events = created_events(&mut tx, workspace_id, id, &members).await?;
         let record = current_conversation_record(&mut tx, workspace_id, id).await?;
-        tx.commit().await?;
-        Ok(events.written(record))
+        finish(tx, events, record).await
     }
 
     /// The channel's creator and chat managers change its name, topic, category and kind.
@@ -220,9 +219,15 @@ impl ChatRepository {
         .bind(conversation_id.to_string())
         .execute(&mut *tx)
         .await?;
-        let (events, record) = changed(&mut tx, workspace_id, conversation_id).await?;
-        tx.commit().await?;
-        Ok(events.written(record))
+        let (mut events, record) = changed(&mut tx, workspace_id, conversation_id).await?;
+        if current.kind == ConversationKind::Public && kind == ConversationKind::Private {
+            // The channel is gone for everyone who is not in it.
+            events.outsiders(
+                conversation_id,
+                ChatEvent::ConversationRemoved { conversation_id },
+            );
+        }
+        finish(tx, events, record).await
     }
 
     /// An archived channel is read-only and leaves the channel list.
@@ -250,8 +255,7 @@ impl ChatRepository {
         .execute(&mut *tx)
         .await?;
         let (events, record) = changed(&mut tx, workspace_id, conversation_id).await?;
-        tx.commit().await?;
-        Ok(events.written(record))
+        finish(tx, events, record).await
     }
 
     /// Every workspace member may join a public channel.
@@ -290,8 +294,7 @@ impl ChatRepository {
             &mut events,
         )
         .await?;
-        tx.commit().await?;
-        Ok(events.written(record))
+        finish(tx, events, record).await
     }
 
     /// Nobody leaves the default channel or a DM.
@@ -306,8 +309,7 @@ impl ChatRepository {
         access.require_member()?;
         require_leavable(&access)?;
         let events = remove_from(&mut tx, &access, actor_id).await?;
-        tx.commit().await?;
-        Ok(events.written(()))
+        finish(tx, events, ()).await
     }
 
     /// Members of a public channel add people to it; for a private channel only its creator
@@ -359,8 +361,7 @@ impl ChatRepository {
         for user_id in added {
             emit_state(&mut tx, workspace_id, conversation_id, user_id, &mut events).await?;
         }
-        tx.commit().await?;
-        Ok(events.written(record))
+        finish(tx, events, record).await
     }
 
     /// The channel's creator and chat managers remove a member.
@@ -384,8 +385,7 @@ impl ChatRepository {
             Events::default()
         };
         let record = current_conversation_record(&mut tx, workspace_id, conversation_id).await?;
-        tx.commit().await?;
-        Ok(events.written(record))
+        finish(tx, events, record).await
     }
 
     /// The DM of exactly these members and the caller. One set of people has one DM.
@@ -439,8 +439,7 @@ impl ChatRepository {
         add_members(&mut tx, id, &members, NotifyLevel::All, now).await?;
         let events = created_events(&mut tx, workspace_id, id, &members).await?;
         let record = current_conversation_record(&mut tx, workspace_id, id).await?;
-        tx.commit().await?;
-        Ok(events.written(record))
+        finish(tx, events, record).await
     }
 
     pub async fn create_category(
@@ -467,8 +466,7 @@ impl ChatRepository {
         .execute(&mut *tx)
         .await?;
         let (events, category) = category_changed(&mut tx, workspace_id, id).await?;
-        tx.commit().await?;
-        Ok(events.written(category))
+        finish(tx, events, category).await
     }
 
     pub async fn rename_category(
@@ -492,8 +490,7 @@ impl ChatRepository {
         .execute(&mut *tx)
         .await?;
         let (events, category) = category_changed(&mut tx, workspace_id, category_id).await?;
-        tx.commit().await?;
-        Ok(events.written(category))
+        finish(tx, events, category).await
     }
 
     /// The category's channels move to the end of the channels without a category.
@@ -545,8 +542,7 @@ impl ChatRepository {
         events.workspace(ChatEvent::CategoriesChanged {
             categories: categories(&mut tx, workspace_id).await?,
         });
-        tx.commit().await?;
-        Ok(events.written(()))
+        finish(tx, events, ()).await
     }
 
     /// One step up or down: a category among the categories, a channel among the channels of
@@ -626,8 +622,7 @@ impl ChatRepository {
                 }
             }
         }
-        tx.commit().await?;
-        Ok(events.written(()))
+        finish(tx, events, ()).await
     }
 }
 

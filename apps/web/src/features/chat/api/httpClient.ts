@@ -36,6 +36,7 @@ import {
 } from '@/api/generated/sdk.gen'
 import type { ChatEvent as WireEvent } from '@/api/generated/types.gen'
 import type { ChatClient } from './client'
+import { type LiveSocket, type LiveSocketOptions, openLiveSocket } from './liveSocket'
 import { ChatError, type ChatEvent, type ConversationState } from './types'
 import { toChatError, toConversation, toEvent, toFollowedThread, toMessage, toMessagePage, toState, toThreadPage, toThreadState } from './wire'
 
@@ -47,12 +48,30 @@ export interface HttpChatClientOptions {
   client?: ApiClient
   /** A "mark as read" for one conversation goes out at most once in this time; default 1000. `0` turns it off. */
   readIntervalMs?: number
+  /** Opens the live socket; tests put their own in. */
+  openSocket?: (options: LiveSocketOptions) => LiveSocket
+  /** How long a send that could not reach the server waits for the connection to come back. Default 60000. */
+  sendWaitMs?: number
+}
+
+/** A typing signal as the live socket sends it. */
+interface WireTyping {
+  type: 'typing'
+  conversation_id: string
+  thread_root_id: string | null
+  user_id: string
+}
+
+interface WirePresence {
+  type: 'presence'
+  user_id: string
+  online: boolean
 }
 
 /**
  * Chat on the Orbit server, for one workspace and the signed-in user. A write's response lists the events that the
  * write caused for the user; they go to the subscribers, so the cache changes the same way for the user's own writes
- * and (through the live socket) for everybody else's.
+ * and (through the live socket) for everybody else's. The socket is open while somebody is subscribed.
  */
 export function createHttpChatClient(options: HttpChatClientOptions): ChatClient {
   const { workspaceId, currentUserId: me, client = apiClient } = options
@@ -63,6 +82,43 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
 
   const emit = (event: ChatEvent) => {
     for (const listener of [...listeners]) listener(event)
+  }
+
+  let socket: LiveSocket | null = null
+  /** Who is online, from the socket's `hello` and its presence signals. `null` before the first `hello`. */
+  let online: Set<string> | null = null
+  let presenceWaiters: ((userIds: string[]) => void)[] = []
+
+  function openSocket() {
+    const url = `${(globalThis.location?.origin ?? 'http://localhost').replace(/^http/, 'ws')}/api/v1/workspaces/${workspaceId}/live`
+    return (options.openSocket ?? openLiveSocket)({
+      url,
+      onStatus: (status) => emit({ type: 'connection', status }),
+      onResync: () => emit({ type: 'resync' }),
+      onHello(userIds) {
+        // A reconnect: tell the subscribers who came and went meanwhile.
+        const next = new Set(userIds)
+        for (const userId of online ?? []) if (!next.has(userId)) emit({ type: 'presence', userId, online: false })
+        for (const userId of next) if (online && !online.has(userId)) emit({ type: 'presence', userId, online: true })
+        online = next
+        for (const resolve of presenceWaiters.splice(0)) resolve(userIds)
+      },
+      onEvent(topic, event) {
+        if (topic === 'presence') {
+          const { user_id: userId, online: isOnline } = event as WirePresence
+          if (isOnline) online?.add(userId)
+          else online?.delete(userId)
+          emit({ type: 'presence', userId, online: isOnline })
+        } else if (topic === 'chat') {
+          const wire = event as WireEvent | WireTyping
+          if (wire.type === 'typing') {
+            emit({ type: 'typing', conversationId: wire.conversation_id, threadRootId: wire.thread_root_id, userId: wire.user_id })
+          } else {
+            emit(toEvent(wire, me))
+          }
+        }
+      },
+    })
   }
 
   /** The body of a successful call; a failure as a `ChatError`. */
@@ -115,10 +171,11 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     async listPins(conversationId) {
       return (await call(listChatPins(at({ conversation_id: conversationId })))).map(toMessage)
     },
-    // Files, search and presence come with the upload, search and live-socket work.
+    // Files and search come with the upload and search work.
     listFiles: async () => [],
     searchMessages: async () => ({ items: [], cursor: null }),
-    getPresence: async () => [me],
+    /** Known from the socket's first frame. */
+    getPresence: () => (online ? Promise.resolve([...online]) : new Promise((resolve) => presenceWaiters.push(resolve))),
 
     async sendMessage(input) {
       const body = {
@@ -127,7 +184,17 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         also_in_channel: input.alsoInChannel ?? false,
         nonce: input.nonce,
       }
-      return toMessage((await write(sendChatMessage({ ...at({ conversation_id: input.conversationId }), body }))).result)
+      const send = () => write(sendChatMessage({ ...at({ conversation_id: input.conversationId }), body }))
+      try {
+        return toMessage((await send()).result)
+      } catch (error) {
+        // The request did not reach the server. The message waits for the connection and goes again; the nonce
+        // makes that safe even if the first request did arrive.
+        if (!(error instanceof ChatError) || error.code !== 'offline' || !socket) throw error
+        const wait = new Promise<never>((_, reject) => setTimeout(() => reject(error), options.sendWaitMs ?? 60_000))
+        await Promise.race([socket.connected(), wait])
+        return toMessage((await send()).result)
+      }
     },
     async editMessage(messageId, body) {
       return toMessage((await write(editChatMessage({ ...at({ message_id: messageId }), body: { body } }))).result)
@@ -232,13 +299,20 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     uploadAttachment: async () => {
       throw new ChatError('upload_failed', 'Files in chat are not available yet.')
     },
-    // Typing needs the live socket.
-    sendTyping() {},
+    sendTyping(conversationId, threadRootId = null) {
+      socket?.send({ type: 'typing', conversation_id: conversationId, thread_root_id: threadRootId })
+    },
 
     subscribe(listener) {
       listeners.add(listener)
+      socket ??= openSocket()
       return () => {
         listeners.delete(listener)
+        if (listeners.size > 0) return
+        socket?.close()
+        socket = null
+        online = null
+        presenceWaiters = []
       }
     },
   }
