@@ -46,12 +46,48 @@ function dropUnder(drag: SidebarDrag, clientX: number, clientY: number): Sidebar
   return key ? { kind: 'section', key } : null
 }
 
+/**
+ * The copy of the dragged row that follows the pointer, as in Discord: a little transparent, with a shadow. It goes
+ * into the sidebar, so it has the colours of the chat theme, and it takes no pointer events, so the row under it is
+ * still found.
+ */
+function makeGhost(source: HTMLElement): { element: HTMLElement; rect: DOMRect } {
+  const rect = source.getBoundingClientRect()
+  const element = source.cloneNode(true) as HTMLElement
+  element.removeAttribute('data-drop-row')
+  element.removeAttribute('data-drop')
+  element.setAttribute('data-slot', 'chat-drag-ghost')
+  element.setAttribute('aria-hidden', 'true')
+  Object.assign(element.style, {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    margin: '0',
+    zIndex: '60',
+    pointerEvents: 'none',
+    opacity: '0.75',
+    borderRadius: '6px',
+    background: 'var(--popover)',
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.3)',
+    cursor: 'grabbing',
+    willChange: 'transform',
+  })
+  ;(source.closest('[data-slot="chat-sidebar"]') ?? document.body).appendChild(element)
+  return { element, rect }
+}
+
+/** Closer to the top or bottom of the list than this, a drag scrolls the list. */
+const SCROLL_EDGE = 36
+
 const sameDrop = (a: SidebarDrop | null, b: SidebarDrop | null) => JSON.stringify(a) === JSON.stringify(b)
 
 /**
  * Drag and drop in the chat sidebar with pointer events, so it works with a mouse and with a finger (HTML5 drag and
  * drop does not start from a touch on every phone). A mouse drags after a small movement; a finger after a short
- * hold, so a swipe still scrolls the list. `start` goes on `onPointerDown` of the element that is the handle.
+ * hold, so a swipe still scrolls the list. `start` goes on `onPointerDown` of the element that is the handle; `source`
+ * is the element that the user sees move (the row, the header of the category).
  */
 export function useSidebarDrag(onDrop: (drag: SidebarDrag, drop: SidebarDrop) => void) {
   const [drag, setDrag] = useState<SidebarDrag | null>(null)
@@ -68,13 +104,46 @@ export function useSidebarDrag(onDrop: (drag: SidebarDrag, drop: SidebarDrop) =>
     if (event.button !== 0 || stop.current) return
     const touch = event.pointerType !== 'mouse'
     const { clientX: startX, clientY: startY, pointerId } = event
+    const source = (event.currentTarget as HTMLElement).closest<HTMLElement>('[data-drop-row], [data-slot="chat-section-header"]')
+    const scroller = source?.closest<HTMLElement>('nav')
     let active = false
     let target: SidebarDrop | null = null
+    let ghost: ReturnType<typeof makeGhost> | null = null
+    let pointer = { x: startX, y: startY }
+    let frame = 0
 
+    const moveGhost = () => {
+      if (!ghost) return
+      // The ghost stays under the pointer where the row was taken.
+      ghost.element.style.transform = `translate(${ghost.rect.left + pointer.x - startX}px, ${ghost.rect.top + pointer.y - startY}px)`
+    }
+    /** Near the top or the bottom of the list the list scrolls, faster nearer the edge. */
+    const autoScroll = () => {
+      frame = requestAnimationFrame(autoScroll)
+      if (!scroller) return
+      const rect = scroller.getBoundingClientRect()
+      const above = rect.top + SCROLL_EDGE - pointer.y
+      const below = pointer.y - (rect.bottom - SCROLL_EDGE)
+      const speed = above > 0 ? -Math.min(above, SCROLL_EDGE) / 3 : below > 0 ? Math.min(below, SCROLL_EDGE) / 3 : 0
+      if (speed === 0) return
+      const before = scroller.scrollTop
+      scroller.scrollTop += speed
+      if (scroller.scrollTop !== before) retarget()
+    }
+    const retarget = () => {
+      const next = dropUnder(item, pointer.x, pointer.y)
+      if (sameDrop(next, target)) return
+      target = next
+      setDrop(next)
+    }
     const activate = () => {
       active = true
       setDrag(item)
       document.body.style.userSelect = 'none'
+      document.body.style.cursor = 'grabbing'
+      if (source) ghost = makeGhost(source)
+      moveGhost()
+      frame = requestAnimationFrame(autoScroll)
     }
     const hold = touch ? setTimeout(activate, HOLD_MS) : undefined
 
@@ -86,6 +155,10 @@ export function useSidebarDrag(onDrop: (drag: SidebarDrag, drop: SidebarDrop) =>
       window.removeEventListener('touchmove', onTouchMove)
       window.removeEventListener('contextmenu', onContextMenu, true)
       document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+      cancelAnimationFrame(frame)
+      ghost?.element.remove()
+      ghost = null
       stop.current = null
       setDrag(null)
       setDrop(null)
@@ -101,10 +174,9 @@ export function useSidebarDrag(onDrop: (drag: SidebarDrag, drop: SidebarDrop) =>
         if (touch) return
         activate()
       }
-      const next = dropUnder(item, move.clientX, move.clientY)
-      if (sameDrop(next, target)) return
-      target = next
-      setDrop(next)
+      pointer = { x: move.clientX, y: move.clientY }
+      moveGhost()
+      retarget()
     }
     const onUp = (up: PointerEvent) => {
       if (up.pointerId !== pointerId) return

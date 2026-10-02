@@ -317,7 +317,7 @@ export function ChatSidebar() {
               data-drop-category={category?.id}
               data-dragging={(drag?.kind === 'category' && drag.id === category?.id) || undefined}
               data-drop={drop?.kind === 'category' && drop.id === category?.id ? drop.zone : undefined}
-              className="relative flex flex-col gap-px data-[dragging]:opacity-60 data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-1.5 data-[drop=after]:after:-bottom-1.5 data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-[''] data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-1.5 data-[drop=before]:before:-top-1.5 data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-['']"
+              className="relative flex flex-col gap-px data-[dragging]:opacity-40 data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-1.5 data-[drop=after]:after:-bottom-1.5 data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary data-[drop=after]:after:content-[''] data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-1.5 data-[drop=before]:before:-top-1.5 data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=before]:before:content-['']"
             >
               <SectionHeader
                 section={section}
