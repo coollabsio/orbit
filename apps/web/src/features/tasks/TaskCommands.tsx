@@ -1,17 +1,16 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
-import { confirmAction } from '@/components/common/confirmAction'
-import { DatePicker } from '@/components/common/DatePicker'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Command, CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
-import { useBulkTasks, useDeleteTask } from '@/features/tasks/api/tasks'
+import { useBulkTasks } from '@/features/tasks/api/tasks'
 import { assignUpdates, assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { DueDateDialog } from '@/features/tasks/components/DueDateDialog'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { LabelPill } from '@/features/tasks/components/TaskLabels'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
+import { useTrashTasks } from '@/features/tasks/useTrashTasks'
 import { GroupIcon } from '@/features/views/components/GroupIcon'
 import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import type { User } from '@/features/workspaces/models'
@@ -39,7 +38,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const { workspace } = useWorkspace()
   const { getTargetIds, openTaskId, setSelected } = useTaskTarget()
   const bulkTasks = useBulkTasks(workspace.id)
-  const deleteTask = useDeleteTask(workspace.id)
+  const trashTasks = useTrashTasks(workspace.id)
   // `focused`: the row that had the keyboard focus, to give it back when the list closes
   const [menu, setMenu] = useState<{ field: TaskField; ids: string[]; focused: string | null } | null>(null)
 
@@ -66,13 +65,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.copyLink', () => copy(`${window.location.origin}/tasks/${targets()[0].id}`, 'Copied task link'), { available: single })
   // the open task has its own trash action, which also closes the page
   useCommand('task.trash', openTaskId ? null : async () => {
-    const trashed = targets()
-    const title = trashed.length === 1 ? `Move ${trashed[0].identifier} to trash?` : `Move ${trashed.length} tasks to trash?`
-    if (!await confirmAction({ title, description: 'Sub-issues move to trash with their parent. You can restore them from trash later.', confirmLabel: 'Move to trash', danger: true })) return
-    const results = await Promise.allSettled(trashed.map((task) => deleteTask.mutateAsync({ taskId: task.id, version: task.version })))
-    const failed = results.filter((result) => result.status === 'rejected').length
-    setSelected([])
-    if (failed > 0) toast.error(`Could not move ${failed} of ${trashed.length} tasks to trash. Try again.`)
+    if (await trashTasks(targets())) setSelected([])
   }, { available })
 
   // the live tasks, so that a second choice in the same list sends the current versions
@@ -89,28 +82,15 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const scope = menuTasks.length === 1 ? menuTasks[0].identifier : `${menuTasks.length} tasks`
 
   if (menu.field === 'dueDate') {
-    const [first] = menuTasks
-    const sameDue = menuTasks.every((task) => task.dueAt === first.dueAt && (task.dueStartAt ?? null) === (first.dueStartAt ?? null))
-    const setDue = (start: string | null, end: string | null) => {
-      mutate(dueUpdates(menuTasks, start, end))
-      close()
-    }
     return (
-      <Dialog open onOpenChange={(next) => { if (!next) close() }}>
-        <DialogContent showCloseButton={false} className="top-1/3 w-auto translate-y-0 gap-0 overflow-hidden p-0 duration-150 data-open:zoom-in-97! data-closed:zoom-out-97! sm:max-w-none">
-          <DialogHeader className="sr-only">
-            <DialogTitle>{FIELD_TITLE.dueDate}</DialogTitle>
-            <DialogDescription>{scope}</DialogDescription>
-          </DialogHeader>
-          <DatePicker
-            startValue={sameDue ? first.dueStartAt ?? null : null}
-            value={sameDue ? first.dueAt : null}
-            clearable={menuTasks.some((task) => task.dueAt)}
-            onClear={() => setDue(null, null)}
-            onDone={({ start, end }) => setDue(start, end)}
-          />
-        </DialogContent>
-      </Dialog>
+      <DueDateDialog
+        tasks={menuTasks}
+        onClose={close}
+        onPick={(start, end) => {
+          mutate(dueUpdates(menuTasks, start, end))
+          close()
+        }}
+      />
     )
   }
 

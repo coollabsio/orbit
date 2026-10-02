@@ -38,6 +38,7 @@ import {
   useSubIssues,
 } from '@/features/tasks/api/tasks'
 import { TaskBoard } from '@/features/tasks/components/TaskBoard'
+import { TaskContextMenu } from '@/features/tasks/components/TaskContextMenu'
 import { TaskDetail } from '@/features/tasks/components/TaskDetail'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
@@ -438,9 +439,13 @@ function WorkspaceTasksPage() {
               </div>
             ) : layout === 'timeline'
               ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
-              : layout === 'board'
-                ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
-                : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => openNewTask({ values })} />}
+              : (
+                <TaskContextMenu tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} groupContext={groupContext} currentUserId={currentUser.data?.id ?? ''}>
+                  {layout === 'board'
+                    ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
+                    : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => openNewTask({ values })} />}
+                </TaskContextMenu>
+              )}
           </div>
         </Pane>
       )}
