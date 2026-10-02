@@ -47,7 +47,7 @@ interface TaskContextMenuProps {
   statuses: TaskStatusDef[]
   groupContext: GroupContext
   currentUserId: string
-  /** The list or the board: every element with a task id in it opens the menu. */
+  /** The list, the board or the timeline: every element with a task id in it opens the menu. */
   children: ReactNode
 }
 
@@ -70,7 +70,9 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
   /** Remembers the task under the pointer; false when the pointer is not on a task or is on a link (the browser menu shows). */
   const pick = (target: EventTarget) => {
     const element = target instanceof Element ? target : null
-    const rowId = element?.closest('[data-task-id]')?.getAttribute('data-task-id')
+    // a timeline row is not a keyboard target (its bar is), so it names its task with data-task-menu
+    const row = element?.closest('[data-task-id], [data-task-menu]')
+    const rowId = row?.getAttribute('data-task-id') ?? row?.getAttribute('data-task-menu')
     if (!rowId || element?.closest('a[href]')) return false
     pickedId.current = rowId
     return true

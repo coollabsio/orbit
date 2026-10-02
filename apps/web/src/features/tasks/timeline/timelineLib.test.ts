@@ -203,8 +203,10 @@ describe('applyDrag', () => {
 })
 
 describe('drawRange and isSameEdit', () => {
-  test('one day sets only the due date at 09:00', () => {
-    expect(drawRange(local(2026, 3, 4), local(2026, 3, 4))).toEqual({ dueStartAt: null, dueAt: iso(local(2026, 3, 4, 9)) })
+  test('one day is a one-day block, not a due-only point', () => {
+    const edit = drawRange(local(2026, 3, 4), local(2026, 3, 4))
+    expect(edit).toEqual({ dueStartAt: iso(local(2026, 3, 4)), dueAt: iso(local(2026, 3, 4, 9)) })
+    expect(taskSpan(edit)?.point).toBe(false)
   })
 
   test('a range is ordered regardless of drag direction', () => {

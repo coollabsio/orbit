@@ -12,15 +12,17 @@ import { dayIndex, spanLabel, xOf, type DragMode, type TaskSpan, type TimeRange 
 
 /** Below this width the label moves outside, to the right of the bar. */
 const LABEL_MIN_WIDTH = 120
+/** Below this width the resize handles move outside the bar. */
+const HANDLE_MIN_WIDTH = 24
 const DIAMOND = 12
 const GAP = 6
 
-/** Edge hit zone with a grip that shows on hover, so resizing is discoverable. */
-function ResizeHandle({ side, onPointerDown }: { side: 'start' | 'end'; onPointerDown: (event: PointerEvent) => void }) {
+/** Edge hit zone with a grip that shows on hover, so resizing is discoverable. `outside` puts it next to a short bar, so both edges and the bar itself stay grabbable. */
+function ResizeHandle({ side, outside, onPointerDown }: { side: 'start' | 'end'; outside: boolean; onPointerDown: (event: PointerEvent) => void }) {
   return (
     <span
       aria-hidden="true"
-      className={cn('absolute inset-y-0 z-10 flex w-2 cursor-ew-resize items-center justify-center', side === 'start' ? '-left-px' : '-right-px')}
+      className={cn('absolute inset-y-0 z-10 flex w-2 cursor-ew-resize items-center justify-center', side === 'start' ? (outside ? '-left-2' : '-left-px') : (outside ? '-right-2' : '-right-px'))}
       onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event) }}
     >
       <span className="h-3 w-0.5 rounded-full bg-foreground/50 opacity-0 transition-opacity duration-150 group-hover/bar:opacity-100" />
@@ -117,6 +119,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
 
   const narrow = width < LABEL_MIN_WIDTH
   const barWidth = Math.max(width, 8)
+  const short = barWidth < HANDLE_MIN_WIDTH
   // tint from the project colour; started work reads a step stronger than work not begun
   const tint = { '--bar': color } as CSSProperties
   return (
@@ -134,7 +137,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
         style={{ ...tint, left, width: barWidth }}
         onPointerDown={(event) => onPointerDown(event, 'move')}
       >
-        <ResizeHandle side="start" onPointerDown={(event) => onPointerDown(event, 'start')} />
+        <ResizeHandle side="start" outside={short} onPointerDown={(event) => onPointerDown(event, 'start')} />
         {narrow ? null : (
           <>
             {/* the label follows the visible edge when the bar starts left of the view */}
@@ -143,7 +146,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
             {assignee && properties.includes('assignee') ? <UserAvatar user={assignee} size={16} /> : null}
           </>
         )}
-        <ResizeHandle side="end" onPointerDown={(event) => onPointerDown(event, 'end')} />
+        <ResizeHandle side="end" outside={short} onPointerDown={(event) => onPointerDown(event, 'end')} />
       </div>
       {narrow ? (
         <span className={cn('pointer-events-none absolute top-1 flex h-6 items-center gap-1.5 text-xs whitespace-nowrap text-foreground', closed && 'opacity-50')} style={{ left: Math.max(left + barWidth, overdueDays > 0 ? tailEnd : 0) + GAP }}>

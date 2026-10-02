@@ -207,12 +207,10 @@ export function applyDrag(task: TaskDates, mode: DragMode, deltaDays: number): D
   return { dueStartAt: span.start.toISOString(), dueAt: endAt(max([addDays(span.end, deltaDays), span.start])) }
 }
 
-/** Click (one day) or press-drag (range) on an undated row. */
+/** Click (one day) or press-drag (range) on an undated row. A click still sets a start, so the result is a bar with both resize handles. */
 export function drawRange(a: Date, b: Date): DateEdit {
   const [lo, hi] = a <= b ? [a, b] : [b, a]
-  const dueAt = atTime(hi, DEFAULT_DUE_HOUR, 0).toISOString()
-  if (differenceInCalendarDays(hi, lo) === 0) return { dueStartAt: null, dueAt }
-  return { dueStartAt: startOfDay(lo).toISOString(), dueAt }
+  return { dueStartAt: startOfDay(lo).toISOString(), dueAt: atTime(hi, DEFAULT_DUE_HOUR, 0).toISOString() }
 }
 
 const instant = (value: string | null | undefined) => (value ? new Date(value).getTime() : null)

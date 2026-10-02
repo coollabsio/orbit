@@ -256,6 +256,8 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
           return (
             <div
               key={row.key}
+              // a right-click anywhere on a task row opens the task menu (TaskContextMenu)
+              data-task-menu={row.kind === 'task' ? row.task.id : undefined}
               // the group band is opaque so the sticky left cell (TimelineRowLabel) matches it
               className={cn('group/row relative flex h-8 transition-colors duration-150 ease-out', row.kind === 'group' ? 'bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]' : 'hover:bg-foreground/[0.03]')}
             >

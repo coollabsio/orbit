@@ -38,7 +38,8 @@ export function useTimelineDrag({ pxPerDay, trackRef, scrollRef, onCommit }: {
   useEffect(() => () => cancelActive.current?.(), [])
 
   const begin = (event: ReactPointerEvent, taskId: string, kind: DragKind) => {
-    if (event.button !== 0 || event.pointerType === 'touch') return
+    // ctrl+click is the context menu on macOS: it must not move a bar or draw a block under the menu
+    if (event.button !== 0 || event.ctrlKey || event.pointerType === 'touch') return
     const track = trackRef.current
     if (!track) return
     // a click the browser never delivered (press and release on different elements) must not eat the next one

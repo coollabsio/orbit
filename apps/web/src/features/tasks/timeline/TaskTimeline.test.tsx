@@ -177,7 +177,7 @@ test('resizing the end edge changes only the due date', async () => {
   expect(requests[0]!.body.due_at).toBe(local(2026, 9, 12, 9).toISOString())
 })
 
-test('clicking an undated row track sets a due date on that day', async () => {
+test('clicking an undated row track makes a one-day block on that day', async () => {
   const requests = captureFetch()
   const view = renderTimeline([ranged, task('b')])
   fireEvent.click(view.getByRole('button', { name: 'No dates (1)' }))
@@ -187,7 +187,7 @@ test('clicking an undated row track sets a due date on that day', async () => {
   fireEvent.pointerDown(track, { ...pointer, clientX: x })
   fireEvent.pointerUp(window, { ...pointer, clientX: x })
   await flush()
-  expect(requests[0]!.body).toEqual({ due_start_at: null, due_at: local(2026, 10, 5, 9).toISOString(), expected_version: 3 })
+  expect(requests[0]!.body).toEqual({ due_start_at: local(2026, 10, 5).toISOString(), due_at: local(2026, 10, 5, 9).toISOString(), expected_version: 3 })
 })
 
 test('a failed save shows a toast', async () => {

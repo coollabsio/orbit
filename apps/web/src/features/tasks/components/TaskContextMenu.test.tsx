@@ -47,6 +47,7 @@ function Page({ tasks, select }: { tasks: Task[]; select: string[] }) {
       <output>{selectedIds.length} selected</output>
       <TaskContextMenu tasks={tasks} users={[]} labels={[]} statuses={[todo]} groupContext={groupContext} currentUserId="user-1">
         {tasks.map((item) => <div key={item.id} {...taskRowTarget(item.id)}>{item.title}</div>)}
+        <div data-task-menu="task-1">Timeline row</div>
         <p>Group header</p>
       </TaskContextMenu>
     </>
@@ -88,4 +89,12 @@ test('a right-click outside a row opens no menu', () => {
   const view = render(<Page tasks={[task(1)]} select={[]} />, { wrapper })
   fireEvent.contextMenu(view.getByText('Group header'))
   expect(view.queryAllByRole('menu').length).toBe(0)
+})
+
+test('a right-click on a timeline row opens the menu for its task', async () => {
+  const writes = captureWrites()
+  const view = render(<Page tasks={[task(1), task(2)]} select={[]} />, { wrapper })
+  await setUrgent(view, 'Timeline row')
+  await waitFor(() => { if (writes.length !== 1) throw new Error('no write') })
+  expect(writes[0].body.updates).toEqual([{ id: 'task-1', expected_version: 1, priority: 'urgent' }])
 })
