@@ -1993,6 +1993,23 @@ export type SavedViewRecord = {
     workspace_id: string;
 };
 
+export type SearchHitRecord = {
+    conversation_id: string;
+    message: MessageRecord;
+    /**
+     * `[start, end)` offsets in `message.body` to highlight, in UTF-16 code units.
+     */
+    ranges: Array<Array<number>>;
+};
+
+export type SearchPage = {
+    /**
+     * Null when there is nothing older.
+     */
+    cursor: string | null;
+    items: Array<SearchHitRecord>;
+};
+
 export type SessionRecord = {
     absolute_expires_at: string;
     created_at: string;
@@ -6247,6 +6264,81 @@ export type RestoreChatReadResponses = {
 };
 
 export type RestoreChatReadResponse = RestoreChatReadResponses[keyof RestoreChatReadResponses];
+
+export type ListChatSearchData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: {
+        /**
+         * Every word must match; the last one matches as a prefix. May be empty with a filter.
+         */
+        query?: string;
+        /**
+         * Only this conversation.
+         */
+        conversation_id?: string;
+        /**
+         * Only messages of this member.
+         */
+        author_id?: string;
+        /**
+         * Only messages with a file.
+         */
+        has_file?: boolean;
+        /**
+         * The `cursor` of the page before.
+         */
+        cursor?: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/chat/search';
+};
+
+export type ListChatSearchErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatSearchError = ListChatSearchErrors[keyof ListChatSearchErrors];
+
+export type ListChatSearchResponses = {
+    200: SearchPage;
+};
+
+export type ListChatSearchResponse = ListChatSearchResponses[keyof ListChatSearchResponses];
 
 export type ListChatStatesData = {
     body?: never;

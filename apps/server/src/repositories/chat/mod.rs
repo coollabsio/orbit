@@ -14,6 +14,7 @@
 mod conversations;
 mod files;
 mod messages;
+mod search;
 mod state;
 
 use std::collections::HashMap;
@@ -31,6 +32,7 @@ pub use crate::live::Recipients;
 
 pub use conversations::{ChannelCreate, ChannelUpdate, MoveDirection, MoveTarget};
 pub use messages::{MessageCursor, SendInput};
+pub use search::{SearchHitRecord, SearchInput, SearchPage};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 
 /// Characters in one message body.

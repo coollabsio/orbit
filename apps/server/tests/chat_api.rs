@@ -1383,6 +1383,107 @@ async fn a_file_is_its_uploaders_until_a_message_takes_it() {
     assert_eq!(files, 0);
 }
 
+#[tokio::test]
+async fn search_finds_messages_in_readable_conversations_only() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    let general = fixture.general().await;
+    let secret = fixture
+        .channel(&fixture.owner, "secret", "private", &[&ada])
+        .await;
+    let release = fixture
+        .send(&fixture.owner, &general, "The Über release plan is ready")
+        .await;
+    fixture.send(&ada, &general, "Lunch plans?").await;
+    let hidden = fixture
+        .send(&fixture.owner, &secret, "The release budget")
+        .await;
+    let ids = |page: &Value| -> Vec<String> {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["message"]["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // Every word must match, without regard to case and accents; the last word is a prefix.
+    let page = fixture
+        .ok(&ada, "GET", "/search?query=uber%20rel", None)
+        .await;
+    assert_eq!(ids(&page), std::slice::from_ref(&release));
+    assert_eq!(page["items"][0]["ranges"], json!([[4, 8], [9, 16]]));
+    assert!(page["cursor"].is_null());
+
+    // A member of the private channel finds its messages, newest first; others do not.
+    let page = fixture.ok(&ada, "GET", "/search?query=release", None).await;
+    assert_eq!(ids(&page), [hidden.clone(), release.clone()]);
+    let page = fixture.ok(&bob, "GET", "/search?query=release", None).await;
+    assert_eq!(ids(&page), std::slice::from_ref(&release));
+    let (status, _) = fixture
+        .call(
+            &bob,
+            "GET",
+            &format!("/search?query=release&conversation_id={secret}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Filters: one conversation, one author; no words and no filter finds nothing.
+    let page = fixture
+        .ok(
+            &ada,
+            "GET",
+            &format!("/search?query=plan&author_id={}", ada.id),
+            None,
+        )
+        .await;
+    assert_eq!(ids(&page).len(), 1);
+    let page = fixture
+        .ok(
+            &ada,
+            "GET",
+            &format!("/search?conversation_id={general}"),
+            None,
+        )
+        .await;
+    assert_eq!(ids(&page).len(), 2);
+    let page = fixture.ok(&ada, "GET", "/search?query=%20", None).await;
+    assert!(ids(&page).is_empty());
+
+    // An edited message is found by its new text only; a deleted one is not found.
+    fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &format!("/messages/{release}"),
+            Some(json!({ "body": "The launch is ready" })),
+        )
+        .await;
+    let page = fixture.ok(&bob, "GET", "/search?query=release", None).await;
+    assert!(ids(&page).is_empty());
+    let page = fixture.ok(&bob, "GET", "/search?query=launch", None).await;
+    assert_eq!(ids(&page), std::slice::from_ref(&release));
+    fixture
+        .ok(
+            &fixture.owner,
+            "DELETE",
+            &format!("/messages/{release}"),
+            None,
+        )
+        .await;
+    let page = fixture.ok(&bob, "GET", "/search?query=launch", None).await;
+    assert!(ids(&page).is_empty());
+
+    // The index is whole after edits and deletes (the server's own integrity job runs this).
+    sqlx::query("INSERT INTO chat_search (chat_search) VALUES ('integrity-check')")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+}
+
 /// Half a million messages in one channel: every call that a page or a click makes must stay
 /// fast. Run by hand: `cargo test -p orbit-server --test chat_api scale -- --ignored --nocapture`.
 #[tokio::test]
@@ -1453,6 +1554,20 @@ async fn every_call_stays_fast_with_half_a_million_messages() {
             &ada,
             "GET",
             "/conversations".to_owned(),
+            None,
+        ),
+        (
+            "search, a word in one message",
+            &ada,
+            "GET",
+            "/search?query=number%20123456".to_owned(),
+            None,
+        ),
+        (
+            "search, a word in every message",
+            &ada,
+            "GET",
+            "/search?query=message%20num".to_owned(),
             None,
         ),
         (

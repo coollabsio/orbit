@@ -1798,7 +1798,7 @@ fn collect_text<'a>(value: &'a Value, parts: &mut Vec<std::borrow::Cow<'a, str>>
 /// word becomes a quoted string (so `AND`, `NEAR`, `col:`, `-`, `*`, `^` and parentheses are plain
 /// text), words without a letter or digit are dropped (the tokenizer would drop them too), the
 /// last word matches as a prefix, and all words must match. `None` when nothing is searchable.
-fn fts_query(input: &str) -> Option<String> {
+pub(crate) fn fts_query(input: &str) -> Option<String> {
     let terms = input
         .split_whitespace()
         // `"` separates tokens anyway; inside the quoted string it would end it.
@@ -1825,7 +1825,7 @@ fn fts_query(input: &str) -> Option<String> {
 
 /// Removes the highlight markers from FTS output and returns the plain text with the marked
 /// spans as UTF-16 ranges.
-fn split_marks(marked: &str) -> (String, Vec<TextRange>) {
+pub(crate) fn split_marks(marked: &str) -> (String, Vec<TextRange>) {
     let mut text = String::with_capacity(marked.len());
     let mut ranges = Vec::new();
     let mut offset = 0_u32;

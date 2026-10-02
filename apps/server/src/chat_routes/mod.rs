@@ -188,6 +188,10 @@ fn json_router(state: ChatState) -> Router {
             get(messages::get_chat_thread),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/chat/search",
+            get(messages::list_chat_search),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/chat/states",
             get(state::list_chat_states),
         )

@@ -17,6 +17,7 @@ import {
   listChatFiles,
   listChatMessages,
   listChatPins,
+  listChatSearch,
   listChatStates,
   listChatThreads,
   listFollowedChatThreads,
@@ -199,8 +200,24 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     async listFiles(conversationId) {
       return (await call(listChatFiles(at({ conversation_id: conversationId })))).map(toMessage)
     },
-    // Search comes with the search work.
-    searchMessages: async () => ({ items: [], cursor: null }),
+    async searchMessages(input) {
+      const query = {
+        query: input.query,
+        conversation_id: input.conversationId,
+        author_id: input.authorId,
+        has_file: input.hasFile,
+        cursor: input.cursor,
+      }
+      const page = await call(listChatSearch({ ...at({}), query }))
+      return {
+        items: page.items.map((hit) => ({
+          message: toMessage(hit.message),
+          conversationId: hit.conversation_id,
+          ranges: hit.ranges.map(([start, end]): [number, number] => [start, end]),
+        })),
+        cursor: page.cursor,
+      }
+    },
     /** Known from the socket's first frame. */
     getPresence: () => (online ? Promise.resolve([...online]) : new Promise((resolve) => presenceWaiters.push(resolve))),
 

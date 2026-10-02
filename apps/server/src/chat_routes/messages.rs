@@ -8,8 +8,8 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, ChatEvents, ChatState, ChatWrite, RequestIdExtension};
 use crate::repositories::chat::{
-    ChatError, FollowedThreadRecord, MessageCursor, MessagePage, MessageRecord, SendInput,
-    ThreadPage,
+    ChatError, FollowedThreadRecord, MessageCursor, MessagePage, MessageRecord, SearchInput,
+    SearchPage, SendInput, ThreadPage,
 };
 use crate::task_routes::{ApiError, ApiJson, ApiQuery};
 
@@ -310,6 +310,56 @@ pub(crate) async fn get_chat_thread(
         state
             .chat
             .get_thread(call.workspace_id, call.actor_id, root_id, cursor)
+            .await,
+    )
+}
+
+#[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ChatSearchQuery {
+    /// Every word must match; the last one matches as a prefix. May be empty with a filter.
+    #[serde(default)]
+    query: String,
+    /// Only this conversation.
+    conversation_id: Option<String>,
+    /// Only messages of this member.
+    author_id: Option<String>,
+    /// Only messages with a file.
+    #[serde(default)]
+    has_file: bool,
+    /// The `cursor` of the page before.
+    cursor: Option<String>,
+}
+
+/// Messages in the conversations the caller can read, newest first, 20 for each page.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/chat/search", params(ChatSearchQuery, ("workspace_id" = String, Path)), responses((status = 200, body = SearchPage)))]
+pub(crate) async fn list_chat_search(
+    State(state): State<ChatState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiQuery(query): ApiQuery<ChatSearchQuery>,
+) -> Result<Json<SearchPage>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let id = |value: &Option<String>, field| {
+        value
+            .as_deref()
+            .map(|value| call.body_id(value, field))
+            .transpose()
+    };
+    let input = SearchInput {
+        conversation_id: id(&query.conversation_id, "conversation_id")?,
+        author_id: id(&query.author_id, "author_id")?,
+        cursor: id(&query.cursor, "cursor")?,
+        has_file: query.has_file,
+        query: query.query,
+    };
+    call.read(
+        state
+            .chat
+            .search_messages(call.workspace_id, call.actor_id, input)
             .await,
     )
 }
