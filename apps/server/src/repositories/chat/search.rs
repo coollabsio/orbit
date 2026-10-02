@@ -1,4 +1,4 @@
-//! Message search (FTS5, migration 0039) over the conversations the caller can read. Every word
+//! Message search (FTS5, migration 0037) over the conversations the caller can read. Every word
 //! must match (the last one as a prefix); case and diacritics are ignored. Newest message first,
 //! paged by message id.
 

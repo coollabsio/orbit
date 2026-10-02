@@ -252,3 +252,241 @@ BEGIN
     WHERE chat_conversations.workspace_id = NEW.workspace_id
       AND chat_conversations.is_default = 1;
 END;
+
+-- Files in messages.
+--
+-- Chat files. The bytes live in the shared attachment blob store (deduplicated per workspace);
+-- a row is one message's reference to a blob. A file is uploaded first and belongs to its
+-- uploader only; the send of the message attaches it. Files that are never attached are
+-- removed after a day. When a row goes, its blob is quarantined for a day; upload
+-- reconciliation then reclaims blobs that nothing references any more.
+CREATE TABLE chat_message_files (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    -- Both NULL until the message is sent.
+    message_id TEXT REFERENCES chat_messages(id) ON DELETE CASCADE,
+    conversation_id TEXT REFERENCES chat_conversations(id) ON DELETE CASCADE,
+    blob_id TEXT NOT NULL REFERENCES attachment_blobs(id) ON DELETE RESTRICT,
+    file_name TEXT NOT NULL CHECK (length(file_name) BETWEEN 1 AND 255),
+    -- Detected from the file's bytes.
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+    -- Of an image, as the uploader's browser measured it: only a hint to reserve space.
+    width INTEGER CHECK (width IS NULL OR width BETWEEN 1 AND 100000),
+    height INTEGER CHECK (height IS NULL OR height BETWEEN 1 AND 100000),
+    uploaded_by TEXT NOT NULL REFERENCES users(id),
+    created_at INTEGER NOT NULL,
+    CHECK ((message_id IS NULL) = (conversation_id IS NULL))
+);
+
+CREATE INDEX chat_message_files_message ON chat_message_files (message_id);
+-- The files list of a conversation: its messages that have files, newest first.
+CREATE INDEX chat_message_files_conversation ON chat_message_files (conversation_id, message_id);
+CREATE INDEX chat_message_files_blob ON chat_message_files (blob_id);
+CREATE INDEX chat_message_files_workspace ON chat_message_files (workspace_id);
+CREATE INDEX chat_message_files_pending ON chat_message_files (created_at)
+    WHERE message_id IS NULL;
+
+CREATE TRIGGER chat_message_files_scope_insert
+BEFORE INSERT ON chat_message_files
+WHEN NOT EXISTS (
+    SELECT 1 FROM attachment_blobs
+    WHERE attachment_blobs.id = NEW.blob_id AND attachment_blobs.workspace_id = NEW.workspace_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'chat file scope mismatch');
+END;
+
+CREATE TRIGGER chat_message_files_scope_immutable
+BEFORE UPDATE OF workspace_id, blob_id ON chat_message_files
+WHEN NEW.workspace_id <> OLD.workspace_id OR NEW.blob_id <> OLD.blob_id
+BEGIN
+    SELECT RAISE(ABORT, 'chat file scope is immutable');
+END;
+
+-- Fires for direct deletes and for the message, conversation and workspace cascades alike.
+CREATE TRIGGER chat_message_files_quarantine_blob
+AFTER DELETE ON chat_message_files
+BEGIN
+    UPDATE attachment_blobs
+    SET quarantine_until = MAX(
+        quarantine_until,
+        CAST(strftime('%s', 'now') AS INTEGER) * 1000 + 86400000
+    )
+    WHERE id = OLD.blob_id;
+END;
+
+-- Message search.
+--
+-- Chat full-text search: an FTS5 index over message bodies, with `unicode61 remove_diacritics 2`
+-- as Docs search has. It is an external-content index: the text stays in `chat_messages` only,
+-- and the index refers to a message by `row_id` (an INTEGER PRIMARY KEY, which a backup's
+-- VACUUM INTO cannot renumber).
+--
+-- Triggers keep it in sync, in the transaction of the message. Only rows of kind 'message' are
+-- indexed. An external-content index must be told the old text to take a row out, which is
+-- what the 'delete' command does.
+-- The server strips U+0002 and U+0003 from a body before it is stored: search uses them as
+-- highlight markers.
+CREATE VIRTUAL TABLE chat_search USING fts5(
+    body,
+    content = 'chat_messages',
+    content_rowid = 'row_id',
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER chat_search_insert
+AFTER INSERT ON chat_messages
+WHEN NEW.kind = 'message'
+BEGIN
+    INSERT INTO chat_search (rowid, body) VALUES (NEW.row_id, NEW.body);
+END;
+
+CREATE TRIGGER chat_search_update
+AFTER UPDATE OF body ON chat_messages
+WHEN NEW.kind = 'message' AND NEW.body IS NOT OLD.body
+BEGIN
+    INSERT INTO chat_search (chat_search, rowid, body) VALUES ('delete', OLD.row_id, OLD.body);
+    INSERT INTO chat_search (rowid, body) VALUES (NEW.row_id, NEW.body);
+END;
+
+-- Fires for direct deletes and for the thread, conversation and workspace cascades alike.
+CREATE TRIGGER chat_search_delete
+AFTER DELETE ON chat_messages
+WHEN OLD.kind = 'message'
+BEGIN
+    INSERT INTO chat_search (chat_search, rowid, body) VALUES ('delete', OLD.row_id, OLD.body);
+END;
+
+-- Mentions in the inbox.
+--
+-- Chat mentions in the inbox: a message in the main list of a channel that mentions a member
+-- (`@user`, or `@channel` / `@here` unless the member muted the channel) notifies that member
+-- (kind `chat_mentioned`). Direct messages and thread replies never do. Reading the conversation
+-- in chat marks the notification as read; a deleted message takes its notifications along.
+--
+-- The kind CHECK changes, so the table is rebuilt like in 0030 and 0032 (SQLite cannot alter a
+-- CHECK). The migration runner holds a transaction with foreign_keys=ON; nothing references
+-- notifications, so the implicit DELETE of DROP TABLE cascades nowhere. Rows are copied aside
+-- and back; the indexes and the trigger are recreated below.
+PRAGMA defer_foreign_keys = ON;
+
+CREATE TABLE notifications_backup AS SELECT * FROM notifications;
+DROP TABLE notifications;
+
+CREATE TABLE notifications (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    recipient_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    kind TEXT NOT NULL
+        CHECK (kind IN ('task_assigned', 'comment_mentioned', 'page_comment_mentioned', 'page_mentioned',
+                        'chat_mentioned')),
+    task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    comment_id TEXT REFERENCES task_comments(id) ON DELETE CASCADE,
+    page_id TEXT REFERENCES pages(id) ON DELETE CASCADE,
+    page_thread_id TEXT REFERENCES page_threads(id) ON DELETE CASCADE,
+    page_comment_id TEXT REFERENCES page_comments(id) ON DELETE CASCADE,
+    page_block_id TEXT CHECK (page_block_id IS NULL OR length(page_block_id) BETWEEN 1 AND 64),
+    chat_conversation_id TEXT REFERENCES chat_conversations(id) ON DELETE CASCADE,
+    chat_message_id TEXT REFERENCES chat_messages(id) ON DELETE CASCADE,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    read_at INTEGER,
+    created_at INTEGER NOT NULL,
+    CHECK ((kind = 'chat_mentioned') = (chat_conversation_id IS NOT NULL)),
+    CHECK ((chat_conversation_id IS NULL) = (chat_message_id IS NULL)),
+    CHECK (
+        (kind IN ('task_assigned', 'comment_mentioned')
+            AND task_id IS NOT NULL
+            AND page_id IS NULL AND page_thread_id IS NULL AND page_comment_id IS NULL
+            AND page_block_id IS NULL)
+        OR (kind = 'page_comment_mentioned'
+            AND task_id IS NULL AND comment_id IS NULL
+            AND page_id IS NOT NULL AND page_thread_id IS NOT NULL AND page_comment_id IS NOT NULL
+            AND page_block_id IS NULL)
+        OR (kind = 'page_mentioned'
+            AND task_id IS NULL AND comment_id IS NULL
+            AND page_id IS NOT NULL AND page_thread_id IS NULL AND page_comment_id IS NULL)
+        OR (kind = 'chat_mentioned'
+            AND task_id IS NULL AND comment_id IS NULL
+            AND page_id IS NULL AND page_thread_id IS NULL AND page_comment_id IS NULL
+            AND page_block_id IS NULL)
+    )
+);
+
+INSERT INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, kind, task_id,
+                           comment_id, page_id, page_thread_id, page_comment_id, page_block_id,
+                           dedupe_key, read_at, created_at)
+SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id,
+       comment_id, page_id, page_thread_id, page_comment_id, page_block_id,
+       dedupe_key, read_at, created_at
+FROM notifications_backup;
+
+DROP TABLE notifications_backup;
+
+CREATE INDEX notifications_inbox ON notifications (
+    workspace_id,
+    recipient_user_id,
+    created_at,
+    id
+);
+CREATE INDEX notifications_task ON notifications (task_id);
+CREATE INDEX notifications_comment ON notifications (comment_id);
+CREATE INDEX notifications_page ON notifications (page_id);
+CREATE INDEX notifications_page_thread ON notifications (page_thread_id);
+CREATE INDEX notifications_page_comment ON notifications (page_comment_id);
+CREATE INDEX notifications_recipient ON notifications (recipient_user_id);
+CREATE INDEX notifications_actor ON notifications (actor_user_id);
+CREATE INDEX notifications_chat_message ON notifications (chat_message_id);
+-- Reading a conversation marks its unread mention notifications as read.
+CREATE INDEX notifications_chat_unread ON notifications (chat_conversation_id, recipient_user_id)
+    WHERE read_at IS NULL AND chat_conversation_id IS NOT NULL;
+-- The 10-minute dedupe looks up the recipient's latest page mention of a page.
+CREATE INDEX notifications_page_mentions ON notifications (page_id, recipient_user_id, created_at)
+    WHERE kind = 'page_mentioned';
+
+CREATE TRIGGER notifications_validate_scope_insert
+BEFORE INSERT ON notifications
+WHEN NOT EXISTS (
+    SELECT 1 FROM memberships
+    WHERE memberships.workspace_id = NEW.workspace_id
+      AND memberships.user_id = NEW.recipient_user_id
+) OR (
+    NEW.task_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM tasks
+        WHERE tasks.id = NEW.task_id AND tasks.workspace_id = NEW.workspace_id
+    )
+) OR (
+    NEW.comment_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM task_comments
+        WHERE task_comments.id = NEW.comment_id
+          AND task_comments.task_id = NEW.task_id
+          AND task_comments.workspace_id = NEW.workspace_id
+    )
+) OR (
+    NEW.page_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM pages
+        WHERE pages.id = NEW.page_id
+          AND pages.workspace_id = NEW.workspace_id
+          AND (pages.owner_id IS NULL OR pages.owner_id = NEW.recipient_user_id)
+    )
+) OR (
+    NEW.chat_message_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM chat_messages
+        JOIN chat_conversations ON chat_conversations.id = chat_messages.conversation_id
+        WHERE chat_messages.id = NEW.chat_message_id
+          AND chat_messages.conversation_id = NEW.chat_conversation_id
+          AND chat_conversations.workspace_id = NEW.workspace_id
+    )
+) OR (
+    NEW.page_comment_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM page_comments
+        WHERE page_comments.id = NEW.page_comment_id
+          AND page_comments.thread_id = NEW.page_thread_id
+          AND page_comments.page_id = NEW.page_id
+          AND page_comments.workspace_id = NEW.workspace_id
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'notification must belong to the workspace task, a page the recipient can see or a chat message');
+END;
