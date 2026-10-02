@@ -103,7 +103,10 @@ export function useMessages(conversationId: string | null | undefined, options: 
   })
 }
 
-/** A thread: every page carries the root and the user's thread state; `items` are the replies. Starts at the newest. */
+/**
+ * A thread: every page carries the root and the user's thread state; `items` are the replies. Starts at the newest,
+ * and holds a limited number of pages like `useMessages`.
+ */
 export function useThread(rootId: string | null | undefined) {
   const { client, workspaceId } = useChatContext()
   return useInfiniteQuery({
@@ -111,6 +114,7 @@ export function useThread(rootId: string | null | undefined) {
     queryKey: chatKeys.thread(workspaceId, rootId ?? ''),
     enabled: client !== null && Boolean(rootId),
     initialPageParam: {} as MessageCursor,
+    maxPages: MAX_MESSAGE_PAGES,
     queryFn: ({ pageParam }) => requireClient(client).getThread(rootId ?? '', pageParam),
     getPreviousPageParam: (first): MessageCursor | undefined => (first.before ? { before: first.before } : undefined),
     getNextPageParam: (last): MessageCursor | undefined => (last.after ? { after: last.after } : undefined),

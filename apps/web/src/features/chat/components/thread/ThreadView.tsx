@@ -1,7 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { useChatContext } from '../../api/chatContext'
+import { chatKeys } from '../../api/keys'
 import { useMarkThreadRead } from '../../api/mutations'
 import { flattenMessages, useConversation, useThread, useThreadState, useUnconfirmedMessages } from '../../api/queries'
 import type { Conversation, Message, ThreadState } from '../../api/types'
@@ -41,6 +43,8 @@ interface ThreadBodyProps {
 /** The messages and the composer. Mounted when the thread has loaded, so what it captures on open stays. */
 function ThreadBody({ conversation, root, state, focusMessageId, announce, list }: ThreadBodyProps) {
   const thread = useThread(root.id)
+  const { workspaceId } = useChatContext()
+  const queryClient = useQueryClient()
   const focused = useWindowFocused()
   const { mutate: markThreadRead } = useMarkThreadRead()
   const composer = useRef<ComposerHandle>(null)
@@ -93,7 +97,8 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
         focusMessageId={focusMessageId}
         announce={announce}
         onAtBottomChange={setAtBottom}
-        onJumpToLatest={() => void thread.fetchNextPage()}
+        // The newest replies left the list in a long scroll back: the thread loads again from its end.
+        onJumpToLatest={() => void queryClient.resetQueries({ queryKey: chatKeys.thread(workspaceId, rootId), exact: true })}
         onMarkUnread={(message) => {
           // A reply moves the thread's cursor; the root moves the conversation's.
           if (message.threadRootId) setSuspended(true)

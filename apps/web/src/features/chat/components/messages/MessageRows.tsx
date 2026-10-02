@@ -3,10 +3,10 @@ import { dayChip, fullTimestamp, messageTime } from '../../lib/time'
 import { useMessageList } from './messageListContext'
 import { replyCountLabel } from './messageText'
 
-/** The date between two days. It sticks to the top of the list while its day scrolls. */
+/** The date between two days. While its day scrolls, the list shows the same chip at its top. */
 export function DayChip({ at }: { at: number }) {
   return (
-    <div role="separator" aria-label={dayChip(at)} data-slot="day-chip" className="pointer-events-none sticky top-2 z-[5] flex justify-center py-2">
+    <div role="separator" aria-label={dayChip(at)} data-slot="day-chip" className="pointer-events-none flex justify-center py-2">
       <span className="rounded-full border border-border bg-background px-3 py-0.5 text-xs font-medium text-muted-foreground">{dayChip(at)}</span>
     </div>
   )
