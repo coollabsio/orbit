@@ -112,7 +112,7 @@ test('a reaction and a favorite show at once and roll back when the write fails'
     await server.opened
     throw new ChatError('offline', 'No connection.')
   }
-  const { wrapper, general, messages, favorite } = await setup({ toggleReaction: refuse, setFavorite: refuse })
+  const { wrapper, general, messages, favorite } = await setup({ setReaction: refuse, setFavorite: refuse })
   const message = messages()[0]
   const view = renderHook(() => ({ react: useToggleReaction(), favorite: useSetFavorite() }), { wrapper })
 

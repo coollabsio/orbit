@@ -273,6 +273,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0036_keyboard_shortcuts.sql"),
                     false,
                 ),
+                Migration::new(
+                    37,
+                    include_str!("../../../../apps/server/migrations/0037_chat.sql"),
+                    false,
+                ),
             ],
         )
     }

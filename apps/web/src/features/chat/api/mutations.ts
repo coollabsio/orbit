@@ -1,6 +1,6 @@
 import { type QueryClient, useMutation, useQueryClient } from '@tanstack/react-query'
 import { extractMentions } from '../lib/mentionTokens'
-import { toggleReaction } from '../lib/reactions'
+import { hasReaction, toggleReaction } from '../lib/reactions'
 import { useChatContext } from './chatContext'
 import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions } from './client'
 import { applyChatEvent, patchMessage, upsertMessage } from './events'
@@ -140,14 +140,14 @@ export function useDeleteMessage() {
 
 /** A message change shown at once and put back if the write fails. */
 function useOptimisticMessageMutation<TInput extends { message: Message }>(
-  run: (client: ChatClient, input: TInput) => Promise<Message>,
+  run: (client: ChatClient, input: TInput, currentUserId: string) => Promise<Message>,
   optimistic: (input: TInput, currentUserId: string) => Message,
 ) {
   const { client, workspaceId, currentUserId } = useChatContext()
   const queryClient = useQueryClient()
   const apply = (message: Message) => applyChatEvent(queryClient, workspaceId, { type: 'message.updated', message })
   return useMutation<Message, Error, TInput>({
-    mutationFn: (input) => run(requireClient(client), input),
+    mutationFn: (input) => run(requireClient(client), input, currentUserId ?? ''),
     onMutate: (input) => apply(optimistic(input, currentUserId ?? '')),
     onSuccess: apply,
     onError: (_error, input) => apply(input.message),
@@ -156,7 +156,8 @@ function useOptimisticMessageMutation<TInput extends { message: Message }>(
 
 export function useToggleReaction() {
   return useOptimisticMessageMutation(
-    (client, input: { message: Message; emoji: string }) => client.toggleReaction(input.message.id, input.emoji),
+    (client, input: { message: Message; emoji: string }, userId) =>
+      client.setReaction(input.message.id, input.emoji, !hasReaction(input.message.reactions, input.emoji, userId)),
     ({ message, emoji }, userId) => ({ ...message, reactions: toggleReaction(message.reactions, emoji, userId) }),
   )
 }

@@ -411,8 +411,15 @@ enum EndpointClass {
     Recovery,
     Invitation,
     Upload,
+    /// Chat has its own budget, so a busy conversation cannot use up the requests of the
+    /// other apps (and they cannot use up chat's).
+    Chat,
     General,
 }
+
+/// Chat makes more small requests than the other apps (a read receipt for each conversation
+/// that is looked at), so its budget is this many times the general one.
+const CHAT_RATE_FACTOR: u32 = 3;
 
 #[derive(Clone, Debug)]
 struct RateLimiter {
@@ -448,6 +455,10 @@ impl RateLimiter {
             EndpointClass::Recovery => self.config.recovery_per_minute,
             EndpointClass::Invitation => self.config.invitation_per_minute,
             EndpointClass::Upload => self.config.upload_per_minute,
+            EndpointClass::Chat => self
+                .config
+                .general_per_minute
+                .saturating_mul(CHAT_RATE_FACTOR),
             EndpointClass::General => self.config.general_per_minute,
         };
         let window = SystemTime::now()
@@ -507,6 +518,8 @@ fn endpoint_class(path: &str) -> Option<EndpointClass> {
         Some(EndpointClass::Upload)
     } else if path.ends_with("/login") || path.contains("/session") || path.contains("/setup") {
         Some(EndpointClass::Authentication)
+    } else if path.contains("/chat/") {
+        Some(EndpointClass::Chat)
     } else {
         Some(EndpointClass::General)
     }
@@ -543,6 +556,22 @@ mod tests {
         });
         assert!(limiter.permits("2001:db8:1:2::1".parse().unwrap(), "/api/v1/tasks"));
         assert!(!limiter.permits("2001:db8:1:2::2".parse().unwrap(), "/api/v1/tasks"));
+    }
+
+    #[test]
+    fn chat_has_its_own_budget_of_three_times_the_general_one() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            general_per_minute: 1,
+            ..RateLimitConfig::default()
+        });
+        let client = IpAddr::V4(1_u32.into());
+        let chat = "/api/v1/workspaces/w/chat/conversations/c/read";
+        for _ in 0..3 {
+            assert!(limiter.permits(client, chat));
+        }
+        assert!(!limiter.permits(client, chat));
+        // Exhausted chat leaves the other apps alone.
+        assert!(limiter.permits(client, "/api/v1/workspaces/w/tasks"));
     }
 
     #[test]

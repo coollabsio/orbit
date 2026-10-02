@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptInvitationData, AcceptInvitationErrors, AcceptInvitationResponses, AddPageFavoriteData, AddPageFavoriteErrors, AddPageFavoriteResponses, BulkTasksData, BulkTasksErrors, BulkTasksResponses, CancelNotionImportData, CancelNotionImportErrors, CancelNotionImportResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CreateApiTokenData, CreateApiTokenErrors, CreateApiTokenResponses, CreateAttachmentCommentData, CreateAttachmentCommentErrors, CreateAttachmentCommentResponses, CreateBackupData, CreateBackupErrors, CreateBackupResponses, CreateCommentData, CreateCommentErrors, CreateCommentResponses, CreateDiscordEventData, CreateDiscordEventErrors, CreateDiscordEventResponses, CreateInvitationData, CreateInvitationErrors, CreateInvitationResponses, CreateLabelData, CreateLabelErrors, CreateLabelResponses, CreateNotionImportData, CreateNotionImportErrors, CreateNotionImportResponses, CreatePageCommentData, CreatePageCommentErrors, CreatePageCommentResponses, CreatePageData, CreatePageErrors, CreatePageResponses, CreatePageThreadData, CreatePageThreadErrors, CreatePageThreadResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreateStatusData, CreateStatusErrors, CreateStatusResponses, CreateTaskData, CreateTaskErrors, CreateTaskRelationData, CreateTaskRelationErrors, CreateTaskRelationResponses, CreateTaskResponses, CreateTeamspaceData, CreateTeamspaceErrors, CreateTeamspaceResponses, CreateViewData, CreateViewErrors, CreateViewResponses, CreateWorkspaceData, CreateWorkspaceErrors, CreateWorkspaceResponses, DeleteCommentAttachmentData, DeleteCommentAttachmentErrors, DeleteCommentAttachmentResponses, DeleteCommentData, DeleteCommentErrors, DeleteCommentResponses, DeleteGithubProjectConnectionData, DeleteGithubProjectConnectionErrors, DeleteGithubProjectConnectionResponses, DeleteLabelData, DeleteLabelErrors, DeleteLabelResponses, DeletePageCommentData, DeletePageCommentErrors, DeletePageCommentResponses, DeletePageData, DeletePageErrors, DeletePageResponses, DeletePageThreadData, DeletePageThreadErrors, DeletePageThreadResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteStatusData, DeleteStatusErrors, DeleteStatusResponses, DeleteTaskAttachmentData, DeleteTaskAttachmentErrors, DeleteTaskAttachmentResponses, DeleteTaskData, DeleteTaskErrors, DeleteTaskRelationData, DeleteTaskRelationErrors, DeleteTaskRelationResponses, DeleteTaskResponses, DeleteTeamspaceData, DeleteTeamspaceErrors, DeleteTeamspaceResponses, DeleteViewData, DeleteViewErrors, DeleteViewResponses, DeleteWorkspaceData, DeleteWorkspaceErrors, DeleteWorkspaceResponses, DownloadBackupData, DownloadBackupErrors, DownloadBackupResponses, DownloadCommentAttachmentData, DownloadCommentAttachmentErrors, DownloadCommentAttachmentResponses, DownloadPageFileData, DownloadPageFileErrors, DownloadPageFileResponses, DownloadTaskAttachmentData, DownloadTaskAttachmentErrors, DownloadTaskAttachmentResponses, DuplicatePageData, DuplicatePageErrors, DuplicatePageResponses, EmptyPageTrashData, EmptyPageTrashErrors, EmptyPageTrashResponses, ExportGlobalAuditData, ExportGlobalAuditErrors, ExportGlobalAuditResponses, ExportPageData, ExportPageErrors, ExportPageResponses, FavoriteViewData, FavoriteViewErrors, FavoriteViewResponses, GetNotionImportData, GetNotionImportErrors, GetNotionImportResponses, GetPageData, GetPageErrors, GetPageResponses, GetPageVersionData, GetPageVersionErrors, GetPageVersionResponses, GetShortcutsData, GetShortcutsErrors, GetShortcutsResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetViewData, GetViewErrors, GetViewPreferenceData, GetViewPreferenceErrors, GetViewPreferenceResponses, GetViewResponses, GetWorkspaceData, GetWorkspaceErrors, GetWorkspaceResponses, GithubManifestCallbackData, GithubManifestCallbackErrors, GithubManifestCallbackResponses, GithubProjectSettingsData, GithubProjectSettingsErrors, GithubProjectSettingsResponses, GithubWebhookData, GithubWebhookErrors, GithubWebhookResponses, GithubWorkspaceSettingsData, GithubWorkspaceSettingsErrors, GithubWorkspaceSettingsResponses, ListApiTokensData, ListApiTokensErrors, ListApiTokensResponses, ListAuditData, ListAuditErrors, ListAuditResponses, ListBackupsData, ListBackupsErrors, ListBackupsResponses, ListCommentAttachmentsData, ListCommentAttachmentsErrors, ListCommentAttachmentsResponses, ListCommentsData, ListCommentsErrors, ListCommentsResponses, ListGithubLinksData, ListGithubLinksErrors, ListGithubLinksResponses, ListGlobalAuditData, ListGlobalAuditErrors, ListGlobalAuditResponses, ListInvitationsData, ListInvitationsErrors, ListInvitationsResponses, ListLabelsData, ListLabelsErrors, ListLabelsResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListNotificationsData, ListNotificationsErrors, ListNotificationsResponses, ListNotionImportsData, ListNotionImportsErrors, ListNotionImportsResponses, ListPageFavoritesData, ListPageFavoritesErrors, ListPageFavoritesResponses, ListPagesData, ListPagesErrors, ListPagesResponses, ListPageThreadsData, ListPageThreadsErrors, ListPageThreadsResponses, ListPageTrashData, ListPageTrashErrors, ListPageTrashResponses, ListPageVersionsData, ListPageVersionsErrors, ListPageVersionsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectTrashData, ListProjectTrashErrors, ListProjectTrashResponses, ListRecentPagesData, ListRecentPagesErrors, ListRecentPagesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStatusesData, ListStatusesErrors, ListStatusesResponses, ListTaskActivityData, ListTaskActivityErrors, ListTaskActivityResponses, ListTaskAttachmentsData, ListTaskAttachmentsErrors, ListTaskAttachmentsResponses, ListTaskRelationsData, ListTaskRelationsErrors, ListTaskRelationsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTaskTrashData, ListTaskTrashErrors, ListTaskTrashResponses, ListTeamspacesData, ListTeamspacesErrors, ListTeamspacesResponses, ListTrashData, ListTrashErrors, ListTrashResponses, ListViewsData, ListViewsErrors, ListViewsResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspacesResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, MeData, MeErrors, MeResponses, MovePageData, MovePageErrors, MovePageFavoriteData, MovePageFavoriteErrors, MovePageFavoriteResponses, MovePageResponses, MoveTeamspaceData, MoveTeamspaceErrors, MoveTeamspaceResponses, PreviewInvitationData, PreviewInvitationErrors, PreviewInvitationResponses, PurgePageData, PurgePageErrors, PurgePageResponses, PutShortcutsData, PutShortcutsErrors, PutShortcutsResponses, PutViewPreferenceData, PutViewPreferenceErrors, PutViewPreferenceResponses, QueryTasksData, QueryTasksErrors, QueryTasksResponses, ReadAllNotificationsData, ReadAllNotificationsErrors, ReadAllNotificationsResponses, ReadNotificationData, ReadNotificationErrors, ReadNotificationResponses, RecordPageVisitData, RecordPageVisitErrors, RecordPageVisitResponses, RecoveryCompleteData, RecoveryCompleteErrors, RecoveryCompleteResponses, RecoveryRequestData, RecoveryRequestErrors, RecoveryRequestResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, RemovePageFavoriteData, RemovePageFavoriteErrors, RemovePageFavoriteResponses, RenameWorkspaceData, RenameWorkspaceErrors, RenameWorkspaceResponses, ReopenPageThreadData, ReopenPageThreadErrors, ReopenPageThreadResponses, ReorderStatusesData, ReorderStatusesErrors, ReorderStatusesResponses, ReorderTasksData, ReorderTasksErrors, ReorderTasksResponses, ReorderViewFavoritesData, ReorderViewFavoritesErrors, ReorderViewFavoritesResponses, ResolvePageThreadData, ResolvePageThreadErrors, ResolvePageThreadResponses, RestorePageData, RestorePageErrors, RestorePageResponses, RestorePageVersionData, RestorePageVersionErrors, RestorePageVersionResponses, RestoreProjectData, RestoreProjectErrors, RestoreProjectResponses, RestoreTaskData, RestoreTaskErrors, RestoreTaskResponses, RestoreWorkspaceData, RestoreWorkspaceErrors, RestoreWorkspaceResponses, RevokeApiTokenData, RevokeApiTokenErrors, RevokeApiTokenResponses, RevokeInvitationData, RevokeInvitationErrors, RevokeInvitationResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, SaveGithubProjectConnectionData, SaveGithubProjectConnectionErrors, SaveGithubProjectConnectionResponses, SearchPagesData, SearchPagesErrors, SearchPagesResponses, SetAccountSuspensionData, SetAccountSuspensionErrors, SetAccountSuspensionResponses, SetPageLockData, SetPageLockErrors, SetPageLockResponses, SetupCompleteData, SetupCompleteErrors, SetupCompleteResponses, SetupStatusData, SetupStatusErrors, SetupStatusResponses, StartGithubManifestData, StartGithubManifestErrors, StartGithubManifestResponses, StartNotionImportData, StartNotionImportErrors, StartNotionImportResponses, TransferOwnershipData, TransferOwnershipErrors, TransferOwnershipResponses, UnfavoriteViewData, UnfavoriteViewErrors, UnfavoriteViewResponses, UpdateCommentData, UpdateCommentErrors, UpdateCommentResponses, UpdateLabelData, UpdateLabelErrors, UpdateLabelResponses, UpdateMeData, UpdateMeErrors, UpdateMeResponses, UpdatePageCommentData, UpdatePageCommentErrors, UpdatePageCommentResponses, UpdatePageData, UpdatePageErrors, UpdatePageResponses, UpdateProjectData, UpdateProjectErrors, UpdateProjectResponses, UpdateStatusData, UpdateStatusErrors, UpdateStatusResponses, UpdateTaskData, UpdateTaskErrors, UpdateTaskResponses, UpdateTeamspaceData, UpdateTeamspaceErrors, UpdateTeamspaceResponses, UpdateViewData, UpdateViewErrors, UpdateViewResponses, UploadCommentAttachmentsData, UploadCommentAttachmentsErrors, UploadCommentAttachmentsResponses, UploadPageFileData, UploadPageFileErrors, UploadPageFileResponses, UploadTaskAttachmentsData, UploadTaskAttachmentsErrors, UploadTaskAttachmentsResponses } from './types.gen';
+import type { AcceptInvitationData, AcceptInvitationErrors, AcceptInvitationResponses, AddChatMembersData, AddChatMembersErrors, AddChatMembersResponses, AddChatReactionData, AddChatReactionErrors, AddChatReactionResponses, AddPageFavoriteData, AddPageFavoriteErrors, AddPageFavoriteResponses, ArchiveChatChannelData, ArchiveChatChannelErrors, ArchiveChatChannelResponses, BulkTasksData, BulkTasksErrors, BulkTasksResponses, CancelNotionImportData, CancelNotionImportErrors, CancelNotionImportResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CreateApiTokenData, CreateApiTokenErrors, CreateApiTokenResponses, CreateAttachmentCommentData, CreateAttachmentCommentErrors, CreateAttachmentCommentResponses, CreateBackupData, CreateBackupErrors, CreateBackupResponses, CreateChatCategoryData, CreateChatCategoryErrors, CreateChatCategoryResponses, CreateChatChannelData, CreateChatChannelErrors, CreateChatChannelResponses, CreateCommentData, CreateCommentErrors, CreateCommentResponses, CreateDiscordEventData, CreateDiscordEventErrors, CreateDiscordEventResponses, CreateInvitationData, CreateInvitationErrors, CreateInvitationResponses, CreateLabelData, CreateLabelErrors, CreateLabelResponses, CreateNotionImportData, CreateNotionImportErrors, CreateNotionImportResponses, CreatePageCommentData, CreatePageCommentErrors, CreatePageCommentResponses, CreatePageData, CreatePageErrors, CreatePageResponses, CreatePageThreadData, CreatePageThreadErrors, CreatePageThreadResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreateStatusData, CreateStatusErrors, CreateStatusResponses, CreateTaskData, CreateTaskErrors, CreateTaskRelationData, CreateTaskRelationErrors, CreateTaskRelationResponses, CreateTaskResponses, CreateTeamspaceData, CreateTeamspaceErrors, CreateTeamspaceResponses, CreateViewData, CreateViewErrors, CreateViewResponses, CreateWorkspaceData, CreateWorkspaceErrors, CreateWorkspaceResponses, DeleteChatCategoryData, DeleteChatCategoryErrors, DeleteChatCategoryResponses, DeleteChatMessageData, DeleteChatMessageErrors, DeleteChatMessageResponses, DeleteCommentAttachmentData, DeleteCommentAttachmentErrors, DeleteCommentAttachmentResponses, DeleteCommentData, DeleteCommentErrors, DeleteCommentResponses, DeleteGithubProjectConnectionData, DeleteGithubProjectConnectionErrors, DeleteGithubProjectConnectionResponses, DeleteLabelData, DeleteLabelErrors, DeleteLabelResponses, DeletePageCommentData, DeletePageCommentErrors, DeletePageCommentResponses, DeletePageData, DeletePageErrors, DeletePageResponses, DeletePageThreadData, DeletePageThreadErrors, DeletePageThreadResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteStatusData, DeleteStatusErrors, DeleteStatusResponses, DeleteTaskAttachmentData, DeleteTaskAttachmentErrors, DeleteTaskAttachmentResponses, DeleteTaskData, DeleteTaskErrors, DeleteTaskRelationData, DeleteTaskRelationErrors, DeleteTaskRelationResponses, DeleteTaskResponses, DeleteTeamspaceData, DeleteTeamspaceErrors, DeleteTeamspaceResponses, DeleteViewData, DeleteViewErrors, DeleteViewResponses, DeleteWorkspaceData, DeleteWorkspaceErrors, DeleteWorkspaceResponses, DownloadBackupData, DownloadBackupErrors, DownloadBackupResponses, DownloadCommentAttachmentData, DownloadCommentAttachmentErrors, DownloadCommentAttachmentResponses, DownloadPageFileData, DownloadPageFileErrors, DownloadPageFileResponses, DownloadTaskAttachmentData, DownloadTaskAttachmentErrors, DownloadTaskAttachmentResponses, DuplicatePageData, DuplicatePageErrors, DuplicatePageResponses, EditChatMessageData, EditChatMessageErrors, EditChatMessageResponses, EmptyPageTrashData, EmptyPageTrashErrors, EmptyPageTrashResponses, ExportGlobalAuditData, ExportGlobalAuditErrors, ExportGlobalAuditResponses, ExportPageData, ExportPageErrors, ExportPageResponses, FavoriteViewData, FavoriteViewErrors, FavoriteViewResponses, FollowChatThreadData, FollowChatThreadErrors, FollowChatThreadResponses, GetChatThreadData, GetChatThreadErrors, GetChatThreadResponses, GetNotionImportData, GetNotionImportErrors, GetNotionImportResponses, GetPageData, GetPageErrors, GetPageResponses, GetPageVersionData, GetPageVersionErrors, GetPageVersionResponses, GetShortcutsData, GetShortcutsErrors, GetShortcutsResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetViewData, GetViewErrors, GetViewPreferenceData, GetViewPreferenceErrors, GetViewPreferenceResponses, GetViewResponses, GetWorkspaceData, GetWorkspaceErrors, GetWorkspaceResponses, GithubManifestCallbackData, GithubManifestCallbackErrors, GithubManifestCallbackResponses, GithubProjectSettingsData, GithubProjectSettingsErrors, GithubProjectSettingsResponses, GithubWebhookData, GithubWebhookErrors, GithubWebhookResponses, GithubWorkspaceSettingsData, GithubWorkspaceSettingsErrors, GithubWorkspaceSettingsResponses, JoinChatChannelData, JoinChatChannelErrors, JoinChatChannelResponses, LeaveChatChannelData, LeaveChatChannelErrors, LeaveChatChannelResponses, ListApiTokensData, ListApiTokensErrors, ListApiTokensResponses, ListAuditData, ListAuditErrors, ListAuditResponses, ListBackupsData, ListBackupsErrors, ListBackupsResponses, ListChatCategoriesData, ListChatCategoriesErrors, ListChatCategoriesResponses, ListChatConversationsData, ListChatConversationsErrors, ListChatConversationsResponses, ListChatMessagesData, ListChatMessagesErrors, ListChatMessagesResponses, ListChatPinsData, ListChatPinsErrors, ListChatPinsResponses, ListChatStatesData, ListChatStatesErrors, ListChatStatesResponses, ListChatThreadsData, ListChatThreadsErrors, ListChatThreadsResponses, ListCommentAttachmentsData, ListCommentAttachmentsErrors, ListCommentAttachmentsResponses, ListCommentsData, ListCommentsErrors, ListCommentsResponses, ListFollowedChatThreadsData, ListFollowedChatThreadsErrors, ListFollowedChatThreadsResponses, ListGithubLinksData, ListGithubLinksErrors, ListGithubLinksResponses, ListGlobalAuditData, ListGlobalAuditErrors, ListGlobalAuditResponses, ListInvitationsData, ListInvitationsErrors, ListInvitationsResponses, ListLabelsData, ListLabelsErrors, ListLabelsResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListNotificationsData, ListNotificationsErrors, ListNotificationsResponses, ListNotionImportsData, ListNotionImportsErrors, ListNotionImportsResponses, ListPageFavoritesData, ListPageFavoritesErrors, ListPageFavoritesResponses, ListPagesData, ListPagesErrors, ListPagesResponses, ListPageThreadsData, ListPageThreadsErrors, ListPageThreadsResponses, ListPageTrashData, ListPageTrashErrors, ListPageTrashResponses, ListPageVersionsData, ListPageVersionsErrors, ListPageVersionsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectTrashData, ListProjectTrashErrors, ListProjectTrashResponses, ListRecentPagesData, ListRecentPagesErrors, ListRecentPagesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStatusesData, ListStatusesErrors, ListStatusesResponses, ListTaskActivityData, ListTaskActivityErrors, ListTaskActivityResponses, ListTaskAttachmentsData, ListTaskAttachmentsErrors, ListTaskAttachmentsResponses, ListTaskRelationsData, ListTaskRelationsErrors, ListTaskRelationsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTaskTrashData, ListTaskTrashErrors, ListTaskTrashResponses, ListTeamspacesData, ListTeamspacesErrors, ListTeamspacesResponses, ListTrashData, ListTrashErrors, ListTrashResponses, ListViewsData, ListViewsErrors, ListViewsResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspacesResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, MarkChatMessageUnreadData, MarkChatMessageUnreadErrors, MarkChatMessageUnreadResponses, MeData, MeErrors, MeResponses, MoveChatItemData, MoveChatItemErrors, MoveChatItemResponses, MovePageData, MovePageErrors, MovePageFavoriteData, MovePageFavoriteErrors, MovePageFavoriteResponses, MovePageResponses, MoveTeamspaceData, MoveTeamspaceErrors, MoveTeamspaceResponses, OpenChatDmData, OpenChatDmErrors, OpenChatDmResponses, PinChatMessageData, PinChatMessageErrors, PinChatMessageResponses, PreviewInvitationData, PreviewInvitationErrors, PreviewInvitationResponses, PurgePageData, PurgePageErrors, PurgePageResponses, PutShortcutsData, PutShortcutsErrors, PutShortcutsResponses, PutViewPreferenceData, PutViewPreferenceErrors, PutViewPreferenceResponses, QueryTasksData, QueryTasksErrors, QueryTasksResponses, ReadAllChatData, ReadAllChatErrors, ReadAllChatResponses, ReadAllNotificationsData, ReadAllNotificationsErrors, ReadAllNotificationsResponses, ReadChatConversationData, ReadChatConversationErrors, ReadChatConversationResponses, ReadChatThreadData, ReadChatThreadErrors, ReadChatThreadResponses, ReadNotificationData, ReadNotificationErrors, ReadNotificationResponses, RecordPageVisitData, RecordPageVisitErrors, RecordPageVisitResponses, RecoveryCompleteData, RecoveryCompleteErrors, RecoveryCompleteResponses, RecoveryRequestData, RecoveryRequestErrors, RecoveryRequestResponses, RemoveChatMemberData, RemoveChatMemberErrors, RemoveChatMemberResponses, RemoveChatReactionData, RemoveChatReactionErrors, RemoveChatReactionResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, RemovePageFavoriteData, RemovePageFavoriteErrors, RemovePageFavoriteResponses, RenameChatCategoryData, RenameChatCategoryErrors, RenameChatCategoryResponses, RenameWorkspaceData, RenameWorkspaceErrors, RenameWorkspaceResponses, ReopenPageThreadData, ReopenPageThreadErrors, ReopenPageThreadResponses, ReorderStatusesData, ReorderStatusesErrors, ReorderStatusesResponses, ReorderTasksData, ReorderTasksErrors, ReorderTasksResponses, ReorderViewFavoritesData, ReorderViewFavoritesErrors, ReorderViewFavoritesResponses, ResolvePageThreadData, ResolvePageThreadErrors, ResolvePageThreadResponses, RestoreChatReadData, RestoreChatReadErrors, RestoreChatReadResponses, RestorePageData, RestorePageErrors, RestorePageResponses, RestorePageVersionData, RestorePageVersionErrors, RestorePageVersionResponses, RestoreProjectData, RestoreProjectErrors, RestoreProjectResponses, RestoreTaskData, RestoreTaskErrors, RestoreTaskResponses, RestoreWorkspaceData, RestoreWorkspaceErrors, RestoreWorkspaceResponses, RevokeApiTokenData, RevokeApiTokenErrors, RevokeApiTokenResponses, RevokeInvitationData, RevokeInvitationErrors, RevokeInvitationResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, SaveGithubProjectConnectionData, SaveGithubProjectConnectionErrors, SaveGithubProjectConnectionResponses, SearchPagesData, SearchPagesErrors, SearchPagesResponses, SendChatMessageData, SendChatMessageErrors, SendChatMessageResponses, SetAccountSuspensionData, SetAccountSuspensionErrors, SetAccountSuspensionResponses, SetPageLockData, SetPageLockErrors, SetPageLockResponses, SetupCompleteData, SetupCompleteErrors, SetupCompleteResponses, SetupStatusData, SetupStatusErrors, SetupStatusResponses, StartGithubManifestData, StartGithubManifestErrors, StartGithubManifestResponses, StartNotionImportData, StartNotionImportErrors, StartNotionImportResponses, TransferOwnershipData, TransferOwnershipErrors, TransferOwnershipResponses, UnfavoriteViewData, UnfavoriteViewErrors, UnfavoriteViewResponses, UpdateChatChannelData, UpdateChatChannelErrors, UpdateChatChannelResponses, UpdateChatStateData, UpdateChatStateErrors, UpdateChatStateResponses, UpdateCommentData, UpdateCommentErrors, UpdateCommentResponses, UpdateLabelData, UpdateLabelErrors, UpdateLabelResponses, UpdateMeData, UpdateMeErrors, UpdateMeResponses, UpdatePageCommentData, UpdatePageCommentErrors, UpdatePageCommentResponses, UpdatePageData, UpdatePageErrors, UpdatePageResponses, UpdateProjectData, UpdateProjectErrors, UpdateProjectResponses, UpdateStatusData, UpdateStatusErrors, UpdateStatusResponses, UpdateTaskData, UpdateTaskErrors, UpdateTaskResponses, UpdateTeamspaceData, UpdateTeamspaceErrors, UpdateTeamspaceResponses, UpdateViewData, UpdateViewErrors, UpdateViewResponses, UploadCommentAttachmentsData, UploadCommentAttachmentsErrors, UploadCommentAttachmentsResponses, UploadPageFileData, UploadPageFileErrors, UploadPageFileResponses, UploadTaskAttachmentsData, UploadTaskAttachmentsErrors, UploadTaskAttachmentsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -371,6 +371,438 @@ export const listAudit = <ThrowOnError extends boolean = false>(options: Options
             type: 'apiKey'
         }],
     url: '/api/v1/workspaces/{workspace_id}/audit',
+    ...options
+});
+
+export const listChatCategories = <ThrowOnError extends boolean = false>(options: Options<ListChatCategoriesData, ThrowOnError>): RequestResult<ListChatCategoriesResponses, ListChatCategoriesErrors, ThrowOnError> => (options.client ?? client).get<ListChatCategoriesResponses, ListChatCategoriesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories',
+    ...options
+});
+
+export const createChatCategory = <ThrowOnError extends boolean = false>(options: Options<CreateChatCategoryData, ThrowOnError>): RequestResult<CreateChatCategoryResponses, CreateChatCategoryErrors, ThrowOnError> => (options.client ?? client).post<CreateChatCategoryResponses, CreateChatCategoryErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The category's channels move to the channels without a category.
+ */
+export const deleteChatCategory = <ThrowOnError extends boolean = false>(options: Options<DeleteChatCategoryData, ThrowOnError>): RequestResult<DeleteChatCategoryResponses, DeleteChatCategoryErrors, ThrowOnError> => (options.client ?? client).delete<DeleteChatCategoryResponses, DeleteChatCategoryErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories/{category_id}',
+    ...options
+});
+
+export const renameChatCategory = <ThrowOnError extends boolean = false>(options: Options<RenameChatCategoryData, ThrowOnError>): RequestResult<RenameChatCategoryResponses, RenameChatCategoryErrors, ThrowOnError> => (options.client ?? client).patch<RenameChatCategoryResponses, RenameChatCategoryErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories/{category_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listChatConversations = <ThrowOnError extends boolean = false>(options: Options<ListChatConversationsData, ThrowOnError>): RequestResult<ListChatConversationsResponses, ListChatConversationsErrors, ThrowOnError> => (options.client ?? client).get<ListChatConversationsResponses, ListChatConversationsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations',
+    ...options
+});
+
+export const createChatChannel = <ThrowOnError extends boolean = false>(options: Options<CreateChatChannelData, ThrowOnError>): RequestResult<CreateChatChannelResponses, CreateChatChannelErrors, ThrowOnError> => (options.client ?? client).post<CreateChatChannelResponses, CreateChatChannelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const updateChatChannel = <ThrowOnError extends boolean = false>(options: Options<UpdateChatChannelData, ThrowOnError>): RequestResult<UpdateChatChannelResponses, UpdateChatChannelErrors, ThrowOnError> => (options.client ?? client).patch<UpdateChatChannelResponses, UpdateChatChannelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const archiveChatChannel = <ThrowOnError extends boolean = false>(options: Options<ArchiveChatChannelData, ThrowOnError>): RequestResult<ArchiveChatChannelResponses, ArchiveChatChannelErrors, ThrowOnError> => (options.client ?? client).post<ArchiveChatChannelResponses, ArchiveChatChannelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/archive',
+    ...options
+});
+
+export const joinChatChannel = <ThrowOnError extends boolean = false>(options: Options<JoinChatChannelData, ThrowOnError>): RequestResult<JoinChatChannelResponses, JoinChatChannelErrors, ThrowOnError> => (options.client ?? client).post<JoinChatChannelResponses, JoinChatChannelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/join',
+    ...options
+});
+
+export const leaveChatChannel = <ThrowOnError extends boolean = false>(options: Options<LeaveChatChannelData, ThrowOnError>): RequestResult<LeaveChatChannelResponses, LeaveChatChannelErrors, ThrowOnError> => (options.client ?? client).post<LeaveChatChannelResponses, LeaveChatChannelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/leave',
+    ...options
+});
+
+export const addChatMembers = <ThrowOnError extends boolean = false>(options: Options<AddChatMembersData, ThrowOnError>): RequestResult<AddChatMembersResponses, AddChatMembersErrors, ThrowOnError> => (options.client ?? client).post<AddChatMembersResponses, AddChatMembersErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/members',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const removeChatMember = <ThrowOnError extends boolean = false>(options: Options<RemoveChatMemberData, ThrowOnError>): RequestResult<RemoveChatMemberResponses, RemoveChatMemberErrors, ThrowOnError> => (options.client ?? client).delete<RemoveChatMemberResponses, RemoveChatMemberErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/members/{user_id}',
+    ...options
+});
+
+/**
+ * The main list of a conversation: root messages, system rows and "also in channel" replies.
+ */
+export const listChatMessages = <ThrowOnError extends boolean = false>(options: Options<ListChatMessagesData, ThrowOnError>): RequestResult<ListChatMessagesResponses, ListChatMessagesErrors, ThrowOnError> => (options.client ?? client).get<ListChatMessagesResponses, ListChatMessagesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/messages',
+    ...options
+});
+
+export const sendChatMessage = <ThrowOnError extends boolean = false>(options: Options<SendChatMessageData, ThrowOnError>): RequestResult<SendChatMessageResponses, SendChatMessageErrors, ThrowOnError> => (options.client ?? client).post<SendChatMessageResponses, SendChatMessageErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/messages',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Pinned messages, newest message first (at most 100).
+ */
+export const listChatPins = <ThrowOnError extends boolean = false>(options: Options<ListChatPinsData, ThrowOnError>): RequestResult<ListChatPinsResponses, ListChatPinsErrors, ThrowOnError> => (options.client ?? client).get<ListChatPinsResponses, ListChatPinsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/pins',
+    ...options
+});
+
+/**
+ * Reads the conversation up to its newest message.
+ */
+export const readChatConversation = <ThrowOnError extends boolean = false>(options: Options<ReadChatConversationData, ThrowOnError>): RequestResult<ReadChatConversationResponses, ReadChatConversationErrors, ThrowOnError> => (options.client ?? client).post<ReadChatConversationResponses, ReadChatConversationErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/read',
+    ...options
+});
+
+export const updateChatState = <ThrowOnError extends boolean = false>(options: Options<UpdateChatStateData, ThrowOnError>): RequestResult<UpdateChatStateResponses, UpdateChatStateErrors, ThrowOnError> => (options.client ?? client).patch<UpdateChatStateResponses, UpdateChatStateErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/state',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Root messages that have replies, newest reply first (at most 100).
+ */
+export const listChatThreads = <ThrowOnError extends boolean = false>(options: Options<ListChatThreadsData, ThrowOnError>): RequestResult<ListChatThreadsResponses, ListChatThreadsErrors, ThrowOnError> => (options.client ?? client).get<ListChatThreadsResponses, ListChatThreadsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/threads',
+    ...options
+});
+
+/**
+ * Returns the DM of exactly these members and the caller, or makes it.
+ */
+export const openChatDm = <ThrowOnError extends boolean = false>(options: Options<OpenChatDmData, ThrowOnError>): RequestResult<OpenChatDmResponses, OpenChatDmErrors, ThrowOnError> => (options.client ?? client).post<OpenChatDmResponses, OpenChatDmErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/dms',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * A root that has replies stays in the list with an empty body; every other message is removed.
+ */
+export const deleteChatMessage = <ThrowOnError extends boolean = false>(options: Options<DeleteChatMessageData, ThrowOnError>): RequestResult<DeleteChatMessageResponses, DeleteChatMessageErrors, ThrowOnError> => (options.client ?? client).delete<DeleteChatMessageResponses, DeleteChatMessageErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}',
+    ...options
+});
+
+export const editChatMessage = <ThrowOnError extends boolean = false>(options: Options<EditChatMessageData, ThrowOnError>): RequestResult<EditChatMessageResponses, EditChatMessageErrors, ThrowOnError> => (options.client ?? client).patch<EditChatMessageResponses, EditChatMessageErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Pinning adds a system row to the conversation.
+ */
+export const pinChatMessage = <ThrowOnError extends boolean = false>(options: Options<PinChatMessageData, ThrowOnError>): RequestResult<PinChatMessageResponses, PinChatMessageErrors, ThrowOnError> => (options.client ?? client).put<PinChatMessageResponses, PinChatMessageErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/pin',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const removeChatReaction = <ThrowOnError extends boolean = false>(options: Options<RemoveChatReactionData, ThrowOnError>): RequestResult<RemoveChatReactionResponses, RemoveChatReactionErrors, ThrowOnError> => (options.client ?? client).delete<RemoveChatReactionResponses, RemoveChatReactionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/reactions/{emoji}',
+    ...options
+});
+
+export const addChatReaction = <ThrowOnError extends boolean = false>(options: Options<AddChatReactionData, ThrowOnError>): RequestResult<AddChatReactionResponses, AddChatReactionErrors, ThrowOnError> => (options.client ?? client).put<AddChatReactionResponses, AddChatReactionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/reactions/{emoji}',
+    ...options
+});
+
+/**
+ * Moves the read cursor to just before the message. For a thread reply the thread's cursor
+ * moves and the caller follows the thread.
+ */
+export const markChatMessageUnread = <ThrowOnError extends boolean = false>(options: Options<MarkChatMessageUnreadData, ThrowOnError>): RequestResult<MarkChatMessageUnreadResponses, MarkChatMessageUnreadErrors, ThrowOnError> => (options.client ?? client).post<MarkChatMessageUnreadResponses, MarkChatMessageUnreadErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/unread',
+    ...options
+});
+
+/**
+ * Moves a category or a channel one step up or down among its siblings.
+ */
+export const moveChatItem = <ThrowOnError extends boolean = false>(options: Options<MoveChatItemData, ThrowOnError>): RequestResult<MoveChatItemResponses, MoveChatItemErrors, ThrowOnError> => (options.client ?? client).post<MoveChatItemResponses, MoveChatItemErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/move',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Reads every conversation and followed thread. `result` holds the states as they were, for
+ * `read-restore`.
+ */
+export const readAllChat = <ThrowOnError extends boolean = false>(options: Options<ReadAllChatData, ThrowOnError>): RequestResult<ReadAllChatResponses, ReadAllChatErrors, ThrowOnError> => (options.client ?? client).post<ReadAllChatResponses, ReadAllChatErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/read-all',
+    ...options
+});
+
+/**
+ * Puts read cursors back and counts again from them: the undo of `read-all`.
+ */
+export const restoreChatRead = <ThrowOnError extends boolean = false>(options: Options<RestoreChatReadData, ThrowOnError>): RequestResult<RestoreChatReadResponses, RestoreChatReadErrors, ThrowOnError> => (options.client ?? client).post<RestoreChatReadResponses, RestoreChatReadErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/read-restore',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The caller's state in every conversation it is a member of.
+ */
+export const listChatStates = <ThrowOnError extends boolean = false>(options: Options<ListChatStatesData, ThrowOnError>): RequestResult<ListChatStatesResponses, ListChatStatesErrors, ThrowOnError> => (options.client ?? client).get<ListChatStatesResponses, ListChatStatesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/states',
+    ...options
+});
+
+/**
+ * The threads the caller follows: unread first, then newest reply first (at most 200).
+ */
+export const listFollowedChatThreads = <ThrowOnError extends boolean = false>(options: Options<ListFollowedChatThreadsData, ThrowOnError>): RequestResult<ListFollowedChatThreadsResponses, ListFollowedChatThreadsErrors, ThrowOnError> => (options.client ?? client).get<ListFollowedChatThreadsResponses, ListFollowedChatThreadsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads',
+    ...options
+});
+
+/**
+ * A root message, a page of its replies and the caller's state in the thread.
+ */
+export const getChatThread = <ThrowOnError extends boolean = false>(options: Options<GetChatThreadData, ThrowOnError>): RequestResult<GetChatThreadResponses, GetChatThreadErrors, ThrowOnError> => (options.client ?? client).get<GetChatThreadResponses, GetChatThreadErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}',
+    ...options
+});
+
+/**
+ * Following starts from now: older replies do not turn unread.
+ */
+export const followChatThread = <ThrowOnError extends boolean = false>(options: Options<FollowChatThreadData, ThrowOnError>): RequestResult<FollowChatThreadResponses, FollowChatThreadErrors, ThrowOnError> => (options.client ?? client).put<FollowChatThreadResponses, FollowChatThreadErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}/follow',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const readChatThread = <ThrowOnError extends boolean = false>(options: Options<ReadChatThreadData, ThrowOnError>): RequestResult<ReadChatThreadResponses, ReadChatThreadErrors, ThrowOnError> => (options.client ?? client).post<ReadChatThreadResponses, ReadChatThreadErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}/read',
     ...options
 });
 

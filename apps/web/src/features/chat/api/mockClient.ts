@@ -1,6 +1,6 @@
 import type { User } from '@/features/workspaces/models'
 import { extractMentions } from '../lib/mentionTokens'
-import { toggleReaction } from '../lib/reactions'
+import { hasReaction, toggleReaction } from '../lib/reactions'
 import { sortFollowedThreads } from '../lib/sidebar'
 import type { ChannelInput, ChatClient, MessageCursor, SendMessageInput } from './client'
 import {
@@ -860,12 +860,12 @@ export function createMockChatClient(options: MockChatClientOptions): ChatClient
       if (reads.has(message.conversationId)) emitState(message.conversationId)
     },
 
-    async toggleReaction(messageId, emoji) {
+    async setReaction(messageId, emoji, on) {
       await wait()
       const message = messageOf(messageId)
       memberConversationOf(message.conversationId)
-      const reactions = toggleReaction(message.reactions, emoji, me)
-      const next = { ...message, reactions }
+      if (hasReaction(message.reactions, emoji, me) === on) return message
+      const next = { ...message, reactions: toggleReaction(message.reactions, emoji, me) }
       putMessage(next)
       emit({ type: 'message.updated', message: next })
       return next

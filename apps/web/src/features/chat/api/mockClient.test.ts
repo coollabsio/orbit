@@ -331,8 +331,8 @@ test('reactions and pins report the changed message', async () => {
   const { client, events } = setup()
   const general = await channel(client, 'general')
   const message = (await client.listMessages(general.id)).items.at(-1)!
-  expect((await client.toggleReaction(message.id, '👍')).reactions).toContainEqual({ emoji: '👍', userIds: ['u1'] })
-  expect((await client.toggleReaction(message.id, '👍')).reactions.some((reaction) => reaction.emoji === '👍')).toBe(false)
+  expect((await client.setReaction(message.id, '👍', true)).reactions).toContainEqual({ emoji: '👍', userIds: ['u1'] })
+  expect((await client.setReaction(message.id, '👍', false)).reactions.some((reaction) => reaction.emoji === '👍')).toBe(false)
   const pinsBefore = (await client.listPins(general.id)).length
   expect(pinsBefore).toBe(1)
   events.length = 0

@@ -178,9 +178,315 @@ export type BulkItem = {
     title?: string | null;
 };
 
+export type CategoryRecord = {
+    id: string;
+    name: string;
+    position: number;
+};
+
 export type ChangePasswordBody = {
     current_password: string;
     new_password: string;
+};
+
+export type ChatCategoryBody = {
+    /**
+     * 1–80 characters after trimming.
+     */
+    name: string;
+};
+
+export type ChatChannelCreateBody = {
+    category_id?: string | null;
+    /**
+     * `public` or `private`.
+     */
+    kind: ConversationKind;
+    /**
+     * Workspace members to add besides the caller.
+     */
+    member_ids?: Array<string>;
+    /**
+     * Stored trimmed, in lower case, with `-` for spaces; at most 80 characters.
+     */
+    name: string;
+    /**
+     * At most 250 characters.
+     */
+    topic?: string;
+};
+
+export type ChatChannelUpdateBody = {
+    /**
+     * Absent: unchanged. `null`: no category.
+     */
+    category_id?: string | null;
+    kind?: null | ConversationKind;
+    name?: string | null;
+    topic?: string | null;
+};
+
+export type ChatConversationCursorBody = {
+    conversation_id: string;
+    last_read_message_id?: string | null;
+};
+
+export type ChatEditBody = {
+    body: string;
+};
+
+/**
+ * One change, as the live socket sends it and as a write's response lists it.
+ */
+export type ChatEvent = {
+    message: MessageRecord;
+    type: 'message.created';
+} | {
+    message: MessageRecord;
+    type: 'message.updated';
+} | {
+    conversation_id: string;
+    message_id: string;
+    thread_root_id: string | null;
+    type: 'message.deleted';
+} | {
+    conversation: ConversationRecord;
+    type: 'conversation.changed';
+} | {
+    conversation_id: string;
+    type: 'conversation.removed';
+} | {
+    categories: Array<CategoryRecord>;
+    type: 'categories.changed';
+} | {
+    state: ConversationStateRecord;
+    type: 'state.changed';
+} | {
+    state: ThreadStateRecord;
+    type: 'thread.changed';
+};
+
+/**
+ * A write without a record of its own.
+ */
+export type ChatEvents = {
+    events: Array<ChatEvent>;
+};
+
+export type ChatFollowBody = {
+    following: boolean;
+};
+
+/**
+ * Exactly one of `category_id` and `conversation_id`.
+ */
+export type ChatMoveBody = {
+    category_id?: string | null;
+    conversation_id?: string | null;
+    direction: MoveDirection;
+};
+
+export type ChatPinBody = {
+    pinned: boolean;
+};
+
+/**
+ * The read cursors to put back: the `states` and `threads` that `read-all` returned.
+ */
+export type ChatRestoreBody = {
+    states: Array<ChatConversationCursorBody>;
+    threads: Array<ChatThreadCursorBody>;
+};
+
+export type ChatSendBody = {
+    /**
+     * A thread reply that also shows in the conversation.
+     */
+    also_in_channel?: boolean;
+    /**
+     * Markdown source, at most 4000 characters. Mentions are tokens: `<@user_id>`,
+     * `<#conversation_id>`, `<!channel>`, `<!here>`.
+     */
+    body: string;
+    /**
+     * Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns
+     * the first message.
+     */
+    nonce: string;
+    /**
+     * The root message, for a thread reply.
+     */
+    thread_root_id?: string | null;
+};
+
+export type ChatStateBody = {
+    favorite?: boolean | null;
+    notify?: null | NotifyLevel;
+};
+
+export type ChatThreadCursorBody = {
+    last_read_reply_id?: string | null;
+    root_id: string;
+};
+
+export type ChatUserIdsBody = {
+    user_ids: Array<string>;
+};
+
+/**
+ * The changed record and the chat events that this write caused for the caller. The events
+ * are the same records that the live socket sends.
+ */
+export type ChatWriteCategoryRecord = {
+    events: Array<ChatEvent>;
+    result: {
+        id: string;
+        name: string;
+        position: number;
+    };
+};
+
+/**
+ * The changed record and the chat events that this write caused for the caller. The events
+ * are the same records that the live socket sends.
+ */
+export type ChatWriteConversationRecord = {
+    events: Array<ChatEvent>;
+    result: {
+        archived: boolean;
+        category_id: string | null;
+        created_at: string;
+        created_by: string;
+        id: string;
+        /**
+         * `#general`: every member is in it and it cannot be left, archived or made private.
+         */
+        is_default: boolean;
+        kind: ConversationKind;
+        last_message_at: string | null;
+        member_ids: Array<string>;
+        /**
+         * Empty for a DM: its title is made from the other members' names.
+         */
+        name: string;
+        /**
+         * Order inside its category.
+         */
+        position: number;
+        topic: string;
+    };
+};
+
+/**
+ * The changed record and the chat events that this write caused for the caller. The events
+ * are the same records that the live socket sends.
+ */
+export type ChatWriteConversationStateRecord = {
+    events: Array<ChatEvent>;
+    /**
+     * The caller's state in one conversation.
+     */
+    result: {
+        conversation_id: string;
+        favorite: boolean;
+        last_read_message_id: string | null;
+        /**
+         * Unread `@user` mentions, plus `@channel` and `@here` unless the conversation is muted.
+         */
+        mention_count: number;
+        notify: NotifyLevel;
+        /**
+         * Unread messages in the main list, written by other members.
+         */
+        unread_count: number;
+    };
+};
+
+/**
+ * The changed record and the chat events that this write caused for the caller. The events
+ * are the same records that the live socket sends.
+ */
+export type ChatWriteMessageRecord = {
+    events: Array<ChatEvent>;
+    result: {
+        /**
+         * A thread reply that also shows in the conversation's main list.
+         */
+        also_in_channel: boolean;
+        author_id: string;
+        /**
+         * Markdown source. Mentions are tokens: `<@user_id>`, `<#conversation_id>`, `<!channel>`,
+         * `<!here>`.
+         */
+        body: string;
+        conversation_id: string;
+        created_at: string;
+        /**
+         * A deleted root that still has replies stays in the list with an empty body.
+         */
+        deleted: boolean;
+        edited_at: string | null;
+        /**
+         * UUIDv7: message ids sort by creation time, and every list orders by them.
+         */
+        id: string;
+        kind: MessageKind;
+        last_reply: null | ReplyPreviewRecord;
+        last_reply_at: string | null;
+        mentions: MentionsRecord;
+        /**
+         * Echo of the sender's nonce, so the sender can replace its optimistic row.
+         */
+        nonce: string | null;
+        pinned: boolean;
+        reactions: Array<ReactionRecord>;
+        /**
+         * Thread summary; meaningful on a root only.
+         */
+        reply_count: number;
+        /**
+         * The first reply authors (at most five).
+         */
+        reply_user_ids: Array<string>;
+        /**
+         * Set on a thread reply.
+         */
+        thread_root_id: string | null;
+    };
+};
+
+/**
+ * The changed record and the chat events that this write caused for the caller. The events
+ * are the same records that the live socket sends.
+ */
+export type ChatWriteReadSnapshot = {
+    events: Array<ChatEvent>;
+    /**
+     * The states that "mark all as read" changed, as they were before, so the caller can undo it.
+     */
+    result: {
+        states: Array<ConversationStateRecord>;
+        threads: Array<ThreadStateRecord>;
+    };
+};
+
+/**
+ * The changed record and the chat events that this write caused for the caller. The events
+ * are the same records that the live socket sends.
+ */
+export type ChatWriteThreadStateRecord = {
+    events: Array<ChatEvent>;
+    /**
+     * The caller's state in one thread.
+     */
+    result: {
+        conversation_id: string;
+        following: boolean;
+        last_read_reply_id: string | null;
+        mention_count: number;
+        root_id: string;
+        unread_replies: number;
+    };
 };
 
 export type CommentBody = {
@@ -227,6 +533,50 @@ export type Condition = {
 export type ConflictMetadata = {
     current_version: number;
     refresh?: string | null;
+};
+
+export type ConversationKind = 'public' | 'private' | 'dm';
+
+export type ConversationRecord = {
+    archived: boolean;
+    category_id: string | null;
+    created_at: string;
+    created_by: string;
+    id: string;
+    /**
+     * `#general`: every member is in it and it cannot be left, archived or made private.
+     */
+    is_default: boolean;
+    kind: ConversationKind;
+    last_message_at: string | null;
+    member_ids: Array<string>;
+    /**
+     * Empty for a DM: its title is made from the other members' names.
+     */
+    name: string;
+    /**
+     * Order inside its category.
+     */
+    position: number;
+    topic: string;
+};
+
+/**
+ * The caller's state in one conversation.
+ */
+export type ConversationStateRecord = {
+    conversation_id: string;
+    favorite: boolean;
+    last_read_message_id: string | null;
+    /**
+     * Unread `@user` mentions, plus `@channel` and `@here` unless the conversation is muted.
+     */
+    mention_count: number;
+    notify: NotifyLevel;
+    /**
+     * Unread messages in the main list, written by other members.
+     */
+    unread_count: number;
 };
 
 export type CreateApiTokenBody = {
@@ -369,6 +719,13 @@ export type FilterNode = FilterGroup | Condition;
 
 export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains';
 
+export type FollowedThreadRecord = {
+    conversation_id: string;
+    last_reply: null | MessageRecord;
+    root: MessageRecord;
+    state: ThreadStateRecord;
+};
+
 export type GithubLink = {
     kind: string;
     source: boolean;
@@ -507,6 +864,77 @@ export type MemberRecord = {
     version: number;
 };
 
+/**
+ * Who the body mentions, parsed from its tokens.
+ */
+export type MentionsRecord = {
+    channel: boolean;
+    here: boolean;
+    user_ids: Array<string>;
+};
+
+/**
+ * `pin`, `join` and `leave` are one-line system rows; `author_id` is the member they are about.
+ */
+export type MessageKind = 'message' | 'pin' | 'join' | 'leave';
+
+/**
+ * Messages in ascending order. A null cursor means there is nothing more in that direction.
+ */
+export type MessagePage = {
+    after: string | null;
+    before: string | null;
+    items: Array<MessageRecord>;
+};
+
+export type MessageRecord = {
+    /**
+     * A thread reply that also shows in the conversation's main list.
+     */
+    also_in_channel: boolean;
+    author_id: string;
+    /**
+     * Markdown source. Mentions are tokens: `<@user_id>`, `<#conversation_id>`, `<!channel>`,
+     * `<!here>`.
+     */
+    body: string;
+    conversation_id: string;
+    created_at: string;
+    /**
+     * A deleted root that still has replies stays in the list with an empty body.
+     */
+    deleted: boolean;
+    edited_at: string | null;
+    /**
+     * UUIDv7: message ids sort by creation time, and every list orders by them.
+     */
+    id: string;
+    kind: MessageKind;
+    last_reply: null | ReplyPreviewRecord;
+    last_reply_at: string | null;
+    mentions: MentionsRecord;
+    /**
+     * Echo of the sender's nonce, so the sender can replace its optimistic row.
+     */
+    nonce: string | null;
+    pinned: boolean;
+    reactions: Array<ReactionRecord>;
+    /**
+     * Thread summary; meaningful on a root only.
+     */
+    reply_count: number;
+    /**
+     * The first reply authors (at most five).
+     */
+    reply_user_ids: Array<string>;
+    /**
+     * Set on a thread reply.
+     */
+    thread_root_id: string | null;
+};
+
+export type MoveDirection = 'up' | 'down';
+
 export type MoveFavoriteBody = {
     /**
      * Index among the caller's visible favorites; larger values move it last.
@@ -582,6 +1010,8 @@ export type NotificationRecord = {
     task_id?: string | null;
     workspace_id: string;
 };
+
+export type NotifyLevel = 'all' | 'mentions' | 'muted';
 
 /**
  * A Notion import. Never contains the token.
@@ -1322,7 +1752,7 @@ export type PageTaskRecord = {
  * A workspace capability that depends on the member's role. Actions open to
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
-export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate';
+export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage';
 
 export type PreviewInvitationBody = {
     token: string;
@@ -1386,8 +1816,21 @@ export type ProjectUpdateBody = {
     name: string;
 };
 
+export type ReactionRecord = {
+    emoji: string;
+    user_ids: Array<string>;
+};
+
 export type ReadAllResponse = {
     updated: number;
+};
+
+/**
+ * The states that "mark all as read" changed, as they were before, so the caller can undo it.
+ */
+export type ReadSnapshot = {
+    states: Array<ConversationStateRecord>;
+    threads: Array<ThreadStateRecord>;
 };
 
 /**
@@ -1455,6 +1898,15 @@ export type ReorderItem = {
     expected_version: number;
     id: string;
     position: number;
+};
+
+/**
+ * The newest reply of a thread, shown under its root.
+ */
+export type ReplyPreviewRecord = {
+    author_id: string;
+    body: string;
+    created_at: string;
 };
 
 export type RestoreBody = {
@@ -1806,6 +2258,26 @@ export type TeamspaceUpdateBody = {
 export type TextRange = {
     end: number;
     start: number;
+};
+
+export type ThreadPage = {
+    after: string | null;
+    before: string | null;
+    items: Array<MessageRecord>;
+    root: MessageRecord;
+    state: null | ThreadStateRecord;
+};
+
+/**
+ * The caller's state in one thread.
+ */
+export type ThreadStateRecord = {
+    conversation_id: string;
+    following: boolean;
+    last_read_reply_id: string | null;
+    mention_count: number;
+    root_id: string;
+    unread_replies: number;
 };
 
 export type TransferBody = {
@@ -3829,6 +4301,2052 @@ export type ListAuditResponses = {
 };
 
 export type ListAuditResponse = ListAuditResponses[keyof ListAuditResponses];
+
+export type ListChatCategoriesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories';
+};
+
+export type ListChatCategoriesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatCategoriesError = ListChatCategoriesErrors[keyof ListChatCategoriesErrors];
+
+export type ListChatCategoriesResponses = {
+    200: Array<CategoryRecord>;
+};
+
+export type ListChatCategoriesResponse = ListChatCategoriesResponses[keyof ListChatCategoriesResponses];
+
+export type CreateChatCategoryData = {
+    body: ChatCategoryBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories';
+};
+
+export type CreateChatCategoryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateChatCategoryError = CreateChatCategoryErrors[keyof CreateChatCategoryErrors];
+
+export type CreateChatCategoryResponses = {
+    200: ChatWriteCategoryRecord;
+};
+
+export type CreateChatCategoryResponse = CreateChatCategoryResponses[keyof CreateChatCategoryResponses];
+
+export type DeleteChatCategoryData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        category_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories/{category_id}';
+};
+
+export type DeleteChatCategoryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteChatCategoryError = DeleteChatCategoryErrors[keyof DeleteChatCategoryErrors];
+
+export type DeleteChatCategoryResponses = {
+    200: ChatEvents;
+};
+
+export type DeleteChatCategoryResponse = DeleteChatCategoryResponses[keyof DeleteChatCategoryResponses];
+
+export type RenameChatCategoryData = {
+    body: ChatCategoryBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        category_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/categories/{category_id}';
+};
+
+export type RenameChatCategoryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RenameChatCategoryError = RenameChatCategoryErrors[keyof RenameChatCategoryErrors];
+
+export type RenameChatCategoryResponses = {
+    200: ChatWriteCategoryRecord;
+};
+
+export type RenameChatCategoryResponse = RenameChatCategoryResponses[keyof RenameChatCategoryResponses];
+
+export type ListChatConversationsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations';
+};
+
+export type ListChatConversationsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatConversationsError = ListChatConversationsErrors[keyof ListChatConversationsErrors];
+
+export type ListChatConversationsResponses = {
+    200: Array<ConversationRecord>;
+};
+
+export type ListChatConversationsResponse = ListChatConversationsResponses[keyof ListChatConversationsResponses];
+
+export type CreateChatChannelData = {
+    body: ChatChannelCreateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations';
+};
+
+export type CreateChatChannelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateChatChannelError = CreateChatChannelErrors[keyof CreateChatChannelErrors];
+
+export type CreateChatChannelResponses = {
+    200: ChatWriteConversationRecord;
+};
+
+export type CreateChatChannelResponse = CreateChatChannelResponses[keyof CreateChatChannelResponses];
+
+export type UpdateChatChannelData = {
+    body: ChatChannelUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}';
+};
+
+export type UpdateChatChannelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateChatChannelError = UpdateChatChannelErrors[keyof UpdateChatChannelErrors];
+
+export type UpdateChatChannelResponses = {
+    200: ChatWriteConversationRecord;
+};
+
+export type UpdateChatChannelResponse = UpdateChatChannelResponses[keyof UpdateChatChannelResponses];
+
+export type ArchiveChatChannelData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/archive';
+};
+
+export type ArchiveChatChannelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ArchiveChatChannelError = ArchiveChatChannelErrors[keyof ArchiveChatChannelErrors];
+
+export type ArchiveChatChannelResponses = {
+    200: ChatWriteConversationRecord;
+};
+
+export type ArchiveChatChannelResponse = ArchiveChatChannelResponses[keyof ArchiveChatChannelResponses];
+
+export type JoinChatChannelData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/join';
+};
+
+export type JoinChatChannelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type JoinChatChannelError = JoinChatChannelErrors[keyof JoinChatChannelErrors];
+
+export type JoinChatChannelResponses = {
+    200: ChatWriteConversationRecord;
+};
+
+export type JoinChatChannelResponse = JoinChatChannelResponses[keyof JoinChatChannelResponses];
+
+export type LeaveChatChannelData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/leave';
+};
+
+export type LeaveChatChannelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type LeaveChatChannelError = LeaveChatChannelErrors[keyof LeaveChatChannelErrors];
+
+export type LeaveChatChannelResponses = {
+    200: ChatEvents;
+};
+
+export type LeaveChatChannelResponse = LeaveChatChannelResponses[keyof LeaveChatChannelResponses];
+
+export type AddChatMembersData = {
+    body: ChatUserIdsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/members';
+};
+
+export type AddChatMembersErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type AddChatMembersError = AddChatMembersErrors[keyof AddChatMembersErrors];
+
+export type AddChatMembersResponses = {
+    200: ChatWriteConversationRecord;
+};
+
+export type AddChatMembersResponse = AddChatMembersResponses[keyof AddChatMembersResponses];
+
+export type RemoveChatMemberData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/members/{user_id}';
+};
+
+export type RemoveChatMemberErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RemoveChatMemberError = RemoveChatMemberErrors[keyof RemoveChatMemberErrors];
+
+export type RemoveChatMemberResponses = {
+    200: ChatWriteConversationRecord;
+};
+
+export type RemoveChatMemberResponse = RemoveChatMemberResponses[keyof RemoveChatMemberResponses];
+
+export type ListChatMessagesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: {
+        /**
+         * Messages older than this message id.
+         */
+        before?: string;
+        /**
+         * Messages newer than this message id.
+         */
+        after?: string;
+        /**
+         * A window with this message in the middle.
+         */
+        around?: string;
+        /**
+         * 1–100; default 50.
+         */
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/messages';
+};
+
+export type ListChatMessagesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatMessagesError = ListChatMessagesErrors[keyof ListChatMessagesErrors];
+
+export type ListChatMessagesResponses = {
+    200: MessagePage;
+};
+
+export type ListChatMessagesResponse = ListChatMessagesResponses[keyof ListChatMessagesResponses];
+
+export type SendChatMessageData = {
+    body: ChatSendBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/messages';
+};
+
+export type SendChatMessageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, chat_message_too_long
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SendChatMessageError = SendChatMessageErrors[keyof SendChatMessageErrors];
+
+export type SendChatMessageResponses = {
+    200: ChatWriteMessageRecord;
+};
+
+export type SendChatMessageResponse = SendChatMessageResponses[keyof SendChatMessageResponses];
+
+export type ListChatPinsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/pins';
+};
+
+export type ListChatPinsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatPinsError = ListChatPinsErrors[keyof ListChatPinsErrors];
+
+export type ListChatPinsResponses = {
+    200: Array<MessageRecord>;
+};
+
+export type ListChatPinsResponse = ListChatPinsResponses[keyof ListChatPinsResponses];
+
+export type ReadChatConversationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/read';
+};
+
+export type ReadChatConversationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReadChatConversationError = ReadChatConversationErrors[keyof ReadChatConversationErrors];
+
+export type ReadChatConversationResponses = {
+    200: ChatWriteConversationStateRecord;
+};
+
+export type ReadChatConversationResponse = ReadChatConversationResponses[keyof ReadChatConversationResponses];
+
+export type UpdateChatStateData = {
+    body: ChatStateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/state';
+};
+
+export type UpdateChatStateErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateChatStateError = UpdateChatStateErrors[keyof UpdateChatStateErrors];
+
+export type UpdateChatStateResponses = {
+    200: ChatWriteConversationStateRecord;
+};
+
+export type UpdateChatStateResponse = UpdateChatStateResponses[keyof UpdateChatStateResponses];
+
+export type ListChatThreadsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/threads';
+};
+
+export type ListChatThreadsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatThreadsError = ListChatThreadsErrors[keyof ListChatThreadsErrors];
+
+export type ListChatThreadsResponses = {
+    200: Array<MessageRecord>;
+};
+
+export type ListChatThreadsResponse = ListChatThreadsResponses[keyof ListChatThreadsResponses];
+
+export type OpenChatDmData = {
+    body: ChatUserIdsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/dms';
+};
+
+export type OpenChatDmErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type OpenChatDmError = OpenChatDmErrors[keyof OpenChatDmErrors];
+
+export type OpenChatDmResponses = {
+    200: ChatWriteConversationRecord;
+};
+
+export type OpenChatDmResponse = OpenChatDmResponses[keyof OpenChatDmResponses];
+
+export type DeleteChatMessageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}';
+};
+
+export type DeleteChatMessageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteChatMessageError = DeleteChatMessageErrors[keyof DeleteChatMessageErrors];
+
+export type DeleteChatMessageResponses = {
+    200: ChatEvents;
+};
+
+export type DeleteChatMessageResponse = DeleteChatMessageResponses[keyof DeleteChatMessageResponses];
+
+export type EditChatMessageData = {
+    body: ChatEditBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}';
+};
+
+export type EditChatMessageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, chat_message_too_long
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type EditChatMessageError = EditChatMessageErrors[keyof EditChatMessageErrors];
+
+export type EditChatMessageResponses = {
+    200: ChatWriteMessageRecord;
+};
+
+export type EditChatMessageResponse = EditChatMessageResponses[keyof EditChatMessageResponses];
+
+export type PinChatMessageData = {
+    body: ChatPinBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/pin';
+};
+
+export type PinChatMessageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PinChatMessageError = PinChatMessageErrors[keyof PinChatMessageErrors];
+
+export type PinChatMessageResponses = {
+    200: ChatWriteMessageRecord;
+};
+
+export type PinChatMessageResponse = PinChatMessageResponses[keyof PinChatMessageResponses];
+
+export type RemoveChatReactionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+        emoji: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/reactions/{emoji}';
+};
+
+export type RemoveChatReactionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RemoveChatReactionError = RemoveChatReactionErrors[keyof RemoveChatReactionErrors];
+
+export type RemoveChatReactionResponses = {
+    200: ChatWriteMessageRecord;
+};
+
+export type RemoveChatReactionResponse = RemoveChatReactionResponses[keyof RemoveChatReactionResponses];
+
+export type AddChatReactionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+        emoji: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/reactions/{emoji}';
+};
+
+export type AddChatReactionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type AddChatReactionError = AddChatReactionErrors[keyof AddChatReactionErrors];
+
+export type AddChatReactionResponses = {
+    200: ChatWriteMessageRecord;
+};
+
+export type AddChatReactionResponse = AddChatReactionResponses[keyof AddChatReactionResponses];
+
+export type MarkChatMessageUnreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/unread';
+};
+
+export type MarkChatMessageUnreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MarkChatMessageUnreadError = MarkChatMessageUnreadErrors[keyof MarkChatMessageUnreadErrors];
+
+export type MarkChatMessageUnreadResponses = {
+    200: ChatWriteConversationStateRecord;
+};
+
+export type MarkChatMessageUnreadResponse = MarkChatMessageUnreadResponses[keyof MarkChatMessageUnreadResponses];
+
+export type MoveChatItemData = {
+    body: ChatMoveBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/move';
+};
+
+export type MoveChatItemErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MoveChatItemError = MoveChatItemErrors[keyof MoveChatItemErrors];
+
+export type MoveChatItemResponses = {
+    200: ChatEvents;
+};
+
+export type MoveChatItemResponse = MoveChatItemResponses[keyof MoveChatItemResponses];
+
+export type ReadAllChatData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/read-all';
+};
+
+export type ReadAllChatErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReadAllChatError = ReadAllChatErrors[keyof ReadAllChatErrors];
+
+export type ReadAllChatResponses = {
+    200: ChatWriteReadSnapshot;
+};
+
+export type ReadAllChatResponse = ReadAllChatResponses[keyof ReadAllChatResponses];
+
+export type RestoreChatReadData = {
+    body: ChatRestoreBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/read-restore';
+};
+
+export type RestoreChatReadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RestoreChatReadError = RestoreChatReadErrors[keyof RestoreChatReadErrors];
+
+export type RestoreChatReadResponses = {
+    200: ChatEvents;
+};
+
+export type RestoreChatReadResponse = RestoreChatReadResponses[keyof RestoreChatReadResponses];
+
+export type ListChatStatesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/states';
+};
+
+export type ListChatStatesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatStatesError = ListChatStatesErrors[keyof ListChatStatesErrors];
+
+export type ListChatStatesResponses = {
+    200: Array<ConversationStateRecord>;
+};
+
+export type ListChatStatesResponse = ListChatStatesResponses[keyof ListChatStatesResponses];
+
+export type ListFollowedChatThreadsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads';
+};
+
+export type ListFollowedChatThreadsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListFollowedChatThreadsError = ListFollowedChatThreadsErrors[keyof ListFollowedChatThreadsErrors];
+
+export type ListFollowedChatThreadsResponses = {
+    200: Array<FollowedThreadRecord>;
+};
+
+export type ListFollowedChatThreadsResponse = ListFollowedChatThreadsResponses[keyof ListFollowedChatThreadsResponses];
+
+export type GetChatThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        root_id: string;
+    };
+    query?: {
+        /**
+         * Messages older than this message id.
+         */
+        before?: string;
+        /**
+         * Messages newer than this message id.
+         */
+        after?: string;
+        /**
+         * A window with this message in the middle.
+         */
+        around?: string;
+        /**
+         * 1–100; default 50.
+         */
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}';
+};
+
+export type GetChatThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetChatThreadError = GetChatThreadErrors[keyof GetChatThreadErrors];
+
+export type GetChatThreadResponses = {
+    200: ThreadPage;
+};
+
+export type GetChatThreadResponse = GetChatThreadResponses[keyof GetChatThreadResponses];
+
+export type FollowChatThreadData = {
+    body: ChatFollowBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        root_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}/follow';
+};
+
+export type FollowChatThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type FollowChatThreadError = FollowChatThreadErrors[keyof FollowChatThreadErrors];
+
+export type FollowChatThreadResponses = {
+    200: ChatWriteThreadStateRecord;
+};
+
+export type FollowChatThreadResponse = FollowChatThreadResponses[keyof FollowChatThreadResponses];
+
+export type ReadChatThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        root_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}/read';
+};
+
+export type ReadChatThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReadChatThreadError = ReadChatThreadErrors[keyof ReadChatThreadErrors];
+
+export type ReadChatThreadResponses = {
+    200: ChatWriteThreadStateRecord;
+};
+
+export type ReadChatThreadResponse = ReadChatThreadResponses[keyof ReadChatThreadResponses];
 
 export type GithubWorkspaceSettingsData = {
     body?: never;

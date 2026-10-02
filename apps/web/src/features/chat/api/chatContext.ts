@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 import type { ChatClient } from './client'
 
 export interface ChatContextValue {
-  /** `null` until the workspace's members and the current user have loaded. */
+  /** `null` until the current user has loaded, and while chat is turned off. */
   client: ChatClient | null
   workspaceId: string
   currentUserId: string | null

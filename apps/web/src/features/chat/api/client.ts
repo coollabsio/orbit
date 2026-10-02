@@ -81,7 +81,8 @@ export interface ChatClient {
   sendMessage(input: SendMessageInput): Promise<Message>
   editMessage(messageId: string, body: string): Promise<Message>
   deleteMessage(messageId: string): Promise<void>
-  toggleReaction(messageId: string, emoji: string): Promise<Message>
+  /** Adds (`on`) or takes back the user's reaction. Doing either twice changes nothing. */
+  setReaction(messageId: string, emoji: string, on: boolean): Promise<Message>
   setPinned(messageId: string, pinned: boolean): Promise<Message>
 
   /** Reads the conversation up to its newest message. */

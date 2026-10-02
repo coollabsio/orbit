@@ -37,10 +37,14 @@ pub enum Permission {
     /// Delete task comments written by other members.
     #[serde(rename = "comments.moderate")]
     CommentsModerate,
+    /// Manage chat categories and channel order, edit and archive channels made by other
+    /// members, and delete other members' chat messages.
+    #[serde(rename = "chat.manage")]
+    ChatManage,
 }
 
 impl Permission {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -52,6 +56,7 @@ impl Permission {
         Self::PagesPurge,
         Self::ViewsManageShared,
         Self::CommentsModerate,
+        Self::ChatManage,
     ];
 }
 
@@ -100,6 +105,23 @@ impl Actor {
     #[must_use]
     pub fn can_change_view_visibility(self, owner_id: Id) -> bool {
         self.user_id == owner_id
+    }
+
+    /// A channel's creator and chat managers edit it, archive it and manage its members.
+    #[must_use]
+    pub fn can_manage_chat_channel(self, created_by: Id) -> bool {
+        self.user_id == created_by || self.can(Permission::ChatManage)
+    }
+
+    /// Only the author rewrites a chat message; `can_delete_chat_message` also lets managers in.
+    #[must_use]
+    pub fn can_edit_chat_message(self, author_id: Id) -> bool {
+        self.user_id == author_id
+    }
+
+    #[must_use]
+    pub fn can_delete_chat_message(self, author_id: Id) -> bool {
+        self.user_id == author_id || self.can(Permission::ChatManage)
     }
 
     /// A private page is visible to its owner alone, so whoever sees one may delete it forever.
@@ -197,7 +219,8 @@ impl Policy {
             | Permission::TeamspacesDelete
             | Permission::PagesPurge
             | Permission::ViewsManageShared
-            | Permission::CommentsModerate => {
+            | Permission::CommentsModerate
+            | Permission::ChatManage => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
         }

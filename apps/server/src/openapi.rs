@@ -168,6 +168,39 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::import_routes::get_notion_import,
         crate::import_routes::start_notion_import,
         crate::import_routes::cancel_notion_import,
+        crate::chat_routes::conversations::list_chat_conversations,
+        crate::chat_routes::conversations::create_chat_channel,
+        crate::chat_routes::conversations::update_chat_channel,
+        crate::chat_routes::conversations::archive_chat_channel,
+        crate::chat_routes::conversations::join_chat_channel,
+        crate::chat_routes::conversations::leave_chat_channel,
+        crate::chat_routes::conversations::add_chat_members,
+        crate::chat_routes::conversations::remove_chat_member,
+        crate::chat_routes::conversations::open_chat_dm,
+        crate::chat_routes::conversations::list_chat_categories,
+        crate::chat_routes::conversations::create_chat_category,
+        crate::chat_routes::conversations::rename_chat_category,
+        crate::chat_routes::conversations::delete_chat_category,
+        crate::chat_routes::conversations::move_chat_item,
+        crate::chat_routes::messages::list_chat_messages,
+        crate::chat_routes::messages::send_chat_message,
+        crate::chat_routes::messages::edit_chat_message,
+        crate::chat_routes::messages::delete_chat_message,
+        crate::chat_routes::messages::add_chat_reaction,
+        crate::chat_routes::messages::remove_chat_reaction,
+        crate::chat_routes::messages::pin_chat_message,
+        crate::chat_routes::messages::list_chat_pins,
+        crate::chat_routes::messages::list_chat_threads,
+        crate::chat_routes::messages::list_followed_chat_threads,
+        crate::chat_routes::messages::get_chat_thread,
+        crate::chat_routes::state::list_chat_states,
+        crate::chat_routes::state::update_chat_state,
+        crate::chat_routes::state::read_chat_conversation,
+        crate::chat_routes::state::mark_chat_message_unread,
+        crate::chat_routes::state::read_chat_thread,
+        crate::chat_routes::state::follow_chat_thread,
+        crate::chat_routes::state::read_all_chat,
+        crate::chat_routes::state::restore_chat_read,
     )
 )]
 struct ApiDocument;
@@ -285,6 +318,7 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/pages")
         || route.contains("/teamspaces")
         || route.contains("/imports/")
+        || route.contains("/chat/")
     {
         "TaskProblem"
     } else if route.starts_with("/api/v1/auth") || route.starts_with("/api/v1/setup") {
@@ -476,6 +510,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
+        id if id.contains("chat") => chat_errors(id, &mut responses),
         _ => {}
     }
 
@@ -923,6 +958,34 @@ fn page_comment_errors(
         "delete_page_thread" | "update_page_comment" | "delete_page_comment"
     ) {
         add_code(responses, "403", "page_comment_forbidden");
+    }
+}
+
+/// Every chat operation is in a workspace the caller may not be in, or names a conversation
+/// or message the caller cannot see: both are `chat_not_found`.
+fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "chat_not_found");
+    if !operation_id.starts_with("list_") {
+        add_code(responses, "422", "validation_failed");
+    }
+    if matches!(operation_id, "send_chat_message" | "edit_chat_message") {
+        add_code(responses, "422", "chat_message_too_long");
+    }
+    if matches!(
+        operation_id,
+        "create_chat_channel" | "update_chat_channel" | "add_chat_reaction"
+    ) {
+        add_code(responses, "409", "chat_conflict");
+    }
+    if !(operation_id.starts_with("list_")
+        || operation_id.starts_with("get_")
+        || operation_id.starts_with("read_")
+        || matches!(
+            operation_id,
+            "create_chat_channel" | "open_chat_dm" | "follow_chat_thread" | "restore_chat_read"
+        ))
+    {
+        add_code(responses, "403", "chat_forbidden");
     }
 }
 

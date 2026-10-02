@@ -1,24 +1,22 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useEffect } from 'react'
 import { useCurrentUser } from '@/features/auth/api'
-import { useMembers } from '@/features/workspaces/api'
-import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { ChatContext } from './chatContext'
 import type { ChatClient } from './client'
 import { applyChatEvent } from './events'
+import { createHttpChatClient } from './httpClient'
 import { clearTyping, noteTyping, resetLiveStore, setConnectionStatus, setOnlineUsers, setPresence } from './liveStore'
-import { createMockChatClient } from './mockClient'
 
 /** One client for each workspace and user, kept for the page lifetime so chat state survives navigation. */
 const clients = new Map<string, ChatClient>()
 
-/** The only place that picks the implementation: the HTTP client replaces this one call. */
-function clientFor(workspaceId: string, currentUserId: string, members: User[]): ChatClient {
+/** The only place that picks the implementation. */
+function clientFor(workspaceId: string, currentUserId: string): ChatClient {
   const key = `${workspaceId}:${currentUserId}`
   let client = clients.get(key)
   if (!client) {
-    client = createMockChatClient({ workspaceId, currentUserId, members })
+    client = createHttpChatClient({ workspaceId, currentUserId })
     clients.set(key, client)
   }
   return client
@@ -31,9 +29,8 @@ function clientFor(workspaceId: string, currentUserId: string, members: User[]):
 export function ChatProvider({ enabled = true, children }: { enabled?: boolean; children: ReactNode }) {
   const queryClient = useQueryClient()
   const workspaceId = useWorkspace().workspace.id
-  const members = useMembers(workspaceId).data
   const currentUserId = useCurrentUser().data?.id ?? null
-  const client = enabled && members && currentUserId ? clientFor(workspaceId, currentUserId, members) : null
+  const client = enabled && currentUserId ? clientFor(workspaceId, currentUserId) : null
 
   useEffect(() => {
     if (!client) return

@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        36
+        37
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 36
+            binary_version: 37
         }
     ));
 }
@@ -1766,6 +1766,108 @@ async fn sub_issues_migration_links_parents_in_one_workspace_and_adds_project_fl
             .scalar::<String>("PRAGMA integrity_check")
             .await
             .unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn chat_migration_gives_every_workspace_member_the_default_channel() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 36)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        owner,
+        member,
+        late,
+        first,
+        first_owner,
+        first_member,
+        second,
+        second_owner,
+        second_late,
+    ]: [Id; 9] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{owner}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1),
+                ('{member}', 'member@example.com', 'member@example.com', 'Member', 'x', 1, 1),
+                ('{late}', 'late@example.com', 'late@example.com', 'Late', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, deleted_at)
+         VALUES ('{first}', 'First', 0, '{first_owner}', 1, 1, NULL);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{first_owner}', '{first}', '{owner}', 'owner', 0, 1, 1),
+                ('{first_member}', '{first}', '{member}', 'member', 0, 1, 1);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    // The workspace that existed before the migration.
+    let members = |workspace: Id| {
+        format!(
+            "SELECT COUNT(*) FROM chat_members JOIN chat_conversations \
+             ON chat_conversations.id = chat_members.conversation_id \
+             WHERE chat_conversations.workspace_id = '{workspace}' AND chat_conversations.is_default = 1 \
+             AND chat_conversations.name = 'general' AND chat_conversations.kind = 'public'"
+        )
+    };
+    assert_eq!(db.scalar::<i64>(&members(first)).await.unwrap(), 2);
+
+    // A workspace made afterwards: its first member makes the channel, later members join it.
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, deleted_at)
+         VALUES ('{second}', 'Second', 0, '{second_owner}', 1700000000000, 1700000000000, NULL);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{second_owner}', '{second}', '{owner}', 'owner', 0, 1700000000000, 1700000000000);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{second_late}', '{second}', '{late}', 'member', 0, 1700000000001, 1700000000001);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&members(second)).await.unwrap(), 2);
+    let ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM chat_conversations")
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(ids.len(), 2);
+    for (id,) in ids {
+        id.parse::<Id>()
+            .expect("the channel id made in SQL is a UUIDv7");
+    }
+
+    // Leaving the workspace leaves its conversations; a deleted workspace takes chat along.
+    db.execute(&format!(
+        "DELETE FROM memberships WHERE id = '{second_late}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&members(second)).await.unwrap(), 1);
+    db.execute(&format!("DELETE FROM workspaces WHERE id = '{first}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM chat_conversations")
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
         "ok"
     );
 }
