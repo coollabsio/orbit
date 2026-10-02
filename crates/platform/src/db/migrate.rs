@@ -278,6 +278,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0037_chat.sql"),
                     false,
                 ),
+                Migration::new(
+                    38,
+                    include_str!("../../../../apps/server/migrations/0038_chat_files.sql"),
+                    false,
+                ),
             ],
         )
     }

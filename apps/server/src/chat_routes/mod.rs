@@ -2,6 +2,7 @@
 //! chat events it caused for the caller, so the web client updates its cache without a refetch.
 
 pub(crate) mod conversations;
+pub(crate) mod files;
 pub(crate) mod messages;
 pub(crate) mod state;
 
@@ -11,7 +12,7 @@ use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
-use orbit_platform::{Id, RequestId};
+use orbit_platform::{Id, RequestId, UploadService};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -31,9 +32,13 @@ pub struct ChatState {
 
 impl ChatState {
     #[must_use]
-    pub fn new(identity: Arc<IdentityRepository>, cookie_mode: CookieMode) -> Self {
+    pub fn new(
+        identity: Arc<IdentityRepository>,
+        uploads: UploadService,
+        cookie_mode: CookieMode,
+    ) -> Self {
         Self {
-            chat: Arc::new(ChatRepository::new(identity.database().clone())),
+            chat: Arc::new(ChatRepository::new(identity.database().clone(), uploads)),
             hub: LiveHub::of(identity.database()),
             identity,
             cookie_mode,
@@ -101,6 +106,10 @@ impl ChatState {
 const TOPIC: &str = "chat";
 
 pub fn chat_router(state: ChatState) -> Router {
+    files::file_router(state.clone()).merge(json_router(state))
+}
+
+fn json_router(state: ChatState) -> Router {
     Router::new()
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/conversations",
@@ -350,6 +359,7 @@ fn problem(
             "Message too long",
             "A message can have at most 4000 characters.",
         ),
+        ChatError::Upload(error) => return files::upload_problem(error, instance, request_id),
         ChatError::Unavailable(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",

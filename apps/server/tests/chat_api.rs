@@ -3,7 +3,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, TimestampMillis};
+use orbit_platform::{
+    AttachmentMutationCoordinator, AuthenticatedUser, Id, LocalBlobStore, PasswordService,
+    TestDatabase, TimestampMillis, UploadLimits, UploadService,
+};
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::chat_routes::{ChatState, chat_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -11,6 +14,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 struct Fixture {
+    _root: tempfile::TempDir,
     database: TestDatabase,
     identity: Arc<IdentityRepository>,
     app: axum::Router,
@@ -57,8 +61,20 @@ impl Fixture {
             )
             .await
             .unwrap();
-        let app = chat_router(ChatState::new(Arc::clone(&identity), CookieMode::secure()));
+        let root = tempfile::tempdir().unwrap();
+        let uploads = UploadService::new(
+            (*database).clone(),
+            Arc::new(LocalBlobStore::new(root.path().join("attachments"))),
+            AttachmentMutationCoordinator::default(),
+            UploadLimits::default(),
+        );
+        let app = chat_router(ChatState::new(
+            Arc::clone(&identity),
+            uploads,
+            CookieMode::secure(),
+        ));
         Self {
+            _root: root,
             database,
             identity,
             app,
@@ -1247,6 +1263,124 @@ async fn counters_stay_exact_under_random_activity() {
             .assert_counters_exact(&format!("step {step} ({description})"))
             .await;
     }
+}
+
+const PNG: &[u8] = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02\x00\x00\x00\x0b\x49\x44\x41\x54\x78\xda\x63\x64\xf8\x0f\x00\x01\x05\x01\x01\x27\x18\xe3\x66\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+
+impl Fixture {
+    /// Uploads a file for a message; returns its record.
+    async fn upload(&self, member: &Member, name: &str, bytes: &[u8]) -> Value {
+        let boundary = "orbit-test-boundary";
+        let mut body = Vec::new();
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/v1/workspaces/{}/chat/files?width=640&height=400",
+                self.workspace_id
+            ))
+            .header(header::COOKIE, &member.cookie)
+            .header(
+                header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(Body::from(body))
+            .unwrap();
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        assert_eq!(status, StatusCode::CREATED, "{value}");
+        value
+    }
+
+    /// The status of a download of a chat file path.
+    async fn download(&self, member: &Member, url: &str) -> StatusCode {
+        let request = Request::builder()
+            .uri(url)
+            .header(header::COOKIE, &member.cookie)
+            .body(Body::empty())
+            .unwrap();
+        self.app.clone().oneshot(request).await.unwrap().status()
+    }
+}
+
+#[tokio::test]
+async fn a_file_is_its_uploaders_until_a_message_takes_it() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    let secret = fixture
+        .channel(&fixture.owner, "secret", "private", &[&ada])
+        .await;
+
+    let file = fixture.upload(&ada, "plan.png", PNG).await;
+    let url = file["url"].as_str().unwrap().to_owned();
+    assert_eq!(file["mime_type"], "image/png");
+    assert_eq!(file["width"], 640);
+    // Before the message is sent only the uploader can open it.
+    assert_eq!(fixture.download(&ada, &url).await, StatusCode::OK);
+    assert_eq!(
+        fixture.download(&fixture.owner, &url).await,
+        StatusCode::NOT_FOUND
+    );
+
+    // Nobody else can attach it, and an unknown id is refused.
+    let with_file =
+        |nonce: &str| Some(json!({ "body": "", "nonce": nonce, "file_ids": [file["id"]] }));
+    let messages = format!("/conversations/{secret}/messages");
+    let (status, problem) = fixture
+        .call(&fixture.owner, "POST", &messages, with_file("a"))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    // A message may be only a file. The file is then for the readers of the conversation.
+    let sent = fixture.ok(&ada, "POST", &messages, with_file("b")).await;
+    assert_eq!(sent["result"]["attachments"][0]["id"], file["id"]);
+    assert_eq!(sent["result"]["attachments"][0]["file_name"], "plan.png");
+    assert_eq!(fixture.download(&fixture.owner, &url).await, StatusCode::OK);
+    assert_eq!(fixture.download(&bob, &url).await, StatusCode::NOT_FOUND);
+    // It cannot go to a second message.
+    let (status, _) = fixture.call(&ada, "POST", &messages, with_file("c")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The page and the files list carry the file.
+    let (_, page) = fixture.main_ids(&fixture.owner, &secret, "").await;
+    assert_eq!(page["items"][0]["attachments"].as_array().unwrap().len(), 1);
+    let files = fixture
+        .ok(&ada, "GET", &format!("/conversations/{secret}/files"), None)
+        .await;
+    assert_eq!(files.as_array().unwrap().len(), 1);
+    assert_eq!(files[0]["id"], sent["result"]["id"]);
+    // Without text and without a file there is no message.
+    let (status, _) = fixture
+        .call(
+            &ada,
+            "POST",
+            &messages,
+            Some(json!({ "body": " ", "nonce": "d" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A deleted message lets its file go: the blob is quarantined and reclaimed later.
+    let message = sent["result"]["id"].as_str().unwrap();
+    fixture
+        .ok(&ada, "DELETE", &format!("/messages/{message}"), None)
+        .await;
+    assert_eq!(fixture.download(&ada, &url).await, StatusCode::NOT_FOUND);
+    let files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chat_message_files")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(files, 0);
 }
 
 /// Half a million messages in one channel: every call that a page or a click makes must stay

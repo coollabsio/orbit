@@ -201,6 +201,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::state::follow_chat_thread,
         crate::chat_routes::state::read_all_chat,
         crate::chat_routes::state::restore_chat_read,
+        crate::chat_routes::files::upload_chat_file,
+        crate::chat_routes::files::download_chat_file,
+        crate::chat_routes::files::list_chat_files,
     )
 )]
 struct ApiDocument;
@@ -965,6 +968,15 @@ fn page_comment_errors(
 /// or message the caller cannot see: both are `chat_not_found`.
 fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
     add_code(responses, "404", "chat_not_found");
+    if operation_id == "upload_chat_file" {
+        add_code(responses, "400", "invalid_multipart");
+        add_code(responses, "413", "upload_too_large");
+        add_code(responses, "422", "validation_failed");
+        return;
+    }
+    if operation_id == "download_chat_file" {
+        return;
+    }
     if !operation_id.starts_with("list_") {
         add_code(responses, "422", "validation_failed");
     }
@@ -1025,6 +1037,7 @@ fn add_download_media_types(operation_id: &str, operation: &mut utoipa::openapi:
     let schema = match operation_id {
         "download_task_attachment" | "download_comment_attachment" => "AttachmentDownload",
         "download_page_file" => "PageFileDownload",
+        "download_chat_file" => "ChatFileDownload",
         _ => return,
     };
     let Some(RefOr::T(response)) = operation.responses.responses.get_mut("200") else {

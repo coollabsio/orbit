@@ -64,6 +64,11 @@ pub(crate) struct ChatSendBody {
     #[serde(default)]
     #[schema(required = false)]
     also_in_channel: bool,
+    /// Files the caller uploaded for this message (at most 10). With files the body may be
+    /// empty.
+    #[serde(default)]
+    #[schema(required = false)]
+    file_ids: Vec<String>,
     /// Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns
     /// the first message.
     nonce: String,
@@ -119,6 +124,7 @@ pub(crate) async fn send_chat_message(
             .as_deref()
             .map(|id| call.body_id(id, "thread_root_id"))
             .transpose()?,
+        file_ids: call.body_ids(&body.file_ids, "file_ids")?,
         body: body.body,
         also_in_channel: body.also_in_channel,
         nonce: body.nonce,

@@ -1,5 +1,6 @@
 import type {
   ChatEvent as WireEvent,
+  ChatFileRecord,
   ConversationRecord,
   ConversationStateRecord,
   FollowedThreadRecord,
@@ -10,6 +11,7 @@ import type {
 } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 import {
+  type Attachment,
   ChatError,
   type ChatErrorCode,
   type ChatEvent,
@@ -44,6 +46,17 @@ export function toConversation(record: ConversationRecord, currentUserId: string
   }
 }
 
+export function toAttachment(record: ChatFileRecord): Attachment {
+  return {
+    id: record.id,
+    fileName: record.file_name,
+    mimeType: record.mime_type,
+    fileSize: record.size_bytes,
+    url: record.url,
+    ...(record.width !== null && record.height !== null ? { width: record.width, height: record.height } : {}),
+  }
+}
+
 export function toMessage(record: MessageRecord): Message {
   return {
     id: record.id,
@@ -56,7 +69,7 @@ export function toMessage(record: MessageRecord): Message {
     createdAt: millis(record.created_at),
     editedAt: record.edited_at === null ? null : millis(record.edited_at),
     deleted: record.deleted,
-    attachments: [],
+    attachments: record.attachments.map(toAttachment),
     reactions: record.reactions.map((reaction) => ({ emoji: reaction.emoji, userIds: reaction.user_ids })),
     pinned: record.pinned,
     alsoInChannel: record.also_in_channel,

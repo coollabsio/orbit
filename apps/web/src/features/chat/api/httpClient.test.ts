@@ -88,7 +88,7 @@ test('a send that cannot reach the server goes again when the connection is back
   const message = {
     id: 'm1', conversation_id: 'c1', thread_root_id: null, kind: 'message', author_id: 'u1', body: 'Hi',
     mentions: { user_ids: [], channel: false, here: false }, created_at: '2026-10-02T08:00:00.000Z', edited_at: null,
-    deleted: false, reactions: [], pinned: false, also_in_channel: false, nonce: 'n1', reply_count: 0, last_reply_at: null,
+    deleted: false, attachments: [], reactions: [], pinned: false, also_in_channel: false, nonce: 'n1', reply_count: 0, last_reply_at: null,
     reply_user_ids: [], last_reply: null,
   }
   const { client, requests } = setup(() => {

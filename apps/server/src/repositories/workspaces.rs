@@ -1609,6 +1609,11 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<MaintenanceSummary, WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
+        // Chat files that were uploaded and never sent with a message.
+        sqlx::query("DELETE FROM chat_message_files WHERE message_id IS NULL AND created_at <= ?")
+            .bind(now.as_millis().saturating_sub(24 * 60 * 60 * 1000))
+            .execute(&mut *transaction)
+            .await?;
         let expired = sqlx::query_scalar::<_, String>(
             "SELECT id FROM workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= ? \
              ORDER BY deleted_at, id",
@@ -1732,13 +1737,16 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
-            // Page files hold their blobs with ON DELETE RESTRICT, so they go before the blobs.
-            attachment_references_purged +=
-                sqlx::query("DELETE FROM page_files WHERE workspace_id = ?")
-                    .bind(&workspace_id)
-                    .execute(&mut *transaction)
-                    .await?
-                    .rows_affected();
+            // Page files and chat files hold their blobs with ON DELETE RESTRICT, so they go
+            // before the blobs.
+            for table in ["page_files", "chat_message_files"] {
+                attachment_references_purged +=
+                    sqlx::query(&format!("DELETE FROM {table} WHERE workspace_id = ?"))
+                        .bind(&workspace_id)
+                        .execute(&mut *transaction)
+                        .await?
+                        .rows_affected();
+            }
             for row in blob_rows {
                 let blob_id: String = row.get("id");
                 let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)

@@ -1,4 +1,4 @@
-import { apiClient, type createApiClient } from '@/api/client'
+import { apiClient, CONTRACT_ID, type createApiClient } from '@/api/client'
 import {
   addChatMembers,
   addChatReaction,
@@ -14,6 +14,7 @@ import {
   leaveChatChannel,
   listChatCategories,
   listChatConversations,
+  listChatFiles,
   listChatMessages,
   listChatPins,
   listChatStates,
@@ -34,11 +35,22 @@ import {
   updateChatChannel,
   updateChatState,
 } from '@/api/generated/sdk.gen'
-import type { ChatEvent as WireEvent } from '@/api/generated/types.gen'
+import type { ChatEvent as WireEvent, ChatFileRecord } from '@/api/generated/types.gen'
 import type { ChatClient } from './client'
 import { type LiveSocket, type LiveSocketOptions, openLiveSocket } from './liveSocket'
 import { ChatError, type ChatEvent, type ConversationState } from './types'
-import { toChatError, toConversation, toEvent, toFollowedThread, toMessage, toMessagePage, toState, toThreadPage, toThreadState } from './wire'
+import {
+  toAttachment,
+  toChatError,
+  toConversation,
+  toEvent,
+  toFollowedThread,
+  toMessage,
+  toMessagePage,
+  toState,
+  toThreadPage,
+  toThreadState,
+} from './wire'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -52,6 +64,19 @@ export interface HttpChatClientOptions {
   openSocket?: (options: LiveSocketOptions) => LiveSocket
   /** How long a send that could not reach the server waits for the connection to come back. Default 60000. */
   sendWaitMs?: number
+}
+
+/** The pixel size of an image file, if this browser can decode it (not SVG, for one). */
+async function imageSize(file: File): Promise<{ width: number; height: number } | null> {
+  if (!file.type.startsWith('image/') || typeof createImageBitmap !== 'function') return null
+  try {
+    const bitmap = await createImageBitmap(file)
+    const size = { width: bitmap.width, height: bitmap.height }
+    bitmap.close()
+    return size
+  } catch {
+    return null
+  }
 }
 
 /** A typing signal as the live socket sends it. */
@@ -171,8 +196,10 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     async listPins(conversationId) {
       return (await call(listChatPins(at({ conversation_id: conversationId })))).map(toMessage)
     },
-    // Files and search come with the upload and search work.
-    listFiles: async () => [],
+    async listFiles(conversationId) {
+      return (await call(listChatFiles(at({ conversation_id: conversationId })))).map(toMessage)
+    },
+    // Search comes with the search work.
     searchMessages: async () => ({ items: [], cursor: null }),
     /** Known from the socket's first frame. */
     getPresence: () => (online ? Promise.resolve([...online]) : new Promise((resolve) => presenceWaiters.push(resolve))),
@@ -182,6 +209,7 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         body: input.body,
         thread_root_id: input.threadRootId ?? null,
         also_in_channel: input.alsoInChannel ?? false,
+        file_ids: (input.attachments ?? []).map((attachment) => attachment.id),
         nonce: input.nonce,
       }
       const send = () => write(sendChatMessage({ ...at({ conversation_id: input.conversationId }), body }))
@@ -296,8 +324,35 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
       await write(moveChatItem({ ...at({}), body }))
     },
 
-    uploadAttachment: async () => {
-      throw new ChatError('upload_failed', 'Files in chat are not available yet.')
+    /**
+     * One request with upload progress, which `fetch` cannot report. The file waits on the server for the message that
+     * names it; the size of an image goes along so the list can reserve its space.
+     */
+    async uploadAttachment(file, { onProgress, signal } = {}) {
+      const failed = (message: string) => new ChatError('upload_failed', message)
+      if (signal?.aborted) throw failed('The upload was cancelled.')
+      const size = await imageSize(file)
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest()
+        const query = size ? `?width=${size.width}&height=${size.height}` : ''
+        request.open('POST', `/api/v1/workspaces/${workspaceId}/chat/files${query}`)
+        request.setRequestHeader('X-Orbit-Contract', CONTRACT_ID)
+        request.withCredentials = true
+        request.responseType = 'json'
+        request.upload.onprogress = (event) => {
+          if (event.lengthComputable) onProgress?.(event.loaded / event.total)
+        }
+        request.onload = () => {
+          if (request.status === 201) resolve(toAttachment(request.response as ChatFileRecord))
+          else reject(failed((request.response as { detail?: string } | null)?.detail ?? 'The upload failed.'))
+        }
+        request.onerror = () => reject(failed('The server could not be reached.'))
+        request.onabort = () => reject(failed('The upload was cancelled.'))
+        signal?.addEventListener('abort', () => request.abort(), { once: true })
+        const body = new FormData()
+        body.append('file', file)
+        request.send(body)
+      })
     },
     sendTyping(conversationId, threadRootId = null) {
       socket?.send({ type: 'typing', conversation_id: conversationId, thread_root_id: threadRootId })

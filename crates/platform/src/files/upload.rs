@@ -17,9 +17,11 @@ use crate::{
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
 const SNIFF_BYTES: usize = 8 * 1024;
-/// References to one blob (bind its id twice): task/comment attachments plus docs page files.
-pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?) \
-     + (SELECT COUNT(*) FROM page_files WHERE blob_id = ?)";
+/// References to one blob (bind its id twice): task/comment attachments, docs page files and
+/// chat files. The second parameter is used for both of the newer tables.
+pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?1) \
+     + (SELECT COUNT(*) FROM page_files WHERE blob_id = ?2) \
+     + (SELECT COUNT(*) FROM chat_message_files WHERE blob_id = ?2)";
 /// Raster image types that are served inline; everything else downloads as an attachment.
 pub const INLINE_IMAGE_TYPES: [&str; 5] = [
     "image/jpeg",
@@ -539,6 +541,9 @@ impl UploadService {
             .fetch_all(self.database.pool())
             .await?;
         sqlx::query("SELECT blob_id FROM page_files WHERE 0")
+            .fetch_all(self.database.pool())
+            .await?;
+        sqlx::query("SELECT blob_id FROM chat_message_files WHERE 0")
             .fetch_all(self.database.pool())
             .await?;
 

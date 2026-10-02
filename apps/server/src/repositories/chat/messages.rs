@@ -4,6 +4,7 @@ use orbit_platform::{Id, TimestampMillis};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
+use super::files::{MAX_MESSAGE_FILES, attach_files};
 use super::{
     Access, ChatError, ChatEvent, ChatRepository, ConversationKind, Events, FollowedThreadRecord,
     MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord, MessageKind, MessagePage, MessageRecord,
@@ -39,7 +40,10 @@ pub struct MessageCursor {
 pub struct SendInput {
     pub conversation_id: Id,
     pub thread_root_id: Option<Id>,
+    /// May be blank when the message has files.
     pub body: String,
+    /// Files the sender uploaded for this message.
+    pub file_ids: Vec<Id>,
     pub also_in_channel: bool,
     pub nonce: String,
 }
@@ -217,7 +221,10 @@ impl ChatRepository {
         actor_id: Id,
         input: SendInput,
     ) -> Result<Written<MessageRecord>, ChatError> {
-        let body = clean_body(&input.body)?;
+        let body = clean_body(&input.body, !input.file_ids.is_empty())?;
+        if input.file_ids.len() > MAX_MESSAGE_FILES {
+            return Err(ChatError::Invalid { field: "file_ids" });
+        }
         if input.nonce.is_empty() || input.nonce.len() > NONCE_MAX_BYTES {
             return Err(ChatError::Invalid { field: "nonce" });
         }
@@ -265,7 +272,7 @@ impl ChatRepository {
         };
         // `@channel` and `@here` do nothing in a thread.
         let broadcast = |token: &str| root.is_none() && body.contains(token);
-        let message = insert_message(
+        let mut message = insert_message(
             &mut tx,
             NewMessage {
                 conversation_id,
@@ -281,6 +288,7 @@ impl ChatRepository {
             },
         )
         .await?;
+        attach_files(&mut tx, &mut message, &input.file_ids).await?;
         let mentioned = members_among(
             &mut tx,
             conversation_id,
@@ -347,7 +355,7 @@ impl ChatRepository {
         message_id: Id,
         body: &str,
     ) -> Result<Written<MessageRecord>, ChatError> {
-        let body = clean_body(body)?;
+        let body = clean_body(body, false)?;
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let (access, message) =
@@ -467,7 +475,11 @@ impl ChatRepository {
         events.replied = message.thread_root_id;
 
         if message.thread_root_id.is_none() && message.reply_count > 0 {
-            for table in ["chat_message_mentions", "chat_reactions"] {
+            for table in [
+                "chat_message_mentions",
+                "chat_reactions",
+                "chat_message_files",
+            ] {
                 sqlx::query(&format!("DELETE FROM {table} WHERE message_id = ?"))
                     .bind(message.id.to_string())
                     .execute(&mut *tx)
@@ -628,13 +640,13 @@ impl ChatRepository {
     }
 }
 
-/// The stored body: at most 4000 characters, not blank, and without the two control characters
+/// The stored body: at most 4000 characters, not blank (unless the message has files), and without the two control characters
 /// that the search index uses as highlight markers.
-fn clean_body(body: &str) -> Result<String, ChatError> {
+fn clean_body(body: &str, has_files: bool) -> Result<String, ChatError> {
     if body.chars().count() > MESSAGE_MAX_CHARS {
         return Err(ChatError::TooLong);
     }
-    if body.trim().is_empty() {
+    if body.trim().is_empty() && !has_files {
         return Err(ChatError::Invalid { field: "body" });
     }
     Ok(body.replace(['\u{2}', '\u{3}'], ""))
@@ -797,6 +809,7 @@ async fn insert_message(
         created_at: new.now,
         edited_at: None,
         deleted: false,
+        attachments: Vec::new(),
         reactions: Vec::new(),
         pinned: false,
         also_in_channel: new.also_in_channel,

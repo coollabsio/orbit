@@ -273,6 +273,34 @@ export type ChatEvents = {
     events: Array<ChatEvent>;
 };
 
+export type ChatFileDownload = Blob | File;
+
+/**
+ * A file of a message.
+ */
+export type ChatFileRecord = {
+    file_name: string;
+    height: number | null;
+    id: string;
+    /**
+     * Detected from the file's bytes, not taken from the client.
+     */
+    mime_type: string;
+    size_bytes: number;
+    /**
+     * Same-origin download path; usable as an image `src` or a file link.
+     */
+    url: string;
+    /**
+     * Of an image, as the uploader's browser measured it.
+     */
+    width: number | null;
+};
+
+export type ChatFileUploadBody = {
+    file: Blob | File;
+};
+
 export type ChatFollowBody = {
     following: boolean;
 };
@@ -308,6 +336,11 @@ export type ChatSendBody = {
      * `<#conversation_id>`, `<!channel>`, `<!here>`.
      */
     body: string;
+    /**
+     * Files the caller uploaded for this message (at most 10). With files the body may be
+     * empty.
+     */
+    file_ids?: Array<string>;
     /**
      * Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns
      * the first message.
@@ -413,6 +446,7 @@ export type ChatWriteMessageRecord = {
          * A thread reply that also shows in the conversation's main list.
          */
         also_in_channel: boolean;
+        attachments: Array<ChatFileRecord>;
         author_id: string;
         /**
          * Markdown source. Mentions are tokens: `<@user_id>`, `<#conversation_id>`, `<!channel>`,
@@ -892,6 +926,7 @@ export type MessageRecord = {
      * A thread reply that also shows in the conversation's main list.
      */
     also_in_channel: boolean;
+    attachments: Array<ChatFileRecord>;
     author_id: string;
     /**
      * Markdown source. Mentions are tokens: `<@user_id>`, `<#conversation_id>`, `<!channel>`,
@@ -4786,6 +4821,61 @@ export type ArchiveChatChannelResponses = {
 
 export type ArchiveChatChannelResponse = ArchiveChatChannelResponses[keyof ArchiveChatChannelResponses];
 
+export type ListChatFilesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/files';
+};
+
+export type ListChatFilesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatFilesError = ListChatFilesErrors[keyof ListChatFilesErrors];
+
+export type ListChatFilesResponses = {
+    200: Array<MessageRecord>;
+};
+
+export type ListChatFilesResponse = ListChatFilesResponses[keyof ListChatFilesResponses];
+
 export type JoinChatChannelData = {
     body?: never;
     headers?: {
@@ -5471,6 +5561,126 @@ export type OpenChatDmResponses = {
 };
 
 export type OpenChatDmResponse = OpenChatDmResponses[keyof OpenChatDmResponses];
+
+export type UploadChatFileData = {
+    body: ChatFileUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: {
+        width?: number;
+        height?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/chat/files';
+};
+
+export type UploadChatFileErrors = {
+    /**
+     * invalid_proxy_headers, invalid_multipart
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, upload_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UploadChatFileError = UploadChatFileErrors[keyof UploadChatFileErrors];
+
+export type UploadChatFileResponses = {
+    201: ChatFileRecord;
+};
+
+export type UploadChatFileResponse = UploadChatFileResponses[keyof UploadChatFileResponses];
+
+export type DownloadChatFileData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        file_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/files/{file_id}';
+};
+
+export type DownloadChatFileErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DownloadChatFileError = DownloadChatFileErrors[keyof DownloadChatFileErrors];
+
+export type DownloadChatFileResponses = {
+    200: ChatFileDownload;
+};
+
+export type DownloadChatFileResponse = DownloadChatFileResponses[keyof DownloadChatFileResponses];
 
 export type DeleteChatMessageData = {
     body?: never;

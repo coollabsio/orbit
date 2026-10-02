@@ -12,13 +12,14 @@
 //! and for the live socket.
 
 mod conversations;
+mod files;
 mod messages;
 mod state;
 
 use std::collections::HashMap;
 
 use orbit_domain::Actor;
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
@@ -47,6 +48,8 @@ pub enum ChatError {
     Invalid { field: &'static str },
     #[error("the message is too long")]
     TooLong,
+    #[error(transparent)]
+    Upload(#[from] UploadError),
     #[error("chat repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
 }
@@ -169,6 +172,24 @@ pub struct CategoryRecord {
     pub position: i64,
 }
 
+/// A file of a message.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ChatFileRecord {
+    #[schema(value_type = String)]
+    pub id: Id,
+    /// Same-origin download path; usable as an image `src` or a file link.
+    pub url: String,
+    pub file_name: String,
+    /// Detected from the file's bytes, not taken from the client.
+    pub mime_type: String,
+    pub size_bytes: i64,
+    /// Of an image, as the uploader's browser measured it.
+    #[schema(required = true)]
+    pub width: Option<i64>,
+    #[schema(required = true)]
+    pub height: Option<i64>,
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ReactionRecord {
     pub emoji: String,
@@ -218,6 +239,7 @@ pub struct MessageRecord {
     pub edited_at: Option<TimestampMillis>,
     /// A deleted root that still has replies stays in the list with an empty body.
     pub deleted: bool,
+    pub attachments: Vec<ChatFileRecord>,
     pub reactions: Vec<ReactionRecord>,
     pub pinned: bool,
     /// A thread reply that also shows in the conversation's main list.
@@ -486,12 +508,18 @@ async fn finish<T>(
 #[derive(Clone)]
 pub struct ChatRepository {
     database: Database,
+    uploads: UploadService,
 }
 
 impl ChatRepository {
     #[must_use]
-    pub fn new(database: Database) -> Self {
-        Self { database }
+    pub fn new(database: Database, uploads: UploadService) -> Self {
+        Self { database, uploads }
+    }
+
+    #[must_use]
+    pub fn uploads(&self) -> &UploadService {
+        &self.uploads
     }
 }
 
@@ -781,6 +809,7 @@ fn message_from_row(row: &SqliteRow) -> Result<MessageRecord, ChatError> {
             .get::<Option<i64>, _>("edited_at")
             .map(TimestampMillis::from_millis),
         deleted: row.get::<Option<i64>, _>("deleted_at").is_some(),
+        attachments: Vec::new(),
         reactions: Vec::new(),
         pinned: row.get::<Option<i64>, _>("pinned_at").is_some(),
         also_in_channel: row.get("also_in_channel"),
@@ -796,7 +825,7 @@ fn message_from_row(row: &SqliteRow) -> Result<MessageRecord, ChatError> {
     })
 }
 
-/// Rows to records, with their reactions: one more query for the whole list.
+/// Rows to records, with their reactions and files: two more queries for the whole list.
 async fn hydrate(
     conn: &mut SqliteConnection,
     rows: &[SqliteRow],
@@ -835,6 +864,7 @@ async fn hydrate(
             }),
         }
     }
+    files::load_files(conn, &mut messages).await?;
     Ok(messages)
 }
 

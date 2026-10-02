@@ -299,7 +299,11 @@ impl App {
                     app_key,
                 ),
                 imports: ImportState::new(Arc::clone(&identity), notion_imports, cookie_mode),
-                chat: ChatState::new(Arc::clone(&identity), cookie_mode),
+                chat: ChatState::new(
+                    Arc::clone(&identity),
+                    attachment_state.uploads.clone(),
+                    cookie_mode,
+                ),
             },
             health,
             assets,

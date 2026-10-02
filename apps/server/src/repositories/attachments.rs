@@ -275,9 +275,11 @@ impl AttachmentRepository {
         sqlx::query(
             "UPDATE attachment_blobs SET quarantine_until = MAX(quarantine_until, ?) \
              WHERE id = ? AND NOT EXISTS (SELECT 1 FROM attachment_references WHERE blob_id = ?) \
-             AND NOT EXISTS (SELECT 1 FROM page_files WHERE blob_id = ?)",
+             AND NOT EXISTS (SELECT 1 FROM page_files WHERE blob_id = ?) \
+             AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = ?)",
         )
         .bind(now.as_millis().saturating_add(DAY_MILLIS))
+        .bind(&blob_id)
         .bind(&blob_id)
         .bind(&blob_id)
         .bind(&blob_id)
