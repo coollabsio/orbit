@@ -106,11 +106,7 @@ function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', op
 const location = (view: ReturnType<typeof render>) => view.getByTestId('location').textContent
 
 /** The editor mounts after the collaborative document's first sync. */
-/**
- * Empties the title through its real onChange. `userEvent.clear` selects and then deletes; a re-render while the editor and
- * comment threads finish loading can drop that selection under happy-dom, so the delete was lost and typing appended to
- * the old title ("DraftRoadmap Q4") in about 1 of 3 full-file runs.
- */
+/** Empties the title through its real onChange (this needs the DOM registered before react-dom loads, see `test/dom.ts`). */
 function clearTitle(title: HTMLInputElement) {
   fireEvent.change(title, { target: { value: '' } })
 }
