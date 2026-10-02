@@ -372,6 +372,7 @@ impl ChatRepository {
         if !access.actor.can_edit_chat_message(message.author_id) {
             return Err(ChatError::Forbidden("Only the author can edit a message."));
         }
+        access.require_member()?;
         access.require_open()?;
         let conversation_id = message.conversation_id;
 
@@ -553,6 +554,7 @@ impl ChatRepository {
         let (access, message) =
             load_message_access(&mut tx, workspace_id, actor_id, message_id).await?;
         access.require_member()?;
+        access.require_open()?;
         if message.deleted || message.kind != MessageKind::Message {
             return Err(ChatError::NotFound);
         }

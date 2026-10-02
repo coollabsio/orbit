@@ -64,10 +64,11 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
 
   // A jump to a reply that is older than the loaded ones: load back until it is there.
   const focusLoaded = !focusMessageId || focusMessageId === rootId || replies.some((reply) => reply.id === focusMessageId)
-  const { hasPreviousPage, isFetchingPreviousPage, fetchPreviousPage } = thread
+  const { hasPreviousPage, isFetchingPreviousPage, isFetchPreviousPageError, fetchPreviousPage } = thread
   useEffect(() => {
-    if (!focusLoaded && hasPreviousPage && !isFetchingPreviousPage) void fetchPreviousPage()
-  }, [focusLoaded, hasPreviousPage, isFetchingPreviousPage, fetchPreviousPage])
+    // A failed page stops the loop; without that it would ask again at once, without end.
+    if (!focusLoaded && hasPreviousPage && !isFetchingPreviousPage && !isFetchPreviousPageError) void fetchPreviousPage()
+  }, [focusLoaded, hasPreviousPage, isFetchingPreviousPage, isFetchPreviousPageError, fetchPreviousPage])
 
   const canWrite = conversation.isMember && !conversation.archived
 

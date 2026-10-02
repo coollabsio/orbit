@@ -63,7 +63,8 @@ export function useEmojiAutocomplete(text: string, setText: (next: string) => vo
 
   /** Returns true when the list used the key. */
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
-    if (!open) return false
+    // During IME composition the keys belong to the IME.
+    if (!open || event.nativeEvent.isComposing) return false
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       const step = event.key === 'ArrowDown' ? 1 : -1

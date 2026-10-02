@@ -2,7 +2,7 @@ import { EmojiPicker as Frimousse, type EmojiPickerListCategoryHeaderProps, type
 import { SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import { EMOJIBASE_PATH, EMOJI_VERSION } from '@/lib/twemoji'
+import { EMOJIBASE_PATH, EMOJI_VERSION, normalizeEmoji } from '@/lib/twemoji'
 import { Emoji } from './Emoji'
 
 function CategoryHeader({ category, ...props }: EmojiPickerListCategoryHeaderProps) {
@@ -42,7 +42,7 @@ export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => v
       emojiVersion={EMOJI_VERSION}
       emojibaseUrl={EMOJIBASE_PATH}
       className="isolate flex h-[380px] w-fit flex-col"
-      onEmojiSelect={({ emoji }) => onPick(emoji)}
+      onEmojiSelect={({ emoji }) => onPick(normalizeEmoji(emoji))}
     >
       <div className="flex items-center gap-2 p-2 pb-0">
         <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md bg-secondary/60 px-2.5 text-muted-foreground focus-within:ring-3 focus-within:ring-ring/50">

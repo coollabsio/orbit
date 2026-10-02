@@ -439,7 +439,7 @@ impl ChatRepository {
         .collect()
     }
 
-    /// The thread states of those of `user_ids` who follow the thread.
+    /// The thread states of those of `user_ids` who follow the thread and can read its conversation.
     pub async fn thread_states_for(
         &self,
         root_id: Id,
@@ -455,7 +455,12 @@ impl ChatRepository {
         sqlx::query(
             "SELECT user_id, last_read_reply_id, read_reply_count, mention_count \
              FROM chat_thread_members WHERE root_id = ? AND following = 1 \
-             AND user_id IN (SELECT value FROM json_each(?))",
+             AND user_id IN (SELECT value FROM json_each(?)) \
+             AND EXISTS (SELECT 1 FROM chat_conversations c \
+                         WHERE c.id = chat_thread_members.conversation_id \
+                           AND (c.kind = 'public' OR EXISTS ( \
+                               SELECT 1 FROM chat_members m WHERE m.conversation_id = c.id \
+                                 AND m.user_id = chat_thread_members.user_id)))",
         )
         .bind(root_id.to_string())
         .bind(id_list(user_ids.iter().copied()))

@@ -353,6 +353,8 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
       const failed = (message: string) => new ChatError('upload_failed', message)
       if (signal?.aborted) throw failed('The upload was cancelled.')
       const size = await imageSize(file)
+      // A cancel while the image was measured: the listener below would never fire.
+      if (signal?.aborted) throw failed('The upload was cancelled.')
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest()
         const query = size ? `?width=${size.width}&height=${size.height}` : ''

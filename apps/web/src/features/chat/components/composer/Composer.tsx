@@ -192,7 +192,8 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = clipboardFiles(event)
-    if (files.length === 0) return
+    // Copied cells or slides carry text and a picture of it: the text is what the user wants.
+    if (files.length === 0 || event.clipboardData.getData('text/plain')) return
     event.preventDefault()
     add(files)
   }

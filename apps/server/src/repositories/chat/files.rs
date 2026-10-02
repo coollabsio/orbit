@@ -56,8 +56,8 @@ pub(super) async fn load_files(
     Ok(())
 }
 
-/// Attaches uploaded files to a new message. Each must be the author's own upload that no
-/// message has yet.
+/// Attaches uploaded files to a new message. Each must be the author's own upload in the
+/// conversation's workspace that no message has yet.
 pub(super) async fn attach_files(
     conn: &mut SqliteConnection,
     message: &mut MessageRecord,
@@ -68,12 +68,14 @@ pub(super) async fn attach_files(
     }
     let attached = sqlx::query(
         "UPDATE chat_message_files SET message_id = ?, conversation_id = ? \
-         WHERE id IN (SELECT value FROM json_each(?)) AND uploaded_by = ? AND message_id IS NULL",
+         WHERE id IN (SELECT value FROM json_each(?)) AND uploaded_by = ? AND message_id IS NULL \
+         AND workspace_id = (SELECT workspace_id FROM chat_conversations WHERE id = ?)",
     )
     .bind(message.id.to_string())
     .bind(message.conversation_id.to_string())
     .bind(id_list(file_ids.iter().copied()))
     .bind(message.author_id.to_string())
+    .bind(message.conversation_id.to_string())
     .execute(&mut *conn)
     .await?
     .rows_affected();

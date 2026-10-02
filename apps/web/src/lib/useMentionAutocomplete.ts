@@ -100,7 +100,8 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
 
   /** Returns true when the key was consumed by the popup. */
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
-    if (!open) return false
+    // During IME composition the keys belong to the IME.
+    if (!open || e.nativeEvent.isComposing) return false
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActiveIndex((index) => (index + 1) % suggestions.length)

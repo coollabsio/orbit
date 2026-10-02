@@ -24,7 +24,10 @@ export function decodeMentions(body: string, people: readonly MentionTarget[], c
 }
 
 interface MentionCandidate {
+  /** The name in lower case. */
   label: string
+  /** The length of the name as written: lower case can change the length of a string ("İ"). */
+  length: number
   token: string
 }
 
@@ -32,14 +35,14 @@ interface MentionCandidate {
 function mentionCandidates(people: readonly MentionTarget[], conversations: readonly MentionTarget[]) {
   const byLength = (a: MentionCandidate, b: MentionCandidate) => b.label.length - a.label.length
   const users = [
-    { label: 'channel', token: '<!channel>' },
-    { label: 'here', token: '<!here>' },
-    ...people.map((person) => ({ label: person.name.toLowerCase(), token: `<@${person.id}>` })),
+    { label: 'channel', length: 7, token: '<!channel>' },
+    { label: 'here', length: 4, token: '<!here>' },
+    ...people.map((person) => ({ label: person.name.toLowerCase(), length: person.name.length, token: `<@${person.id}>` })),
   ]
     .filter((item) => item.label)
     .sort(byLength)
   const channels = conversations
-    .map((conversation) => ({ label: conversation.name.toLowerCase(), token: `<#${conversation.id}>` }))
+    .map((conversation) => ({ label: conversation.name.toLowerCase(), length: conversation.name.length, token: `<#${conversation.id}>` }))
     .filter((item) => item.label)
     .sort(byLength)
   return { users, channels }
@@ -55,7 +58,6 @@ export interface MentionMatch {
 /** Every `@Name`, `#name`, `@channel` and `@here` in typed text, in order. Text inside code is not a mention. */
 export function findMentions(text: string, people: readonly MentionTarget[], conversations: readonly MentionTarget[]): MentionMatch[] {
   const { users, channels } = mentionCandidates(people, conversations)
-  const lower = text.toLowerCase()
   const matches: MentionMatch[] = []
   let offset = 0
   // `split` with a capturing group puts the code segments at the odd indexes.
@@ -68,11 +70,11 @@ export function findMentions(text: string, people: readonly MentionTarget[], con
         const candidates = char === '@' ? users : char === '#' ? channels : null
         const match =
           candidates && isBoundary(part[index - 1])
-            ? candidates.find((item) => lower.startsWith(item.label, at + 1) && isBoundary(part[index + 1 + item.label.length]))
+            ? candidates.find((item) => part.slice(index + 1, index + 1 + item.length).toLowerCase() === item.label && isBoundary(part[index + 1 + item.length]))
             : undefined
         if (match) {
-          matches.push({ start: at, end: at + 1 + match.label.length, token: match.token })
-          index += 1 + match.label.length
+          matches.push({ start: at, end: at + 1 + match.length, token: match.token })
+          index += 1 + match.length
         } else {
           index += 1
         }

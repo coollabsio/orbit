@@ -51,17 +51,18 @@ function internalPath(url: string): string | null {
 }
 
 /** Plain text with its emoji as Twemoji images. */
-function emojify(text: string, key: number): React.ReactNode {
-  return <EmojiText key={`text-${key}`} text={text} />
+function emojify(text: string, key: string): React.ReactNode {
+  return <EmojiText key={key} text={text} />
 }
 
-function linkifyText(text: string): React.ReactNode[] {
+/** `keyPrefix` keeps the keys apart when a caller puts the parts of more than one run of text in one list. */
+function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
   const urlRegex = /https?:\/\/[^\s<]+/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = urlRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(emojify(text.slice(lastIndex, match.index), lastIndex))
+    if (match.index > lastIndex) parts.push(emojify(text.slice(lastIndex, match.index), `${keyPrefix}-text-${lastIndex}`))
     const url = match[0].replace(/[.,!?;:)}\]]+$/, '')
     if (!url) {
       parts.push(match[0])
@@ -73,7 +74,7 @@ function linkifyText(text: string): React.ReactNode[] {
     parts.push(
       github ? (
         <a
-          key={`link-${match.index}`}
+          key={`${keyPrefix}-link-${match.index}`}
           href={safeHref(url)}
           target="_blank"
           rel="noopener noreferrer"
@@ -85,7 +86,7 @@ function linkifyText(text: string): React.ReactNode[] {
         </a>
       ) : path ? (
         <a
-          key={`link-${match.index}`}
+          key={`${keyPrefix}-link-${match.index}`}
           href={path}
           className="text-primary hover:underline"
           onClick={(e) => {
@@ -97,7 +98,7 @@ function linkifyText(text: string): React.ReactNode[] {
         </a>
       ) : (
         <a
-          key={`link-${match.index}`}
+          key={`${keyPrefix}-link-${match.index}`}
           href={safeHref(url)}
           target="_blank"
           rel="noopener noreferrer"
@@ -110,12 +111,12 @@ function linkifyText(text: string): React.ReactNode[] {
     if (url.length < match[0].length) parts.push(match[0].slice(url.length))
     lastIndex = match.index + match[0].length
   }
-  if (lastIndex < text.length) parts.push(emojify(text.slice(lastIndex), lastIndex))
-  return parts.length > 0 ? parts : [emojify(text, 0)]
+  if (lastIndex < text.length) parts.push(emojify(text.slice(lastIndex), `${keyPrefix}-text-${lastIndex}`))
+  return parts.length > 0 ? parts : [emojify(text, `${keyPrefix}-text-0`)]
 }
 
 export function mentionifyText(text: string, keyPrefix: string, mentionTokens: MentionToken[]): React.ReactNode[] {
-  if (mentionTokens.length === 0) return linkifyText(text)
+  if (mentionTokens.length === 0) return linkifyText(text, keyPrefix)
 
   const sortedTokens = [...mentionTokens]
     .filter(
@@ -138,7 +139,7 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
       const nextHash = text.indexOf('#', cursor + 1)
       const candidates = [nextAt, nextHash].filter((index) => index !== -1)
       const end = candidates.length > 0 ? Math.min(...candidates) : text.length
-      parts.push(...linkifyText(text.slice(cursor, end)))
+      parts.push(...linkifyText(text.slice(cursor, end), `${keyPrefix}-${cursor}`))
       cursor = end
       continue
     }

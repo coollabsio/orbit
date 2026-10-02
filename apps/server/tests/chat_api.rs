@@ -1766,3 +1766,94 @@ async fn every_call_stays_fast_with_half_a_million_messages() {
     );
     fixture.assert_counters_exact("the scale run").await;
 }
+
+#[tokio::test]
+async fn a_member_who_left_does_not_edit_and_an_archived_channel_takes_no_reactions() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let design = fixture
+        .channel(&fixture.owner, "design", "public", &[&ada])
+        .await;
+    let message = fixture.send(&ada, &design, "Mine").await;
+    let edit = Some(json!({ "body": "<!channel> changed" }));
+
+    fixture
+        .ok(
+            &ada,
+            "POST",
+            &format!("/conversations/{design}/leave"),
+            None,
+        )
+        .await;
+    let (status, _) = fixture
+        .call(&ada, "PATCH", &format!("/messages/{message}"), edit)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    fixture
+        .ok(
+            &fixture.owner,
+            "POST",
+            &format!("/conversations/{design}/archive"),
+            None,
+        )
+        .await;
+    let (status, _) = fixture
+        .call(
+            &fixture.owner,
+            "PUT",
+            &format!("/messages/{message}/reactions/%F0%9F%91%8D"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    fixture.assert_counters_exact("left and archived").await;
+}
+
+#[tokio::test]
+async fn a_dm_gets_its_member_back_after_the_member_returns_to_the_workspace() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let open = Some(json!({ "user_ids": [ada.id.to_string()] }));
+    let dm = fixture
+        .ok(&fixture.owner, "POST", "/dms", open.clone())
+        .await;
+    let dm_id = dm["result"]["id"].as_str().unwrap();
+    fixture.send(&fixture.owner, dm_id, "Hi").await;
+
+    // Removed from the workspace and added again: the membership row is a new one.
+    let (membership, created_at): (String, i64) = sqlx::query_as(
+        "DELETE FROM memberships WHERE workspace_id = ? AND user_id = ? RETURNING id, created_at",
+    )
+    .bind(&fixture.workspace_id)
+    .bind(ada.id.to_string())
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+    )
+    .bind(membership)
+    .bind(&fixture.workspace_id)
+    .bind(ada.id.to_string())
+    .bind(created_at)
+    .bind(created_at)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let messages = format!("/conversations/{dm_id}/messages");
+    let (status, _) = fixture.call(&ada, "GET", &messages, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let again = fixture.ok(&fixture.owner, "POST", "/dms", open).await;
+    assert_eq!(again["result"]["id"], dm["result"]["id"]);
+    assert_eq!(again["result"]["member_ids"].as_array().unwrap().len(), 2);
+    fixture.ok(&ada, "GET", &messages, None).await;
+    assert_eq!(
+        fixture.counts(&ada, dm_id).await,
+        (0, 0),
+        "starts with all read"
+    );
+    fixture.assert_counters_exact("dm repaired").await;
+}

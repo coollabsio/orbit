@@ -47,3 +47,9 @@ test('extractMentions lists each user once and the two global mentions', () => {
   expect(extractMentions('<@u1> <@u2> <@u1> <!here> <#c1>')).toEqual({ userIds: ['u1', 'u2'], channel: false, here: true })
   expect(extractMentions('<!channel> plain @Ada')).toEqual({ userIds: [], channel: true, here: false })
 })
+
+test('a letter that is longer in lower case does not move the match', () => {
+  const people = [{ id: 'u1', name: 'Ada' }, { id: 'u2', name: 'İpek' }]
+  expect(encodeMentions('İyi günler @Ada', people, [])).toBe('İyi günler <@u1>')
+  expect(encodeMentions('@İpek!', people, [])).toBe('<@u2>!')
+})

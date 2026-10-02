@@ -418,9 +418,25 @@ impl ChatRepository {
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(existing) = existing {
-            let record =
-                current_conversation_record(&mut tx, workspace_id, parse_id(existing)?).await?;
-            return Ok(Events::default().written(record));
+            let id = parse_id(existing)?;
+            // A member who left the workspace and came back lost the row; put it back.
+            let present: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM chat_members WHERE conversation_id = ?")
+                    .bind(id.to_string())
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if usize::try_from(present) == Ok(members.len())
+                || require_workspace_members(&mut tx, workspace_id, &members)
+                    .await
+                    .is_err()
+            {
+                let record = current_conversation_record(&mut tx, workspace_id, id).await?;
+                return Ok(Events::default().written(record));
+            }
+            add_members(&mut tx, id, &members, NotifyLevel::All, now).await?;
+            let events = created_events(&mut tx, workspace_id, id, &members).await?;
+            let record = current_conversation_record(&mut tx, workspace_id, id).await?;
+            return finish(tx, events, record).await;
         }
         require_workspace_members(&mut tx, workspace_id, &members).await?;
         let id = Id::new_v7();

@@ -4,7 +4,7 @@
 //! held across an `await`. A writer that must publish in commit order takes
 //! [`LiveHub::write_lock`] *before* it begins its database transaction.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -62,8 +62,9 @@ struct Workspace {
     seq: u64,
     buffer: VecDeque<Buffered>,
     connections: HashMap<u64, Connection>,
-    /// Members whose last connection closed a moment ago; still online.
-    leaving: HashSet<Id>,
+    /// Members whose last connection closed a moment ago; still online. The value is that
+    /// connection, so only its own timer takes the member offline.
+    leaving: HashMap<Id, u64>,
     write_lock: Arc<AsyncMutex<()>>,
 }
 
@@ -93,7 +94,7 @@ impl Workspace {
             .connections
             .values()
             .map(|connection| connection.user_id)
-            .chain(self.leaving.iter().copied())
+            .chain(self.leaving.keys().copied())
             .collect();
         users.sort_unstable();
         users.dedup();
@@ -101,7 +102,7 @@ impl Workspace {
     }
 
     fn is_online(&self, user_id: Id) -> bool {
-        self.leaving.contains(&user_id)
+        self.leaving.contains_key(&user_id)
             || self
                 .connections
                 .values()
@@ -282,16 +283,16 @@ impl LiveHub {
             if workspace.is_online(user_id) {
                 return;
             }
-            workspace.leaving.insert(user_id);
+            workspace.leaving.insert(user_id, connection_id);
         }
         let hub = self.clone();
         tokio::spawn(async move {
             tokio::time::sleep(hub.inner.offline_grace).await;
             let mut workspaces = hub.workspaces();
             if let Some(workspace) = workspaces.get_mut(&workspace_id)
-                && workspace.leaving.remove(&user_id)
-                && !workspace.is_online(user_id)
+                && workspace.leaving.get(&user_id) == Some(&connection_id)
             {
+                workspace.leaving.remove(&user_id);
                 workspace.presence(user_id, false);
             }
         });
@@ -442,6 +443,25 @@ mod tests {
             json!({ "type": "presence", "user_id": bob, "online": false })
         );
         assert_eq!(hub.online(workspace), [ada]);
+    }
+
+    #[tokio::test]
+    async fn an_old_offline_timer_does_not_end_a_later_delay() {
+        let database = TestDatabase::new().await.unwrap();
+        let hub = LiveHub::with_offline_grace(&database, Duration::from_millis(200));
+        let (workspace, ada) = (Id::new_v7(), Id::new_v7());
+
+        let first = hub.connect(workspace, ada, None, None);
+        hub.disconnect(workspace, first.id, ada);
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let second = hub.connect(workspace, ada, None, None);
+        hub.disconnect(workspace, second.id, ada);
+
+        // The first timer ends here; the second delay has only started.
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(hub.online(workspace), [ada]);
+        tokio::time::sleep(Duration::from_millis(160)).await;
+        assert!(hub.online(workspace).is_empty());
     }
 
     #[tokio::test]
