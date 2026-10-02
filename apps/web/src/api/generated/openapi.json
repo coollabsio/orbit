@@ -26152,7 +26152,8 @@
         "type": "object",
         "description": "A write without a record of its own.",
         "required": [
-          "events"
+          "events",
+          "seq"
         ],
         "properties": {
           "events": {
@@ -26160,6 +26161,11 @@
             "items": {
               "$ref": "#/components/schemas/ChatEvent"
             }
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -26406,10 +26412,11 @@
       },
       "ChatWrite_CategoryRecord": {
         "type": "object",
-        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends.",
+        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends; `seq` is the socket's number of the last\none, so a client that got a later event on its socket leaves these out.",
         "required": [
           "result",
-          "events"
+          "events",
+          "seq"
         ],
         "properties": {
           "events": {
@@ -26437,15 +26444,21 @@
                 "format": "int64"
               }
             }
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
       "ChatWrite_ConversationRecord": {
         "type": "object",
-        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends.",
+        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends; `seq` is the socket's number of the last\none, so a client that got a later event on its socket leaves these out.",
         "required": [
           "result",
-          "events"
+          "events",
+          "seq"
         ],
         "properties": {
           "events": {
@@ -26523,15 +26536,21 @@
                 "type": "string"
               }
             }
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
       "ChatWrite_ConversationStateRecord": {
         "type": "object",
-        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends.",
+        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends; `seq` is the socket's number of the last\none, so a client that got a later event on its socket leaves these out.",
         "required": [
           "result",
-          "events"
+          "events",
+          "seq"
         ],
         "properties": {
           "events": {
@@ -26578,15 +26597,21 @@
                 "description": "Unread messages in the main list, written by other members."
               }
             }
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
       "ChatWrite_MessageRecord": {
         "type": "object",
-        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends.",
+        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends; `seq` is the socket's number of the last\none, so a client that got a later event on its socket leaves these out.",
         "required": [
           "result",
-          "events"
+          "events",
+          "seq"
         ],
         "properties": {
           "events": {
@@ -26717,15 +26742,21 @@
                 "description": "Set on a thread reply."
               }
             }
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
       "ChatWrite_ReadSnapshot": {
         "type": "object",
-        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends.",
+        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends; `seq` is the socket's number of the last\none, so a client that got a later event on its socket leaves these out.",
         "required": [
           "result",
-          "events"
+          "events",
+          "seq"
         ],
         "properties": {
           "events": {
@@ -26755,15 +26786,21 @@
                 }
               }
             }
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
       "ChatWrite_ThreadStateRecord": {
         "type": "object",
-        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends.",
+        "description": "The changed record and the chat events that this write caused for the caller. The events\nare the same records that the live socket sends; `seq` is the socket's number of the last\none, so a client that got a later event on its socket leaves these out.",
         "required": [
           "result",
-          "events"
+          "events",
+          "seq"
         ],
         "properties": {
           "events": {
@@ -26808,6 +26845,11 @@
                 "format": "int64"
               }
             }
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },

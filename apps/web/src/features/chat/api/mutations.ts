@@ -1,45 +1,27 @@
-import { type QueryClient, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { extractMentions } from '../lib/mentionTokens'
 import { hasReaction, toggleReaction } from '../lib/reactions'
 import { useChatContext } from './chatContext'
 import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions } from './client'
-import { applyChatEvent, updateOutbox } from './events'
+import { patchMessage, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
-import type { Attachment, Category, ChatEvent, Conversation, ConversationState, Message, NotifyLevel, ThreadState } from './types'
+import type { Attachment, Category, Conversation, ConversationState, Message, NotifyLevel, ThreadState } from './types'
 
 const TYPING_INTERVAL = 8000
 /** When the typing signal was last sent, for each composer (conversation or thread). */
 const typingSentAt = new Map<string, number>()
 const typingKey = (conversationId: string, threadRootId?: string | null) => `${conversationId}:${threadRootId ?? ''}`
 
-interface Cache {
-  queryClient: QueryClient
-  workspaceId: string
-  apply: (event: ChatEvent) => void
-}
-
 /**
- * A write without an optimistic step. The client reports every change as an event; applying the result here as well
- * (`onSuccess`) is idempotent and makes the caller independent of when the event arrives.
+ * A write without an optimistic step. The cache changes through the events that the client reports for the write,
+ * before the write resolves. The result is for the caller only: it is not written to the cache, because by then the
+ * cache can hold a newer record from the live socket.
  */
-function useChatMutation<TInput, TResult>(
-  run: (client: ChatClient, input: TInput) => Promise<TResult>,
-  onSuccess?: (result: TResult, cache: Cache) => void,
-) {
-  const { client, workspaceId } = useChatContext()
-  const queryClient = useQueryClient()
-  return useMutation<TResult, Error, TInput>({
-    mutationFn: (input) => run(requireClient(client), input),
-    onSuccess: (result) =>
-      onSuccess?.(result, { queryClient, workspaceId, apply: (event) => applyChatEvent(queryClient, workspaceId, event) }),
-  })
+function useChatMutation<TInput, TResult>(run: (client: ChatClient, input: TInput) => Promise<TResult>) {
+  const { client } = useChatContext()
+  return useMutation<TResult, Error, TInput>({ mutationFn: (input) => run(requireClient(client), input) })
 }
-
-const applyMessage = (message: Message, cache: Cache) => cache.apply({ type: 'message.updated', message })
-const applyState = (state: ConversationState, cache: Cache) => cache.apply({ type: 'state.changed', state })
-const applyThreadState = (state: ThreadState, cache: Cache) => cache.apply({ type: 'thread.changed', state })
-const applyConversation = (conversation: Conversation, cache: Cache) => cache.apply({ type: 'conversation.changed', conversation })
 
 export interface SendInput {
   conversationId: string
@@ -96,7 +78,6 @@ export function useSendMessage() {
       typingSentAt.delete(typingKey(input.conversationId, input.threadRootId))
       return optimistic
     },
-    onSuccess: (message) => applyChatEvent(queryClient, workspaceId, { type: 'message.created', message }),
     onError: (_error, _input, optimistic) => {
       if (!optimistic) return
       updateOutbox(queryClient, workspaceId, (waiting) =>
@@ -126,9 +107,7 @@ export function useSendMessage() {
 
 export function useEditMessage() {
   return useChatMutation(
-    (client, input: { messageId: string; body: string }) => client.editMessage(input.messageId, input.body),
-    applyMessage,
-  )
+    (client, input: { messageId: string; body: string }) => client.editMessage(input.messageId, input.body))
 }
 
 /** The lists change through the client's events: a root with replies stays as a deleted row, anything else goes. */
@@ -136,57 +115,75 @@ export function useDeleteMessage() {
   return useChatMutation((client, messageId: string) => client.deleteMessage(messageId))
 }
 
-/** A message change shown at once and put back if the write fails. */
+/**
+ * A change to one field of a message, shown at once and taken back if the write fails. Both steps change the message
+ * that is in the cache at that moment, so an edit or a reaction that came from somebody else meanwhile stays.
+ */
 function useOptimisticMessageMutation<TInput extends { message: Message }>(
   run: (client: ChatClient, input: TInput, currentUserId: string) => Promise<Message>,
-  optimistic: (input: TInput, currentUserId: string) => Message,
+  change: (message: Message, input: TInput, currentUserId: string) => Message,
+  revert: (message: Message, input: TInput, currentUserId: string) => Message,
 ) {
   const { client, workspaceId, currentUserId } = useChatContext()
   const queryClient = useQueryClient()
-  const apply = (message: Message) => applyChatEvent(queryClient, workspaceId, { type: 'message.updated', message })
+  const patch = (input: TInput, update: typeof change) => {
+    const { conversationId, id: messageId, threadRootId } = input.message
+    patchMessage(queryClient, workspaceId, { conversationId, messageId, threadRootId }, (message) => update(message, input, currentUserId ?? ''))
+  }
   return useMutation<Message, Error, TInput>({
     mutationFn: (input) => run(requireClient(client), input, currentUserId ?? ''),
-    onMutate: (input) => apply(optimistic(input, currentUserId ?? '')),
-    onSuccess: apply,
-    onError: (_error, input) => apply(input.message),
+    onMutate: (input) => patch(input, change),
+    onError: (_error, input) => patch(input, revert),
   })
 }
 
 export function useToggleReaction() {
+  const toggle = (message: Message, { emoji }: { message: Message; emoji: string }, userId: string) => ({
+    ...message,
+    reactions: toggleReaction(message.reactions, emoji, userId),
+  })
   return useOptimisticMessageMutation(
     (client, input: { message: Message; emoji: string }, userId) =>
       client.setReaction(input.message.id, input.emoji, !hasReaction(input.message.reactions, input.emoji, userId)),
-    ({ message, emoji }, userId) => ({ ...message, reactions: toggleReaction(message.reactions, emoji, userId) }),
+    toggle,
+    toggle,
   )
 }
 
 export function useSetPinned() {
   return useOptimisticMessageMutation(
     (client, input: { message: Message; pinned: boolean }) => client.setPinned(input.message.id, input.pinned),
-    ({ message, pinned }) => ({ ...message, pinned }),
+    (message, { pinned }) => ({ ...message, pinned }),
+    (message, { pinned }) => ({ ...message, pinned: !pinned }),
   )
 }
 
-/** A change to the user's own conversation settings, shown at once and put back if the write fails. */
-function useOptimisticStateMutation<TInput extends { conversationId: string }>(
+/**
+ * A change to one of the user's own conversation settings, shown at once and taken back if the write fails. Only that
+ * setting goes back: the counts of the state can have changed meanwhile.
+ */
+function useOptimisticStateMutation<TInput extends { conversationId: string }, TKey extends 'notify' | 'favorite'>(
   run: (client: ChatClient, input: TInput) => Promise<ConversationState>,
-  optimistic: (state: ConversationState, input: TInput) => ConversationState,
+  key: TKey,
+  value: (input: TInput) => ConversationState[TKey],
 ) {
   const { client, workspaceId } = useChatContext()
   const queryClient = useQueryClient()
-  const apply = (state: ConversationState) => applyChatEvent(queryClient, workspaceId, { type: 'state.changed', state })
-  return useMutation<ConversationState, Error, TInput, ConversationState | undefined>({
+  const set = (conversationId: string, next: ConversationState[TKey]) =>
+    queryClient.setQueryData<ConversationState[]>(chatKeys.states(workspaceId), (states) =>
+      states?.map((state) => (state.conversationId === conversationId ? { ...state, [key]: next } : state)),
+    )
+  return useMutation<ConversationState, Error, TInput, ConversationState[TKey] | undefined>({
     mutationFn: (input) => run(requireClient(client), input),
     onMutate: (input) => {
       const previous = queryClient
         .getQueryData<ConversationState[]>(chatKeys.states(workspaceId))
-        ?.find((state) => state.conversationId === input.conversationId)
-      if (previous) apply(optimistic(previous, input))
+        ?.find((state) => state.conversationId === input.conversationId)?.[key]
+      set(input.conversationId, value(input))
       return previous
     },
-    onSuccess: apply,
-    onError: (_error, _input, previous) => {
-      if (previous) apply(previous)
+    onError: (_error, input, previous) => {
+      if (previous !== undefined) set(input.conversationId, previous)
     },
   })
 }
@@ -194,28 +191,30 @@ function useOptimisticStateMutation<TInput extends { conversationId: string }>(
 export function useSetNotify() {
   return useOptimisticStateMutation(
     (client, input: { conversationId: string; notify: NotifyLevel }) => client.setNotify(input.conversationId, input.notify),
-    (state, { notify }) => ({ ...state, notify }),
+    'notify',
+    (input) => input.notify,
   )
 }
 
 export function useSetFavorite() {
   return useOptimisticStateMutation(
     (client, input: { conversationId: string; favorite: boolean }) => client.setFavorite(input.conversationId, input.favorite),
-    (state, { favorite }) => ({ ...state, favorite }),
+    'favorite',
+    (input) => input.favorite,
   )
 }
 
 export function useMarkRead() {
-  return useChatMutation((client, conversationId: string) => client.markRead(conversationId), applyState)
+  return useChatMutation((client, conversationId: string) => client.markRead(conversationId))
 }
 
 /** Moves the read cursor to just before a message (for a thread reply: the thread's cursor). */
 export function useMarkUnread() {
-  return useChatMutation((client, messageId: string) => client.markUnread(messageId), applyState)
+  return useChatMutation((client, messageId: string) => client.markUnread(messageId))
 }
 
 export function useMarkThreadRead() {
-  return useChatMutation((client, rootId: string) => client.markThreadRead(rootId), applyThreadState)
+  return useChatMutation((client, rootId: string) => client.markThreadRead(rootId))
 }
 
 /** Resolves with the previous states: pass them to `useRestoreRead` for Undo. */
@@ -229,20 +228,16 @@ export function useRestoreRead() {
 
 export function useSetThreadFollow() {
   return useChatMutation(
-    (client, input: { rootId: string; following: boolean }) => client.setThreadFollow(input.rootId, input.following),
-    applyThreadState,
-  )
+    (client, input: { rootId: string; following: boolean }) => client.setThreadFollow(input.rootId, input.following))
 }
 
 export function useCreateChannel() {
-  return useChatMutation((client, input: ChannelInput) => client.createChannel(input), applyConversation)
+  return useChatMutation((client, input: ChannelInput) => client.createChannel(input))
 }
 
 export function useUpdateChannel() {
   return useChatMutation(
-    (client, input: { conversationId: string; patch: Partial<ChannelInput> }) => client.updateChannel(input.conversationId, input.patch),
-    applyConversation,
-  )
+    (client, input: { conversationId: string; patch: Partial<ChannelInput> }) => client.updateChannel(input.conversationId, input.patch))
 }
 
 export function useArchiveChannel() {
@@ -250,7 +245,7 @@ export function useArchiveChannel() {
 }
 
 export function useJoinChannel() {
-  return useChatMutation((client, conversationId: string) => client.joinChannel(conversationId), applyConversation)
+  return useChatMutation((client, conversationId: string) => client.joinChannel(conversationId))
 }
 
 export function useLeaveChannel() {
@@ -259,9 +254,7 @@ export function useLeaveChannel() {
 
 export function useAddMembers() {
   return useChatMutation(
-    (client, input: { conversationId: string; userIds: string[] }) => client.addMembers(input.conversationId, input.userIds),
-    applyConversation,
-  )
+    (client, input: { conversationId: string; userIds: string[] }) => client.addMembers(input.conversationId, input.userIds))
 }
 
 /** The lists change through the client's events (removing yourself from a private channel removes the conversation). */
@@ -273,7 +266,7 @@ export function useRemoveMember() {
 
 /** Resolves with the DM for exactly these members (and the user): the existing one, or a new one. */
 export function useOpenDm() {
-  return useChatMutation((client, userIds: string[]) => client.openDm(userIds), applyConversation)
+  return useChatMutation((client, userIds: string[]) => client.openDm(userIds))
 }
 
 export function useCreateCategory() {

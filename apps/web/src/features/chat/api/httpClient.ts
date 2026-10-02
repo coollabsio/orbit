@@ -163,10 +163,14 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     }
   }
 
-  /** A write: its events go to the subscribers before the caller gets the result. */
-  async function write<T extends { events: WireEvent[] }>(request: Promise<{ data: T | undefined }>): Promise<T> {
+  /**
+   * A write: its events go to the subscribers before the caller gets the result. The socket sends the same events. If
+   * it has delivered them already (`seq`), the response is old news: newer events can be in the cache by now, and the
+   * records of the response must not go over them.
+   */
+  async function write<T extends { events: WireEvent[]; seq: number }>(request: Promise<{ data: T | undefined }>): Promise<T> {
     const data = await call(request)
-    for (const event of data.events) emit(toEvent(event, me))
+    if (!socket?.seen(data.seq)) for (const event of data.events) emit(toEvent(event, me))
     return data
   }
 

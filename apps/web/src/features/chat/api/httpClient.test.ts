@@ -9,6 +9,8 @@ const state = { conversation_id: 'c1', last_read_message_id: 'm9', unread_count:
 function setup(respond: (path: string) => Response) {
   const requests: string[] = []
   const sent: object[] = []
+  /** The number of the newest event that the fake socket has delivered. */
+  const seen = { seq: 0 }
   /** The live socket's callbacks, so a test can play the server. */
   let live!: LiveSocketOptions
   const client = createHttpChatClient({
@@ -17,7 +19,7 @@ function setup(respond: (path: string) => Response) {
     readIntervalMs: 40,
     openSocket: (options) => {
       live = options
-      return { send: (frame) => sent.push(frame), reconnected: () => Promise.resolve(), close() {} }
+      return { send: (frame) => sent.push(frame), seen: (seq) => seq <= seen.seq, reconnected: () => Promise.resolve(), close() {} }
     },
     client: createApiClient({
       fetch: async (request) => {
@@ -29,19 +31,27 @@ function setup(respond: (path: string) => Response) {
   })
   const events: ChatEvent[] = []
   client.subscribe((event) => events.push(event))
-  return { client, requests, events, sent, live }
+  return { client, requests, events, sent, live, seen }
 }
 
 test('a write gives its events to the subscribers and its result to the caller', async () => {
-  const { client, requests, events } = setup(() => Response.json({ result: state, events: [{ type: 'state.changed', state }] }))
+  const { client, requests, events } = setup(() => Response.json({ result: state, events: [{ type: 'state.changed', state }], seq: 5 }))
   const result = await client.setFavorite('c1', false)
   expect(requests).toEqual(['PATCH /api/v1/workspaces/w1/chat/conversations/c1/state'])
   expect(result.lastReadMessageId).toBe('m9')
   expect(events).toEqual([{ type: 'state.changed', state: result }])
 })
 
+test('a response that comes after the socket delivered its events does not go over newer events', async () => {
+  const { client, events, seen } = setup(() => Response.json({ result: state, events: [{ type: 'state.changed', state }], seq: 5 }))
+  seen.seq = 6
+  const result = await client.setFavorite('c1', false)
+  expect(result.lastReadMessageId).toBe('m9')
+  expect(events).toEqual([])
+})
+
 test('"mark as read" calls inside one interval share one more request', async () => {
-  const { client, requests } = setup(() => Response.json({ result: state, events: [] }))
+  const { client, requests } = setup(() => Response.json({ result: state, events: [], seq: 1 }))
   await client.markRead('c1')
   const second = client.markRead('c1')
   const third = client.markRead('c1')
@@ -94,7 +104,7 @@ test('a send that cannot reach the server goes again when the connection is back
   const { client, requests } = setup(() => {
     attempts += 1
     if (attempts === 1) throw new TypeError('Failed to fetch')
-    return Response.json({ result: message, events: [] })
+    return Response.json({ result: message, events: [], seq: 1 })
   })
   const sentMessage = await client.sendMessage({ conversationId: 'c1', body: 'Hi', nonce: 'n1' })
   expect(sentMessage.id).toBe('m1')

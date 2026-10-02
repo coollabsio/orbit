@@ -271,6 +271,7 @@ export type ChatEvent = {
  */
 export type ChatEvents = {
     events: Array<ChatEvent>;
+    seq: number;
 };
 
 export type ChatFileDownload = Blob | File;
@@ -378,7 +379,8 @@ export type ChatUserIdsBody = {
 
 /**
  * The changed record and the chat events that this write caused for the caller. The events
- * are the same records that the live socket sends.
+ * are the same records that the live socket sends; `seq` is the socket's number of the last
+ * one, so a client that got a later event on its socket leaves these out.
  */
 export type ChatWriteCategoryRecord = {
     events: Array<ChatEvent>;
@@ -387,11 +389,13 @@ export type ChatWriteCategoryRecord = {
         name: string;
         position: number;
     };
+    seq: number;
 };
 
 /**
  * The changed record and the chat events that this write caused for the caller. The events
- * are the same records that the live socket sends.
+ * are the same records that the live socket sends; `seq` is the socket's number of the last
+ * one, so a client that got a later event on its socket leaves these out.
  */
 export type ChatWriteConversationRecord = {
     events: Array<ChatEvent>;
@@ -418,11 +422,13 @@ export type ChatWriteConversationRecord = {
         position: number;
         topic: string;
     };
+    seq: number;
 };
 
 /**
  * The changed record and the chat events that this write caused for the caller. The events
- * are the same records that the live socket sends.
+ * are the same records that the live socket sends; `seq` is the socket's number of the last
+ * one, so a client that got a later event on its socket leaves these out.
  */
 export type ChatWriteConversationStateRecord = {
     events: Array<ChatEvent>;
@@ -443,11 +449,13 @@ export type ChatWriteConversationStateRecord = {
          */
         unread_count: number;
     };
+    seq: number;
 };
 
 /**
  * The changed record and the chat events that this write caused for the caller. The events
- * are the same records that the live socket sends.
+ * are the same records that the live socket sends; `seq` is the socket's number of the last
+ * one, so a client that got a later event on its socket leaves these out.
  */
 export type ChatWriteMessageRecord = {
     events: Array<ChatEvent>;
@@ -497,11 +505,13 @@ export type ChatWriteMessageRecord = {
          */
         thread_root_id: string | null;
     };
+    seq: number;
 };
 
 /**
  * The changed record and the chat events that this write caused for the caller. The events
- * are the same records that the live socket sends.
+ * are the same records that the live socket sends; `seq` is the socket's number of the last
+ * one, so a client that got a later event on its socket leaves these out.
  */
 export type ChatWriteReadSnapshot = {
     events: Array<ChatEvent>;
@@ -512,11 +522,13 @@ export type ChatWriteReadSnapshot = {
         states: Array<ConversationStateRecord>;
         threads: Array<ThreadStateRecord>;
     };
+    seq: number;
 };
 
 /**
  * The changed record and the chat events that this write caused for the caller. The events
- * are the same records that the live socket sends.
+ * are the same records that the live socket sends; `seq` is the socket's number of the last
+ * one, so a client that got a later event on its socket leaves these out.
  */
 export type ChatWriteThreadStateRecord = {
     events: Array<ChatEvent>;
@@ -531,6 +543,7 @@ export type ChatWriteThreadStateRecord = {
         root_id: string;
         unread_replies: number;
     };
+    seq: number;
 };
 
 export type CommentBody = {

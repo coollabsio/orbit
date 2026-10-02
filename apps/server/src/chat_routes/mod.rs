@@ -57,13 +57,16 @@ impl ChatState {
         workspace_id: Id,
         actor_id: Id,
         write: impl Future<Output = Result<Written<T>, ChatError>>,
-    ) -> Result<Written<T>, ChatError> {
+    ) -> Result<(Written<T>, u64), ChatError> {
         let _order = self.hub.write_lock(workspace_id).await;
         let written = write.await?;
         for emitted in &written.events {
             self.hub
                 .publish(workspace_id, &emitted.recipients, TOPIC, &emitted.event);
         }
+        // The number of the write's last event. A client that has seen it on its socket knows
+        // that the response is not news, and that it must not put it over newer events.
+        let seq = self.hub.seq(workspace_id);
         if !written.inbox.is_empty() {
             self.hub.signal(
                 workspace_id,
@@ -110,7 +113,7 @@ impl ChatState {
                 Err(error) => tracing::warn!(error = %error, "thread states for the live socket"),
             }
         }
-        Ok(written)
+        Ok((written, seq))
     }
 }
 
@@ -271,17 +274,20 @@ async fn detached(request: Request, next: Next) -> Response {
 }
 
 /// The changed record and the chat events that this write caused for the caller. The events
-/// are the same records that the live socket sends.
+/// are the same records that the live socket sends; `seq` is the socket's number of the last
+/// one, so a client that got a later event on its socket leaves these out.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct ChatWrite<T> {
     result: T,
     events: Vec<ChatEvent>,
+    seq: u64,
 }
 
 /// A write without a record of its own.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct ChatEvents {
     events: Vec<ChatEvent>,
+    seq: u64,
 }
 
 type RequestIdExtension = Option<Extension<RequestId>>;
@@ -355,7 +361,7 @@ impl<'a> Call<'a> {
         state: &ChatState,
         write: impl Future<Output = Result<Written<T>, ChatError>>,
     ) -> Result<Json<ChatWrite<T>>, ApiError> {
-        let written = state
+        let (written, seq) = state
             .publish(self.workspace_id, self.actor_id, write)
             .await
             .map_err(|error| self.problem(error))?;
@@ -363,6 +369,7 @@ impl<'a> Call<'a> {
         Ok(Json(ChatWrite {
             result: written.value,
             events,
+            seq,
         }))
     }
 
@@ -371,12 +378,13 @@ impl<'a> Call<'a> {
         state: &ChatState,
         write: impl Future<Output = Result<Written<()>, ChatError>>,
     ) -> Result<Json<ChatEvents>, ApiError> {
-        let written = state
+        let (written, seq) = state
             .publish(self.workspace_id, self.actor_id, write)
             .await
             .map_err(|error| self.problem(error))?;
         Ok(Json(ChatEvents {
             events: written.events_for(self.actor_id),
+            seq,
         }))
     }
 }

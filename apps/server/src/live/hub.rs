@@ -203,6 +203,14 @@ impl LiveHub {
         workspace.deliver(recipients, &frame);
     }
 
+    /// The number of the newest event of a workspace.
+    #[must_use]
+    pub fn seq(&self, workspace_id: Id) -> u64 {
+        self.workspaces()
+            .get(&workspace_id)
+            .map_or(0, |workspace| workspace.seq)
+    }
+
     /// Sends a signal that is not numbered and not kept (typing).
     pub fn signal(
         &self,
