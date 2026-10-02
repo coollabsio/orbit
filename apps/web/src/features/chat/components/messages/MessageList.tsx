@@ -221,8 +221,10 @@ export function MessageList({
   const newIndex = items.findIndex((item) => item.type === 'message' && item.isNew)
   const indexOfMessage = (messageId: string | null | undefined) =>
     messageId ? items.findIndex((item) => (item.type === 'message' ? item.message.id === messageId : item.type === 'root' && root?.id === messageId)) : -1
-  // Rows that must stay in the DOM out of view: the one with the keyboard focus, an open edit, the anchor of the menu.
-  const kept = [indexOfMessage(activeId), indexOfMessage(editingId), indexOfMessage(overlay?.messageId)].filter((index) => index !== -1)
+  const latest = allMessages[allMessages.length - 1]
+  const activeRowId = activeId !== null && allMessages.some((message) => message.id === activeId) ? activeId : latest?.id
+  // Rows that must stay in the DOM out of view: the one that Tab goes to, an open edit, the anchor of the menu.
+  const kept = [indexOfMessage(activeRowId), indexOfMessage(editingId), indexOfMessage(overlay?.messageId)].filter((index) => index !== -1)
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -244,6 +246,9 @@ export function MessageList({
       return outside.length > 0 ? [...new Set([...indexes, ...outside])].sort((a, b) => a - b) : indexes
     },
   })
+  // An item above the view that changes its height (a day chip that goes when an older page comes) must not move
+  // what the user sees. The default does not correct that while the list scrolls up.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => item.start < (instance.scrollOffset ?? 0)
   const firstVisible = virtualizer.range?.startIndex ?? 0
   // The "New" line is above the view, or (not loaded) before the window.
   const unreadAbove = track.current.positioned && (newIndex !== -1 ? newIndex < firstVisible : unreadBeforeWindow)
@@ -251,8 +256,6 @@ export function MessageList({
   const dayAbove = items.slice(0, firstVisible + 1).findLast((item) => item.type === 'message' && item.day !== undefined)
 
   const quickEmojis = quickReactions(allMessages, currentUserId)
-  const latest = allMessages[allMessages.length - 1]
-  const activeRowId = activeId !== null && allMessages.some((message) => message.id === activeId) ? activeId : latest?.id
   const overlayMessage = overlay ? allMessages.find((message) => message.id === overlay.messageId) : undefined
 
   function rowElement(messageId: string): HTMLElement | null {
@@ -364,7 +367,7 @@ export function MessageList({
   const viewport = virtualizer.scrollRect?.height ?? 0
   const wantedFill = inThread || loading ? 0 : Math.max(0, Math.round(viewport - (virtualizer.getTotalSize() - fill)))
   useLayoutEffect(() => {
-    if (Math.abs(wantedFill - fill) > 1) setFill(wantedFill)
+    if (wantedFill !== fill) setFill(wantedFill)
   }, [wantedFill, fill])
 
   // An unmount ends what the virtualizer was scrolling to. In development React mounts every component twice
@@ -372,6 +375,7 @@ export function MessageList({
   useLayoutEffect(
     () => () => {
       track.current.positioned = false
+      track.current.jumpedTo = null
     },
     [],
   )

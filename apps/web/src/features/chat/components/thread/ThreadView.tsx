@@ -71,7 +71,7 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
   const { hasPreviousPage, isFetchingPreviousPage, isFetchPreviousPageError, fetchPreviousPage } = thread
   useEffect(() => {
     // A failed page stops the loop; without that it would ask again at once, without end.
-    if (!focusLoaded && hasPreviousPage && !isFetchingPreviousPage && !isFetchPreviousPageError) void fetchPreviousPage()
+    if (!focusLoaded && hasPreviousPage && !isFetchingPreviousPage && !isFetchPreviousPageError) void fetchPreviousPage({ cancelRefetch: false })
   }, [focusLoaded, hasPreviousPage, isFetchingPreviousPage, isFetchPreviousPageError, fetchPreviousPage])
 
   const canWrite = conversation.isMember && !conversation.archived
@@ -89,8 +89,8 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
         hasNewer={thread.hasNextPage}
         loadingOlder={thread.isFetchingPreviousPage}
         loadingNewer={thread.isFetchingNextPage}
-        onLoadOlder={() => void thread.fetchPreviousPage()}
-        onLoadNewer={() => void thread.fetchNextPage()}
+        onLoadOlder={() => void thread.fetchPreviousPage({ cancelRefetch: false })}
+        onLoadNewer={() => void thread.fetchNextPage({ cancelRefetch: false })}
         lastReadMessageId={suspended ? state?.lastReadReplyId : openCursor}
         openAt="unread"
         initialFromBottom={initialFromBottom}

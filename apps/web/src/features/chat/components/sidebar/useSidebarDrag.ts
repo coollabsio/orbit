@@ -154,6 +154,7 @@ export function useSidebarDrag(onDrop: (drag: SidebarDrag, drop: SidebarDrop) =>
       window.removeEventListener('pointercancel', end)
       window.removeEventListener('touchmove', onTouchMove)
       window.removeEventListener('contextmenu', onContextMenu, true)
+      window.removeEventListener('keydown', onKeyDown, true)
       document.body.style.userSelect = ''
       document.body.style.cursor = ''
       cancelAnimationFrame(frame)
@@ -197,6 +198,13 @@ export function useSidebarDrag(onDrop: (drag: SidebarDrag, drop: SidebarDrop) =>
     const onTouchMove = (move: TouchEvent) => {
       if (active && move.cancelable) move.preventDefault()
     }
+    // `Esc` ends the drag and nothing moves. It goes no further: it must not close a pane too.
+    const onKeyDown = (key: KeyboardEvent) => {
+      if (key.key !== 'Escape' || !active) return
+      key.preventDefault()
+      key.stopPropagation()
+      end()
+    }
     // A hold is the start of a drag here, not the request for the context menu.
     const onContextMenu = (menu: MouseEvent) => {
       if (!touch) return
@@ -209,6 +217,7 @@ export function useSidebarDrag(onDrop: (drag: SidebarDrag, drop: SidebarDrop) =>
     window.addEventListener('pointercancel', end)
     window.addEventListener('touchmove', onTouchMove, { passive: false })
     window.addEventListener('contextmenu', onContextMenu, true)
+    window.addEventListener('keydown', onKeyDown, true)
     stop.current = end
   }
 

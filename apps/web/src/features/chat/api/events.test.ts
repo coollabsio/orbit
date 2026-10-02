@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { InfiniteQueryObserver, QueryClient } from '@tanstack/react-query'
+import { QueryClient } from '@tanstack/react-query'
 import { testMessage } from '../lib/testMessage'
 import { applyChatEvent, type MessagePages, type ThreadPages, updateOutbox } from './events'
 import { chatKeys } from './keys'
@@ -68,32 +68,27 @@ test('the confirmed message takes the place of the row in the outbox with its no
   expect(outbox()).toEqual(['~001-n1'])
 })
 
-test('a list that loads while an event comes loads once more', async () => {
+test('an event that comes while a list loads is applied again when the load ends', async () => {
   const client = new QueryClient()
-  let calls = 0
   let release = () => {}
-  // An open list: only a query that someone looks at loads again.
-  const observer = new InfiniteQueryObserver(client, {
+  // The server read the page before the message was there.
+  const loaded = client.fetchInfiniteQuery({
     queryKey: chatKeys.messages(W, 'c1'),
     initialPageParam: {},
-    getNextPageParam: () => undefined,
-    staleTime: Infinity,
     queryFn: async () => {
-      calls += 1
-      if (calls === 1) await new Promise<void>((resolve) => (release = resolve))
-      return { items: calls === 1 ? [] : [testMessage({ id: 'm1' })], before: null, after: null }
+      await new Promise<void>((resolve) => (release = resolve))
+      return { items: [testMessage({ id: 'm1' })], before: null, after: null }
     },
   })
-  const stop = observer.subscribe(() => {})
   await Promise.resolve()
-  // No data yet: the event itself changes nothing.
-  applyChatEvent(client, W, { type: 'message.created', message: testMessage({ id: 'm1' }) })
-  applyChatEvent(client, W, { type: 'message.updated', message: testMessage({ id: 'm1' }) })
+  // No data yet: the events themselves change nothing.
+  applyChatEvent(client, W, { type: 'message.created', message: testMessage({ id: 'm2' }) })
+  applyChatEvent(client, W, { type: 'message.updated', message: testMessage({ id: 'm2', body: 'edited' }) })
   release()
+  await loaded
   await new Promise((resolve) => setTimeout(resolve, 10))
-  stop()
-  expect(calls).toBe(2)
-  expect(client.getQueryData<MessagePages>(chatKeys.messages(W, 'c1'))?.pages[0].items.map((message) => message.id)).toEqual(['m1'])
+  const items = client.getQueryData<MessagePages>(chatKeys.messages(W, 'c1'))!.pages[0].items
+  expect(items.map((message) => [message.id, message.body])).toEqual([['m1', testMessage({ id: 'm1' }).body], ['m2', 'edited']])
 })
 
 test('a reply goes to its thread and updates the root’s summary in the conversation list, once', () => {

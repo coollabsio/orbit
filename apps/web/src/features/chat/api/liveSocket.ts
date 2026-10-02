@@ -87,6 +87,8 @@ export function openLiveSocket(options: LiveSocketOptions): LiveSocket {
       return
     }
     if (frame.type === 'hello') {
+      // The numbers of a new epoch start again: the last number of the old one says nothing about it.
+      if (frame.epoch !== epoch) lastSeq = null
       epoch = frame.epoch ?? null
       helloSeq = frame.seq ?? 0
       attempt = 0

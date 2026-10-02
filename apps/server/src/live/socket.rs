@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use orbit_platform::Id;
 use serde::Deserialize;
@@ -69,11 +69,11 @@ async fn connect(
         return refuse(upgrade, close::SESSION, "no session");
     };
     let database = state.identity.database().clone();
-    if !authorized(&database, workspace, session.id)
-        .await
-        .unwrap_or(false)
-    {
-        return refuse(upgrade, close::FORBIDDEN, "no access");
+    match authorized(&database, workspace, session.id).await {
+        Ok(true) => {}
+        Ok(false) => return refuse(upgrade, close::FORBIDDEN, "no access"),
+        // The database could not say: the client must try again, not give up.
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
     upgrade
         .max_message_size(MAX_FRAME_BYTES)

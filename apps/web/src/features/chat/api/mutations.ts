@@ -78,6 +78,9 @@ export function useSendMessage() {
       typingSentAt.delete(typingKey(input.conversationId, input.threadRootId))
       return optimistic
     },
+    // Usually the `message.created` event took the row out already. It did not if nobody listened to the client then
+    // (the user was in a different workspace), or if a resync came in place of the event.
+    onSuccess: (_message, input) => updateOutbox(queryClient, workspaceId, (waiting) => waiting.filter((item) => item.nonce !== input.nonce)),
     onError: (_error, _input, optimistic) => {
       if (!optimistic) return
       updateOutbox(queryClient, workspaceId, (waiting) =>
@@ -138,15 +141,18 @@ function useOptimisticMessageMutation<TInput extends { message: Message }>(
 }
 
 export function useToggleReaction() {
-  const toggle = (message: Message, { emoji }: { message: Message; emoji: string }, userId: string) => ({
-    ...message,
-    reactions: toggleReaction(message.reactions, emoji, userId),
-  })
+  type Input = { message: Message; emoji: string }
+  /** The user's reaction on or off. Nothing changes if it is in that state already. */
+  const set = (on: (input: Input, userId: string) => boolean) => (message: Message, input: Input, userId: string) =>
+    hasReaction(message.reactions, input.emoji, userId) === on(input, userId)
+      ? message
+      : { ...message, reactions: toggleReaction(message.reactions, input.emoji, userId) }
+  // What the click asks for comes from the message as the user saw it.
+  const wanted = (input: Input, userId: string) => !hasReaction(input.message.reactions, input.emoji, userId)
   return useOptimisticMessageMutation(
-    (client, input: { message: Message; emoji: string }, userId) =>
-      client.setReaction(input.message.id, input.emoji, !hasReaction(input.message.reactions, input.emoji, userId)),
-    toggle,
-    toggle,
+    (client, input: Input, userId) => client.setReaction(input.message.id, input.emoji, wanted(input, userId)),
+    set(wanted),
+    set((input, userId) => !wanted(input, userId)),
   )
 }
 

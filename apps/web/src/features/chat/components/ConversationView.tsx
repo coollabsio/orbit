@@ -160,8 +160,9 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
           hasNewer={query.hasNextPage}
           loadingOlder={query.isFetchingPreviousPage}
           loadingNewer={query.isFetchingNextPage}
-          onLoadOlder={() => void query.fetchPreviousPage()}
-          onLoadNewer={() => void query.fetchNextPage()}
+          // A page must not stop a refetch that is on its way (after a resync): the refetch would be lost.
+          onLoadOlder={() => void query.fetchPreviousPage({ cancelRefetch: false })}
+          onLoadNewer={() => void query.fetchNextPage({ cancelRefetch: false })}
           lastReadMessageId={cursor}
           openAt={view.openAt}
           focusMessageId={focusMessageId}

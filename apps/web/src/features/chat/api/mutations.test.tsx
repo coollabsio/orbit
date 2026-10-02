@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { ChatContext } from './chatContext'
@@ -171,4 +171,26 @@ test('a reaction and a favorite show at once and roll back when the write fails'
   })
   expect(messages()[0].reactions).toEqual(message.reactions)
   expect(favorite()).toBe(false)
+})
+
+test('a failed reaction does not come back when the server’s message came meanwhile', async () => {
+  const server = gate()
+  const { wrapper, messages } = await setup({
+    setReaction: async () => {
+      await server.opened
+      throw new ChatError('conflict', 'Too many reactions.')
+    },
+  })
+  const message = messages()[0]
+  const view = renderHook(() => ({ react: useToggleReaction(), client: useQueryClient() }), { wrapper })
+
+  await act(async () => {
+    view.result.current.react.mutate({ message, emoji: '🎉' })
+    await tick()
+    // An event with the message as the server has it: without the reaction.
+    applyChatEvent(view.result.current.client, W, { type: 'message.updated', message })
+    server.open()
+    await tick()
+  })
+  expect(messages()[0].reactions).toEqual(message.reactions)
 })

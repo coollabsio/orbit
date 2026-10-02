@@ -173,14 +173,15 @@ function messageUpdated(queryClient: QueryClient, workspaceId: string, message: 
 
 /**
  * An event for a query that is loading can be lost: the query has no data to change yet, or the response that
- * comes was read before the event and takes its place. Such a query loads once more when it ends.
+ * comes was read before the event and takes its place. The event is applied once more when the load ends: every
+ * event gives the same result when it is applied a second time.
  */
-function refetchAfterFetch(queryClient: QueryClient, queryKey: readonly unknown[]) {
-  for (const query of queryClient.getQueryCache().findAll({ queryKey, fetchStatus: 'fetching' })) {
-    const again = () => void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true }, { cancelRefetch: false })
-    // More events in one fetch ask once: the later calls join the refetch that the first one started.
-    query.promise?.then(again, again)
-  }
+function applyAgainAfterFetch(queryClient: QueryClient, workspaceId: string, event: ChatEvent) {
+  const fetching = changedKeys(workspaceId, event).flatMap((queryKey) => queryClient.getQueryCache().findAll({ queryKey, fetchStatus: 'fetching' }))
+  if (fetching.length === 0) return
+  const again = () => applyChatEvent(queryClient, workspaceId, event)
+  // The events of one load are applied again in the order in which they came.
+  void Promise.allSettled(fetching.map((query) => query.promise)).then(again)
 }
 
 /** The queries that an event changes in place. */
@@ -211,7 +212,7 @@ function changedKeys(workspaceId: string, event: ChatEvent): (readonly unknown[]
  * provider sends those to the live stores.
  */
 export function applyChatEvent(queryClient: QueryClient, workspaceId: string, event: ChatEvent) {
-  for (const key of changedKeys(workspaceId, event)) refetchAfterFetch(queryClient, key)
+  applyAgainAfterFetch(queryClient, workspaceId, event)
   switch (event.type) {
     case 'message.created':
       messageCreated(queryClient, workspaceId, event.message)

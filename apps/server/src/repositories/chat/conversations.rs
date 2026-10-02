@@ -558,6 +558,9 @@ impl ChatRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
         require_category(&mut tx, workspace_id, Some(category_id)).await?;
+        if before_id == Some(category_id) {
+            return Ok(Events::default().written(()));
+        }
         let mut order = sqlx::query(
             "SELECT id FROM chat_categories WHERE workspace_id = ? AND id <> ? ORDER BY position, id",
         )
@@ -605,6 +608,9 @@ impl ChatRepository {
         }
         access.require_open()?;
         require_category(&mut tx, workspace_id, category_id).await?;
+        if before_id == Some(conversation_id) {
+            return Ok(Events::default().written(()));
+        }
         let siblings = sqlx::query(
             "SELECT id, position FROM chat_conversations WHERE workspace_id = ? AND kind <> 'dm' \
              AND archived_at IS NULL AND category_id IS ? AND id <> ? ORDER BY position, id",
