@@ -1,5 +1,5 @@
 /**
- * Chat is being rebuilt: its routes, navigation and shortcuts exist in development builds only, and production keeps
- * "Coming soon". This is the only place that decides it.
+ * Chat is on in every build. The routes, navigation and shortcuts of chat all read this one switch, so turning chat
+ * off again is this one line.
  */
-export const chatEnabled = import.meta.env.DEV === true
+export const chatEnabled = true

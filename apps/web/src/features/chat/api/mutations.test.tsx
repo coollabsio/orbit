@@ -3,36 +3,76 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { ChatContext } from './chatContext'
-import type { ChatClient } from './client'
+import type { ChatClient, SendMessageInput } from './client'
 import { applyChatEvent, type MessagePages } from './events'
 import { chatKeys } from './keys'
-import { createMockChatClient } from './mockClient'
 import { useSendMessage, useSetFavorite, useToggleReaction } from './mutations'
-import { ChatError, type ConversationState } from './types'
+import { ChatError, type Conversation, type ConversationState, type Message } from './types'
 
 const W = 'w1'
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5))
 
-/** The provider's wiring without the workspace and auth queries: a client, and its events into a loaded cache. */
+const general: Conversation = {
+  id: 'c1',
+  kind: 'public',
+  name: 'general',
+  topic: '',
+  categoryId: null,
+  position: 0,
+  memberIds: ['u1', 'u2'],
+  isMember: true,
+  isDefault: true,
+  archived: false,
+  createdBy: 'u2',
+  createdAt: 1,
+  lastMessageAt: 1,
+}
+
+function message(id: string, authorId: string, body: string, nonce: string | null = null): Message {
+  return {
+    id,
+    conversationId: general.id,
+    threadRootId: null,
+    kind: 'message',
+    authorId,
+    body,
+    mentions: { userIds: [], channel: false, here: false },
+    createdAt: 1,
+    editedAt: null,
+    deleted: false,
+    attachments: [],
+    reactions: [],
+    pinned: false,
+    alsoInChannel: false,
+    nonce,
+    replyCount: 0,
+    lastReplyAt: null,
+    replyUserIds: [],
+    lastReply: null,
+  }
+}
+
+/**
+ * The provider's wiring without the workspace and auth queries: a loaded cache, and a client that confirms a send the
+ * way the server does (the message comes back as an event and as the result). `overrides` make single calls fail.
+ */
 async function setup(overrides: Partial<ChatClient> = {}) {
-  const mock = createMockChatClient({
-    workspaceId: W,
-    currentUserId: 'u1',
-    members: [
-      { id: 'u1', role: 'Member' },
-      { id: 'u2', role: 'Owner' },
-    ],
-    latencyMs: 0,
-  })
-  const client: ChatClient = { ...mock, ...overrides }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  mock.subscribe((event) => applyChatEvent(queryClient, W, event))
-  const general = (await mock.listConversations()).find((conversation) => conversation.isDefault)!
+  let sent = 0
+  const server = {
+    async sendMessage(input: SendMessageInput) {
+      const confirmed = message(`m${++sent}`, 'u1', input.body, input.nonce)
+      applyChatEvent(queryClient, W, { type: 'message.created', message: confirmed })
+      return confirmed
+    },
+  }
+  const client = { ...server, ...overrides } as ChatClient
   queryClient.setQueryData<MessagePages>(chatKeys.messages(W, general.id), {
-    pages: [await mock.listMessages(general.id)],
+    pages: [{ items: [message('m0', 'u2', 'Welcome')], before: null, after: null }],
     pageParams: [{}],
   })
-  queryClient.setQueryData(chatKeys.states(W), await mock.listStates())
+  const state: ConversationState = { conversationId: general.id, lastReadMessageId: 'm0', unreadCount: 0, mentionCount: 0, notify: 'mentions', favorite: false }
+  queryClient.setQueryData(chatKeys.states(W), [state])
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
       <ChatContext.Provider value={{ client, workspaceId: W, currentUserId: 'u1' }}>{children}</ChatContext.Provider>
@@ -41,7 +81,7 @@ async function setup(overrides: Partial<ChatClient> = {}) {
   const messages = () => queryClient.getQueryData<MessagePages>(chatKeys.messages(W, general.id))!.pages.flatMap((page) => page.items)
   const favorite = () =>
     queryClient.getQueryData<ConversationState[]>(chatKeys.states(W))!.find((state) => state.conversationId === general.id)!.favorite
-  return { mock, wrapper, general, messages, favorite }
+  return { mock: server, wrapper, general, messages, favorite }
 }
 
 function gate() {

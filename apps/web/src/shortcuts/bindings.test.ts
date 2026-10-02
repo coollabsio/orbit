@@ -74,7 +74,7 @@ test('isReserved refuses browser shortcuts and bare modifiers', () => {
 
 test('findConflicts lists every command a key collides with', () => {
   const bindings = resolveBindings({})
-  expect(findConflicts(bindings, 'task.setStatus', 'G').length).toBe(10)
+  expect(findConflicts(bindings, 'task.setStatus', 'G').length).toBe(11)
   expect(findConflicts(bindings, 'task.setStatus', 'P').map((command) => command.id)).toEqual(['task.setPriority'])
   expect(findConflicts(bindings, 'task.setStatus', 'Q')).toEqual([])
 })

@@ -148,7 +148,7 @@ const CODE_BY_STATUS: Partial<Record<number, ChatErrorCode>> = { 403: 'forbidden
 
 /**
  * A failed request as the `ChatError` the UI knows. Input that the server refuses (422: an empty name, an empty
- * message) is `conflict`, as in the mock client; only the length limit has its own code. Everything else, a request
+ * message) is `conflict`, which the dialogs show as a name problem; only the length limit has its own code. Everything else, a request
  * that did not reach the server included, is `offline`.
  */
 export function toChatError(error: unknown): ChatError {

@@ -103,7 +103,7 @@ test('command palette never advertises disabled products or mock store titles', 
   await waitFor(() => expect(view.getByPlaceholderText('Search tasks, pages and navigation…')).toBeTruthy())
 
   const labels = view.getAllByRole('option').map((option) => option.textContent ?? '')
-  for (const forbidden of ['Go to Mail', 'Go to Chat', 'Go to Direct Messages', 'Infrastructure', 'Proxy issue', '#general']) {
+  for (const forbidden of ['Go to Mail', 'Go to Direct Messages', 'Infrastructure', 'Proxy issue', '#general']) {
     expect(labels.some((label) => label.includes(forbidden))).toBe(false)
   }
 })

@@ -108,9 +108,9 @@ test('docs are enabled in the sidebar and highlight on page routes', () => {
   fireEvent.click(docs)
   expect(view.getByTestId('location').textContent).toBe('/docs')
   expect(view.getByRole('link', { name: 'Docs' }).dataset.active).toBe('true')
-  for (const label of ['Mail', 'Chat']) {
-    expect(view.queryByRole('link', { name: label })).toBeNull()
-  }
+  // Mail is not a product yet; Chat is.
+  expect(view.queryByRole('link', { name: 'Mail' })).toBeNull()
+  expect(view.getByRole('link', { name: 'Chat' })).toBeTruthy()
 })
 
 test('chat and direct messages are not products in production: Chat is "Coming soon"', () => {

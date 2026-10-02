@@ -21,7 +21,7 @@ test('tasks are the landing page, docs are enabled and mock product routes are d
   }
 })
 
-test('chat is a product in development builds only, and direct messages are not a product of their own', () => {
+test('chat is a product only while it is turned on, and direct messages are not a product of their own', () => {
   expect(disabledProductPathsFor(false)).toEqual(['/mail', '/chat'])
   expect(mobileDockPathsFor(false)).toEqual(['/tasks', '/docs', '/settings'])
   expect(disabledProductPathsFor(true)).toEqual(['/mail'])
@@ -33,8 +33,8 @@ test('chat is a product in development builds only, and direct messages are not 
   expect(isDisabledProductPath('/chat/general')).toBe(!chatEnabled)
 })
 
-test('the test run is not a development build, so the production behaviour is what the other tests see', () => {
-  expect(chatEnabled).toBeFalse()
+test('chat is on in every build', () => {
+  expect(chatEnabled).toBeTrue()
 })
 
 test('everything below /chat is a full screen on a phone', () => {

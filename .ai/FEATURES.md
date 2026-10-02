@@ -395,8 +395,8 @@ Core files: `features/chat/pages/ChatPage.tsx`, `features/chat/components/*`, `f
 Design: `docs/superpowers/specs/2026-10-01-chat-redesign-design.md` (UI) and
 `2026-10-02-chat-backend-design.md` (backend); both are local files.
 
-Chat runs on the server. It is on in development builds only (`lib/chatEnabled.ts`); production
-shows "Coming soon" until that gate is removed.
+Chat runs on the server and is on in every build. `lib/chatEnabled.ts` is the one switch that
+turns its routes, navigation and shortcuts off.
 
 - One chat space for each workspace: public and private channels, direct messages (1:1 and
   group), shared categories, personal favorites. `#general` has every member.
@@ -407,8 +407,7 @@ shows "Coming soon" until that gate is removed.
 - Live updates, typing and presence come over the workspace's live socket
   (`GET /api/v1/workspaces/{id}/live`).
 - A mention in a channel makes an Inbox item; reading the channel reads it.
-- `features/chat/api/client.ts` is the contract. `httpClient.ts` is the implementation;
-  `mockClient.ts` is an in-memory one that only tests use.
+- `features/chat/api/client.ts` is the contract and `httpClient.ts` is its implementation.
 
 ## Notifications, profile, and settings
 

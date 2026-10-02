@@ -160,7 +160,7 @@ test('a key that many shortcuts start with cannot be swapped', async () => {
   const puts = api()
   const view = mount()
   await record(view, 'Change status', 'g')
-  expect(row(view, 'Change status').textContent).toContain('Used by "Go to inbox" and 9 more.')
+  expect(row(view, 'Change status').textContent).toContain('Used by "Go to inbox" and 10 more.')
   expect(within(row(view, 'Change status')).queryByRole('button', { name: 'Swap' })).toBeNull()
   expect(puts).toEqual([])
 })

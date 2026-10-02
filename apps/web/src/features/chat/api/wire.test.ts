@@ -103,7 +103,7 @@ test('a failed request becomes the chat error the UI knows', () => {
   expect(problem(403, 'chat_forbidden').code).toBe('forbidden')
   expect(problem(409, 'chat_conflict').code).toBe('conflict')
   expect(problem(422, 'chat_message_too_long').code).toBe('too_long')
-  // An empty channel name or message: the dialogs treat it like the mock client's `conflict`.
+  // An empty channel name or message: the dialogs treat it as `conflict`.
   expect(problem(422, 'validation_failed').code).toBe('conflict')
   expect(problem(500, 'internal_error').code).toBe('offline')
   expect(problem(403, 'chat_forbidden').message).toBe('Why it failed.')
