@@ -120,9 +120,9 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
       onTouchEnd={cancelPress}
       onTouchCancel={cancelPress}
     >
-      {/* The measure: at most 90 characters of text beside the avatar column. The toolbar is anchored to its right edge. */}
+      {confirmed && !editing && !message.deleted ? <MessageToolbar message={message} /> : null}
+      {/* The measure: at most 90 characters of text beside the avatar column. */}
       <div className="relative flex max-w-[calc(90ch+3rem)] gap-3 text-[15px] max-[899px]:gap-2 max-[899px]:text-sm">
-        {confirmed && !editing && !message.deleted ? <MessageToolbar message={message} /> : null}
         <div className="flex w-9 shrink-0 justify-center max-[899px]:w-[30px]">
           {groupStart ? (
             <UserAvatar user={author} name="?" size={phone ? 30 : 36} className="mt-0.5" />

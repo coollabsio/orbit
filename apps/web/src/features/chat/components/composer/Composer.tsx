@@ -15,7 +15,6 @@ import { MentionPopover } from '@/components/common/MentionPopover'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Textarea } from '@/components/ui/textarea'
 import { clipboardFiles } from '@/lib/attachmentLib'
 import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
 import { useChatContext } from '../../api/chatContext'
@@ -25,8 +24,11 @@ import { clearDraft, getDraft, setDraft } from '../../lib/drafts'
 import { encodeMentions, extractMentions } from '../../lib/mentionTokens'
 import { useCoarsePointer } from '../messages/environment'
 import { conversationTitle, useChatPeople } from '../messages/people'
+import { ComposerInput } from './ComposerInput'
 import { ComposerUploads } from './ComposerUploads'
+import { EmojiSuggestions } from './EmojiSuggestions'
 import { useAutosize } from './useAutosize'
+import { useEmojiAutocomplete } from './useEmojiAutocomplete'
 import { useUploads } from './useUploads'
 
 /** The counter shows when this few characters are left. */
@@ -56,7 +58,8 @@ interface ComposerProps {
 }
 
 /**
- * The message box of a conversation or a thread: markdown source, `@` and `#` autocomplete, files, emoji, a draft kept
+ * The message box of a conversation or a thread: markdown source, `@`, `#` and `:emoji` autocomplete (mentions and
+ * emoji show in the field as the reader will get them), files, a draft kept
  * in `localStorage`, and the typing signal. `Enter` sends (a new line on a touch screen), `Shift+Enter` is a new line.
  */
 export function Composer({ ref, conversation, threadRootId = null, autoFocus = false, onEditLast, onFocusList, onSent }: ComposerProps) {
@@ -94,6 +97,7 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
         { id: '!here', name: 'here', handle: 'everyone online' },
       ]
   const mention = useMentionAutocomplete([...candidates, ...everyone], text, setText, input, undefined, undefined, people.channels)
+  const emoji = useEmojiAutocomplete(text, setText, input)
 
   useEffect(() => {
     const element = input.current
@@ -132,6 +136,7 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
     clear()
     setAlsoInChannel(false)
     mention.close()
+    emoji.close()
     onSent?.()
     input.current?.focus()
   }
@@ -158,14 +163,18 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
   }
 
   function onChange(event: ChangeEvent<HTMLTextAreaElement>) {
-    setText(event.target.value)
-    mention.update(event.target.value, event.target.selectionStart)
+    const { value, selectionStart } = event.target
+    // `:joy:` typed in full becomes the emoji
+    if (emoji.complete(value, selectionStart)) return
+    setText(value)
+    mention.update(value, selectionStart)
+    emoji.update(value, selectionStart)
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    // `Esc` closes the mention list and goes no further; with nothing open here it reaches the view, which closes
-    // the pane. It never clears the text.
-    if (mention.handleKeyDown(event)) {
+    // `Esc` closes the mention or emoji list and goes no further; with nothing open here it reaches the view, which
+    // closes the pane. It never clears the text.
+    if (mention.handleKeyDown(event) || emoji.handleKeyDown(event)) {
       event.stopPropagation()
       return
     }
@@ -199,14 +208,18 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
       <div className="relative">
         {mention.open ? (
           <MentionPopover suggestions={mention.suggestions} activeIndex={mention.activeIndex} onSelect={mention.insert} onHover={mention.setActiveIndex} />
+        ) : emoji.open ? (
+          <EmojiSuggestions query={emoji.query} suggestions={emoji.suggestions} activeIndex={emoji.activeIndex} onSelect={emoji.insert} onHover={emoji.setActiveIndex} />
         ) : null}
         <div
           data-slot="composer-box"
           className="flex max-h-[50cqh] flex-col rounded-lg border border-input bg-background transition-[border-color,box-shadow] dark:bg-input/30 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
         >
-          <Textarea
+          <ComposerInput
             ref={input}
             value={text}
+            people={people.members}
+            conversations={people.channels}
             rows={1}
             aria-label={inThread ? 'Reply in thread' : `Message ${title}`}
             placeholder={inThread ? 'Reply…' : `Message ${title}`}
@@ -214,8 +227,14 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
             onChange={onChange}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            onSelect={(event) => mention.update(event.currentTarget.value, event.currentTarget.selectionStart)}
-            onBlur={mention.close}
+            onSelect={(event) => {
+              mention.update(event.currentTarget.value, event.currentTarget.selectionStart)
+              emoji.update(event.currentTarget.value, event.currentTarget.selectionStart)
+            }}
+            onBlur={() => {
+              mention.close()
+              emoji.close()
+            }}
           />
           <ComposerUploads uploads={uploads} onRemove={remove} onRetry={retry} />
           <div className="flex shrink-0 items-center gap-1 p-1.5">

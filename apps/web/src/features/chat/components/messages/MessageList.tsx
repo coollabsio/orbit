@@ -213,6 +213,7 @@ export function MessageList({
     openMenu: (message, anchor, align) => {
       if (actionsFor(message).length > 0) showOverlay('menu', message, anchor, align)
     },
+    openPicker: (message, anchor, align) => showOverlay('picker', message, anchor, align),
     openSheet: (message) => {
       const row = rowElement(message.id)
       if (row && actionsFor(message).length > 0) showOverlay('sheet', message, row, 'start')
@@ -475,7 +476,7 @@ export function MessageList({
                     editing={editingId === root.id}
                     active={activeRowId === root.id}
                     tone={highlight?.id === root.id ? highlight.phase : undefined}
-                    menuOpen={overlayOpen && overlay?.kind === 'menu' && overlay.messageId === root.id}
+                    menuOpen={overlayOpen && overlay?.kind !== 'sheet' && overlay?.messageId === root.id}
                   />
                   {root.replyCount > 0 || messages.length > 0 ? <RepliesDivider count={Math.max(root.replyCount, messages.length)} /> : null}
                 </>
@@ -495,7 +496,7 @@ export function MessageList({
                     editing={editingId === row.message.id}
                     active={activeRowId === row.message.id}
                     tone={highlight?.id === row.message.id ? highlight.phase : undefined}
-                    menuOpen={overlayOpen && overlay?.kind === 'menu' && overlay.messageId === row.message.id}
+                    menuOpen={overlayOpen && overlay?.kind !== 'sheet' && overlay?.messageId === row.message.id}
                   />
                 ),
               )}

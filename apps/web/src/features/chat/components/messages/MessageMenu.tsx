@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { Emoji } from '@/components/common/Emoji'
 import { Button } from '@/components/ui/button'
 import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -87,7 +88,7 @@ export function MessageActionSheet({
                   onOpenChange(false)
                 }}
               >
-                {emoji}
+                <Emoji value={emoji} />
               </Button>
             ))}
           </div>

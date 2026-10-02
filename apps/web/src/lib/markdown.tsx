@@ -4,6 +4,7 @@
 // message content and embed cards.
 import { appNavigate } from './navigateBridge'
 import { CodeBlock } from '@/components/common/CodeBlock'
+import { EmojiText } from '@/components/common/Emoji'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from './utils'
 import { isMentionBoundary, type MentionToken } from './mentions'
@@ -49,13 +50,18 @@ function internalPath(url: string): string | null {
   return url.startsWith(`${origin}/`) ? url.slice(origin.length) : null
 }
 
+/** Plain text with its emoji as Twemoji images. */
+function emojify(text: string, key: number): React.ReactNode {
+  return <EmojiText key={`text-${key}`} text={text} />
+}
+
 function linkifyText(text: string): React.ReactNode[] {
   const urlRegex = /https?:\/\/[^\s<]+/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = urlRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
+    if (match.index > lastIndex) parts.push(emojify(text.slice(lastIndex, match.index), lastIndex))
     const url = match[0].replace(/[.,!?;:)}\]]+$/, '')
     if (!url) {
       parts.push(match[0])
@@ -104,8 +110,8 @@ function linkifyText(text: string): React.ReactNode[] {
     if (url.length < match[0].length) parts.push(match[0].slice(url.length))
     lastIndex = match.index + match[0].length
   }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
-  return parts.length > 0 ? parts : [text]
+  if (lastIndex < text.length) parts.push(emojify(text.slice(lastIndex), lastIndex))
+  return parts.length > 0 ? parts : [emojify(text, 0)]
 }
 
 export function mentionifyText(text: string, keyPrefix: string, mentionTokens: MentionToken[]): React.ReactNode[] {

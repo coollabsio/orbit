@@ -23,12 +23,14 @@ export function decodeMentions(body: string, people: readonly MentionTarget[], c
   })
 }
 
-/**
- * Composer text to the stored body. A name matches without regard to case, must start after a word boundary and end at
- * one, and the longest name wins ("@Ada Lovelace" before "@Ada"). Code is left alone.
- */
-export function encodeMentions(text: string, people: readonly MentionTarget[], conversations: readonly MentionTarget[]): string {
-  const byLength = (a: { label: string }, b: { label: string }) => b.label.length - a.label.length
+interface MentionCandidate {
+  label: string
+  token: string
+}
+
+/** What `@…` and `#…` can match, longest name first so "Ann Lee" wins over "Ann". */
+function mentionCandidates(people: readonly MentionTarget[], conversations: readonly MentionTarget[]) {
+  const byLength = (a: MentionCandidate, b: MentionCandidate) => b.label.length - a.label.length
   const users = [
     { label: 'channel', token: '<!channel>' },
     { label: 'here', token: '<!here>' },
@@ -40,39 +42,61 @@ export function encodeMentions(text: string, people: readonly MentionTarget[], c
     .map((conversation) => ({ label: conversation.name.toLowerCase(), token: `<#${conversation.id}>` }))
     .filter((item) => item.label)
     .sort(byLength)
-
-  const encode = (part: string) => {
-    const lower = part.toLowerCase()
-    let out = ''
-    let index = 0
-    while (index < part.length) {
-      const char = part[index]
-      const candidates = char === '@' ? users : char === '#' ? channels : null
-      const match =
-        candidates && isBoundary(part[index - 1])
-          ? candidates.find(
-              (item) => lower.startsWith(item.label, index + 1) && isBoundary(part[index + 1 + item.label.length]),
-            )
-          : undefined
-      if (match) {
-        out += match.token
-        index += 1 + match.label.length
-      } else {
-        out += char
-        index += 1
-      }
-    }
-    return out
-  }
-
-  // `split` with a capturing group puts the code segments at the odd indexes.
-  return text
-    .split(CODE)
-    .map((part, index) => (index % 2 === 1 ? part : encode(part)))
-    .join('')
+  return { users, channels }
 }
 
-/** Who a stored body mentions. */
+export interface MentionMatch {
+  /** `[start, end)` in the text: the `@` or `#` and the name. */
+  start: number
+  end: number
+  token: string
+}
+
+/** Every `@Name`, `#name`, `@channel` and `@here` in typed text, in order. Text inside code is not a mention. */
+export function findMentions(text: string, people: readonly MentionTarget[], conversations: readonly MentionTarget[]): MentionMatch[] {
+  const { users, channels } = mentionCandidates(people, conversations)
+  const lower = text.toLowerCase()
+  const matches: MentionMatch[] = []
+  let offset = 0
+  // `split` with a capturing group puts the code segments at the odd indexes.
+  text.split(CODE).forEach((part, partIndex) => {
+    if (partIndex % 2 === 0) {
+      let index = 0
+      while (index < part.length) {
+        const at = offset + index
+        const char = part[index]
+        const candidates = char === '@' ? users : char === '#' ? channels : null
+        const match =
+          candidates && isBoundary(part[index - 1])
+            ? candidates.find((item) => lower.startsWith(item.label, at + 1) && isBoundary(part[index + 1 + item.label.length]))
+            : undefined
+        if (match) {
+          matches.push({ start: at, end: at + 1 + match.label.length, token: match.token })
+          index += 1 + match.label.length
+        } else {
+          index += 1
+        }
+      }
+    }
+    offset += part.length
+  })
+  return matches
+}
+
+/**
+ * Composer text to the stored body. A name matches without regard to case, must start after a word boundary and end at
+ * one, and the longest name wins ("@Ada Lovelace" before "@Ada"). Code is left alone.
+ */
+export function encodeMentions(text: string, people: readonly MentionTarget[], conversations: readonly MentionTarget[]): string {
+  let out = ''
+  let cursor = 0
+  for (const match of findMentions(text, people, conversations)) {
+    out += text.slice(cursor, match.start) + match.token
+    cursor = match.end
+  }
+  return out + text.slice(cursor)
+}
+
 export function extractMentions(body: string): Mentions {
   const mentions: Mentions = { userIds: [], channel: false, here: false }
   for (const match of body.matchAll(TOKEN)) {

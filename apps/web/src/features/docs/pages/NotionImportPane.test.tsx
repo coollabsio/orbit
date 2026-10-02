@@ -194,7 +194,9 @@ test('choose: tri-state tree, filter, counts, destination and a minimal selectio
   expect(calls.filter((call) => call.path === '/imports/notion/import-1').map((call) => call.search)).toEqual(['', '?include=tree'])
   expect(view.getByText(/more than 5,000 pages/)).toBeTruthy()
   const tree = view.getByRole('tree', { name: 'Notion pages' })
-  expect(within(tree).getAllByRole('treeitem').map((row) => row.textContent)).toEqual(['📘Handbook2', 'Orphan'])
+  // the page icon is an image now, so it is not in the text
+  expect(within(tree).getAllByRole('treeitem').map((row) => row.textContent)).toEqual(['Handbook2', 'Orphan'])
+  expect(within(tree).getByAltText('📘')).toBeTruthy()
 
   fireEvent.click(within(tree).getByRole('button', { name: 'Expand Handbook' }))
   fireEvent.click(within(tree).getByRole('button', { name: 'Expand Beta' }))
@@ -208,7 +210,7 @@ test('choose: tri-state tree, filter, counts, destination and a minimal selectio
   // Filter: matches and their ancestors.
   const filter = view.getByLabelText('Filter pages')
   await userEvent.type(filter, 'row one')
-  expect(within(tree).getAllByRole('treeitem').map((row) => row.textContent)).toEqual(['📘Handbook2', 'Beta1', 'Tasks2', 'Row one'])
+  expect(within(tree).getAllByRole('treeitem').map((row) => row.textContent)).toEqual(['Handbook2', 'Beta1', 'Tasks2', 'Row one'])
   fireEvent.click(within(tree).getByRole('checkbox', { name: 'Select Row one' }))
   expect(view.getByText('4 pages selected')).toBeTruthy()
   await clearInput(filter)

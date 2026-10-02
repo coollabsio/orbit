@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, mock, test } from 'bun:test'
 import { act, fireEvent, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef } from 'react'
+import { emojibaseResponse } from '@/test/emojibase'
 import { PageEditor, type PageEditorHandle, type PageEditorProps, type PageRef } from './PageEditor'
 
 beforeAll(() => {
@@ -218,18 +219,21 @@ describe('PageEditor', () => {
     })
     expect(await view.findByText('Heads up')).toBeTruthy()
     const trigger = view.getByRole('button', { name: 'Change callout icon' })
-    expect(trigger.textContent).toBe('⭐')
+    expect(trigger.querySelector('img')?.alt).toBe('⭐')
     expect(trigger.closest('[data-content-type="callout"]')?.getAttribute('data-background-color')).toBe('blue')
 
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => emojibaseResponse(input) ?? realFetch(input)) as typeof fetch
     fireEvent.click(trigger)
     expect(trigger.getAttribute('aria-expanded')).toBe('true')
-    await userEvent.click(await view.findByTitle('grinning face'))
+    await userEvent.click(await view.findByRole('gridcell', { name: 'Grinning face' }, { timeout: 4000 }))
+    globalThis.fetch = realFetch
 
     const [callout] = ref.current!.getContent() as { type: string; props: Record<string, string> }[]
     expect(callout.type).toBe('callout')
     expect(callout.props).toEqual({ emoji: '😀', backgroundColor: 'blue', textColor: 'default' })
     expect(onChange).toHaveBeenCalled()
-    expect(view.getByRole('button', { name: 'Change callout icon' }).textContent).toBe('😀')
+    expect(view.getByRole('button', { name: 'Change callout icon' }).querySelector('img')?.alt).toBe('😀')
   })
 
   test('read-only mode renders a non-editable document', async () => {

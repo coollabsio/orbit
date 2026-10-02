@@ -1,116 +1,96 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { EmojiPicker as Frimousse, type EmojiPickerListCategoryHeaderProps, type EmojiPickerListEmojiProps, type EmojiPickerListRowProps } from 'frimousse'
 import { SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
-import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
-import type { EmojiEntry } from '@/lib/emojis'
+import { Spinner } from '@/components/ui/spinner'
+import { EMOJIBASE_PATH, EMOJI_VERSION } from '@/lib/twemoji'
+import { Emoji } from './Emoji'
 
-/** Category buckets mirror the chat composer's emoji panel. */
-const EMOJI_CATEGORY_ORDER = ['Smileys', 'Gestures', 'Symbols', 'Objects', 'Other']
-
-function emojiCategory({ name, keywords }: EmojiEntry): string {
-  const text = `${name} ${keywords}`
-  if (/\b(face|smil|grin|laugh|tear|kiss|heart|angry|sad|sleep|sick|hot|cold|party|emotion)\b/.test(text)) {
-    return 'Smileys'
-  }
-  if (/\b(hand|finger|fist|clap|thumb|wave|gesture|pray|writing)\b/.test(text)) {
-    return 'Gestures'
-  }
-  if (/\b(button|symbol|arrow|sign|mark|circle|square|triangle|keycap|zodiac|cross|star)\b/.test(text)) {
-    return 'Symbols'
-  }
-  if (
-    /\b(tool|book|phone|computer|card|money|clock|mail|music|game|food|drink|sport|vehicle|building|house|medical|office|light|lock|key)\b/.test(
-      text,
-    )
-  ) {
-    return 'Objects'
-  }
-  return 'Other'
+function CategoryHeader({ category, ...props }: EmojiPickerListCategoryHeaderProps) {
+  return (
+    <div data-slot="emoji-category" className="bg-popover px-3 pt-3 pb-1.5 text-xs font-medium text-muted-foreground" {...props}>
+      {category.label}
+    </div>
+  )
 }
 
-/** A labelled grid of emoji buttons; the label sticks while the list scrolls. */
-function EmojiGroup({ label, children }: { label: string; children: ReactNode }) {
+function Row({ children, ...props }: EmojiPickerListRowProps) {
   return (
-    <section data-slot="emoji-group" className="mb-3">
-      <div className="sticky top-0 z-10 mb-1 border-b border-border bg-popover/95 py-1 text-[10px] font-bold tracking-wider text-muted-foreground uppercase">{label}</div>
-      <div className="grid grid-cols-8 gap-1">{children}</div>
-    </section>
+    <div data-slot="emoji-row" className="scroll-my-1.5 px-1.5" {...props}>
+      {children}
+    </div>
+  )
+}
+
+function EmojiButton({ emoji, ...props }: EmojiPickerListEmojiProps) {
+  return (
+    <button data-slot="emoji-button" className="flex size-9 items-center justify-center rounded-md text-xl outline-none data-active:bg-muted" {...props}>
+      <Emoji value={emoji.emoji} />
+    </button>
   )
 }
 
 /**
- * Standalone emoji picker panel (the reference app's icon picker shell): header with an optional
- * Remove action, search, grouped grid. The catalog is loaded lazily on first mount.
+ * The emoji picker panel: search, categories, keyboard navigation and skin tones (Frimousse), with Twemoji images.
+ * The emoji data comes from Orbit itself, not from a CDN. `onRemove` adds a Remove action (page and callout icons).
  */
 export function EmojiPicker({ onPick, onRemove }: { onPick: (emoji: string) => void; onRemove?: () => void }) {
-  const [emojis, setEmojis] = useState<EmojiEntry[]>([])
-  const [query, setQuery] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    import('@/lib/emojis').then(({ EMOJIS }) => {
-      if (!cancelled) setEmojis(EMOJIS)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const filtered = q
-      ? emojis.filter(({ emoji, name, keywords }) => emoji.includes(q) || name.includes(q) || keywords.includes(q))
-      : emojis
-    const byCategory = new Map<string, EmojiEntry[]>()
-    filtered.forEach((entry) => {
-      const category = emojiCategory(entry)
-      byCategory.set(category, [...(byCategory.get(category) ?? []), entry])
-    })
-    return EMOJI_CATEGORY_ORDER.filter((category) => byCategory.has(category)).map((category) => ({
-      category,
-      items: byCategory.get(category)!,
-    }))
-  }, [emojis, query])
-
   return (
-    <div className="w-80 p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-bold tracking-wider text-muted-foreground uppercase">Emoji</span>
+    <Frimousse.Root
+      data-slot="emoji-picker"
+      columns={9}
+      locale="en"
+      emojiVersion={EMOJI_VERSION}
+      emojibaseUrl={EMOJIBASE_PATH}
+      className="isolate flex h-[380px] w-fit flex-col"
+      onEmojiSelect={({ emoji }) => onPick(emoji)}
+    >
+      <div className="flex items-center gap-2 p-2 pb-0">
+        <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md bg-secondary/60 px-2.5 text-muted-foreground focus-within:ring-3 focus-within:ring-ring/50">
+          <Search className="size-3.5 shrink-0" aria-hidden="true" />
+          <Frimousse.Search autoFocus placeholder="Search emoji" aria-label="Search emoji" className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
+        </label>
         {onRemove ? (
           <Button type="button" variant="ghost" size="sm" onClick={onRemove}>
             Remove
           </Button>
         ) : null}
       </div>
-      <InputGroup className="mb-2">
-        <InputGroupAddon>
-          <Search className="size-3.5" />
-        </InputGroupAddon>
-        <InputGroupInput
-          value={query}
-          placeholder="Search emoji"
-          autoFocus
-          aria-label="Search emoji"
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </InputGroup>
-      <div className="max-h-72 overflow-y-auto overscroll-contain pr-0.5">
-        {emojis.length === 0 ? (
-          <div className="py-6 text-center text-sm font-medium text-muted-foreground">Loading emoji...</div>
-        ) : groups.length > 0 ? (
-          groups.map((group) => (
-            <EmojiGroup key={group.category} label={group.category}>
-              {group.items.map(({ emoji, name }) => (
-                <Button key={`${emoji}-${name}`} variant="ghost" size="icon" className="text-lg" title={name} onClick={() => onPick(emoji)}>
-                  {emoji}
-                </Button>
-              ))}
-            </EmojiGroup>
-          ))
-        ) : (
-          <div className="py-6 text-center text-sm font-medium text-muted-foreground">No emoji found</div>
-        )}
+      <Frimousse.Viewport className="relative flex-1 outline-none">
+        <Frimousse.Loading className="absolute inset-0 flex items-center justify-center">
+          <Spinner className="text-muted-foreground" />
+        </Frimousse.Loading>
+        <Frimousse.Empty className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">No emoji found</Frimousse.Empty>
+        <Frimousse.List className="pb-1.5 select-none" components={{ CategoryHeader, Row, Emoji: EmojiButton }} />
+      </Frimousse.Viewport>
+      <div className="flex h-11 shrink-0 items-center gap-2 border-t px-3">
+        <Frimousse.ActiveEmoji>
+          {({ emoji }) =>
+            emoji ? (
+              <>
+                <span className="text-xl">
+                  <Emoji value={emoji.emoji} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{emoji.label}</span>
+              </>
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">Pick an emoji</span>
+            )
+          }
+        </Frimousse.ActiveEmoji>
+        <Frimousse.SkinTone>
+          {({ skinTone, setSkinTone, skinToneVariations }) => {
+            const index = skinToneVariations.findIndex((variation) => variation.skinTone === skinTone)
+            const current = skinToneVariations[index] ?? skinToneVariations[0]
+            const next = skinToneVariations[(index + 1) % skinToneVariations.length]
+            if (!current || !next) return null
+            return (
+              <Button type="button" variant="ghost" size="icon-sm" className="text-base" aria-label={`Skin tone: ${skinTone}. Change skin tone`} title="Change skin tone" onClick={() => setSkinTone(next.skinTone)}>
+                <Emoji value={current.emoji} />
+              </Button>
+            )
+          }}
+        </Frimousse.SkinTone>
       </div>
-    </div>
+    </Frimousse.Root>
   )
 }

@@ -15,6 +15,8 @@ export interface MessageListContextValue {
   react: (message: Message, emoji: string) => void
   openThread: (message: Message) => void
   openMenu: (message: Message, anchor: MenuAnchor, align: 'start' | 'end') => void
+  /** The full emoji picker, to add a reaction. */
+  openPicker: (message: Message, anchor: MenuAnchor, align: 'start' | 'end') => void
   /** The mobile action sheet (long press). */
   openSheet: (message: Message) => void
   saveEdit: (message: Message, text: string) => void

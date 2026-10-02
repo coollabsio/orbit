@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import type { Page, PageSummary, Teamspace } from '@/api/generated/types.gen'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
+import { emojibaseResponse } from '@/test/emojibase'
 import { DocTree } from './DocTree'
 
 const originalFetch = globalThis.fetch
@@ -58,6 +59,8 @@ function setup({
   if (collapsed) window.localStorage.setItem('orbit:docs_collapsed_spaces:workspace-1', JSON.stringify(collapsed))
   const calls: Call[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const emojiData = emojibaseResponse(input)
+    if (emojiData) return emojiData
     const request = input as Request
     const url = new URL(request.url)
     const text = await request.text()
@@ -523,10 +526,10 @@ test('"Change icon" picks an emoji; "Remove" returns to the default glyph', asyn
   await userEvent.click(await view.findByRole('menuitem', { name: 'Change icon' }))
   const picker = await view.findByRole('dialog', { name: 'Icon for Design' })
   expect(within(picker).queryByRole('button', { name: 'Remove' })).toBeNull()
-  await userEvent.click(await within(picker).findByTitle('grinning face'))
+  await userEvent.click(await within(picker).findByRole('gridcell', { name: 'Grinning face' }, { timeout: 4000 }))
   await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBeTrue())
   expect(calls.find((call) => call.method === 'PATCH')).toMatchObject({ path: '/teamspaces/t2', body: { expected_version: 1, icon: '😀' } })
-  await waitFor(() => expect(within(row(view, 'teamspace:t2')).queryByText('😀')).toBeTruthy())
+  await waitFor(() => expect(within(row(view, 'teamspace:t2')).queryByAltText('😀')).toBeTruthy())
 
   fireEvent.click(view.getByRole('button', { name: 'Ops options' }))
   await userEvent.click(await view.findByRole('menuitem', { name: 'Change icon' }))
