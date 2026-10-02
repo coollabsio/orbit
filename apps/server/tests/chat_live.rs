@@ -262,12 +262,34 @@ async fn drain(socket: &mut Socket) -> Vec<(String, String)> {
 async fn the_handshake_needs_a_session_and_membership() {
     let (server, owner) = Server::start().await;
     let outsider = server.user("outsider", false).await;
-    assert_eq!(server.socket(None, "").await.unwrap_err(), 401);
-    assert_eq!(server.socket(Some("nothing"), "").await.unwrap_err(), 401);
-    assert_eq!(
-        server.socket(Some(&outsider.token), "").await.unwrap_err(),
-        403
-    );
+    // A refused handshake is an upgrade that closes at once: a browser can read the close
+    // code, and it cannot read an HTTP status.
+    for (token, code) in [
+        (None, 4401),
+        (Some("nothing"), 4401),
+        (Some(outsider.token.as_str()), 4403),
+    ] {
+        let mut socket = server.socket(token, "").await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap();
+        assert!(
+            matches!(&first, Some(Ok(Ws::Close(Some(frame)))) if u16::from(frame.code) == code),
+            "{first:?}"
+        );
+    }
+    // A request without an Origin is still refused before the upgrade.
+    let request = format!(
+        "{}/api/v1/workspaces/{}/live",
+        server.base.replacen("http", "ws", 1),
+        server.workspace
+    )
+    .into_client_request()
+    .unwrap();
+    assert!(matches!(
+        tokio_tungstenite::connect_async(request).await,
+        Err(tungstenite::Error::Http(response)) if response.status() == 403
+    ));
 
     let (mut socket, hello) = server.client(&owner).await;
     assert_eq!(hello["online"], json!([owner.id]));

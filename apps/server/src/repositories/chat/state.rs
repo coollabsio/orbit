@@ -1,6 +1,8 @@
 //! Each member's read state: cursors, unread and mention counters, notify level, favorites and
 //! thread follows.
 
+use std::collections::HashSet;
+
 use orbit_platform::Id;
 use serde::Serialize;
 use sqlx::{Row, SqliteConnection};
@@ -328,7 +330,7 @@ impl ChatRepository {
         let mut tx = self.database.immediate_transaction().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
         let mut events = Events::default();
-        for cursor in states {
+        for cursor in last_of_each(states, |cursor| cursor.conversation_id) {
             let access =
                 match load_access(&mut tx, workspace_id, actor_id, cursor.conversation_id).await {
                     Ok(access) if access.member.is_some() => access,
@@ -351,7 +353,7 @@ impl ChatRepository {
             )
             .await?;
         }
-        for cursor in threads {
+        for cursor in last_of_each(threads, |cursor| cursor.root_id) {
             let root = match load_root(&mut tx, workspace_id, actor_id, cursor.root_id).await {
                 Ok(root) => root,
                 Err(ChatError::NotFound) => continue,
@@ -590,6 +592,19 @@ async fn emit_thread_state(
         },
     );
     Ok(state)
+}
+
+/// The last entry of each key, in the order of the list. A restore counts a conversation (or a
+/// thread) once, however often the request names it.
+fn last_of_each<T>(entries: Vec<T>, key: impl Fn(&T) -> Id) -> Vec<T> {
+    let mut seen = HashSet::new();
+    let mut kept: Vec<T> = entries
+        .into_iter()
+        .rev()
+        .filter(|entry| seen.insert(key(entry)))
+        .collect();
+    kept.reverse();
+    kept
 }
 
 /// Puts a member's cursor at `cursor` and counts what is unread after it. This is the one place

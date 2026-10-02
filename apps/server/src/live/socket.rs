@@ -1,8 +1,11 @@
 //! `GET /api/v1/workspaces/{workspace_id}/live?epoch=<epoch>&after=<seq>`: the live socket.
 //!
-//! Before the upgrade: the platform layer requires an allowed `Origin`; then the session cookie
-//! (401) and membership of a live workspace (403). After it the connection is checked again
-//! every 15 seconds, so a removed member, a suspended account and an ended session lose it.
+//! Before the upgrade the platform layer requires an allowed `Origin`. A request without a
+//! session, or from someone who is not a member of a live workspace, is upgraded and closed at
+//! once with 4401 or 4403: a browser shows an HTTP status at the handshake as close code 1006,
+//! which the client cannot tell from a network failure. After it the connection is checked
+//! again every 15 seconds, so a removed member, a suspended account and an ended session lose
+//! it.
 //!
 //! The only frame a client may send is `{"type":"typing","conversation_id":…,"thread_root_id":…}`.
 
@@ -11,7 +14,7 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
 use orbit_platform::Id;
@@ -61,18 +64,18 @@ async fn connect(
     Query(resume): Query<Resume>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
-) -> Result<Response, StatusCode> {
-    let session = request_session(&state.identity, state.cookie_mode, &headers)
-        .await
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+) -> Response {
+    let Some(session) = request_session(&state.identity, state.cookie_mode, &headers).await else {
+        return refuse(upgrade, close::SESSION, "no session");
+    };
     let database = state.identity.database().clone();
     if !authorized(&database, workspace, session.id)
         .await
         .unwrap_or(false)
     {
-        return Err(StatusCode::FORBIDDEN);
+        return refuse(upgrade, close::FORBIDDEN, "no access");
     }
-    Ok(upgrade
+    upgrade
         .max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
         .on_upgrade(move |socket| {
@@ -84,7 +87,18 @@ async fn connect(
                 session.user.id,
                 resume,
             )
-        }))
+        })
+}
+
+/// Accepts the upgrade and closes the socket with `code`; nothing else is sent.
+fn refuse(upgrade: WebSocketUpgrade, code: u16, reason: &'static str) -> Response {
+    upgrade.on_upgrade(move |mut socket| async move {
+        let frame = CloseFrame {
+            code,
+            reason: reason.into(),
+        };
+        let _ = send(&mut socket, Message::Close(Some(frame))).await;
+    })
 }
 
 async fn serve(

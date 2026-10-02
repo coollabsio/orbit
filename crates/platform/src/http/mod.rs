@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
-use axum::http::{Request, Response, StatusCode};
+use axum::http::{Method, Request, Response, StatusCode};
 use axum::response::Response as AxumResponse;
 use tower::{Layer, Service};
 
@@ -249,7 +249,7 @@ where
                 ));
             }
 
-            if !rate_limiter.permits(client_ip.0, request.uri().path()) {
+            if !rate_limiter.permits(client_ip.0, request.method(), request.uri().path()) {
                 return Ok(finish_response(
                     problem_response(
                         StatusCode::TOO_MANY_REQUESTS,
@@ -446,8 +446,8 @@ impl RateLimiter {
         }
     }
 
-    fn permits(&self, ip: IpAddr, path: &str) -> bool {
-        let Some(class) = endpoint_class(path) else {
+    fn permits(&self, ip: IpAddr, method: &Method, path: &str) -> bool {
+        let Some(class) = endpoint_class(method, path) else {
             return true;
         };
         let limit = match class {
@@ -497,7 +497,7 @@ fn rate_limit_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
-fn endpoint_class(path: &str) -> Option<EndpointClass> {
+fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClass> {
     if matches!(
         path,
         "/oauth/register" | "/oauth/authorize" | "/oauth/token" | "/oauth/revoke"
@@ -515,6 +515,9 @@ fn endpoint_class(path: &str) -> Option<EndpointClass> {
     } else if path.contains("/invitations") {
         Some(EndpointClass::Invitation)
     } else if path.contains("/attachments") {
+        Some(EndpointClass::Upload)
+    } else if method == Method::POST && path.ends_with("/chat/files") {
+        // A chat file upload. The downloads (`GET .../chat/files/{id}`) are chat requests.
         Some(EndpointClass::Upload)
     } else if path.ends_with("/login") || path.contains("/session") || path.contains("/setup") {
         Some(EndpointClass::Authentication)
@@ -534,7 +537,7 @@ mod tests {
         let limiter = RateLimiter::default();
         for host in 0..5_000_u32 {
             assert_eq!(
-                limiter.permits(IpAddr::V4(host.into()), "/api/v1/tasks"),
+                limiter.permits(IpAddr::V4(host.into()), &Method::GET, "/api/v1/tasks"),
                 host < MAX_RATE_LIMIT_ENTRIES as u32
             );
         }
@@ -554,8 +557,16 @@ mod tests {
             general_per_minute: 1,
             ..RateLimitConfig::default()
         });
-        assert!(limiter.permits("2001:db8:1:2::1".parse().unwrap(), "/api/v1/tasks"));
-        assert!(!limiter.permits("2001:db8:1:2::2".parse().unwrap(), "/api/v1/tasks"));
+        assert!(limiter.permits(
+            "2001:db8:1:2::1".parse().unwrap(),
+            &Method::GET,
+            "/api/v1/tasks"
+        ));
+        assert!(!limiter.permits(
+            "2001:db8:1:2::2".parse().unwrap(),
+            &Method::GET,
+            "/api/v1/tasks"
+        ));
     }
 
     #[test]
@@ -567,11 +578,36 @@ mod tests {
         let client = IpAddr::V4(1_u32.into());
         let chat = "/api/v1/workspaces/w/chat/conversations/c/read";
         for _ in 0..3 {
-            assert!(limiter.permits(client, chat));
+            assert!(limiter.permits(client, &Method::GET, chat));
         }
-        assert!(!limiter.permits(client, chat));
+        assert!(!limiter.permits(client, &Method::GET, chat));
         // Exhausted chat leaves the other apps alone.
-        assert!(limiter.permits(client, "/api/v1/workspaces/w/tasks"));
+        assert!(limiter.permits(client, &Method::GET, "/api/v1/workspaces/w/tasks"));
+    }
+
+    #[test]
+    fn a_chat_file_upload_is_an_upload_and_a_download_is_a_chat_request() {
+        let files = "/api/v1/workspaces/w/chat/files";
+        assert_eq!(
+            endpoint_class(&Method::POST, files),
+            Some(EndpointClass::Upload)
+        );
+        assert_eq!(
+            endpoint_class(&Method::GET, "/api/v1/workspaces/w/chat/files/f"),
+            Some(EndpointClass::Chat)
+        );
+        assert_eq!(
+            endpoint_class(&Method::POST, "/api/v1/workspaces/w/chat/read-all"),
+            Some(EndpointClass::Chat)
+        );
+
+        let limiter = RateLimiter::new(RateLimitConfig {
+            upload_per_minute: 1,
+            ..RateLimitConfig::default()
+        });
+        let client = IpAddr::V4(1_u32.into());
+        assert!(limiter.permits(client, &Method::POST, files));
+        assert!(!limiter.permits(client, &Method::POST, files));
     }
 
     #[test]
@@ -581,16 +617,17 @@ mod tests {
             ..RateLimitConfig::default()
         });
         let exhausted = IpAddr::V4(0_u32.into());
-        assert!(limiter.permits(exhausted, "/api/v1/tasks"));
-        assert!(!limiter.permits(exhausted, "/api/v1/tasks"));
+        assert!(limiter.permits(exhausted, &Method::GET, "/api/v1/tasks"));
+        assert!(!limiter.permits(exhausted, &Method::GET, "/api/v1/tasks"));
         for host in 1..MAX_RATE_LIMIT_ENTRIES as u32 {
-            assert!(limiter.permits(IpAddr::V4(host.into()), "/api/v1/tasks"));
+            assert!(limiter.permits(IpAddr::V4(host.into()), &Method::GET, "/api/v1/tasks"));
         }
 
         assert!(!limiter.permits(
             IpAddr::V4((MAX_RATE_LIMIT_ENTRIES as u32).into()),
+            &Method::GET,
             "/api/v1/tasks"
         ));
-        assert!(!limiter.permits(exhausted, "/api/v1/tasks"));
+        assert!(!limiter.permits(exhausted, &Method::GET, "/api/v1/tasks"));
     }
 }

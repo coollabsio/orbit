@@ -8,12 +8,15 @@ pub(crate) mod state;
 
 use std::sync::Arc;
 
-use axum::extract::Extension;
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::extract::{Extension, Request};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use orbit_platform::{Id, RequestId, UploadService};
 use serde::Serialize;
+use tracing::Instrument;
 use utoipa::ToSchema;
 
 use crate::auth_routes::CookieMode;
@@ -47,7 +50,8 @@ impl ChatState {
 
     /// Runs a write and sends its events to the live sockets. The hub's write lock is held
     /// from before the write's transaction until the events are out, so the events of a
-    /// workspace are published in commit order.
+    /// workspace are published in commit order. The caller runs in a task of its own
+    /// ([`detached`]), so nothing stops this between the commit and the events.
     async fn publish<T>(
         &self,
         workspace_id: Id,
@@ -231,7 +235,35 @@ fn json_router(state: ChatState) -> Router {
             "/api/v1/workspaces/{workspace_id}/chat/read-restore",
             post(state::restore_chat_read),
         )
+        .layer(middleware::from_fn(detached))
         .with_state(state)
+}
+
+/// Runs a write in a task of its own. axum drops the future of a request when the client
+/// disconnects; a write that stopped after its commit would never publish its events. The
+/// task holds the hub's write lock and runs to the end, whoever waits for it.
+async fn detached(request: Request, next: Next) -> Response {
+    if request.method() == Method::GET {
+        return next.run(request).await;
+    }
+    let instance = request.uri().path().to_owned();
+    let request_id = request
+        .extensions()
+        .get::<RequestId>()
+        .cloned()
+        .map(Extension);
+    match tokio::spawn(next.run(request).in_current_span()).await {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(error = %error, "chat write task");
+            problem(
+                ChatError::Unavailable(sqlx::Error::WorkerCrashed),
+                &instance,
+                request_id.as_ref(),
+            )
+            .into_response()
+        }
+    }
 }
 
 /// The changed record and the chat events that this write caused for the caller. The events
@@ -380,4 +412,41 @@ fn problem(
         ),
     };
     ApiError::new(status, code, title, detail, instance, request_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use axum::body::Body;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_write_ends_when_its_request_is_dropped() {
+        let done = Arc::new(AtomicBool::new(false));
+        let app = Router::new()
+            .route(
+                "/write",
+                post({
+                    let done = Arc::clone(&done);
+                    || async move {
+                        tokio::time::sleep(Duration::from_millis(60)).await;
+                        done.store(true, Ordering::SeqCst);
+                    }
+                }),
+            )
+            .layer(middleware::from_fn(detached));
+        let request = Request::post("/write").body(Body::empty()).unwrap();
+        // The client goes away while the write runs.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), app.oneshot(request))
+                .await
+                .is_err()
+        );
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!(done.load(Ordering::SeqCst));
+    }
 }

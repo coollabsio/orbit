@@ -53,6 +53,9 @@ struct Inner {
     /// Made when the process starts: a client with another epoch cannot get a replay.
     epoch: String,
     workspaces: Mutex<HashMap<Id, Workspace>>,
+    /// The write lock of each workspace that has a write now. They are not in `workspaces`:
+    /// a write takes its lock before it knows that the workspace exists.
+    write_locks: Mutex<HashMap<Id, Arc<AsyncMutex<()>>>>,
     next_connection: AtomicU64,
     offline_grace: Duration,
 }
@@ -65,7 +68,6 @@ struct Workspace {
     /// Members whose last connection closed a moment ago; still online. The value is that
     /// connection, so only its own timer takes the member offline.
     leaving: HashMap<Id, u64>,
-    write_lock: Arc<AsyncMutex<()>>,
 }
 
 struct Connection {
@@ -145,6 +147,7 @@ impl LiveHub {
         let inner = database.extension(move || Inner {
             epoch: Id::new_v7().to_string(),
             workspaces: Mutex::new(HashMap::new()),
+            write_locks: Mutex::new(HashMap::new()),
             next_connection: AtomicU64::new(1),
             offline_grace,
         });
@@ -161,13 +164,17 @@ impl LiveHub {
     /// Hold this from before a write's transaction until its events are published, so the
     /// events of a workspace go out in commit order.
     pub async fn write_lock(&self, workspace_id: Id) -> OwnedMutexGuard<()> {
-        let lock = Arc::clone(
-            &self
-                .workspaces()
-                .entry(workspace_id)
-                .or_default()
-                .write_lock,
-        );
+        let lock = {
+            let mut locks = self
+                .inner
+                .write_locks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            // A lock that only this map refers to has no write that holds it or waits for it.
+            // Such locks go here, so a write to an id that names no workspace leaves nothing.
+            locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+            Arc::clone(locks.entry(workspace_id).or_default())
+        };
         lock.lock_owned().await
     }
 
@@ -462,6 +469,36 @@ mod tests {
         assert_eq!(hub.online(workspace), [ada]);
         tokio::time::sleep(Duration::from_millis(160)).await;
         assert!(hub.online(workspace).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_write_lock_leaves_no_entry_and_still_keeps_the_order() {
+        let database = TestDatabase::new().await.unwrap();
+        let hub = LiveHub::of(&database);
+        let locks = || hub.inner.write_locks.lock().unwrap().len();
+        // Writes to ids that name no workspace: the locks do not add up.
+        for _ in 0..100 {
+            drop(hub.write_lock(Id::new_v7()).await);
+        }
+        assert_eq!(locks(), 1, "only the lock of the last write is left");
+        assert!(hub.workspaces().is_empty());
+
+        // A held lock stays through the writes of other workspaces: the next write of its
+        // workspace waits for it.
+        let workspace = Id::new_v7();
+        let held = hub.write_lock(workspace).await;
+        drop(hub.write_lock(Id::new_v7()).await);
+        let waiting = tokio::spawn({
+            let hub = hub.clone();
+            async move { drop(hub.write_lock(workspace).await) }
+        });
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        drop(hub.write_lock(Id::new_v7()).await);
+        assert!(!waiting.is_finished(), "the first write still has the lock");
+        drop(held);
+        waiting.await.unwrap();
+        drop(hub.write_lock(Id::new_v7()).await);
+        assert_eq!(locks(), 1);
     }
 
     #[tokio::test]
