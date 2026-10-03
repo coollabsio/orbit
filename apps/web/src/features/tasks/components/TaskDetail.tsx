@@ -9,6 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
 import { DatePicker } from '@/components/common/DatePicker'
+import { useTaskPickerUpdate } from '@/features/tasks/useTaskPickerUpdate'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -34,6 +35,8 @@ import {
 import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { useParentActions } from '@/features/tasks/useParentActions'
+import { useMoveToProject } from '@/features/tasks/useMoveToProject'
+import { ColorDot } from '@/components/common/ColorDot'
 import { descendantCount, parentPickerTitle, trashConfirmDescription } from '@/features/tasks/subIssuesLib'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { AddRelationMenu, DuplicateBanner, TaskRelationsSection } from './TaskRelations'
@@ -67,10 +70,15 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
   const githubContentReadOnly = !githubLinks.isSuccess || githubLinks.data.some((link) => link.source)
   const githubSyncPaused = githubLinks.data?.some((link) => link.source && link.state === 'paused')
   const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request' && !link.source) ?? []
+  // the task is the GitHub issue or pull request it syncs from: the server refuses to move it to another project
+  const githubIssueLinked = githubLinks.data?.some((link) => link.source) ?? false
+  const moveToProject = useMoveToProject(workspace.id)
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // the date panel needs to close itself from Clear/Done, so the popover stays controlled
+  // the date panel needs to close itself from Clear, so the popover stays controlled
   const [dueDateOpen, setDueDateOpen] = useState(false)
+  // each pick saves and the picker stays open; quick picks queue behind the save in flight
+  const saveDueDate = useTaskPickerUpdate(task, 'Due date update failed.')
   const [sourceOpen, setSourceOpen] = useState(false)
   const projects = useProjects(workspace.id).data ?? []
   const relations = useTaskRelations(workspace.id, task?.id).data ?? []
@@ -366,10 +374,39 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
             </PropertyGroup>
 
             <PropertyGroup title="Project">
-              {project ? (
-                <LabelPill label={project} />
+              {githubIssueLinked ? (
+                // GitHub sync finds the task through its project's repository, so it cannot move
+                <>
+                  {project ? <LabelPill label={project} /> : <span className="text-xs text-muted-foreground/70">—</span>}
+                  <p className="mt-1 text-xs text-muted-foreground">Synced with GitHub, so it stays in this project.</p>
+                </>
               ) : (
-                <span className="text-xs text-muted-foreground/70">—</span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <PropertyButton aria-label={`Project: ${project?.name ?? 'none'}`}>
+                        {project ? <LabelPill label={project} /> : <span className="text-muted-foreground">Set project</span>}
+                      </PropertyButton>
+                    }
+                  />
+                  <DropdownMenuContent className="w-auto min-w-52">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Move to project</DropdownMenuLabel>
+                      {projects.map((item) => (
+                        <DropdownMenuItem
+                          key={item.id}
+                          className="data-selected:bg-accent data-selected:font-medium"
+                          data-selected={item.id === task.projectId || undefined}
+                          onClick={() => moveToProject([task], item)}
+                        >
+                          <ColorDot color={item.color} className="size-2" />
+                          <span className="flex-1 truncate">{item.name}</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">{item.key}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </PropertyGroup>
 
@@ -422,13 +459,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                       })
                       setDueDateOpen(false)
                     }}
-                    onDone={({ start, end }) => {
-                      updateTask.mutate({
-                        taskId: task.id,
-                        body: { expected_version: task.version, due_start_at: start, due_at: end },
-                      })
-                      setDueDateOpen(false)
-                    }}
+                    onChange={({ start, end }) => saveDueDate({ due_start_at: start, due_at: end })}
                   />
                 </PopoverContent>
               </Popover>

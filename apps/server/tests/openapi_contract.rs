@@ -548,7 +548,7 @@ fn task_records_document_duplicate_and_blocked_fields() {
     assert_eq!(record["properties"]["blocked"]["type"], "boolean");
     assert_eq!(
         document["components"]["schemas"]["TaskRef"]["required"],
-        serde_json::json!(["id", "project_id", "project_key", "title"])
+        serde_json::json!(["id", "project_id", "project_key", "number", "title"])
     );
 }
 
@@ -593,7 +593,14 @@ fn task_relation_routes_are_documented() {
     );
     assert_eq!(
         schemas["RelatedTask"]["required"],
-        serde_json::json!(["id", "project_id", "title", "status_id"])
+        serde_json::json!([
+            "id",
+            "project_id",
+            "number",
+            "title",
+            "status_id",
+            "version"
+        ])
     );
 }
 
@@ -1238,7 +1245,7 @@ fn sub_issue_contract_is_documented() {
     }
     assert_eq!(
         schemas["TaskRef"]["required"],
-        serde_json::json!(["id", "project_id", "project_key", "title"])
+        serde_json::json!(["id", "project_id", "project_key", "number", "title"])
     );
     for schema in [
         "CreateTaskBody",

@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import type { TaskRelationRecord } from '@/api/generated/types.gen'
 import { taskIdentifier, type Project, type TaskRef, type TaskStatusDef } from '@/features/tasks/api/models'
 import { ADD_RELATION_OPTIONS, groupRelations, type RelationKind } from '@/features/tasks/relationsLib'
+import { StatusPicker } from './StatusPicker'
 import { TaskStatusIcon } from './TaskStatusIcon'
 
 const DUPLICATE_FALLBACK = { category: 'duplicate', color: '#8b8f98' } as const
@@ -21,7 +22,7 @@ export function DuplicateBanner({ duplicateOf, projects, status, animate, pendin
   onOpen: (taskId: string) => void
   onUnmark: () => void
 }) {
-  const identifier = taskIdentifier(duplicateOf.id, projectOf(projects, duplicateOf.projectId))
+  const identifier = taskIdentifier(duplicateOf.id, projectOf(projects, duplicateOf.projectId), duplicateOf.number)
   return (
     <div
       role="note"
@@ -70,20 +71,25 @@ export function TaskRelationsSection({ relations, statuses, projects, newRelatio
         {groups.map((group) => (
           <ul key={group.key} role="group" aria-label={group.label} className="col-span-full m-0 grid list-none grid-cols-subgrid gap-y-px p-0">
             {group.relations.map((relation, index) => {
-              const identifier = taskIdentifier(relation.task.id, projectOf(projects, relation.task.project_id))
+              const identifier = taskIdentifier(relation.task.id, projectOf(projects, relation.task.project_id), relation.task.number)
               return (
                 <li
                   key={relation.id}
                   className={cn('group/relation col-span-full grid min-h-8 grid-cols-subgrid items-center rounded-md transition-colors duration-150 ease-out hover:bg-muted', relation.id === newRelationId && 'animate-relation-enter')}
                 >
-                  {/* raw: one hit area across four subgrid columns, the row's hover fill already covers it */}
+                  <span aria-hidden="true" className="py-1.5 pr-5 pl-2 text-xs whitespace-nowrap text-muted-foreground/70 max-sm:pr-3">{index === 0 ? group.label : null}</span>
+                  {/* the other task's status changes in place; Duplicate needs a canonical task, so it is not offered */}
+                  <StatusPicker
+                    task={{ id: relation.task.id, projectId: relation.task.project_id, statusId: relation.task.status_id, version: relation.task.version }}
+                    statuses={statuses}
+                    className="-mx-1"
+                  />
+                  {/* raw: one hit area across the id and title subgrid columns, the row's hover fill already covers it */}
                   <button
                     type="button"
-                    className="col-span-4 grid grid-cols-subgrid items-center rounded-md py-1.5 pl-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className="col-span-2 grid grid-cols-subgrid items-center self-stretch rounded-md text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                     onClick={() => onOpen(relation.task.id)}
                   >
-                    <span aria-hidden="true" className="pr-5 whitespace-nowrap text-muted-foreground/70 max-sm:pr-3">{index === 0 ? group.label : null}</span>
-                    <TaskStatusIcon status={statuses.find((status) => status.id === relation.task.status_id)} />
                     <span className="pr-2.5 pl-2 whitespace-nowrap text-muted-foreground tabular-nums">{identifier}</span>
                     <span className="truncate pr-2 text-foreground">{relation.task.title || 'Untitled'}</span>
                   </button>

@@ -20,7 +20,7 @@ function withClient(client: QueryClient) {
 }
 
 const task = (id: string, position: number): TaskRecord => ({
-  id, workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title: id,
+  id, workspace_id: 'workspace-1', project_id: 'project-1', number: 1, status_id: 'todo', title: id,
   description: '', position, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', duplicate_of: null, blocked: false, version: 1,
   parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,
@@ -183,7 +183,7 @@ test('task relations load, add and remove through the relation endpoints and inv
   const calls: Array<{ method: string; path: string; body?: unknown }> = []
   const relation: TaskRelationRecord = {
     id: 'rel-1', type: 'blocks', direction: 'incoming', created_at: '2026-09-23T10:00:00Z',
-    task: { id: 'task-2', project_id: 'project-1', title: 'Auth token refresh', status_id: 'todo' },
+    task: { id: 'task-2', project_id: 'project-1', number: 2, title: 'Auth token refresh', status_id: 'todo', version: 1 },
   }
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request

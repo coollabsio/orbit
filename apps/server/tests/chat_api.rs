@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
+use orbit_domain::WorkspaceRole;
 use orbit_platform::{
     AttachmentMutationCoordinator, AuthenticatedUser, Id, LocalBlobStore, PasswordService,
     TestDatabase, TimestampMillis, UploadLimits, UploadService,
@@ -10,6 +11,7 @@ use orbit_platform::{
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::chat_routes::{ChatState, chat_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use orbit_server::repositories::workspaces::{InvitationDelivery, WorkspaceRepository};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -87,7 +89,8 @@ impl Fixture {
         }
     }
 
-    async fn add_member(&self, name: &str) -> Member {
+    /// A user without a membership yet.
+    async fn add_user(&self, name: &str) -> (Id, String) {
         let id = Id::new_v7();
         let now = TimestampMillis::now();
         let email = format!("{name}@example.com");
@@ -104,6 +107,33 @@ impl Fixture {
         .execute(self.database.pool())
         .await
         .unwrap();
+        (id, email)
+    }
+
+    async fn session(&self, id: Id, email: String, name: &str) -> Member {
+        let session = self
+            .identity
+            .create_session(
+                &AuthenticatedUser {
+                    id,
+                    email,
+                    display_name: name.to_owned(),
+                },
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+        Member {
+            id,
+            cookie: format!("__Host-orbit_session={}", session.token),
+        }
+    }
+
+    /// A member whose membership row is inserted directly, the way members from before public
+    /// channels had everyone look: in the default channel only.
+    async fn add_member(&self, name: &str) -> Member {
+        let (id, email) = self.add_user(name).await;
+        let now = TimestampMillis::now();
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
              VALUES (?, ?, ?, 'member', 0, ?, ?)",
@@ -116,22 +146,49 @@ impl Fixture {
         .execute(self.database.pool())
         .await
         .unwrap();
-        let session = self
-            .identity
-            .create_session(
-                &AuthenticatedUser {
-                    id,
-                    email,
-                    display_name: name.to_owned(),
-                },
+        self.session(id, email, name).await
+    }
+
+    /// A member who joins by accepting an invitation, as in the app.
+    async fn invite_member(&self, name: &str) -> Member {
+        let (id, email) = self.add_user(name).await;
+        let now = TimestampMillis::now();
+        let workspaces = WorkspaceRepository::new((*self.database).clone());
+        let invitation = workspaces
+            .invite(
+                self.workspace_id.parse().unwrap(),
+                self.owner.id,
+                email.clone(),
+                WorkspaceRole::Member,
+                InvitationDelivery::Manual,
+                "invite",
                 now,
             )
             .await
             .unwrap();
-        Member {
-            id,
-            cookie: format!("__Host-orbit_session={}", session.token),
-        }
+        workspaces
+            .accept_invitation(&invitation.token, id, &email, "accept", now)
+            .await
+            .unwrap();
+        self.session(id, email, name).await
+    }
+
+    /// The member ids of a conversation, as `member` lists it.
+    async fn member_ids(&self, member: &Member, conversation: &str) -> Vec<String> {
+        let listed = self.ok(member, "GET", "/conversations", None).await;
+        let mut ids: Vec<String> = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|listed| listed["id"] == conversation)
+            .unwrap_or_else(|| panic!("{conversation} is not listed"))["member_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|id| id.as_str().unwrap().to_owned())
+            .collect();
+        ids.sort_unstable();
+        ids
     }
 
     async fn call(
@@ -662,12 +719,13 @@ async fn public_channels_are_readable_by_all_and_writable_by_members() {
     let design = fixture.channel(&ada, "design", "public", &[]).await;
     fixture.send(&ada, &design, "First").await;
 
-    // Not a member: can read, cannot write.
-    let (ids, _) = fixture.main_ids(&bob, &design, "").await;
+    // A member from before the channel had everyone is not in it: can read, cannot write.
+    let cy = fixture.add_member("cy").await;
+    let (ids, _) = fixture.main_ids(&cy, &design, "").await;
     assert_eq!(ids.len(), 1);
     let (status, problem) = fixture
         .call(
-            &bob,
+            &cy,
             "POST",
             &format!("/conversations/{design}/messages"),
             Some(json!({ "body": "Hi", "nonce": "x" })),
@@ -678,12 +736,13 @@ async fn public_channels_are_readable_by_all_and_writable_by_members() {
 
     // Joining starts with everything read, and adds a system row.
     let joined = fixture
-        .ok(&bob, "POST", &format!("/conversations/{design}/join"), None)
+        .ok(&cy, "POST", &format!("/conversations/{design}/join"), None)
         .await;
-    assert_eq!(joined["result"]["member_ids"].as_array().unwrap().len(), 2);
-    assert_eq!(fixture.counts(&bob, &design).await, (0, 0));
-    fixture.send(&bob, &design, "Hi").await;
+    assert_eq!(joined["result"]["member_ids"].as_array().unwrap().len(), 4);
+    assert_eq!(fixture.counts(&cy, &design).await, (0, 0));
+    fixture.send(&cy, &design, "Hi").await;
     assert_eq!(fixture.counts(&ada, &design).await, (1, 0));
+    assert_eq!(fixture.counts(&bob, &design).await, (2, 0));
 
     // A duplicate name is a conflict; an empty one is invalid.
     let create = |name: &str| Some(json!({ "name": name, "kind": "public" }));
@@ -723,17 +782,7 @@ async fn public_channels_are_readable_by_all_and_writable_by_members() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {problem}");
     }
 
-    // Leaving keeps a public channel readable; an archived channel is read-only and unlisted.
-    fixture
-        .ok(
-            &bob,
-            "POST",
-            &format!("/conversations/{design}/leave"),
-            None,
-        )
-        .await;
-    let (ids, _) = fixture.main_ids(&bob, &design, "").await;
-    assert_eq!(ids.len(), 4, "two messages, a join row and a leave row");
+    // An archived channel is read-only and unlisted.
     fixture
         .ok(
             &ada,
@@ -762,6 +811,141 @@ async fn public_channels_are_readable_by_all_and_writable_by_members() {
     // The name is free again.
     fixture.channel(&bob, "design", "public", &[]).await;
     fixture.assert_counters_exact("channel changes").await;
+}
+
+#[tokio::test]
+async fn a_public_channel_has_every_workspace_member_and_nobody_leaves_it() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    let general = fixture.general().await;
+    let design = fixture
+        .channel(&fixture.owner, "design", "public", &[])
+        .await;
+    let secret = fixture
+        .channel(&fixture.owner, "secret", "private", &[&ada, &bob])
+        .await;
+    let old = fixture.channel(&fixture.owner, "old", "public", &[]).await;
+    fixture.send(&ada, &design, "Before cy").await;
+    fixture.send(&ada, &secret, "Before cy").await;
+    fixture
+        .ok(
+            &fixture.owner,
+            "POST",
+            &format!("/conversations/{old}/archive"),
+            None,
+        )
+        .await;
+
+    // A new public channel has every workspace member; a private one only the chosen ones.
+    let mut everyone = vec![
+        fixture.owner.id.to_string(),
+        ada.id.to_string(),
+        bob.id.to_string(),
+    ];
+    everyone.sort_unstable();
+    assert_eq!(fixture.member_ids(&bob, &design).await, everyone);
+    assert_eq!(fixture.counts(&bob, &design).await, (1, 0));
+    assert_eq!(fixture.member_ids(&ada, &secret).await.len(), 3);
+
+    // A private channel can be left.
+    fixture
+        .ok(
+            &bob,
+            "POST",
+            &format!("/conversations/{secret}/leave"),
+            None,
+        )
+        .await;
+
+    // Someone who joins the workspace joins every live public channel, with everything read.
+    let cy = fixture.invite_member("cy").await;
+    everyone.push(cy.id.to_string());
+    everyone.sort_unstable();
+    assert_eq!(fixture.member_ids(&cy, &design).await, everyone);
+    assert_eq!(fixture.member_ids(&cy, &general).await, everyone);
+    assert_eq!(fixture.counts(&cy, &design).await, (0, 0));
+    let listed = fixture.ok(&cy, "GET", "/conversations", None).await;
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|conversation| conversation["id"] != secret.as_str())
+    );
+    let in_old: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chat_members WHERE conversation_id = ? AND user_id = ?",
+    )
+    .bind(&old)
+    .bind(cy.id.to_string())
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(in_old, 0, "an archived channel gets nobody new");
+
+    // A private channel made public gets everyone, with everything read.
+    let updated = fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &format!("/conversations/{secret}"),
+            Some(json!({ "kind": "public" })),
+        )
+        .await;
+    assert_eq!(updated["result"]["member_ids"].as_array().unwrap().len(), 4);
+    assert_eq!(fixture.counts(&bob, &secret).await, (0, 0));
+    assert_eq!(fixture.counts(&cy, &secret).await, (0, 0));
+
+    // Nobody leaves a public channel or is removed from it.
+    for (member, method, path) in [
+        (&bob, "POST", format!("/conversations/{design}/leave")),
+        (&ada, "POST", format!("/conversations/{secret}/leave")),
+        (
+            &fixture.owner,
+            "DELETE",
+            format!("/conversations/{design}/members/{}", ada.id),
+        ),
+    ] {
+        let (status, problem) = fixture.call(member, method, &path, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {problem}");
+        assert_eq!(problem["code"], "chat_forbidden");
+    }
+    assert_eq!(fixture.member_ids(&ada, &design).await, everyone);
+    fixture.assert_counters_exact("public channels").await;
+}
+
+#[tokio::test]
+async fn a_dm_with_only_yourself_is_a_place_for_notes() {
+    let fixture = Fixture::new().await;
+    let me = fixture.add_member("me").await;
+    let notes = fixture
+        .ok(&me, "POST", "/dms", Some(json!({ "user_ids": [] })))
+        .await;
+    let same = fixture
+        .ok(
+            &me,
+            "POST",
+            "/dms",
+            Some(json!({ "user_ids": [me.id.to_string()] })),
+        )
+        .await;
+    assert_eq!(notes["result"]["id"], same["result"]["id"]);
+    assert_eq!(notes["result"]["member_ids"], json!([me.id.to_string()]));
+    let notes = notes["result"]["id"].as_str().unwrap();
+    let root = fixture
+        .send(&me, notes, &format!("A note for <@{}>", me.id))
+        .await;
+    fixture.reply(&me, notes, &root, "More").await;
+    assert_eq!(fixture.counts(&me, notes).await, (0, 0));
+    assert_eq!(fixture.thread(&me, &root).await, Some((true, 0, 0)));
+    let inbox: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE recipient_user_id = ?")
+            .bind(me.id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(inbox, 0);
+    fixture.assert_counters_exact("notes").await;
 }
 
 #[tokio::test]
@@ -1829,7 +2013,7 @@ async fn a_member_who_left_does_not_edit_and_an_archived_channel_takes_no_reacti
     let fixture = Fixture::new().await;
     let ada = fixture.add_member("ada").await;
     let design = fixture
-        .channel(&fixture.owner, "design", "public", &[&ada])
+        .channel(&fixture.owner, "design", "private", &[&ada])
         .await;
     let message = fixture.send(&ada, &design, "Mine").await;
     let edit = Some(json!({ "body": "<!channel> changed" }));
@@ -1842,10 +2026,11 @@ async fn a_member_who_left_does_not_edit_and_an_archived_channel_takes_no_reacti
             None,
         )
         .await;
+    // The private channel is gone for the member who left.
     let (status, _) = fixture
         .call(&ada, "PATCH", &format!("/messages/{message}"), edit)
         .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     fixture
         .ok(

@@ -5,7 +5,7 @@ import { useTasks } from '@/features/tasks/api/tasks'
 import { pickerCandidates } from '@/features/tasks/relationsLib'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
-/** Recently updated tasks: the browse list, and where identifiers match (the server search only knows text). */
+/** Recently updated tasks: the browse list. The server search matches titles, descriptions and identifiers (`ENG-12`). */
 const RECENT = { sort: 'updated_at', order: 'desc', limit: 100 } as const
 
 export interface UseTaskCandidatesInput {

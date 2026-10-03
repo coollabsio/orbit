@@ -733,6 +733,50 @@ async fn member_ids(
     .collect()
 }
 
+/// Puts a new workspace member into every live public channel, with everything read, the way
+/// the `chat_default_channel_for_member` trigger does for `#general`. Every insert into
+/// `memberships` calls this in the same transaction, so a public channel always has every
+/// workspace member. Channels the member is in already stay as they are.
+pub async fn join_public_channels(
+    conn: &mut SqliteConnection,
+    workspace_id: Id,
+    user_id: Id,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO chat_members (conversation_id, user_id, workspace_id, notify, \
+         last_read_message_id, read_count, joined_at) \
+         SELECT c.id, ?, c.workspace_id, 'mentions', \
+                (SELECT id FROM chat_messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1), \
+                c.message_count, ? \
+         FROM chat_conversations c \
+         WHERE c.workspace_id = ? AND c.kind = 'public' AND c.archived_at IS NULL \
+         ON CONFLICT (conversation_id, user_id) DO NOTHING",
+    )
+    .bind(user_id.to_string())
+    .bind(now.as_millis())
+    .bind(workspace_id.to_string())
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Every member of the workspace.
+async fn workspace_member_ids(
+    conn: &mut SqliteConnection,
+    workspace_id: Id,
+) -> Result<Vec<Id>, ChatError> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT user_id FROM memberships WHERE workspace_id = ? ORDER BY created_at, user_id",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(parse_id)
+    .collect()
+}
+
 fn conversation_record(conversation: &Conversation, member_ids: Vec<Id>) -> ConversationRecord {
     ConversationRecord {
         id: conversation.id,

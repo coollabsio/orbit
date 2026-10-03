@@ -1,26 +1,30 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
+import { ColorDot } from '@/components/common/ColorDot'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Command, CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { useProjects } from '@/features/tasks/api/projects'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
 import { assignUpdates, assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { DueDateDialog } from '@/features/tasks/components/DueDateDialog'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { LabelPill } from '@/features/tasks/components/TaskLabels'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
+import { useMoveToProject } from '@/features/tasks/useMoveToProject'
 import { useTrashTasks } from '@/features/tasks/useTrashTasks'
 import { GroupIcon } from '@/features/views/components/GroupIcon'
 import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { taskPath } from '@/lib/taskLinks'
 import { focusTaskRow, focusedTaskId, useTaskTarget } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 
-type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate'
+type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate' | 'project'
 
-const FIELD_TITLE: Record<TaskField, string> = { status: 'Change status', priority: 'Change priority', assignee: 'Change assignee', labels: 'Change labels', dueDate: 'Set due date' }
+const FIELD_TITLE: Record<TaskField, string> = { status: 'Change status', priority: 'Change priority', assignee: 'Change assignee', labels: 'Change labels', dueDate: 'Set due date', project: 'Move to project' }
 
 interface TaskCommandsProps {
   /** The tasks in view, or the open task. */
@@ -39,6 +43,9 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const { getTargetIds, openTaskId, setSelected } = useTaskTarget()
   const bulkTasks = useBulkTasks(workspace.id)
   const trashTasks = useTrashTasks(workspace.id)
+  const moveToProject = useMoveToProject(workspace.id)
+  // every project: a project page's group context knows only its own
+  const projects = useProjects(workspace.id).data ?? []
   // `focused`: the row that had the keyboard focus, to give it back when the list closes
   const [menu, setMenu] = useState<{ field: TaskField; ids: string[]; focused: string | null } | null>(null)
 
@@ -60,9 +67,10 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.setAssignee', open('assignee'), { available })
   useCommand('task.setLabels', open('labels'), { available })
   useCommand('task.setDueDate', open('dueDate'), { available })
+  useCommand('task.moveToProject', open('project'), { available: () => available() && projects.length > 1 })
   useCommand('task.assignMe', () => mutate(assignUpdates(targets(), currentUserId)), { available })
   useCommand('task.copyId', () => copy(targets()[0].identifier, 'Copied task ID'), { available: single })
-  useCommand('task.copyLink', () => copy(`${window.location.origin}/tasks/${targets()[0].id}`, 'Copied task link'), { available: single })
+  useCommand('task.copyLink', () => copy(`${window.location.origin}${taskPath(targets()[0])}`, 'Copied task link'), { available: single })
   // the open task has its own trash action, which also closes the page
   useCommand('task.trash', openTaskId ? null : async () => {
     if (await trashTasks(targets())) setSelected([])
@@ -133,6 +141,16 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
           {menu.field === 'labels' ? labels.map((label) => (
             <CommandItem key={label.id} value={label.name} data-checked={menuTasks.every((task) => task.labels.includes(label.id))} onSelect={() => mutate(labelToggleUpdates(menuTasks, label.id))}>
               <LabelPill label={label} />
+            </CommandItem>
+          )) : null}
+          {menu.field === 'project' ? projects.map((project) => (
+            <CommandItem key={project.id} value={`${project.name} ${project.key}`} data-checked={menuTasks.every((task) => task.projectId === project.id)} onSelect={() => {
+              moveToProject(menuTasks, project)
+              close()
+            }}>
+              <ColorDot color={project.color} className="size-2" />
+              <span className="flex-1 truncate">{project.name}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">{project.key}</span>
             </CommandItem>
           )) : null}
         </CommandList>

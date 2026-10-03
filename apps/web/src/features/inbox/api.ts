@@ -8,6 +8,7 @@ import {
 } from '@/api/generated/sdk.gen'
 import type { NotificationRecord } from '@/api/generated/types.gen'
 import { fetchAllPages } from '@/api/pagination'
+import { taskPath } from '@/lib/taskLinks'
 
 function required<T>(data: T | undefined, message: string): T {
   if (data === undefined) throw new Error(message)
@@ -79,7 +80,8 @@ export function notificationTarget(notification: NotificationRecord): string | n
     const thread = notification.page_thread_id ? `?thread=${encodeURIComponent(notification.page_thread_id)}` : ''
     return `/docs/${notification.page_id}${thread}`
   }
-  return notification.task_id ? `/tasks/${notification.task_id}` : null
+  // the task page replaces the id with the identifier once the task loads
+  return notification.task_id ? taskPath({ id: notification.task_id }) : null
 }
 
 /** Mentions in task comments, page comments, page bodies and chat. */

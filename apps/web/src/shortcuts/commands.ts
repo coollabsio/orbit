@@ -62,6 +62,7 @@ const REGISTRY = [
   { id: 'task.assignMe', title: 'Assign to me', group: 'Task', keys: 'I', context: 'task-target' },
   { id: 'task.setLabels', title: 'Change labels', group: 'Task', keys: 'L', context: 'task-target' },
   { id: 'task.setDueDate', title: 'Set due date', group: 'Task', keys: 'Shift+D', context: 'task-target' },
+  { id: 'task.moveToProject', title: 'Move to project', group: 'Task', keys: 'Shift+P', context: 'task-target' },
   { id: 'task.addSubIssue', title: 'Add sub-issue', group: 'Task', keys: 'Mod+Shift+O', context: 'task-target' },
   { id: 'task.addRelation', title: 'Add relation', group: 'Task', keys: 'Mod+Shift+M', context: 'task-target' },
   { id: 'task.copyId', title: 'Copy task ID', group: 'Task', keys: 'Mod+.', context: 'task-target' },

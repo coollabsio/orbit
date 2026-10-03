@@ -4,17 +4,18 @@ import { Add as Plus, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import type { PageTaskRecord } from '@/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { UserAvatarStack } from '@/components/common/UserAvatar'
 import { taskFromRecord, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
-import { subIssuesQuery, useCreateTask, useSubIssues, useUpdateTask } from '@/features/tasks/api/tasks'
+import { subIssuesQuery, useCreateTask, useSubIssues } from '@/features/tasks/api/tasks'
 import { subIssueDefaults } from '@/features/tasks/subIssuesLib'
-import { defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
+import { defaultStatusOf } from '@/features/tasks/taskMeta'
 import { useParentActions } from '@/features/tasks/useParentActions'
 import { useCollapsedTasks } from '@/features/views/useCollapsedTasks'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { AssigneePicker } from './AssigneePicker'
+import { PriorityPicker } from './PriorityPicker'
+import { StatusPicker } from './StatusPicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { TreeGutter } from './TreeGutter'
@@ -129,12 +130,7 @@ function SubIssueChildren({ parentId, depth, context }: { parentId: string; dept
 
 function SubIssueRow({ task, depth, context }: { task: Task; depth: number; context: Context }) {
   const { workspace } = useWorkspace()
-  const updateTask = useUpdateTask(workspace.id)
   const parentActions = useParentActions(workspace.id)
-  const status = context.statuses.find((item) => item.id === task.statusId)
-  // Duplicate needs a canonical task: change it from the task itself
-  const options = projectStatuses(context.statuses, task.projectId).filter((option) => option.category !== 'duplicate')
-  const assignees = context.users.filter((user) => task.assigneeIds.includes(user.id))
   return (
     <div
       className={cn('group/sub relative flex min-h-8 items-center gap-1.5 rounded-md pr-1 text-xs transition-colors duration-150 hover-fine:hover:bg-muted motion-reduce:transition-none', context.newIds.has(task.id) && 'animate-relation-enter')}
@@ -148,26 +144,8 @@ function SubIssueRow({ task, depth, context }: { task: Task; depth: number; cont
         onToggle={() => context.toggle(task.id)}
         identifier={task.identifier}
       />
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger render={
-          <Button variant="ghost" size="icon-sm" className="size-[22px] shrink-0" aria-label={`Status: ${status?.name ?? 'None'}`}>
-            <TaskStatusIcon status={status} />
-          </Button>
-        } />
-        <DropdownMenuContent className="w-auto min-w-45">
-          {options.map((option) => (
-            <DropdownMenuItem
-              key={option.id}
-              className="data-selected:bg-accent data-selected:font-medium"
-              data-selected={option.id === task.statusId || undefined}
-              onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
-            >
-              <TaskStatusIcon status={option} />
-              {option.name}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/* Duplicate needs a canonical task: change it from the task itself */}
+      <StatusPicker task={task} statuses={context.statuses} />
       <Button
         type="button"
         variant="link"
@@ -177,7 +155,19 @@ function SubIssueRow({ task, depth, context }: { task: Task; depth: number; cont
         <span className="shrink-0 text-muted-foreground tabular-nums">{task.identifier}</span>
         <span className="truncate">{task.title || 'Untitled'}</span>
       </Button>
-      {assignees.length > 0 ? <UserAvatarStack users={assignees} size={16} /> : null}
+      {/* quiet until the row is hovered: the priority only when set, the avatar only when assigned */}
+      <PriorityPicker
+        task={task}
+        align="right"
+        className={cn('shrink-0', task.priority === 'none' && 'hover-fine:opacity-0 hover-fine:group-hover/sub:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100')}
+      />
+      <AssigneePicker
+        task={task}
+        users={context.users}
+        size={16}
+        max={3}
+        className={cn(task.assigneeIds.length === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/sub:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100')}
+      />
       <Button
         variant="ghost"
         size="icon-xs"

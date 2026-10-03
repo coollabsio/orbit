@@ -8,7 +8,7 @@ import {
 
 const relation = (id: string, type: string, direction: string, createdAt = '2026-09-23T10:00:00Z') => ({
   id, type, direction, created_at: createdAt,
-  task: { id: `task-${id}`, project_id: 'p1', title: id, status_id: 'todo' },
+  task: { id: `task-${id}`, project_id: 'p1', title: id, status_id: 'todo', version: 1 },
 }) as TaskRelationRecord
 
 const task = (id: string, title: string, overrides: Partial<Task> = {}): Task => ({

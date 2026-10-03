@@ -1784,6 +1784,11 @@ export type PageTaskRecord = {
         duplicate_of: null | TaskRef;
         id: string;
         label_ids: Array<string>;
+        /**
+         * Per-project sequence number: the task's identifier is `{project key}-{number}`, e.g.
+         * `ENG-12`. Reassigned when the task moves to another project; never reused.
+         */
+        number: number;
         parent: null | TaskRef;
         /**
          * The direct parent; null for top-level tasks.
@@ -1946,9 +1951,17 @@ export type RecoveryRequestResponse = {
  */
 export type RelatedTask = {
     id: string;
+    /**
+     * The task's number in its project; with the project key it makes the identifier (`ENG-12`).
+     */
+    number: number;
     project_id: string;
     status_id: string;
     title: string;
+    /**
+     * The other task's version, so it can be updated in place (e.g. its status) from the relation row.
+     */
+    version: number;
 };
 
 export type RenameWorkspaceBody = {
@@ -2211,6 +2224,11 @@ export type TaskRecord = {
     duplicate_of: null | TaskRef;
     id: string;
     label_ids: Array<string>;
+    /**
+     * Per-project sequence number: the task's identifier is `{project key}-{number}`, e.g.
+     * `ENG-12`. Reassigned when the task moves to another project; never reused.
+     */
+    number: number;
     parent: null | TaskRef;
     /**
      * The direct parent; null for top-level tasks.
@@ -2240,10 +2258,15 @@ export type TaskRecord = {
 };
 
 /**
- * A task reference small enough to embed; clients build the display identifier themselves.
+ * A task reference small enough to embed; clients build the display identifier
+ * (`{project_key}-{number}`) themselves.
  */
 export type TaskRef = {
     id: string;
+    /**
+     * The task's number in that project.
+     */
+    number: number;
     project_id: string;
     /**
      * The key of the task's (live) project, e.g. `ORB`.
@@ -11016,7 +11039,7 @@ export type BulkTasksErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, github_content_read_only
+     * contract_mismatch, task_conflict, conflict, github_content_read_only, github_linked_move
      */
     409: TaskProblem;
     /**
@@ -11297,6 +11320,9 @@ export type GetTaskData = {
     };
     path: {
         workspace_id: string;
+        /**
+         * Task UUID or identifier such as `ENG-12`
+         */
         task_id: string;
     };
     query?: never;
@@ -11376,7 +11402,7 @@ export type UpdateTaskErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, task_conflict, conflict, github_content_read_only
+     * contract_mismatch, task_conflict, conflict, github_content_read_only, github_linked_move
      */
     409: TaskProblem;
     /**

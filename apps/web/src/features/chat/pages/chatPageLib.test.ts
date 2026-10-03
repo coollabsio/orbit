@@ -30,6 +30,11 @@ test('only same-origin task and page URLs are link card targets', () => {
   expect(orbitLinkTarget('https://orbit.test/docs/trash', origin)).toBeNull()
   expect(orbitLinkTarget('https://orbit.test/chat/c1', origin)).toBeNull()
   expect(orbitLinkTarget('not a url', origin)).toBeNull()
+  // task URLs name a task by identifier too, also inside a saved view
+  expect(orbitLinkTarget('https://orbit.test/tasks/ENG-12', origin)).toEqual({ kind: 'task', id: 'ENG-12' })
+  expect(orbitLinkTarget('/views/v1/ENG-12?x=1', origin)).toEqual({ kind: 'task', id: 'ENG-12' })
+  expect(orbitLinkTarget('/views/v1', origin)).toBeNull()
+  expect(orbitLinkTarget('/views/v1/ENG-12/more', origin)).toBeNull()
 })
 
 test('the task title is the first line with text, cut near 80 characters', () => {

@@ -263,8 +263,8 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
             >
               <TimelineRowLabel
                 row={row}
-                status={status}
-                assignee={assignee}
+                statuses={statuses}
+                users={users}
                 properties={properties}
                 groupContext={groupContext}
                 onToggle={(key, open) => setOverrides((prev) => ({ ...prev, [key]: open }))}

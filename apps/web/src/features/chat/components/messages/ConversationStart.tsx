@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { useChatContext } from '../../api/chatContext'
 import type { Conversation } from '../../api/types'
+import { isSelfDm } from '../../lib/sidebar'
 import { fullTimestamp } from '../../lib/time'
 import { useChatLocation, useChatNavigation } from '../../useChatNavigation'
 import { conversationTitle, useChatPeople } from './people'
@@ -13,6 +14,15 @@ export function ConversationStart({ conversation }: { conversation: Conversation
   const { togglePane } = useChatNavigation()
   const title = conversationTitle(conversation, people, currentUserId)
   const membersOpen = location.view === 'conversation' && location.pane === 'members' && !location.thread && !location.q
+
+  if (isSelfDm(conversation, currentUserId)) {
+    return (
+      <div data-slot="conversation-start" className="flex flex-col items-start gap-1 px-4 pt-8 pb-4 max-[899px]:px-3">
+        <p className="text-base font-semibold">This is your space</p>
+        <p className="max-w-[90ch] text-sm text-muted-foreground">Draft messages, keep links and files handy, or jot down notes. Only you can see it.</p>
+      </div>
+    )
+  }
 
   if (conversation.kind === 'dm') {
     return (

@@ -148,7 +148,9 @@ test('bulk due date picker schedules the selected tasks for this week', async ()
 
   fireEvent.click(within(view.getByRole('toolbar', { name: 'Selected tasks' })).getByRole('button', { name: 'Due date' }))
   await userEvent.click(await view.findByRole('button', { name: 'This week' }, { timeout: 5000 }))
-  await userEvent.click(view.getByRole('button', { name: 'Done' }))
+  // picks collect while the picker is open; closing it writes them once
+  expect(writes).toHaveLength(0)
+  await userEvent.keyboard('{Escape}')
 
   await waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 })
   const { updates } = writes[0].body as { updates: { id: string; due_start_at: string; due_at: string }[] }

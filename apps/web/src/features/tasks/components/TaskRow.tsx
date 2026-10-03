@@ -2,26 +2,14 @@ import { taskRowTarget } from '@/shortcuts/taskTarget'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { TaskStatusIcon } from './TaskStatusIcon'
 import { BlockedIndicator } from './BlockedIndicator'
-import { projectStatuses } from '@/features/tasks/taskMeta'
 import { refIdentifier, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { LabelRecord } from '@/api/generated/types.gen'
 import type { TaskProperty } from '@/features/views/viewState'
-import { useUpdateTask } from '@/features/tasks/api/tasks'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { PriorityPicker } from './PriorityPicker'
+import { StatusPicker } from './StatusPicker'
+import { AssigneePicker } from './AssigneePicker'
 import { LinkifiedText } from './LinkifiedText'
 import { DateStamp, ProjectChip } from './TaskPropertyChips'
 import { DueDatePicker } from './DueDatePicker'
@@ -70,10 +58,7 @@ interface TaskRowProps {
 
 /** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title … labels · progress · project · due · assignee · created · updated. */
 export function TaskRow({ task, statuses, labels, users, assignees, project, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent, nest }: TaskRowProps) {
-  const { workspace } = useWorkspace()
-  const updateTask = useUpdateTask(workspace.id)
   const status = statuses.find((s) => s.id === task.statusId)
-  const options = projectStatuses(statuses, task.projectId)
   const has = (property: TaskProperty) => properties.includes(property)
   return (
     <div
@@ -133,34 +118,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
           className="-my-1.5"
         />
       ) : null}
-      {has('status') ? (
-        <div onClick={(e) => e.stopPropagation()}>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-sm" className="size-[22px]" aria-label={`Status: ${status?.name ?? 'None'}`}>
-                  <TaskStatusIcon status={status} />
-                </Button>
-              }
-            />
-            <DropdownMenuContent className="w-auto min-w-45">
-              {options.map((option) => (
-                <DropdownMenuItem
-                  key={option.id}
-                  className="data-selected:bg-accent data-selected:font-medium"
-                  data-selected={option.id === task.statusId || undefined}
-                  onClick={() => option.category === 'duplicate'
-                    ? onRequestDuplicate(task)
-                    : updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, status_id: option.id } })}
-                >
-                  <TaskStatusIcon status={option} />
-                  {option.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ) : null}
+      {has('status') ? <StatusPicker task={task} statuses={statuses} onRequestDuplicate={() => onRequestDuplicate(task)} /> : null}
       {!has('id') && task.blocked ? <BlockedIndicator /> : null}
       {showParent && task.parent ? (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
@@ -199,55 +157,10 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       ) : null}
       {has('project') ? <span className="flex w-[4.5rem] shrink-0 max-[1099px]:hidden"><ProjectChip project={project} className="max-w-full text-xs" /></span> : null}
       {has('due_date') ? <DueDatePicker task={task} status={status} className="w-[4.25rem] shrink-0 text-xs max-[640px]:hidden" /> : null}
-      {has('assignee') ? (
-        <div className="flex w-7 shrink-0 justify-end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-auto rounded-full p-0"
-                  aria-label={assignees.length > 0 ? `Assignees: ${assignees.map((user) => user.name).join(', ')}` : 'Assign task'}
-                >
-                  {/* at most two circles (28px) so the slot stays narrow */}
-                  <UserAvatarStack users={assignees} size={18} max={assignees.length > 2 ? 1 : 2} />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-auto min-w-45">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Assignees</DropdownMenuLabel>
-                {users.map((user) => {
-                  const active = task.assigneeIds.includes(user.id)
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={user.id}
-                      checked={active}
-                      closeOnClick
-                      onCheckedChange={() => updateTask.mutate({
-                        taskId: task.id,
-                        body: {
-                          expected_version: task.version,
-                          assignee_ids: active
-                            ? task.assigneeIds.filter((id) => id !== user.id)
-                            : [...task.assigneeIds, user.id],
-                        },
-                      })}
-                    >
-                      <UserAvatar user={user} size={16} />
-                      {user.name}
-                    </DropdownMenuCheckboxItem>
-                  )
-                })}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ) : null}
+      {/* at most two circles (28px) so the slot stays narrow */}
+      {has('assignee') ? <AssigneePicker task={task} users={users} max={assignees.length > 2 ? 1 : 2} className="w-7 justify-end" /> : null}
       {has('created') ? <DateStamp property="created" iso={task.createdAt} className="min-w-[44px] text-right text-xs text-muted-foreground/70 max-[480px]:hidden" /> : null}
       {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} className="min-w-[44px] text-right text-xs text-muted-foreground/70 max-[480px]:hidden" /> : null}
-      {updateTask.isError ? <span role="alert" className="text-xs text-destructive">Status update failed. <Button variant="ghost" onClick={(event) => { event.stopPropagation(); if (updateTask.variables) updateTask.mutate(updateTask.variables) }}>Retry</Button></span> : null}
       {nest?.['data-nest'] === 'inside' ? <NestChip className="top-1/2 right-3 -translate-y-1/2" /> : null}
     </div>
   )

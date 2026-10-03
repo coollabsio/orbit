@@ -29,7 +29,7 @@ const record = (id: string, title: string) => ({
 })
 const relation = (id: string, type: string, direction: string, other: { id: string; title: string }) => ({
   id, type, direction, created_at: `2026-09-23T10:00:0${id.at(-1)}Z`,
-  task: { id: other.id, project_id: 'project-1', title: other.title, status_id: 'todo' },
+  task: { id: other.id, project_id: 'project-1', title: other.title, status_id: 'todo', version: 1 },
 })
 
 type Call = { method: string; path: string; body?: unknown }

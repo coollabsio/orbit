@@ -9,7 +9,7 @@ import { keepIdentifiersTogether } from '@/lib/toast'
 /** A task the server closed by automation in the same request (`auto_closed` on PATCH and bulk responses). */
 export type AutoClosedTask = { id: string; status_id: string }
 
-type ParentWire = { parent_task_id?: string | null; parent?: { id: string; project_key: string } | null; ancestors?: Array<{ id: string }> | null }
+type ParentWire = { parent_task_id?: string | null; parent?: { id: string; project_key: string; number?: number } | null; ancestors?: Array<{ id: string }> | null }
 
 const isAutoClosed = (item: unknown): item is AutoClosedTask =>
   typeof item === 'object' && item !== null
@@ -47,7 +47,7 @@ export function announceAutoClosed(queryClient: QueryClient, workspaceId: string
   const parentIds = new Set<string>()
   const embedded = new Map<string, string>()
   for (const record of changed as Array<TaskRecord & ParentWire>) {
-    if (record.parent) embedded.set(record.parent.id, refIdentifier({ id: record.parent.id, projectKey: record.parent.project_key }))
+    if (record.parent) embedded.set(record.parent.id, refIdentifier({ id: record.parent.id, projectKey: record.parent.project_key, number: record.parent.number }))
     for (const ancestor of record.ancestors ?? []) parentIds.add(ancestor.id)
     let id = record.parent_task_id ?? null
     while (id && !parentIds.has(id)) {
@@ -55,8 +55,10 @@ export function announceAutoClosed(queryClient: QueryClient, workspaceId: string
       id = (findCachedTask(queryClient, workspaceId, id) as (TaskRecord & ParentWire) | undefined)?.parent_task_id ?? null
     }
   }
-  const identifierOf = (taskId: string) => embedded.get(taskId)
-    ?? taskIdentifier(taskId, projects.find((project) => project.id === findCachedTask(queryClient, workspaceId, taskId)?.project_id))
+  const identifierOf = (taskId: string) => {
+    const cached = findCachedTask(queryClient, workspaceId, taskId)
+    return embedded.get(taskId) ?? taskIdentifier(taskId, projects.find((project) => project.id === cached?.project_id), cached?.number)
+  }
   const message = autoClosedMessage({ items, parentIds, identifierOf })
   if (message) toast.success(keepIdentifiersTogether(message))
 }

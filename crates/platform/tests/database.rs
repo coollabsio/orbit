@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        37
+        38
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 37
+            binary_version: 38
         }
     ));
 }
@@ -1860,6 +1860,115 @@ async fn chat_migration_gives_every_workspace_member_the_default_channel() {
             .unwrap(),
         1
     );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn task_numbers_migration_backfills_allocates_and_never_reuses() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 37)
+        .run(&db)
+        .await
+        .unwrap();
+    let [user, workspace, membership, eng, ops, eng_todo, ops_todo]: [Id; 7] =
+        std::array::from_fn(|_| Id::new_v7());
+    let [first, second, third, other]: [Id; 4] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'Orbit', 0, '{membership}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{membership}', '{workspace}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at)
+         VALUES ('{eng}', '{workspace}', 'Engineering', 'ENG', '#000000', 0, NULL, 1, 1),
+                ('{ops}', '{workspace}', 'Operations', 'OPS', '#000000', 0, NULL, 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at)
+         VALUES ('{eng_todo}', '{workspace}', '{eng}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1),
+                ('{ops_todo}', '{workspace}', '{ops}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at)
+         VALUES ('{second}', '{workspace}', '{eng}', '{eng_todo}', 'Second', '{user}', 20, 20),
+                ('{first}', '{workspace}', '{eng}', '{eng_todo}', 'First', '{user}', 10, 10),
+                ('{third}', '{workspace}', '{eng}', '{eng_todo}', 'Third', '{user}', 30, 30),
+                ('{other}', '{workspace}', '{ops}', '{ops_todo}', 'Other', '{user}', 5, 5);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    let number = |task: Id| format!("SELECT number FROM tasks WHERE id = '{task}'");
+    let counter = |project: Id| format!("SELECT task_counter FROM projects WHERE id = '{project}'");
+    // Backfill: creation order within each project.
+    assert_eq!(db.scalar::<i64>(&number(first)).await.unwrap(), 1);
+    assert_eq!(db.scalar::<i64>(&number(second)).await.unwrap(), 2);
+    assert_eq!(db.scalar::<i64>(&number(third)).await.unwrap(), 3);
+    assert_eq!(db.scalar::<i64>(&number(other)).await.unwrap(), 1);
+    assert_eq!(db.scalar::<i64>(&counter(eng)).await.unwrap(), 3);
+    assert_eq!(db.scalar::<i64>(&counter(ops)).await.unwrap(), 1);
+
+    // A delete never frees its number.
+    db.execute(&format!("DELETE FROM tasks WHERE id = '{third}'"))
+        .await
+        .unwrap();
+    let fourth = Id::new_v7();
+    db.execute(&format!(
+        "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at) \
+         VALUES ('{fourth}', '{workspace}', '{eng}', '{eng_todo}', 'Fourth', '{user}', 40, 40)"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&number(fourth)).await.unwrap(), 4);
+
+    // A move takes the target project's next number, even when the old one is taken there.
+    db.execute(&format!(
+        "UPDATE tasks SET project_id = '{ops}', status_id = '{ops_todo}', number = NULL WHERE id = '{first}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&number(first)).await.unwrap(), 2);
+    assert_eq!(db.scalar::<i64>(&counter(ops)).await.unwrap(), 2);
+    assert_eq!(db.scalar::<i64>(&counter(eng)).await.unwrap(), 4);
+    // Rewriting the same project keeps the number.
+    db.execute(&format!(
+        "UPDATE tasks SET project_id = '{eng}' WHERE id = '{second}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&number(second)).await.unwrap(), 2);
+
+    // An explicit number (an import) moves the counter forward only.
+    let imported = Id::new_v7();
+    db.execute(&format!(
+        "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, number, created_at, updated_at) \
+         VALUES ('{imported}', '{workspace}', '{eng}', '{eng_todo}', 'Imported', '{user}', 10, 50, 50)"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&counter(eng)).await.unwrap(), 10);
+    let error = db
+        .execute(&format!(
+            "UPDATE tasks SET number = 2 WHERE id = '{fourth}'"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("UNIQUE constraint failed"), "{error}");
+
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
             .await

@@ -12,7 +12,7 @@ const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
 const record = (id: string, fields: Partial<TaskRecord> = {}): TaskRecord => ({
-  id, workspace_id: 'workspace-1', project_id: 'project-1', status_id: 'todo', title: id,
+  id, workspace_id: 'workspace-1', project_id: 'project-1', number: 1, status_id: 'todo', title: id,
   description: '', position: 0, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-23T10:00:00Z', updated_at: '2026-09-23T10:00:00Z', version: 1,
   duplicate_of: null, blocked: false, parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,

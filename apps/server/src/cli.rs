@@ -785,6 +785,14 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     .execute(database.pool())
     .await
     .map_err(operation)?;
+    orbit_server::repositories::chat::join_public_channels(
+        &mut *database.pool().acquire().await.map_err(operation)?,
+        workspace_id,
+        member_id,
+        now,
+    )
+    .await
+    .map_err(operation)?;
     let already_seeded: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM tasks \
          JOIN audit_events ON audit_events.resource_id = tasks.id \

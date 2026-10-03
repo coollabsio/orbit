@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ChatError } from '@/features/chat/api/types'
-import { canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, matchPeople, pickablePeople } from './channelLib'
+import { canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, matchPeople, messageablePeople, pickablePeople } from './channelLib'
 
 test('a channel name is lowercase and spaces become hyphens while it is typed', () => {
   expect(channelNameInput('Design Team')).toBe('design-team')
@@ -51,6 +51,15 @@ const people = [
 test('a picker offers nobody suspended, not the current user and not the excluded ones, by name', () => {
   expect(pickablePeople(people, 'u1').map((person) => person.id)).toEqual(['u3', 'u2'])
   expect(pickablePeople(people, 'u1', ['u3']).map((person) => person.id)).toEqual(['u2'])
+})
+
+test('a new message offers yourself first, as "(you)", then the others by name', () => {
+  expect(messageablePeople(people, 'u1').map((person): string[] => [person.id, person.name])).toEqual([
+    ['u1', 'Me (you)'],
+    ['u3', 'Ada Lovelace'],
+    ['u2', 'Zoe Park'],
+  ])
+  expect(messageablePeople(people, null).map((person) => person.id)).toEqual(['u3', 'u1', 'u2'])
 })
 
 test('people match by name, handle or email', () => {

@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 
+use super::chat::join_public_channels;
 use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditOutcome};
 
@@ -382,6 +383,9 @@ impl IdentityRepository {
         .execute(&mut *transaction)
         .await
         .map_err(SetupError::Unavailable)?;
+        join_public_channels(&mut transaction, defaults.workspace.id, user_id, now)
+            .await
+            .map_err(SetupError::Unavailable)?;
         sqlx::query(
             "INSERT INTO projects (id, workspace_id, name, project_key, color, version, created_at, updated_at) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

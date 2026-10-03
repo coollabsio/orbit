@@ -2,21 +2,23 @@ import type { ReactNode } from 'react'
 import { Gps } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { UserAvatar } from '@/components/common/UserAvatar'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
 import type { GroupContext } from '@/features/views/grouping'
 import type { TaskProperty } from '@/features/views/viewState'
 import type { User } from '@/features/workspaces/models'
-import { PriorityIcon } from '../components/PriorityIcon'
+import { AssigneePicker } from '../components/AssigneePicker'
+import { PriorityPicker } from '../components/PriorityPicker'
+import { StatusPicker } from '../components/StatusPicker'
 import { TaskStatusIcon } from '../components/TaskStatusIcon'
 import type { TimelineRow } from './timelineLib'
 
-/** Left-pane cell for a timeline row: group header, "No dates" toggle, or task. */
-export function TimelineRowLabel({ row, status, assignee, properties, groupContext, onToggle, onOpen, onReveal }: {
+/** Left-pane cell for a timeline row: group header, "No dates" toggle, or task (its status, priority and assignees
+ *  change in place; the rest of the row opens it). */
+export function TimelineRowLabel({ row, statuses, users, properties, groupContext, onToggle, onOpen, onReveal }: {
   row: TimelineRow
-  status?: TaskStatusDef
-  assignee?: User
+  statuses: TaskStatusDef[]
+  users: User[]
   properties: TaskProperty[]
   groupContext: GroupContext
   onToggle: (key: string, open: boolean) => void
@@ -49,14 +51,23 @@ export function TimelineRowLabel({ row, status, assignee, properties, groupConte
   const has = (property: TaskProperty) => properties.includes(property)
   // on phones a dated task is labelled by its bar; only undated tasks need the chip
   return (
-    <LabelCell fill="row" className={cn(row.span && 'max-[899px]:hidden')}>
-      <CellButton className="pr-3 pl-6 text-foreground" onClick={() => onOpen(row.task.id)}>
-        {has('priority') ? <PriorityIcon priority={row.task.priority} /> : null}
-        {has('status') ? <TaskStatusIcon status={status} /> : null}
+    <LabelCell fill="row" className={cn('gap-2 pl-6 max-[899px]:pl-0', row.span && 'max-[899px]:hidden')}>
+      {/* on phones the cell is a floating chip: the pickers hide and the chip shows the status glyph */}
+      {has('priority') ? <PriorityPicker task={row.task} className="-mx-1 max-[899px]:hidden" /> : null}
+      {has('status') ? <StatusPicker task={row.task} statuses={statuses} className="-mx-1 max-[899px]:hidden" /> : null}
+      <CellButton className="pr-3 text-foreground" onClick={() => onOpen(row.task.id)}>
+        {has('status') ? <span className="hidden max-[899px]:contents"><TaskStatusIcon status={statuses.find((status) => status.id === row.task.statusId)} /></span> : null}
         {has('id') ? <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{row.task.identifier}</span> : null}
         <span className="min-w-0 flex-1 truncate">{row.task.title || 'Untitled'}</span>
-        {has('assignee') && assignee ? <UserAvatar user={assignee} size={18} /> : null}
       </CellButton>
+      {has('assignee') ? (
+        <AssigneePicker
+          task={row.task}
+          users={users}
+          max={1}
+          className={cn('mr-3 max-[899px]:hidden', row.task.assigneeIds.length === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100')}
+        />
+      ) : null}
       {onReveal ? (
         // overlays the row end on hover, so it never costs the title any width
         <Button
@@ -66,7 +77,7 @@ export function TimelineRowLabel({ row, status, assignee, properties, groupConte
           aria-label={`Show ${row.task.identifier} on the timeline`}
           title="Show on timeline"
           // the row-hover fill plus a soft left fade, so the title it covers fades out under it
-          className="absolute right-2 bg-[color-mix(in_oklch,var(--foreground)_3%,var(--background))] text-muted-foreground opacity-0 shadow-[-12px_0_8px_-2px_color-mix(in_oklch,var(--foreground)_3%,var(--background))] group-hover/row:opacity-100 focus-visible:opacity-100"
+          className={cn('absolute right-2', has('assignee') && 'right-10', 'bg-[color-mix(in_oklch,var(--foreground)_3%,var(--background))] text-muted-foreground opacity-0 shadow-[-12px_0_8px_-2px_color-mix(in_oklch,var(--foreground)_3%,var(--background))] group-hover/row:opacity-100 focus-visible:opacity-100')}
           onClick={onReveal}
         >
           <Gps aria-hidden="true" />

@@ -26,10 +26,14 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
+import { taskPath, taskSlug } from '@/lib/taskLinks'
 import {
+  cachedTaskSlug,
   prefetchTaskDetail,
+  primeTaskAlias,
   useCommentAttachments,
   useTask,
+  useTaskRouteId,
   useTaskActivity,
   useTaskAttachments,
   useTaskComments,
@@ -84,7 +88,9 @@ const PRESET_TITLE: Record<TaskPreset, string> = {
 
 export function TasksPage() {
   const { workspace } = useWorkspace()
-  const { taskId } = useParams()
+  const { taskId: taskParam } = useParams()
+  // the URL names the task by identifier (`ENG-12`) or id; the provider and every query use the id
+  const { taskId } = useTaskRouteId(workspace.id, taskParam)
   return (
     <TaskTargetProvider key={workspace.id} openTaskId={taskId ?? null}>
       <WorkspaceTasksPage />
@@ -94,7 +100,12 @@ export function TasksPage() {
 
 function WorkspaceTasksPage() {
   const { workspace } = useWorkspace()
-  const { taskId, viewId } = useParams()
+  const { taskId: taskParam, viewId } = useParams()
+  const taskRoute = useTaskRouteId(workspace.id, taskParam)
+  /** The open task's id, once the route segment is resolved. */
+  const taskId = taskRoute.taskId
+  /** A task URL is open (it may still be resolving). */
+  const detailOpen = Boolean(taskParam)
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -173,8 +184,14 @@ function WorkspaceTasksPage() {
   const records = tasksQuery.tasks
   const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
   const visibleTasks = useMemo(() => quickSearchTasks(tasks, search), [tasks, search])
+  // tasks the activity feed may name: the loaded rows, relations and sub-issues
+  const knownNumbers = new Map<string, number>([
+    ...records.map((record) => [record.id, record.number] as const),
+    ...(relationsQuery.data ?? []).map((relation) => [relation.task.id, relation.task.number] as const),
+    ...(subIssuesQuery.data?.items ?? []).map((record) => [record.id, record.number] as const),
+  ])
   const activeTask = detailQuery.data
-    ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data, projects)
+    ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data, projects, knownNumbers)
     : undefined
   const users = membersQuery.data ?? []
   const filterOptions: FilterOptions = {
@@ -212,7 +229,7 @@ function WorkspaceTasksPage() {
 
   // Closing a task returns to the page it was opened from: a list page passes its project along in the
   // history state, and related tasks opened from the detail keep it. Without one (a link) it is `/tasks`.
-  const originProject = viewId ? null : taskId ? (location.state as TaskOrigin | null)?.originProject ?? null : projectFilter
+  const originProject = viewId ? null : detailOpen ? (location.state as TaskOrigin | null)?.originProject ?? null : projectFilter
   const originState: TaskOrigin = { originProject }
   const closeParams = new URLSearchParams(detailParams)
   closeParams.delete('redirect')
@@ -225,7 +242,7 @@ function WorkspaceTasksPage() {
     const next = new URLSearchParams(searchParams)
     if (projectId) next.set('project', projectId)
     else next.delete('project')
-    if (taskId || viewId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
+    if (detailOpen || viewId) navigate(`/tasks${next.size > 0 ? `?${next}` : ''}`)
     else setSearchParams(next, { replace: true })
   }
   // keep the current view on screen until the task can render complete (at most OPEN_WAIT_MS)
@@ -238,18 +255,30 @@ function WorkspaceTasksPage() {
     if (shown.length > 0) order.current = shown
     const wait = new Promise((resolve) => setTimeout(resolve, OPEN_WAIT_MS))
     void Promise.race([prefetchTaskDetail(queryClient, workspace.id, id), wait]).then(() => {
-      if (opening.current === id) navigate(`${basePath}/${id}${detailSearchSuffix}`, { state: originState })
+      // the identifier once the task is cached (the URL says ENG-12); the id if the prefetch is still running
+      if (opening.current === id) navigate(`${basePath}/${cachedTaskSlug(queryClient, workspace.id, id)}${detailSearchSuffix}`, { state: originState })
     })
   }
   const closeTask = () => navigate(redirect ?? `${basePath}${closeSearchSuffix}`)
 
   useEffect(() => {
-    if (!taskId || !searchParams.has('project')) return
-    navigate(`${basePath}/${taskId}${detailSearchSuffix}`, { replace: true, state: { originProject: viewId ? null : searchParams.get('project') } satisfies TaskOrigin })
-  }, [basePath, detailSearchSuffix, navigate, searchParams, taskId, viewId])
+    if (!taskParam || !searchParams.has('project')) return
+    navigate(`${basePath}/${encodeURIComponent(taskParam)}${detailSearchSuffix}`, { replace: true, state: { originProject: viewId ? null : searchParams.get('project') } satisfies TaskOrigin })
+  }, [basePath, detailSearchSuffix, navigate, searchParams, taskParam, viewId])
+
+  // The URL follows the task's identifier: an id URL (an old link) and a stale identifier (the task moved to another
+  // project, or its project key changed) are replaced. The new segment is primed, so it resolves without a request.
+  const detailRecord = detailQuery.data
+  const detailProjectKey = projects.find((project) => project.id === detailRecord?.project_id)?.key
+  const canonicalSlug = detailRecord && detailProjectKey ? taskSlug({ id: detailRecord.id, number: detailRecord.number, projectKey: detailProjectKey }) : null
+  useEffect(() => {
+    if (!taskParam || !taskId || !canonicalSlug || canonicalSlug === taskParam) return
+    primeTaskAlias(queryClient, workspace.id, canonicalSlug, taskId)
+    navigate(`${taskPath({ id: taskId, number: detailRecord?.number, projectKey: detailProjectKey }, basePath)}${location.search}`, { replace: true, state: location.state })
+  }, [basePath, canonicalSlug, detailProjectKey, detailRecord?.number, location.search, location.state, navigate, queryClient, taskId, taskParam, workspace.id])
 
   // Esc closes the task, unless it belongs to a field, an open menu or a dialog
-  useCommand('detail.close', taskId ? closeTask : null)
+  useCommand('detail.close', detailOpen ? closeTask : null)
   const stepTask = (step: 1 | -1) => {
     const ids = order.current.length > 0 ? order.current : visibleTasks.map((task) => task.id)
     const next = taskId ? ids[ids.indexOf(taskId) + step] : undefined
@@ -258,7 +287,7 @@ function WorkspaceTasksPage() {
   useCommand('detail.next', taskId ? () => stepTask(1) : null)
   useCommand('detail.prev', taskId ? () => stepTask(-1) : null)
   // list keys work in every layout; rows can be selected in the list only (it has the bulk toolbar)
-  useListNavigation(taskId ? null : openTask, { selectable: layout === 'list' })
+  useListNavigation(detailOpen ? null : openTask, { selectable: layout === 'list' })
 
   /** Starting properties of a new task; each group value wins over the filter default for its field. */
   const newTaskDefaults = (values: GroupValues) => {
@@ -305,8 +334,11 @@ function WorkspaceTasksPage() {
   // page's tasks as placeholder data, which must not render under the new page's title and placeholder display.
   // On a list, the task query loads and fails inside the list area, so the filter stays reachable to fix it.
   const pending = viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending
+  if (taskRoute.error) {
+    return <TaskBoundary title="Task unavailable" description={taskUnavailableDescription(taskRoute.error)} />
+  }
   // a task opens straight from a blank canvas: a loading message in between reads as a flicker
-  if (taskId && (pending || tasksQuery.isLoading || detailLoading)) return <div className="flex-1 bg-background" />
+  if (detailOpen && (!taskId || pending || tasksQuery.isLoading || detailLoading)) return <div className="flex-1 bg-background" />
   if (pending) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
@@ -316,7 +348,7 @@ function WorkspaceTasksPage() {
   if (taskId && (commentsQuery.isError || activityQuery.isError || attachmentsQuery.isError || commentAttachments.isError)) {
     return <TaskBoundary title="Task unavailable" description="The server could not load this task." />
   }
-  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || (taskId && tasksQuery.error)) {
+  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || (detailOpen && tasksQuery.error)) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace." />
   }
 

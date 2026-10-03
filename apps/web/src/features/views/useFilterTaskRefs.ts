@@ -47,7 +47,7 @@ export function useFilterTaskRefs(workspaceId: string, filter: FilterGroup): Rec
         return
       }
       const project = projects.data?.find((item) => item.id === result.data.project_id)
-      refs[id] = { identifier: taskIdentifier(result.data.id, project), title: result.data.title }
+      refs[id] = { identifier: taskIdentifier(result.data.id, project, result.data.number), title: result.data.title }
       return
     }
     if (result.error instanceof ApiProblem && result.error.status === 404) refs[id] = null

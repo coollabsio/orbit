@@ -2,7 +2,6 @@ import { focusAdjacentColumn, taskRowTarget } from '@/shortcuts/taskTarget'
 import { useState } from 'react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { UserAvatarStack } from '@/components/common/UserAvatar'
 import type { LabelRecord } from '@/api/generated/types.gen'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { pickerTitle } from '@/features/tasks/relationsLib'
@@ -17,6 +16,7 @@ import { useParentActions } from '@/features/tasks/useParentActions'
 import type { DisplayOptions, TaskProperty } from '@/features/views/viewState'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { AssigneePicker } from './AssigneePicker'
 import { BlockedIndicator } from './BlockedIndicator'
 import { PriorityPicker } from './PriorityPicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
@@ -25,7 +25,7 @@ import { NestChip } from './NestChip'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { DateStamp, ProjectChip } from './TaskPropertyChips'
 import { DueDatePicker } from './DueDatePicker'
-import { TaskStatusIcon } from './TaskStatusIcon'
+import { StatusPicker } from './StatusPicker'
 
 export interface TaskBoardProps {
   tasks: Task[]
@@ -87,14 +87,16 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const assignees = users.filter((user) => task.assigneeIds.includes(user.id))
     const status = statusById.get(task.statusId)
     const cardLabels = has('labels') ? task.labels.flatMap((id) => labelById.get(id) ?? []) : []
-    const showTop = has('status') || has('id') || Boolean(task.blocked) || (has('assignee') && assignees.length > 0) || has('priority')
+    // a missing due date or assignee is set from a quiet glyph in the header that shows on hover
+    const setDue = has('due_date') && !task.dueAt
+    const showTop = has('status') || has('id') || Boolean(task.blocked) || has('assignee') || setDue || has('priority')
     const showProgress = has('sub_issue_progress') && (task.subIssueCount ?? 0) > 0
     const showMeta = showProgress || has('project') || (has('due_date') && Boolean(task.dueAt)) || has('created') || has('updated')
     return (
       <article
         data-board-card
         className={cn(
-          'relative flex cursor-pointer flex-col gap-[7px] rounded-md border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-active:border-primary/40 data-dragging:border-dashed data-dragging:opacity-35',
+          'group/card relative flex cursor-pointer flex-col gap-[7px] rounded-md border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-active:border-primary/40 data-dragging:border-dashed data-dragging:opacity-35',
           // lift only where hover is real and motion is welcome; the hover styles skip a nest target: `hover-fine` is
           // emitted after `data-*` at equal specificity, so they must be mutually exclusive (.ai/lessons.md)
           'not-data-[nest=inside]:hover-fine:hover:border-foreground/20 not-data-[nest=inside]:hover-fine:hover:bg-accent not-data-[nest=inside]:hover-fine:hover:shadow-md motion-safe:not-data-[nest=inside]:hover-fine:hover:-translate-y-px',
@@ -125,16 +127,24 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
         {...nest.rowProps(task)}
         {...taskRowTarget(task.id)}
       >
-        {/* status · id · blocked … assignees · priority (priority changes in place) */}
+        {/* status · id · blocked … [set due date] · assignees · priority (status, due date, assignees and priority change in place) */}
         {showTop ? (
           <div className="flex min-h-5 items-center justify-between gap-2 text-[11px] text-muted-foreground/70">
             <span className="flex min-w-0 items-center gap-1">
-              {has('status') ? <TaskStatusIcon status={status} size={12} /> : null}
+              {has('status') ? <StatusPicker task={task} statuses={statuses} size={12} className="-m-1 size-5" onRequestDuplicate={() => setDuplicateTask(task)} /> : null}
               {has('id') ? <span className="whitespace-nowrap tabular-nums">{task.identifier}</span> : null}
               {task.blocked ? <BlockedIndicator /> : null}
             </span>
             <span className="flex items-center gap-1">
-              {has('assignee') && assignees.length > 0 ? <UserAvatarStack users={assignees} size={18} /> : null}
+              {setDue ? <DueDatePicker task={task} status={status} empty="icon" className="hover-fine:opacity-0 hover-fine:group-hover/card:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100" /> : null}
+              {has('assignee') ? (
+                <AssigneePicker
+                  task={task}
+                  users={users}
+                  max={3}
+                  className={cn(assignees.length === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/card:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100')}
+                />
+              ) : null}
               {has('priority') ? <PriorityPicker task={task} align="right" /> : null}
             </span>
           </div>

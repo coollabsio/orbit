@@ -36,6 +36,7 @@ import type { CommandId, Group } from '@/shortcuts/commands'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useAvailableCommands, useBindings, useRunCommand } from '@/shortcuts/useCommand'
 import { chatEnabled, docsHidden } from './productNavigation'
+import { taskPath } from '@/lib/taskLinks'
 
 const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, Docs: FileText, Chat: MessageSquare }
 
@@ -171,7 +172,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       icon: SquareCheck,
       title: t.title,
       meta: t.identifier,
-      to: `/tasks/${t.id}`,
+      to: taskPath(t),
       keywords: `${t.identifier} ${t.labels.join(' ')}`,
     }))
     // Only show page hits for the query they belong to (the debounced search lags the input).

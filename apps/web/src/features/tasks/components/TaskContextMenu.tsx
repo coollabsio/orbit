@@ -1,7 +1,8 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Flag, Hierarchy2, LinkBroken, RecordCircle, Tag, Trash, User as UserIcon, UserAdd } from 'reicon-react'
+import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, Tag, Trash, User as UserIcon, UserAdd } from 'reicon-react'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
+import { ColorDot } from '@/components/common/ColorDot'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import {
   ContextMenu,
@@ -18,6 +19,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { useProjects } from '@/features/tasks/api/projects'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
 import { assignUpdates, assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { pickerTitle } from '@/features/tasks/relationsLib'
@@ -25,6 +27,7 @@ import { parentPickerTitle } from '@/features/tasks/subIssuesLib'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import { dueDatePresets, menuTargetIds } from '@/features/tasks/taskMenuLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
+import { useMoveToProject } from '@/features/tasks/useMoveToProject'
 import { useParentActions } from '@/features/tasks/useParentActions'
 import { useTrashTasks } from '@/features/tasks/useTrashTasks'
 import { GroupIcon } from '@/features/views/components/GroupIcon'
@@ -32,6 +35,7 @@ import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import { buildTaskTree, descendantIds } from '@/features/views/taskTree'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { taskPath } from '@/lib/taskLinks'
 import { Shortcut } from '@/shortcuts/Shortcut'
 import { useTaskTarget } from '@/shortcuts/taskTarget'
 import { DueDateDialog } from './DueDateDialog'
@@ -62,6 +66,9 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
   const trashTasks = useTrashTasks(workspace.id)
   const duplicates = useDuplicateActions(workspace.id)
   const parentActions = useParentActions(workspace.id)
+  const moveToProject = useMoveToProject(workspace.id)
+  // every project: a project page's group context knows only its own
+  const projects = useProjects(workspace.id).data ?? []
   const pickedId = useRef<string | null>(null)
   const [ids, setIds] = useState<string[]>([])
   // a dialog that follows the menu; it keeps the tasks the menu was opened on
@@ -205,6 +212,24 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               </ContextMenuSubContent>
             </ContextMenuSub>
           ) : null}
+          {projects.length > 1 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Folder aria-hidden />
+                <span className="flex-1">Move to project</span>
+                <ContextMenuShortcut><Shortcut id="task.moveToProject" /></ContextMenuShortcut>
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="min-w-52">
+                {projects.map((project) => (
+                  <ContextMenuCheckboxItem key={project.id} checked={targets.every((task) => task.projectId === project.id)} closeOnClick onCheckedChange={() => moveToProject(targets, project)}>
+                    <ColorDot color={project.color} className="size-2" />
+                    <span className="flex-1 truncate">{project.name}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">{project.key}</span>
+                  </ContextMenuCheckboxItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
           <ContextMenuSeparator />
           {targets.some((task) => !task.assigneeIds.includes(currentUserId)) ? (
             <ContextMenuItem onClick={() => mutate(assignUpdates(targets, currentUserId))}>
@@ -241,14 +266,14 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
                     ID
                     <ContextMenuShortcut><Shortcut id="task.copyId" /></ContextMenuShortcut>
                   </ContextMenuItem>
-                  <ContextMenuItem onClick={() => copy(`${window.location.origin}/tasks/${first.id}`, 'Copied task link')}>
+                  <ContextMenuItem onClick={() => copy(`${window.location.origin}${taskPath(first)}`, 'Copied task link')}>
                     Link
                     <ContextMenuShortcut><Shortcut id="task.copyLink" /></ContextMenuShortcut>
                   </ContextMenuItem>
                   <ContextMenuItem onClick={() => copy(first.title, 'Copied task title')}>Title</ContextMenuItem>
                 </ContextMenuSubContent>
               </ContextMenuSub>
-              <ContextMenuItem onClick={() => window.open(`/tasks/${first.id}`, '_blank', 'noopener')}>
+              <ContextMenuItem onClick={() => window.open(taskPath(first), '_blank', 'noopener')}>
                 <ArrowUpRightSquare aria-hidden />
                 Open in new tab
               </ContextMenuItem>

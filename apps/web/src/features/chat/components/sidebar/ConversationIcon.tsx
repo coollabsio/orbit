@@ -6,7 +6,8 @@ import { dmPeerIds } from '@/features/chat/lib/sidebar'
 import type { User } from '@/features/workspaces/models'
 
 /**
- * The glyph of a conversation: `#` or a lock for a channel, the other person's avatar with presence for a 1:1 DM, and
+ * The glyph of a conversation: `#` or a lock for a channel, the other person's avatar with presence for a 1:1 DM (your
+ * own avatar, without presence, for the DM with yourself), and
  * for a group DM stacked avatars (`group="stack"`, the header) or the number of other members (`group="count"`, a row).
  */
 export function ConversationIcon({
@@ -36,8 +37,9 @@ export function ConversationIcon({
   }
   const peerIds = dmPeerIds(conversation, currentUserId ?? '')
   if (peerIds.length <= 1) {
+    // the DM with yourself shows your avatar without a presence dot
     const id = peerIds[0] ?? currentUserId
-    return <UserAvatar user={people.find((person) => person.id === id)} size={size} showOnline online={id ? online.has(id) : false} />
+    return <UserAvatar user={people.find((person) => person.id === id)} size={size} showOnline={peerIds.length === 1} online={id ? online.has(id) : false} />
   }
   if (group === 'stack') return <UserAvatarStack users={people.filter((person) => peerIds.includes(person.id))} size={size} />
   return (

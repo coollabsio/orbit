@@ -248,6 +248,31 @@ async fn task_reads_are_filtered_before_pagination_and_hide_related_projects() {
         .tool("get_task", json!({"task_id": fixture.other_task}))
         .await;
     assert_eq!(denied["result"]["isError"], true);
+    // An identifier (`KEY-N`) names a task too; one outside the grant stays hidden.
+    for (project, task) in [
+        (fixture.project, fixture.task),
+        (fixture.other_project, fixture.other_task),
+    ] {
+        let (key, number): (String, i64) = sqlx::query_as(
+            "SELECT projects.project_key, tasks.number FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ?",
+        )
+        .bind(task.to_string())
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+        let read = fixture
+            .tool(
+                "get_task",
+                json!({"task_id": format!("{}-{number}", key.to_lowercase())}),
+            )
+            .await;
+        if project == fixture.project {
+            assert_eq!(read["result"]["structuredContent"]["id"], task.to_string());
+            assert_eq!(read["result"]["structuredContent"]["number"], number);
+        } else {
+            assert_eq!(read["result"]["isError"], true);
+        }
+    }
     let denied = fixture
         .tool("list_tasks", json!({"project_id": fixture.other_project}))
         .await;

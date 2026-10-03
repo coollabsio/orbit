@@ -8,10 +8,11 @@ import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
 import { taskIdentifier } from '@/features/tasks/api/models'
 import { useProjectStatuses, useProjects } from '@/features/tasks/api/projects'
-import { useTask } from '@/features/tasks/api/tasks'
+import { useTask, useTaskRouteId } from '@/features/tasks/api/tasks'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { taskPath } from '@/lib/taskLinks'
 
 /** The compact card under a message for a link to an Orbit task or page. One row; the whole card is the link. */
 function LinkCard({ className, ...props }: ComponentProps<typeof Link>) {
@@ -27,9 +28,10 @@ function LinkCard({ className, ...props }: ComponentProps<typeof Link>) {
   )
 }
 
-/** Title, status and assignees of a task. Nothing while it loads, or when the user cannot see it. */
-function TaskLinkCard({ taskId }: { taskId: string }) {
+/** Title, status and assignees of a task (named by id or identifier). Nothing while it loads, or when the user cannot see it. */
+function TaskLinkCard({ taskId: taskRef }: { taskId: string }) {
   const { workspace } = useWorkspace()
+  const { taskId } = useTaskRouteId(workspace.id, taskRef)
   const task = useTask(workspace.id, taskId).data
   const projects = useProjects(workspace.id, task !== undefined).data
   const statuses = useProjectStatuses(workspace.id, task?.project_id).data
@@ -37,10 +39,11 @@ function TaskLinkCard({ taskId }: { taskId: string }) {
   if (!task || task.deleted_at) return null
   const status = statuses?.find((candidate) => candidate.id === task.status_id)
   const assignees = (members ?? []).filter((member) => task.assignee_ids.includes(member.id))
+  const project = projects?.find((candidate) => candidate.id === task.project_id)
   return (
-    <LinkCard to={`/tasks/${task.id}`} data-kind="task">
+    <LinkCard to={taskPath({ id: task.id, number: task.number, projectKey: project?.key })} data-kind="task">
       <TaskStatusIcon status={status} />
-      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{taskIdentifier(task.id, projects?.find((project) => project.id === task.project_id))}</span>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{taskIdentifier(task.id, project, task.number)}</span>
       <span className="min-w-0 flex-1 truncate font-medium">{task.title}</span>
       {status ? <span className="shrink-0 text-xs text-muted-foreground max-[899px]:hidden">{status.name}</span> : null}
       {assignees.length > 0 ? <UserAvatarStack users={assignees} size={18} /> : null}

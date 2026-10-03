@@ -1420,6 +1420,7 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
         TaskError::Invalid { field } => validation(field, request_id),
         TaskError::Conflict
         | TaskError::GithubContentReadOnly
+        | TaskError::GithubLinkedMove
         | TaskError::RestoreConflict { .. }
         | TaskError::VersionConflict { .. }
         | TaskError::InvalidCursor

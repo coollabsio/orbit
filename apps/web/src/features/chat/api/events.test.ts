@@ -118,6 +118,71 @@ test('a reply goes to its thread and updates the root’s summary in the convers
   expect(find('m1')?.replyCount).toBe(1)
 })
 
+test('a root that gets its first reply joins the conversation’s Threads list, newest reply first', () => {
+  const { client, root } = setup()
+  const threadsKey = chatKeys.threads(W, 'c1')
+  const older = testMessage({ id: 'm0', createdAt: 50, replyCount: 2, lastReplyAt: 150 })
+  client.setQueryData<Message[]>(threadsKey, [older])
+  const threads = () => client.getQueryData<Message[]>(threadsKey)!.map((item) => [item.id, item.replyCount])
+
+  // The root's update after the first reply (another member's reply, as the socket sends it).
+  const replied = { ...root, replyCount: 1, lastReplyAt: 200, replyUserIds: ['u2'] }
+  applyChatEvent(client, W, { type: 'message.updated', message: replied })
+  expect(threads()).toEqual([['m1', 1], ['m0', 2]])
+  // Once more (the response after the socket) changes nothing.
+  applyChatEvent(client, W, { type: 'message.updated', message: replied })
+  expect(threads()).toEqual([['m1', 1], ['m0', 2]])
+
+  // A reply to the older thread moves it to the top.
+  applyChatEvent(client, W, { type: 'message.updated', message: { ...older, replyCount: 3, lastReplyAt: 300 } })
+  expect(threads()).toEqual([['m0', 3], ['m1', 1]])
+})
+
+test('a reply puts its root into the Threads list from the copy in the message list', () => {
+  const { client } = setup()
+  const threadsKey = chatKeys.threads(W, 'c1')
+  client.setQueryData<Message[]>(threadsKey, [])
+  applyChatEvent(client, W, { type: 'message.created', message: testMessage({ id: 'm7', threadRootId: 'm1', authorId: 'u2', createdAt: 200 }) })
+  expect(client.getQueryData<Message[]>(threadsKey)!.map((item) => [item.id, item.replyCount])).toEqual([['m1', 1]])
+})
+
+test('an event that comes while the Threads list loads is applied again when the load ends', async () => {
+  const { client, root } = setup()
+  let release = () => {}
+  // The server read the list before the reply was there.
+  const loaded = client.fetchQuery({
+    queryKey: chatKeys.threads(W, 'c1'),
+    queryFn: async () => {
+      await new Promise<void>((resolve) => (release = resolve))
+      return [] as Message[]
+    },
+  })
+  await Promise.resolve()
+  applyChatEvent(client, W, { type: 'message.updated', message: { ...root, replyCount: 1, lastReplyAt: 200 } })
+  release()
+  await loaded
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(client.getQueryData<Message[]>(chatKeys.threads(W, 'c1'))!.map((item) => item.id)).toEqual(['m1'])
+})
+
+test('a reply to a followed thread that the Threads view does not list yet refetches that list', () => {
+  const { client, root } = setup()
+  client.setQueryData<ThreadPages>(chatKeys.thread(W, 'm1'), {
+    pages: [{ items: [], before: null, after: null, root, state: threadState('m1') }],
+    pageParams: [{}],
+  })
+  client.setQueryData<FollowedThread[]>(chatKeys.followedThreads(W), [])
+  applyChatEvent(client, W, { type: 'message.created', message: testMessage({ id: 'm7', threadRootId: 'm1', createdAt: 200 }) })
+  expect(client.getQueryState(chatKeys.followedThreads(W))?.isInvalidated).toBe(true)
+})
+
+test('a reply to a thread the user does not follow leaves the Threads view alone', () => {
+  const { client } = setup()
+  client.setQueryData<FollowedThread[]>(chatKeys.followedThreads(W), [])
+  applyChatEvent(client, W, { type: 'message.created', message: testMessage({ id: 'm7', threadRootId: 'm1', createdAt: 200 }) })
+  expect(client.getQueryState(chatKeys.followedThreads(W))?.isInvalidated).toBe(false)
+})
+
 test('an "also in channel" reply shows in the main list as well', () => {
   const { client, ids } = setup()
   applyChatEvent(client, W, {

@@ -29,7 +29,7 @@ const VISIBLE_PARENT_WHERE: &str =
 pub(super) fn parent_subquery(parent_id_sql: &str) -> String {
     format!(
         "(SELECT json_object('id', parent.id, 'project_id', parent.project_id, \
-         'project_key', parent_project.project_key, 'title', parent.title) \
+         'project_key', parent_project.project_key, 'number', parent.number, 'title', parent.title) \
          FROM {VISIBLE_PARENT_FROM} WHERE parent.id = {parent_id_sql} AND {VISIBLE_PARENT_WHERE})"
     )
 }
@@ -92,16 +92,16 @@ pub(super) async fn validate_parent_in_tx(
 /// hidden ancestor, as the `parent` field does, so the chain always ends at the task's parent.
 pub(super) async fn ancestors(pool: &SqlitePool, task_id: Id) -> Result<Vec<TaskRef>, TaskError> {
     let sql = format!(
-        "WITH RECURSIVE chain(id, project_id, project_key, title, parent_task_id, depth) AS ( \
-             SELECT parent.id, parent.project_id, parent_project.project_key, parent.title, \
+        "WITH RECURSIVE chain(id, project_id, project_key, number, title, parent_task_id, depth) AS ( \
+             SELECT parent.id, parent.project_id, parent_project.project_key, parent.number, parent.title, \
              parent.parent_task_id, 1 FROM tasks AS child, {VISIBLE_PARENT_FROM} \
              WHERE child.id = ? AND parent.id = child.parent_task_id AND {VISIBLE_PARENT_WHERE} \
              UNION ALL \
-             SELECT parent.id, parent.project_id, parent_project.project_key, parent.title, \
+             SELECT parent.id, parent.project_id, parent_project.project_key, parent.number, parent.title, \
              parent.parent_task_id, chain.depth + 1 FROM chain, {VISIBLE_PARENT_FROM} \
              WHERE parent.id = chain.parent_task_id AND {VISIBLE_PARENT_WHERE} AND chain.depth < ? \
          ) \
-         SELECT id, project_id, project_key, title FROM chain ORDER BY depth DESC"
+         SELECT id, project_id, project_key, number, title FROM chain ORDER BY depth DESC"
     );
     let rows = sqlx::query(&sql)
         .bind(task_id.to_string())
@@ -114,6 +114,7 @@ pub(super) async fn ancestors(pool: &SqlitePool, task_id: Id) -> Result<Vec<Task
                 id: parse_id(row.get("id"))?,
                 project_id: parse_id(row.get("project_id"))?,
                 project_key: row.get("project_key"),
+                number: row.get::<Option<i64>, _>("number").unwrap_or_default(),
                 title: row.get("title"),
             })
         })

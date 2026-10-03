@@ -76,7 +76,7 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
     if (relations) {
       const task = tasks.find((item) => item.id === relations[1])
       body = task?.duplicate_of
-        ? [{ id: `rel-${task.id}`, type: 'duplicate', direction: 'outgoing', task: { ...task.duplicate_of, status_id: 'todo' }, created_at: '2026-09-23T10:00:00Z' }]
+        ? [{ id: `rel-${task.id}`, type: 'duplicate', direction: 'outgoing', task: { ...task.duplicate_of, status_id: 'todo', version: 1 }, created_at: '2026-09-23T10:00:00Z' }]
         : []
     }
     if (path.endsWith('/github-links')) body = []

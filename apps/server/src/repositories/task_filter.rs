@@ -1222,6 +1222,24 @@ fn push_text(query: &mut QueryBuilder<'_, Sqlite>, value: &Value) {
         .push(" ESCAPE '\\' OR LOWER(tasks.description) LIKE ")
         .push_bind(pattern)
         .push(" ESCAPE '\\'");
+    // An identifier (`ENG-12`, any case) finds that task; a bare number every task with it.
+    let trimmed = text.trim();
+    if let Some((key, number)) = super::tasks::parse_task_identifier(trimmed) {
+        query
+            .push(" OR (tasks.number = ")
+            .push_bind(number)
+            .push(" AND tasks.project_id IN (SELECT id FROM projects WHERE workspace_id = tasks.workspace_id AND project_key = ")
+            .push_bind(key)
+            .push("))");
+    } else if let Some(number) = trimmed
+        .strip_prefix('#')
+        .unwrap_or(trimmed)
+        .parse::<i64>()
+        .ok()
+        .filter(|number| *number > 0)
+    {
+        query.push(" OR tasks.number = ").push_bind(number);
+    }
 }
 
 fn escape_like(value: &str) -> String {

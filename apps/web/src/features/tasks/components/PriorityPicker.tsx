@@ -3,16 +3,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { PriorityIcon } from './PriorityIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import type { Task } from '@/features/tasks/api/models'
-import { useUpdateTask } from '@/features/tasks/api/tasks'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useTaskPickerUpdate } from '@/features/tasks/useTaskPickerUpdate'
 
-/** Priority glyph that opens a menu to change the priority in place (list rows and board cards). */
-export function PriorityPicker({ task, align = 'left' }: { task: Task; align?: 'left' | 'right' }) {
-  const { workspace } = useWorkspace()
-  const updateTask = useUpdateTask(workspace.id)
+/** Priority glyph that opens a menu to change the priority in place (list rows, board cards, timeline and sub-issue rows). */
+export function PriorityPicker({ task, align = 'left', className }: { task: Pick<Task, 'id' | 'version' | 'priority'>; align?: 'left' | 'right'; className?: string }) {
+  const save = useTaskPickerUpdate(task, 'Priority update failed.')
   return (
-    <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <DropdownMenu>
+    <div className={className} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           render={
             <Button variant="ghost" size="icon-sm" className="size-[22px] text-muted-foreground/70" aria-label={`Priority: ${PRIORITY_LABEL[task.priority]}`} title="Change priority">
@@ -26,7 +24,7 @@ export function PriorityPicker({ task, align = 'left' }: { task: Task; align?: '
               key={priority}
               className="data-selected:bg-accent data-selected:font-medium"
               data-selected={priority === task.priority || undefined}
-              onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, priority } })}
+              onClick={() => { if (priority !== task.priority) save({ priority }) }}
             >
               <PriorityIcon priority={priority} />
               {PRIORITY_LABEL[priority]}
@@ -34,7 +32,6 @@ export function PriorityPicker({ task, align = 'left' }: { task: Task; align?: '
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      {updateTask.isError ? <span role="alert" className="text-xs text-destructive">Priority update failed. <Button variant="ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</Button></span> : null}
     </div>
   )
 }

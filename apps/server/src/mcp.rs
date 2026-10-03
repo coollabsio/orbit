@@ -29,7 +29,7 @@ use crate::repositories::task_filter::{
     SubIssuesDisplay,
 };
 use crate::repositories::tasks::{
-    SortOrder, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
+    SortOrder, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, parse_task_identifier,
 };
 
 #[derive(Clone)]
@@ -151,7 +151,7 @@ struct EmptyArgs {}
 struct ListTasksArgs {
     /// Limit results to one approved project. Omit to search all approved projects.
     project_id: Option<String>,
-    /// Match task title or description.
+    /// Match task title or description, or a task identifier such as ENG-12.
     query: Option<String>,
     /// Continue from the next_cursor of the previous response.
     cursor: Option<String>,
@@ -162,6 +162,7 @@ struct ListTasksArgs {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TaskArgs {
+    /// Task id, or its identifier such as ENG-12.
     task_id: String,
 }
 
@@ -171,6 +172,8 @@ struct TaskArgs {
 struct ReadTask {
     id: Id,
     project_id: Id,
+    /// With the project key, the task identifier (`ENG-12`).
+    number: i64,
     status_id: Id,
     title: String,
     description: String,
@@ -189,6 +192,7 @@ impl From<TaskRecord> for ReadTask {
         Self {
             id: task.id,
             project_id: task.project_id,
+            number: task.number,
             status_id: task.status_id,
             title: task.title,
             description: task.description,
@@ -392,7 +396,18 @@ impl TaskTools {
             }
             "get_task" => {
                 let args: TaskArgs = arguments(&request)?;
-                let id = parse_id(&args.task_id)?;
+                let id = match self
+                    .tasks
+                    .resolve_task_id(principal.workspace_id, &args.task_id)
+                    .await
+                {
+                    Ok(id) => id,
+                    // Neither a UUID nor an identifier: the old invalid-argument error.
+                    Err(TaskError::NotFound) if parse_task_identifier(&args.task_id).is_none() => {
+                        parse_id(&args.task_id)?
+                    }
+                    Err(error) => return Ok(task_error(error)),
+                };
                 match self
                     .tasks
                     .get_task(principal.workspace_id, id, principal.creator_id)

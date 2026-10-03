@@ -1,4 +1,5 @@
 import type { User } from '@/features/workspaces/models'
+import { formatTaskIdentifier } from '@/lib/taskLinks'
 import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
@@ -21,6 +22,7 @@ export interface TaskStatusDef {
 export interface TaskRef {
   id: string
   projectId: string
+  number?: number
   title: string
 }
 
@@ -72,7 +74,11 @@ export interface TaskActivity {
 
 export interface Task {
   id: string
+  /** `ENG-12`: project key and number. */
   identifier: string
+  /** The number in the project; with `projectKey` it makes the identifier and the URL (`taskPath`). */
+  number?: number
+  projectKey?: string
   title: string
   description: string
   sourceUrl?: string | null
@@ -209,9 +215,13 @@ function updateChanges(metadata: Record<string, unknown>, projectName: (projectI
   })
 }
 
-/** Human task id: project key + last four id characters, e.g. ORB-91C0. */
-export function taskIdentifier(taskId: string, project: Pick<ProjectRecord, 'key'> | undefined): string {
-  return `${project?.key ?? 'TASK'}-${taskId.slice(-4).toUpperCase()}`
+/**
+ * Human task id: project key + number, e.g. ORB-12. A task whose number is not loaded (an activity event naming a
+ * task outside the cache) falls back to the last four id characters, e.g. ORB-91C0.
+ */
+export function taskIdentifier(taskId: string, project: Pick<ProjectRecord, 'key'> | undefined, number?: number | null): string {
+  const key = project?.key ?? 'TASK'
+  return number && number > 0 ? formatTaskIdentifier(key, number) : `${key}-${taskId.slice(-4).toUpperCase()}`
 }
 
 /** A task named by id, title and project key: the "Parent title ›" label and the detail breadcrumb. */
@@ -219,14 +229,15 @@ export interface TaskKeyRef {
   id: string
   title: string
   projectKey: string
+  number?: number
 }
 
-/** Identifier of a `TaskKeyRef`, same rule as `taskIdentifier`: ORB-91C0. */
-export function refIdentifier(ref: Pick<TaskKeyRef, 'id' | 'projectKey'>): string {
-  return `${ref.projectKey}-${ref.id.slice(-4).toUpperCase()}`
+/** Identifier of a `TaskKeyRef`, same rule as `taskIdentifier`: ORB-12. */
+export function refIdentifier(ref: Pick<TaskKeyRef, 'id' | 'projectKey' | 'number'>): string {
+  return taskIdentifier(ref.id, { key: ref.projectKey }, ref.number)
 }
 
-type WireRef = { id: string; title: string; project_key: string }
+type WireRef = { id: string; title: string; project_key: string; number?: number }
 /** Sub-issue fields as the API sends them (`ancestors`: GET /tasks/{id} only). Read structurally. */
 export type SubIssueWire = {
   parent_task_id?: string | null
@@ -235,7 +246,7 @@ export type SubIssueWire = {
   sub_issue_closed_count?: number
   ancestors?: WireRef[]
 }
-const keyRef = (ref: WireRef): TaskKeyRef => ({ id: ref.id, title: ref.title, projectKey: ref.project_key })
+const keyRef = (ref: WireRef): TaskKeyRef => ({ id: ref.id, title: ref.title, projectKey: ref.project_key, number: ref.number })
 
 export function taskFromRecord(
   record: TaskRecord,
@@ -245,6 +256,8 @@ export function taskFromRecord(
   activity: AuditEvent[] = [],
   /** Every workspace project, so relation events can name tasks of other projects. */
   projects: ProjectRecord[] = [],
+  /** Numbers of other loaded tasks (lists, relations, sub-issues), so activity events can name them. */
+  numbers: ReadonlyMap<string, number> = new Map(),
 ): Task {
   const projectFor = (projectId: string | undefined) => projectId
     ? projects.find((item) => item.id === projectId) ?? (project?.id === projectId ? project : undefined)
@@ -263,14 +276,16 @@ export function taskFromRecord(
     : 'none'
   const wire = record as TaskRecord & SubIssueWire
   // tasks named in activity: the parent and ancestors carry their own project key
-  const knownRefs = [...(wire.parent ? [wire.parent] : []), ...(wire.ancestors ?? [])]
+  const knownRefs: WireRef[] = [...(wire.parent ? [wire.parent] : []), ...(wire.ancestors ?? []), ...(record.duplicate_of ? [record.duplicate_of] : [])]
   const identifierOf = (taskId: string, projectId: string | undefined) => {
     const ref = knownRefs.find((item) => item.id === taskId)
-    return ref ? refIdentifier(keyRef(ref)) : taskIdentifier(taskId, projectFor(projectId))
+    return ref ? refIdentifier(keyRef(ref)) : taskIdentifier(taskId, projectFor(projectId), numbers.get(taskId))
   }
   return {
     id: record.id,
-    identifier: taskIdentifier(record.id, project),
+    identifier: taskIdentifier(record.id, project, record.number),
+    number: record.number,
+    projectKey: project?.key,
     title: record.title,
     description: record.description,
     sourceUrl: record.source_url ?? null,
@@ -323,7 +338,7 @@ export function taskFromRecord(
         : [base]
     }),
     duplicateOf: record.duplicate_of
-      ? { id: record.duplicate_of.id, projectId: record.duplicate_of.project_id, title: record.duplicate_of.title }
+      ? { id: record.duplicate_of.id, projectId: record.duplicate_of.project_id, number: record.duplicate_of.number, title: record.duplicate_of.title }
       : null,
     blocked: record.blocked ?? false,
     parentTaskId: wire.parent_task_id ?? null,

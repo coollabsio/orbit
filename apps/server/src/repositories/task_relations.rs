@@ -474,9 +474,13 @@ pub struct RelatedTask {
     pub id: Id,
     #[schema(value_type = String)]
     pub project_id: Id,
+    /// The task's number in its project; with the project key it makes the identifier (`ENG-12`).
+    pub number: i64,
     pub title: String,
     #[schema(value_type = String)]
     pub status_id: Id,
+    /// The other task's version, so it can be updated in place (e.g. its status) from the relation row.
+    pub version: u64,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -496,7 +500,8 @@ pub struct TaskRelationRecord {
 /// whose other task and project are live are returned.
 const RELATION_SELECT: &str = "SELECT task_relations.id, task_relations.type, task_relations.task_id, \
      task_relations.created_at, other.id AS other_id, other.project_id AS other_project_id, \
-     other.title AS other_title, other.status_id AS other_status_id \
+     other.number AS other_number, other.title AS other_title, other.status_id AS other_status_id, \
+     other.version AS other_version \
      FROM task_relations \
      JOIN tasks AS other ON other.id = CASE WHEN task_relations.task_id = ? \
          THEN task_relations.related_task_id ELSE task_relations.task_id END \
@@ -526,8 +531,13 @@ fn relation_from_row(
         task: RelatedTask {
             id: parse_id(row.get("other_id"))?,
             project_id: parse_id(row.get("other_project_id"))?,
+            number: row
+                .get::<Option<i64>, _>("other_number")
+                .unwrap_or_default(),
             title: row.get("other_title"),
             status_id: parse_id(row.get("other_status_id"))?,
+            version: u64::try_from(row.get::<i64, _>("other_version"))
+                .map_err(|_| TaskError::Conflict)?,
         },
         created_at: TimestampMillis::from_millis(row.get("created_at")),
     })

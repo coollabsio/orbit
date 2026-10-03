@@ -6,7 +6,7 @@ import { usePresence } from '@/features/chat/api/liveStore'
 import { useOpenDm } from '@/features/chat/api/mutations'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
-import { chatErrorMessage, pickablePeople } from './channelLib'
+import { chatErrorMessage, messageablePeople } from './channelLib'
 import { MemberPicker } from './MemberPicker'
 
 interface NewMessageDialogProps {
@@ -14,14 +14,17 @@ interface NewMessageDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-/** Picks one or more people and opens the direct message with exactly them: the existing one, or a new one. */
+/**
+ * Picks one or more people and opens the direct message with exactly them: the existing one, or a new one. Picking
+ * only yourself opens the DM with yourself, a place for notes.
+ */
 export function NewMessageDialog({ open, onOpenChange }: NewMessageDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New message</DialogTitle>
-          <DialogDescription>Choose one person, or several for a group conversation.</DialogDescription>
+          <DialogDescription>Choose one person, several for a group conversation, or yourself for notes.</DialogDescription>
         </DialogHeader>
         <NewMessageForm onDone={() => onOpenChange(false)} />
       </DialogContent>
@@ -40,7 +43,8 @@ function NewMessageForm({ onDone }: { onDone: () => void }) {
   const submit = async () => {
     if (selectedIds.length === 0 || openDm.isPending) return
     try {
-      const conversation = await openDm.mutateAsync(selectedIds)
+      // the server adds the caller to every DM: only yourself is the DM with yourself
+      const conversation = await openDm.mutateAsync(selectedIds.filter((id) => id !== currentUserId))
       onDone()
       openConversation(conversation.id)
     } catch {
@@ -59,7 +63,7 @@ function NewMessageForm({ onDone }: { onDone: () => void }) {
       <MemberPicker
         autoFocus
         label="To"
-        people={pickablePeople(members, currentUserId)}
+        people={messageablePeople(members, currentUserId)}
         selectedIds={selectedIds}
         onChange={(ids) => {
           setSelectedIds(ids)

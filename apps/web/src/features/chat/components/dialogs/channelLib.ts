@@ -52,6 +52,13 @@ export function pickablePeople<T extends Person & { name: string }>(
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/** People a new message can go to: yourself first, as "Name (you)" (the DM with yourself), then `pickablePeople`. */
+export function messageablePeople<T extends Person & { name: string }>(members: readonly T[], currentUserId: string | null): T[] {
+  const me = members.find((member) => member.id === currentUserId)
+  const others = pickablePeople(members, currentUserId)
+  return me ? [{ ...me, name: `${me.name} (you)` }, ...others] : others
+}
+
 /** Name, handle or email contains the text, without regard to case. An empty text matches everybody. */
 export function matchPeople<T extends { name: string; handle: string; email: string }>(people: readonly T[], text: string): T[] {
   const query = text.trim().toLowerCase().replace(/^@/, '')

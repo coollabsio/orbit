@@ -77,6 +77,11 @@ export function dmPeerIds(conversation: Conversation, currentUserId: string): st
   return conversation.memberIds.filter((id) => id !== currentUserId)
 }
 
+/** A DM with only the current user in it: their own place for notes, drafts and links. */
+export function isSelfDm(conversation: Conversation, currentUserId: string | null): boolean {
+  return conversation.kind === 'dm' && currentUserId !== null && dmPeerIds(conversation, currentUserId).length === 0
+}
+
 /** A DM has no name: its title is the other members' names. */
 export function dmTitle(conversation: Conversation, people: readonly ChatPerson[], currentUserId: string): string {
   const nameOf = (id: string) => people.find((person) => person.id === id)?.name ?? 'Unknown'
@@ -105,12 +110,14 @@ const byActivity = (a: Conversation, b: Conversation) => lastActivity(b) - lastA
 /**
  * The scrolling list of the chat sidebar: Favorites (hidden when empty; a favorite leaves its own group), each shared
  * category by position (kept when empty, so admins can fill it), "Channels" for channels without a category (hidden
- * when empty), then Direct messages by last activity. Only joined, unarchived conversations show.
+ * when empty), then Direct messages by last activity, the DM with yourself first. Only joined, unarchived
+ * conversations show.
  */
 export function buildSidebarSections(
   conversations: readonly Conversation[],
   categories: readonly Category[],
   states: readonly ConversationState[],
+  currentUserId: string | null = null,
 ): SidebarSection[] {
   const favoriteIds = new Set(states.filter((state) => state.favorite).map((state) => state.conversationId))
   const joined = conversations.filter((conversation) => conversation.isMember && !conversation.archived)
@@ -156,7 +163,9 @@ export function buildSidebarSections(
     kind: 'dms',
     title: 'Direct messages',
     category: null,
-    conversations: rest.filter((conversation) => conversation.kind === 'dm').sort(byActivity),
+    conversations: rest
+      .filter((conversation) => conversation.kind === 'dm')
+      .sort((a, b) => Number(isSelfDm(b, currentUserId)) - Number(isSelfDm(a, currentUserId)) || byActivity(a, b)),
   })
   return sections
 }

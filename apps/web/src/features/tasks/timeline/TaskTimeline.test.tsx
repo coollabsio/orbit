@@ -461,7 +461,7 @@ test('rows and bars show only the chosen display properties', () => {
   const icons = (view: ReturnType<typeof renderTimeline>, name: string) => view.container.querySelectorAll(`svg[aria-label="${name}"]`).length
   const all = renderTimeline([urgent])
   expect(all.getByText('WEB-a')).toBeTruthy()
-  expect(icons(all, 'Unstarted')).toBe(2) // row + bar
+  expect(icons(all, 'Unstarted')).toBe(3) // row picker + the phone chip's glyph + bar
   expect(icons(all, 'Urgent')).toBe(1)
   all.unmount()
   const none = renderTimeline([urgent], { properties: [] })

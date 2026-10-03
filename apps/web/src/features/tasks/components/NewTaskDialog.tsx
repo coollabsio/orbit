@@ -388,10 +388,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                     setDraft((current) => ({ ...current, dueAt: null, dueStartAt: null }))
                     setDueDateOpen(false)
                   }}
-                  onDone={({ start, end }) => {
-                    setDraft((current) => ({ ...current, dueAt: end, dueStartAt: start }))
-                    setDueDateOpen(false)
-                  }}
+                  onChange={({ start, end }) => setDraft((current) => ({ ...current, dueAt: end, dueStartAt: start }))}
                 />
               </PopoverContent>
             </Popover>
@@ -405,7 +402,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 <span role="status" className="flex items-center gap-1 text-muted-foreground">
                   Created
                   <Button type="button" variant="link" size="xs" className="px-0" onClick={() => openTask(created)}>
-                    {taskIdentifier(created.id, projects.find((candidate) => candidate.id === created.project_id))}
+                    {taskIdentifier(created.id, projects.find((candidate) => candidate.id === created.project_id), created.number)}
                   </Button>
                 </span>
               ) : projects.length === 0 ? (

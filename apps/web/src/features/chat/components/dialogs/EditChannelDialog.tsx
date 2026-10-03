@@ -138,7 +138,7 @@ function EditChannelForm({ conversation, onDone }: { conversation: Conversation;
               ? `#${conversation.name} is the default channel. Everybody is in it, so it cannot be private.`
               : isPrivate
                 ? 'Only the people in it can see it. New people must be added.'
-                : 'Anyone in the workspace can find it and join.'}
+                : 'Everyone in the workspace is in it.'}
           </FieldDescription>
         </FieldContent>
         <Switch id={privateId} checked={isPrivate} disabled={conversation.isDefault} onCheckedChange={setIsPrivate} />

@@ -1130,7 +1130,8 @@ fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOr
     (sort, order)
 }
 
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
+/// `task_id` is the task UUID or its identifier, e.g. `ENG-12` (case-insensitive).
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path, description = "Task UUID or identifier such as `ENG-12`")), responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
 async fn get_task(
     State(state): State<TaskState>,
     Path((workspace, task)): Path<(String, String)>,
@@ -1140,7 +1141,11 @@ async fn get_task(
     let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
-    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    let task_id = state
+        .tasks
+        .resolve_task_id(workspace_id, &task)
+        .await
+        .map_err(|error| task_problem(error, instance.clone(), request_id.as_ref()))?;
     state
         .tasks
         .get_task(workspace_id, task_id, actor_id)
@@ -2194,6 +2199,14 @@ pub(crate) fn task_problem(
             "github_content_read_only",
             "GitHub content is read-only",
             "GitHub controls this task's title and description.",
+            instance,
+            request_id,
+        ),
+        TaskError::GithubLinkedMove => ApiError::new(
+            StatusCode::CONFLICT,
+            "github_linked_move",
+            "Task is synced with GitHub",
+            "This task is synced with a GitHub issue of its project's repository and cannot move to another project.",
             instance,
             request_id,
         ),

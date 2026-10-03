@@ -5,7 +5,7 @@ import type { PageTaskRecord, TaskRecord } from '@/api/generated/types.gen'
 import { cachedDescendantIds, findCachedTask, patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks } from './optimistic'
 
 const task = (workspaceId: string, version = 1): TaskRecord => ({
-  id: 'task-1', workspace_id: workspaceId, project_id: 'project-1', status_id: 'todo', title: 'Before',
+  id: 'task-1', workspace_id: workspaceId, project_id: 'project-1', number: 1, status_id: 'todo', title: 'Before',
   description: '', position: 1, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T10:00:00Z', duplicate_of: null, blocked: false, version,
   parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,
@@ -45,14 +45,14 @@ test('successful optimistic updates reconcile the authoritative server version',
 test('a write response keeps the detail breadcrumb, or narrows it to the new parent until the refetch', () => {
   const client = new QueryClient()
   const detailKey = queryKeys.tasks.detail('workspace-a', 'task-1')
-  const root = { id: 'task-0009', project_id: 'project-1', project_key: 'ORB', title: 'Root' }
-  const parent = { id: 'task-0012', project_id: 'project-1', project_key: 'ORB', title: 'Parent' }
+  const root = { id: 'task-0009', project_id: 'project-1', project_key: 'ORB', number: 9, title: 'Root' }
+  const parent = { id: 'task-0012', project_id: 'project-1', project_key: 'ORB', number: 12, title: 'Parent' }
   client.setQueryData(detailKey, { ...task('workspace-a'), parent_task_id: 'task-0012', ancestors: [root, parent] })
 
   reconcileWorkspaceTask(client, 'workspace-a', { ...task('workspace-a', 2), parent_task_id: 'task-0012' })
   expect(client.getQueryData<TaskRecord>(detailKey)?.ancestors).toEqual([root, parent])
 
-  const moved = { id: 'task-0040', project_id: 'project-1', title: 'Other', project_key: 'ORB' }
+  const moved = { id: 'task-0040', project_id: 'project-1', title: 'Other', project_key: 'ORB', number: 40 }
   reconcileWorkspaceTask(client, 'workspace-a', { ...task('workspace-a', 3), parent_task_id: 'task-0040', parent: moved })
   expect(client.getQueryData<TaskRecord>(detailKey)?.ancestors?.map((ref) => ref.id)).toEqual(['task-0040'])
 

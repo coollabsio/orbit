@@ -5,7 +5,7 @@ import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Pl
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/common/UserAvatar'
-import { DatePicker } from '@/components/common/DatePicker'
+import { DatePicker, type DueRange } from '@/components/common/DatePicker'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DropdownMenu,
@@ -374,9 +374,17 @@ function BulkBar({
   const [first] = tasks
   const sameDue = tasks.every((task) => task.dueAt === first.dueAt && (task.dueStartAt ?? null) === (first.dueStartAt ?? null))
   const [dueOpen, setDueOpen] = useState(false)
+  // picks collect while the picker is open (a day, then the range's last day, then a time) and are written once,
+  // in one bulk request, when it closes; Clear writes at once
+  const [duePick, setDuePick] = useState<DueRange | null>(null)
   const bulkDue = (start: string | null, end: string | null) => {
     mutate(dueUpdates(tasks, start, end))
+    setDuePick(null)
     setDueOpen(false)
+  }
+  const toggleDue = (open: boolean) => {
+    if (!open && duePick) bulkDue(duePick.start, duePick.end)
+    else setDueOpen(open)
   }
 
   return (
@@ -451,7 +459,7 @@ function BulkBar({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Popover open={dueOpen} onOpenChange={setDueOpen}>
+        <Popover open={dueOpen} onOpenChange={toggleDue}>
           <PopoverTrigger render={<BulkAction icon={<Calendar aria-hidden />} label="Due date" />} />
           <PopoverContent side="top" align="end" className="w-auto gap-0 p-0">
             <DatePicker
@@ -459,7 +467,7 @@ function BulkBar({
               value={sameDue ? first.dueAt : null}
               clearable={tasks.some((task) => task.dueAt)}
               onClear={() => bulkDue(null, null)}
-              onDone={({ start, end }) => bulkDue(start, end)}
+              onChange={setDuePick}
             />
           </PopoverContent>
         </Popover>

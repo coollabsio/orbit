@@ -113,6 +113,44 @@ export function patchMessage(
   })
 }
 
+/** The Threads list's order, as the server sends it: newest reply first. */
+const byLastReply = (a: Message, b: Message) => (b.lastReplyAt ?? b.createdAt) - (a.lastReplyAt ?? a.createdAt) || byId(b, a)
+
+/**
+ * Puts a root into its conversation's Threads list, in order, once it has replies (the first reply makes a new
+ * thread); a root without replies leaves the list.
+ */
+function placeThreadRoot(queryClient: QueryClient, workspaceId: string, root: Message) {
+  queryClient.setQueryData<Message[]>(chatKeys.threads(workspaceId, root.conversationId), (roots) => {
+    if (!roots) return roots
+    const others = roots.filter((item) => item.id !== root.id)
+    if (root.replyCount === 0) return others.length === roots.length ? roots : others
+    return [...others, root].sort(byLastReply)
+  })
+}
+
+/** The newest copy of a root in the cache: its thread's, else the one in a message list. */
+function cachedRoot(queryClient: QueryClient, workspaceId: string, conversationId: string, rootId: string): Message | undefined {
+  const thread = queryClient.getQueryData<ThreadPages>(chatKeys.thread(workspaceId, rootId))
+  if (thread?.pages[0]) return thread.pages[0].root
+  for (const [, data] of queryClient.getQueriesData<MessagePages>({ queryKey: chatKeys.messagesOf(workspaceId, conversationId) })) {
+    const root = data?.pages.flatMap((page) => page.items).find((item) => item.id === rootId)
+    if (root) return root
+  }
+  return undefined
+}
+
+/**
+ * The Threads view lists followed threads with their root and last reply, which events do not carry. When the user
+ * follows a thread (its open thread says so) that the cached list lacks, the list is asked again.
+ */
+function refetchFollowedIfMissing(queryClient: QueryClient, workspaceId: string, rootId: string) {
+  const followed = queryClient.getQueryData<FollowedThread[]>(chatKeys.followedThreads(workspaceId))
+  if (!followed || followed.some((thread) => thread.root.id === rootId)) return
+  const thread = queryClient.getQueryData<ThreadPages>(chatKeys.thread(workspaceId, rootId))
+  if (thread?.pages[0]?.state?.following) void queryClient.invalidateQueries({ queryKey: chatKeys.followedThreads(workspaceId) })
+}
+
 function upsertById<T>(items: T[] | undefined, item: T, idOf: (item: T) => string): T[] | undefined {
   if (!items) return items
   return items.some((current) => idOf(current) === idOf(item))
@@ -158,12 +196,20 @@ function messageCreated(queryClient: QueryClient, workspaceId: string, message: 
       ? sortFollowedThreads(threads.map((thread) => (thread.root.id === threadRootId ? { ...thread, lastReply: message } : thread)))
       : threads,
   )
-  void queryClient.invalidateQueries({ queryKey: chatKeys.threads(workspaceId, conversationId) })
+  refetchFollowedIfMissing(queryClient, workspaceId, threadRootId)
+  // The first reply makes a new thread. Without a copy of its root the Threads list has to be asked again.
+  const root = cachedRoot(queryClient, workspaceId, conversationId, threadRootId)
+  if (root && root.replyCount > 0) placeThreadRoot(queryClient, workspaceId, root)
+  else void queryClient.invalidateQueries({ queryKey: chatKeys.threads(workspaceId, conversationId) })
 }
 
 function messageUpdated(queryClient: QueryClient, workspaceId: string, message: Message) {
   const { conversationId, threadRootId } = message
   patchMessage(queryClient, workspaceId, { conversationId, messageId: message.id, threadRootId }, () => message)
+  if (threadRootId === null && message.kind === 'message') {
+    placeThreadRoot(queryClient, workspaceId, message)
+    if (message.replyCount > 0) refetchFollowedIfMissing(queryClient, workspaceId, message.id)
+  }
   queryClient.setQueryData<Message[]>(chatKeys.pins(workspaceId, conversationId), (pins) => {
     if (!pins) return pins
     const others = pins.filter((pin) => pin.id !== message.id)
@@ -192,6 +238,7 @@ function changedKeys(workspaceId: string, event: ChatEvent): (readonly unknown[]
       return [
         chatKeys.messagesOf(workspaceId, event.message.conversationId),
         chatKeys.thread(workspaceId, event.message.threadRootId ?? event.message.id),
+        chatKeys.threads(workspaceId, event.message.conversationId),
       ]
     case 'message.deleted':
       return [chatKeys.messagesOf(workspaceId, event.conversationId), chatKeys.thread(workspaceId, event.threadRootId ?? event.messageId)]

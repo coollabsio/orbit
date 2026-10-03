@@ -125,7 +125,9 @@ export function dropUpdate(task: Task, field: GroupBy, from: string | null, to: 
       const next = swapValue(task.labels, from, to)
       return next ? update({ label_ids: next }) : null
     }
-    case 'project': // no API moves a task between projects: dragging is disabled
+    // Moving between projects maps the status and renumbers the task on the server (Move to project in the menus);
+    // dragging between project groups stays disabled.
+    case 'project':
     case 'none':
       return null
   }

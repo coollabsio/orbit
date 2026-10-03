@@ -36,7 +36,7 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
     { label: 'Online', people: people.filter((person) => online.has(person.id)) },
     { label: 'Offline', people: people.filter((person) => !online.has(person.id)) },
   ].filter((group) => group.people.length > 0)
-  // in #general everybody stays, and removing yourself is "Leave" in the conversation menu
+  // every workspace member stays in a public channel, and removing yourself is "Leave" in the conversation menu
   const canRemove = Boolean(conversation && conversation.kind === 'private' && !conversation.isDefault && canManageChannel(conversation, currentUser))
 
   const message = (person: User) => {

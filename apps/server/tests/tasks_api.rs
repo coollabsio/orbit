@@ -3235,7 +3235,7 @@ async fn task_records_expose_the_visible_duplicate_target() {
     assert_eq!(task["blocked"], false);
     let uri = task_uri(&fixture, id_of(&task));
     let key = project_key_of(&fixture, &fixture.project_id).await;
-    let expected = json!({"id": id_of(&canonical), "project_id": fixture.project_id, "project_key": key, "title": "Canonical"});
+    let expected = json!({"id": id_of(&canonical), "project_id": fixture.project_id, "project_key": key, "number": canonical["number"], "title": "Canonical"});
 
     let (status, marked) = call(
         &fixture,
@@ -3399,7 +3399,7 @@ async fn relations_can_be_added_listed_and_removed() {
     assert_eq!(created["direction"], "outgoing");
     assert_eq!(
         created["task"],
-        json!({"id": id_of(&blocked), "project_id": fixture.project_id, "title": "Login fails", "status_id": fixture.status_id})
+        json!({"id": id_of(&blocked), "project_id": fixture.project_id, "number": 2, "title": "Login fails", "status_id": fixture.status_id, "version": blocked["version"]})
     );
     assert!(created["created_at"].is_string());
 
@@ -5057,7 +5057,7 @@ async fn sub_issue_parent_is_set_on_create_update_and_bulk() {
     assert_eq!(child["parent_task_id"], parent_id.as_str());
     assert_eq!(
         child["parent"],
-        json!({"id": parent_id, "project_id": fixture.project_id, "project_key": key, "title": "Parent"})
+        json!({"id": parent_id, "project_id": fixture.project_id, "project_key": key, "number": parent["number"], "title": "Parent"})
     );
 
     // Update attaches and detaches; each real change is audited once.
@@ -5315,8 +5315,8 @@ async fn sub_issue_ancestors_are_listed_root_first_on_the_task_endpoint() {
     assert_eq!(
         leaf["ancestors"],
         json!([
-            {"id": id_of(&root), "project_id": fixture.project_id, "project_key": root_key, "title": "Root"},
-            {"id": id_of(&middle), "project_id": other_project, "project_key": "ANC", "title": "Middle"}
+            {"id": id_of(&root), "project_id": fixture.project_id, "project_key": root_key, "number": root["number"], "title": "Root"},
+            {"id": id_of(&middle), "project_id": other_project, "project_key": "ANC", "number": middle["number"], "title": "Middle"}
         ])
     );
     assert_eq!(leaf["parent"]["project_key"], "ANC");
@@ -5361,7 +5361,7 @@ async fn sub_issue_under_a_hidden_parent_lists_as_top_level_everywhere_and_ances
     let leaf = fetch_task(&fixture, id_of(&leaf)).await;
     assert_eq!(
         leaf["ancestors"],
-        json!([{"id": id_of(&visible), "project_id": fixture.project_id, "project_key": visible_key, "title": "Visible"}])
+        json!([{"id": id_of(&visible), "project_id": fixture.project_id, "project_key": visible_key, "number": visible["number"], "title": "Visible"}])
     );
     let visible = fetch_task(&fixture, id_of(&visible)).await;
     assert_eq!(visible["parent"], Value::Null);
@@ -6522,4 +6522,267 @@ async fn sub_issue_filters_and_hidden_display_select_by_hierarchy() {
     body["sub_issues"] = json!("tree");
     let (status, _) = call(&fixture, "POST", &query_uri(&fixture), Some(body)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+async fn status_named_in(fixture: &Fixture, project_id: &str, name: &str) -> String {
+    sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = ? AND name = ?")
+        .bind(project_id)
+        .bind(name)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn task_numbers_count_per_project_and_are_never_reused() {
+    let fixture = Fixture::new().await;
+    let first = fixture.create_task("First").await;
+    let second = fixture.create_task("Second").await;
+    assert_eq!(first["number"], 1);
+    assert_eq!(second["number"], 2);
+
+    // A hard delete (retention purge) never frees the number.
+    sqlx::query("DELETE FROM tasks WHERE id = ?")
+        .bind(id_of(&second))
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let third = fixture.create_task("Third").await;
+    assert_eq!(third["number"], 3);
+
+    // Another project starts at 1.
+    let other = create_project(&fixture, "OPS").await;
+    let other_todo = status_id_by_category(&fixture, &other, "unstarted").await;
+    let (status, other_task) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({"project_id": other, "status_id": other_todo, "title": "Ops"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(other_task["number"], 1);
+
+    // Parent, ancestor and relation references carry the number.
+    let (status, child) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({
+            "project_id": other, "status_id": other_todo, "title": "Child",
+            "parent_task_id": id_of(&third)
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(child["number"], 2);
+    assert_eq!(child["parent"]["number"], 3);
+    let (status, read) = call(&fixture, "GET", &task_uri(&fixture, id_of(&child)), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(read["ancestors"][0]["number"], 3);
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &relations_uri(&fixture, id_of(&first)),
+        Some(json!({"type": "related", "task_id": id_of(&other_task)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, relations) = call(
+        &fixture,
+        "GET",
+        &relations_uri(&fixture, id_of(&first)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(relations[0]["task"]["number"], 1);
+}
+
+#[tokio::test]
+async fn tasks_can_be_read_and_searched_by_identifier() {
+    let fixture = Fixture::new().await;
+    let key = project_key_of(&fixture, &fixture.project_id).await;
+    fixture.create_task("Alpha").await;
+    let beta = fixture.create_task("Beta").await;
+    let identifier = format!("{key}-2");
+
+    for path in [
+        identifier.clone(),
+        identifier.to_lowercase(),
+        id_of(&beta).to_owned(),
+    ] {
+        let (status, read) = call(&fixture, "GET", &task_uri(&fixture, &path), None).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert_eq!(read["id"], beta["id"], "{path}");
+        assert!(read["ancestors"].is_array());
+    }
+    for path in [
+        format!("{key}-99"),
+        "NOPE-2".to_owned(),
+        "not-a-task".to_owned(),
+        "2".to_owned(),
+    ] {
+        let (status, _) = call(&fixture, "GET", &task_uri(&fixture, &path), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+    // Other per-task endpoints keep taking ids only.
+    let (status, _) = call(
+        &fixture,
+        "GET",
+        &format!("{}/comments", task_uri(&fixture, &identifier)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    for search in [identifier.to_lowercase(), "2".to_owned(), "#2".to_owned()] {
+        let (status, page) = call(
+            &fixture,
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/tasks?search={}",
+                fixture.workspace_id,
+                search.replace('#', "%23")
+            ),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{search}");
+        let titles: Vec<&str> = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(titles, ["Beta"], "{search}");
+    }
+}
+
+#[tokio::test]
+async fn moving_a_task_between_projects_maps_its_status_and_renumbers_it() {
+    let fixture = Fixture::new().await;
+    let other = create_project(&fixture, "OPS").await;
+    // The target already has OPS-1, the moving task's own number.
+    let other_backlog = status_named_in(&fixture, &other, "Backlog").await;
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({"project_id": other, "status_id": other_backlog, "title": "Ops one"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let todo = status_named_in(&fixture, &fixture.project_id, "Todo").await;
+    let task = fixture.create_task("Mover").await;
+    assert_eq!(task["number"], 1);
+    let uri = task_uri(&fixture, id_of(&task));
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": 0, "status_id": todo})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Same name and category wins over the category's first status (Backlog).
+    let (status, moved) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": task["version"], "project_id": other})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(moved["project_id"], other);
+    assert_eq!(
+        moved["status_id"],
+        status_named_in(&fixture, &other, "Todo").await
+    );
+    assert_eq!(moved["number"], 2);
+    assert_eq!(moved["position"], 0);
+    let (status, read) = call(&fixture, "GET", &task_uri(&fixture, "ops-2"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(read["id"], moved["id"]);
+
+    // No status of the same name: the first one of the same category.
+    let (status, review) = call(
+        &fixture,
+        "POST",
+        &format!(
+            "/api/v1/workspaces/{}/projects/{}/statuses",
+            fixture.workspace_id, fixture.project_id
+        ),
+        Some(json!({"name": "Review", "color": "#123456", "category": "started"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let reviewed = fixture.create_task("In review").await;
+    let (status, reviewed) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&reviewed)),
+        Some(json!({"expected_version": 0, "status_id": id_of(&review)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Bulk moves two tasks; positions continue the target column.
+    let back = fixture.create_task("Back").await;
+    let (status, bulk) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks/bulk", fixture.workspace_id),
+        Some(json!({"updates": [
+            {"id": id_of(&reviewed), "expected_version": reviewed["version"], "project_id": other},
+            {"id": id_of(&back), "expected_version": back["version"], "project_id": other},
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bulk}");
+    assert_eq!(
+        bulk["items"][0]["status_id"],
+        status_named_in(&fixture, &other, "In Progress").await
+    );
+    assert_eq!(bulk["items"][0]["number"], 3);
+    assert_eq!(bulk["items"][1]["number"], 4);
+    assert_eq!(bulk["items"][1]["status_id"], other_backlog);
+    assert_eq!(bulk["items"][1]["position"], 1);
+
+    // An explicit status still has to belong to the target project.
+    let stay = fixture.create_task("Stay").await;
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&stay)),
+        Some(json!({"expected_version": 0, "project_id": other, "status_id": todo})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A task synced with a GitHub issue stays in its project.
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id) VALUES (?, 'acme/repo', 7, ?)")
+        .bind(&fixture.workspace_id)
+        .bind(id_of(&stay))
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (status, problem) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&stay)),
+        Some(json!({"expected_version": 0, "project_id": other})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "github_linked_move");
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&stay)),
+        Some(json!({"expected_version": 0, "priority": "high"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 }

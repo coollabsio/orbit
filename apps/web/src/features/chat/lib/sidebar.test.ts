@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Conversation, ConversationState, FollowedThread } from '../api/types'
-import { buildSidebarSections, chatBadges, conversationBadge, dmTitle, dropBefore, unreadConversations } from './sidebar'
+import { buildSidebarSections, chatBadges, conversationBadge, dmTitle, dropBefore, isSelfDm, unreadConversations } from './sidebar'
 import { testMessage } from './testMessage'
 
 const conversation = (id: string, overrides: Partial<Conversation> = {}): Conversation => ({
@@ -68,6 +68,20 @@ test('sidebar sections: favorites, categories by position, Channels, then DMs by
     ['Channels', ['general']],
     ['Direct messages', ['d-new', 'd-old']],
   ])
+})
+
+test('the DM with yourself comes first among the direct messages', () => {
+  const conversations = [
+    conversation('d-new', { kind: 'dm', name: '', memberIds: ['u1', 'u2'], lastMessageAt: 20 }),
+    conversation('notes', { kind: 'dm', name: '', memberIds: ['u1'], lastMessageAt: 5 }),
+    conversation('d-old', { kind: 'dm', name: '', memberIds: ['u1', 'u3'], lastMessageAt: 10 }),
+  ]
+  const dms = buildSidebarSections(conversations, [], [], 'u1').find((section) => section.kind === 'dms')
+  expect(dms?.conversations.map((item) => item.id)).toEqual(['notes', 'd-new', 'd-old'])
+  expect(isSelfDm(conversations[1], 'u1')).toBe(true)
+  expect(isSelfDm(conversations[0], 'u1')).toBe(false)
+  expect(isSelfDm(conversation('c1', { memberIds: ['u1'] }), 'u1')).toBe(false)
+  expect(isSelfDm(conversations[1], null)).toBe(false)
 })
 
 test('a DM is titled by its other members', () => {

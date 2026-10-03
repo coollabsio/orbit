@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { queryKeys } from '@/api/queryKeys'
 import { fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
@@ -56,6 +57,9 @@ function Page({ tasks, select }: { tasks: Task[]; select: string[] }) {
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  // the project menus read every project from the cache; one project offers no move
+  client.setQueryDefaults(queryKeys.projects(workspace.id), { staleTime: Infinity })
+  client.setQueryData(queryKeys.projects(workspace.id), [launch])
   return <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><TaskTargetProvider openTaskId={null}>{children}</TaskTargetProvider></WorkspaceContext.Provider></QueryClientProvider>
 }
 

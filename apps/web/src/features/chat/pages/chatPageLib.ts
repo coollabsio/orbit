@@ -24,7 +24,10 @@ export function paneLayout(available: number | null, wanted: number): PaneLayout
   return { fits: true, width: Math.min(width, Math.floor(available - COLUMN_MIN)) }
 }
 
-/** The id of an Orbit task or page that a same-origin URL points to; `null` for every other URL. */
+/**
+ * The Orbit task or page that a same-origin URL points to; `null` for every other URL. A task `id` is what the URL
+ * names it by: its id or its identifier (`/tasks/ENG-12`, `/views/<view>/ENG-12`).
+ */
 export function orbitLinkTarget(url: string, origin: string): { kind: 'task' | 'page'; id: string } | null {
   let parsed: URL
   try {
@@ -33,9 +36,17 @@ export function orbitLinkTarget(url: string, origin: string): { kind: 'task' | '
     return null
   }
   if (parsed.origin !== origin) return null
-  const [, root, id, rest] = parsed.pathname.split('/')
+  const [, root, id, rest, more] = parsed.pathname.split('/')
+  const segment = (value: string) => {
+    try {
+      return decodeURIComponent(value)
+    } catch {
+      return value
+    }
+  }
+  if (root === 'views' && id && rest && !more) return { kind: 'task', id: segment(rest) }
   if (!id || rest) return null
-  if (root === 'tasks') return id === 'projects' ? null : { kind: 'task', id }
+  if (root === 'tasks') return id === 'projects' ? null : { kind: 'task', id: segment(id) }
   if (root === 'docs') return id === 'trash' || id === 'import' ? null : { kind: 'page', id }
   return null
 }

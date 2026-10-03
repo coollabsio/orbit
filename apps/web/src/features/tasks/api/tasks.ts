@@ -33,6 +33,7 @@ import {
 import type {
   BulkItem,
   CreateTaskBody,
+  ProjectRecord,
   CreateTaskRelationData,
   ListTasksData,
   PageTaskRecord,
@@ -46,8 +47,9 @@ import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed } from './autoClosed'
 import { isTaskVersionConflict } from './conflicts'
 import { commentUploadMode } from './commentUpload'
-import { patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, snapshotTasks, type WorkspaceTaskSnapshot } from './optimistic'
+import { findCachedTask, patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, snapshotTasks, type WorkspaceTaskSnapshot } from './optimistic'
 import { PartialUploadError, uploadFiles } from './uploadQueue'
+import { isTaskUuid, normalizeTaskParam, taskSlug } from '@/lib/taskLinks'
 
 type ApiClient = ReturnType<typeof createApiClient>
 export type TaskFilters = NonNullable<ListTasksData['query']>
@@ -218,6 +220,50 @@ export function useTask(workspaceId: string, taskId: string | undefined) {
   return useQuery(taskDetailQueries(workspaceId, taskId).task)
 }
 
+/**
+ * Route segments that name a task by identifier (`ENG-12`), resolved to its id. Outside `tasks.all` on purpose: a
+ * task write must not refetch it (after a move the old identifier names nothing), and it never goes stale (numbers
+ * are never reused, so an old identifier keeps leading to its task, whose page then replaces the URL).
+ */
+const taskAliasKey = (workspaceId: string, param: string) => ['task-alias', workspaceId, normalizeTaskParam(param)] as const
+
+/** Remembers that `slug` names `taskId`, so navigating to `/tasks/<slug>` needs no extra request. */
+export function primeTaskAlias(queryClient: QueryClient, workspaceId: string, slug: string, taskId: string) {
+  if (slug !== taskId) queryClient.setQueryData(taskAliasKey(workspaceId, slug), taskId)
+}
+
+/** The route segment of a cached task: its identifier when the task and its project are cached, else its id. */
+export function cachedTaskSlug(queryClient: QueryClient, workspaceId: string, taskId: string): string {
+  const record = queryClient.getQueryData<TaskRecord>(queryKeys.tasks.detail(workspaceId, taskId)) ?? findCachedTask(queryClient, workspaceId, taskId)
+  const project = record && queryClient.getQueryData<ProjectRecord[]>(queryKeys.projects(workspaceId))?.find((item) => item.id === record.project_id)
+  const slug = taskSlug({ id: taskId, number: record?.number, projectKey: project?.key })
+  primeTaskAlias(queryClient, workspaceId, slug, taskId)
+  return slug
+}
+
+/**
+ * The task id a route segment names: a UUID as is, an identifier (`ENG-12`) through one GET that also fills the
+ * detail cache. `taskId` stays undefined while it resolves and when it fails (`error`).
+ */
+export function useTaskRouteId(workspaceId: string, param: string | undefined): { taskId: string | undefined; error: Error | null } {
+  const queryClient = useQueryClient()
+  const byId = !param || isTaskUuid(param)
+  const alias = useQuery({
+    queryKey: taskAliasKey(workspaceId, param ?? ''),
+    enabled: !byId,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      const { data } = await getTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: param ?? '' }, throwOnError: true })
+      const record = required(data, 'Task response was empty.')
+      queryClient.setQueryData(queryKeys.tasks.detail(workspaceId, record.id), record)
+      return record.id
+    },
+  })
+  if (byId) return { taskId: param?.toLowerCase(), error: null }
+  return { taskId: alias.data, error: alias.data ? null : alias.error }
+}
+
 /** The detail task `queryOptions`, same cache as `useTask` — used to load a task by id without mounting the detail view. */
 export function taskRecordQuery(workspaceId: string, taskId: string) {
   return taskDetailQueries(workspaceId, taskId).task
@@ -282,7 +328,8 @@ async function promptForConflict(error: Error, refresh: () => void) {
 const CLEARABLE_FIELDS = new Set(['due_at', 'due_start_at', 'source_url', 'parent_task_id'])
 
 export function optimisticTaskPatch(body: Omit<TaskUpdateBody, 'expected_version'>): Partial<TaskRecord> {
-  const { duplicate_of_id: _duplicateOf, ...fields } = body
+  // A project move waits for the server: it maps the status and assigns the new number (and so the identifier).
+  const { duplicate_of_id: _duplicateOf, project_id: _project, ...fields } = body
   return Object.fromEntries(Object.entries(fields).filter(([key, value]) => value != null || CLEARABLE_FIELDS.has(key))) as Partial<TaskRecord>
 }
 

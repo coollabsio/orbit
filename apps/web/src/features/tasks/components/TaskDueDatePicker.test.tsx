@@ -77,10 +77,11 @@ for (const [label, weeksAhead] of [['This week', 0], ['Next week', 1]] as const)
   const view = render(<TaskDetail task={task} project={undefined} state={state} onBack={() => {}} />, { wrapper: Wrapper })
 
   fireEvent.click(view.getByRole('button', { name: 'Due date' }))
+  // no Done step: the shortcut saves at once and the picker stays open
   fireEvent.click(view.getByRole('button', { name: label }))
-  fireEvent.click(view.getByRole('button', { name: 'Done' }))
 
   await waitFor(() => expect(requestBody).toBeDefined())
+  expect(view.getByRole('button', { name: 'Due date' }).getAttribute('aria-expanded')).toBe('true')
   const start = new Date(requestBody?.due_start_at as string)
   const end = new Date(requestBody?.due_at as string)
   expect(start.getDay()).toBe(1)

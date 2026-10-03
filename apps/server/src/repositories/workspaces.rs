@@ -17,6 +17,7 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
+use super::chat::join_public_channels;
 use super::membership;
 use super::page_versions;
 use super::task_relations;
@@ -282,6 +283,7 @@ impl WorkspaceRepository {
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        join_public_channels(&mut transaction, id, actor_id, now).await?;
         insert_default_project(&mut transaction, &defaults, now).await?;
         insert_default_teamspace(&mut transaction, id, actor_id, now).await?;
         audit::record(
@@ -722,6 +724,7 @@ impl WorkspaceRepository {
             .bind(now.as_millis())
             .execute(&mut *transaction)
             .await?;
+            join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
             (id, true)
         };
         sqlx::query(
@@ -884,6 +887,7 @@ impl WorkspaceRepository {
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
         sqlx::query(
             "UPDATE workspace_invitations SET accepted_at = ? WHERE id = ? AND workspace_id = ?",
         )

@@ -74,6 +74,9 @@ pub struct TaskRecord {
     pub project_id: Id,
     #[schema(value_type = String)]
     pub status_id: Id,
+    /// Per-project sequence number: the task's identifier is `{project key}-{number}`, e.g.
+    /// `ENG-12`. Reassigned when the task moves to another project; never reused.
+    pub number: i64,
     pub title: String,
     pub description: String,
     pub source_url: Option<String>,
@@ -122,7 +125,8 @@ pub struct TaskRecord {
     pub trashed_descendant_count: Option<i64>,
 }
 
-/// A task reference small enough to embed; clients build the display identifier themselves.
+/// A task reference small enough to embed; clients build the display identifier
+/// (`{project_key}-{number}`) themselves.
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct TaskRef {
     #[schema(value_type = String)]
@@ -131,6 +135,10 @@ pub struct TaskRef {
     pub project_id: Id,
     /// The key of the task's (live) project, e.g. `ORB`.
     pub project_key: String,
+    /// The task's number in that project.
+    #[serde(default)]
+    #[schema(required = true)]
+    pub number: i64,
     pub title: String,
 }
 
@@ -331,6 +339,8 @@ pub enum TaskError {
     Conflict,
     #[error("GitHub controls this task's title and description")]
     GithubContentReadOnly,
+    #[error("a task synced with a GitHub issue cannot move to another project")]
+    GithubLinkedMove,
     #[error("integration event conflicts with its original payload")]
     IntegrationConflict,
     #[error("restore conflicts with the current {field}")]
@@ -1275,6 +1285,29 @@ impl TaskRepository {
         finish_page(tasks, limit, &fingerprint, |task| {
             task_cursor_key(task, filter)
         })
+    }
+
+    /// Resolves a `{task_id}` path segment: a task UUID, or an identifier such as `ENG-12`
+    /// (case-insensitive) of a task in a live project of the workspace. Only resolves; the
+    /// caller still reads the task through an access-checked method.
+    pub async fn resolve_task_id(&self, workspace_id: Id, value: &str) -> Result<Id, TaskError> {
+        if let Ok(id) = value.parse::<Id>() {
+            return Ok(id);
+        }
+        let (key, number) = parse_task_identifier(value).ok_or(TaskError::NotFound)?;
+        sqlx::query_scalar::<_, String>(
+            "SELECT tasks.id FROM tasks JOIN projects ON projects.id = tasks.project_id \
+             WHERE tasks.workspace_id = ? AND projects.project_key = ? AND tasks.number = ? \
+             AND projects.deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .bind(key)
+        .bind(number)
+        .fetch_optional(self.database.pool())
+        .await?
+        .map(parse_id)
+        .transpose()?
+        .ok_or(TaskError::NotFound)
     }
 
     pub async fn get_task(
@@ -2455,6 +2488,21 @@ pub(super) async fn update_task_in_tx(
         }
     }
     let project_id = update.changes.project_id.unwrap_or(current.project_id);
+    let moves_project = project_id != current.project_id;
+    if moves_project {
+        // GitHub sync finds the task through its project's repository connection; in another
+        // project the next sync would conflict, so the move is refused instead.
+        let linked: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM github_issue_links WHERE workspace_id = ? AND task_id = ?)",
+        )
+        .bind(workspace_id.to_string())
+        .bind(update.id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+        if linked {
+            return Err(TaskError::GithubLinkedMove);
+        }
+    }
     // Only these changes can move the task into or out of the Duplicate status.
     let duplicate_may_change = update.changes.duplicate_of_id.is_some()
         || update.changes.status_id.is_some()
@@ -2481,8 +2529,11 @@ pub(super) async fn update_task_in_tx(
                 status_id
             }
             Some(status_id) => status_id,
-            None if was_duplicate && project_id != current.project_id => {
+            None if was_duplicate && moves_project => {
                 task_relations::duplicate_status_id_in_tx(tx, workspace_id, project_id).await?
+            }
+            None if moves_project => {
+                matching_status_in_tx(tx, workspace_id, current.status_id, project_id).await?
             }
             None => current.status_id,
         },
@@ -2522,7 +2573,23 @@ pub(super) async fn update_task_in_tx(
         .priority
         .clone()
         .unwrap_or(current.priority.clone());
-    let position = update.changes.position.unwrap_or(current.position);
+    let position = match update.changes.position {
+        Some(position) => position,
+        // A moved task goes to the end of its column in the target project.
+        None if moves_project => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM tasks WHERE workspace_id = ? AND project_id = ? \
+                 AND status_id = ? AND deleted_at IS NULL AND id <> ?",
+            )
+            .bind(workspace_id.to_string())
+            .bind(project_id.to_string())
+            .bind(status_id.to_string())
+            .bind(update.id.to_string())
+            .fetch_one(&mut **tx)
+            .await?
+        }
+        None => current.position,
+    };
     let due_at = update.changes.due_at.unwrap_or(current.due_at);
     let due_start_at =
         if matches!(update.changes.due_at, Some(None)) && update.changes.due_start_at.is_none() {
@@ -2535,8 +2602,10 @@ pub(super) async fn update_task_in_tx(
             field: "due_start_at",
         });
     }
-    sqlx::query("UPDATE tasks SET project_id = ?, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, parent_task_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
-        .bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_task_id.map(|id| id.to_string())).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    // A project move clears `number`; the `tasks_number_project_change` trigger assigns the
+    // target project's next one (clearing it here keeps the old number from colliding there).
+    sqlx::query("UPDATE tasks SET project_id = ?, number = CASE WHEN project_id = ? THEN number ELSE NULL END, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, parent_task_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
+        .bind(project_id.to_string()).bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_task_id.map(|id| id.to_string())).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
     if parent_task_id != current.parent_task_id {
         // Project ids let the activity feed build cross-project identifiers (ORB-91C0). A hidden
         // old parent (trashed, or in a trashed project) has no `current.parent`, so read its
@@ -2889,6 +2958,34 @@ async fn require_task_tx(
     } else {
         Err(TaskError::NotFound)
     }
+}
+
+/// The status a task in `status_id` takes in `project_id` when it moves there without an
+/// explicit status: the same name and category, else the first status of the same category,
+/// else the first unstarted status, else the first status. Never the Duplicate status (a
+/// duplicate follows the move through `duplicate_status_id_in_tx`).
+async fn matching_status_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    status_id: Id,
+    project_id: Id,
+) -> Result<Id, TaskError> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT target.id FROM task_statuses AS target \
+         LEFT JOIN task_statuses AS source ON source.id = ? AND source.workspace_id = target.workspace_id \
+         WHERE target.workspace_id = ? AND target.project_id = ? AND target.category <> 'duplicate' \
+         ORDER BY (target.category = source.category AND LOWER(target.name) = LOWER(source.name)) DESC, \
+         (target.category = source.category) DESC, (target.category = 'unstarted') DESC, \
+         target.position, target.id LIMIT 1",
+    )
+    .bind(status_id.to_string())
+    .bind(workspace_id.to_string())
+    .bind(project_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await?
+    .map(parse_id)
+    .transpose()?
+    .ok_or(TaskError::NotFound)
 }
 
 async fn validate_project_status(
@@ -3430,7 +3527,7 @@ async fn task_from_row_tx(
 /// or NULL when the task is not a duplicate or its target (or target's project) is in the trash.
 fn duplicate_of_subquery(task_id_sql: &str) -> String {
     format!(
-        "(SELECT json_object('id', canonical.id, 'project_id', canonical.project_id, 'project_key', canonical_project.project_key, 'title', canonical.title) \
+        "(SELECT json_object('id', canonical.id, 'project_id', canonical.project_id, 'project_key', canonical_project.project_key, 'number', canonical.number, 'title', canonical.title) \
          FROM task_relations AS duplicate_relation \
          JOIN tasks AS canonical ON canonical.id = duplicate_relation.related_task_id \
          JOIN projects AS canonical_project ON canonical_project.id = canonical.project_id \
@@ -3442,7 +3539,7 @@ fn duplicate_of_subquery(task_id_sql: &str) -> String {
 /// The column list every `TaskRecord` query selects (decoded by `task_record_from_row`).
 fn task_columns() -> String {
     format!(
-        "tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.title, \
+        "tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.number, tasks.title, \
          tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
          tasks.creator_service_account_id, \
          (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, \
@@ -3471,6 +3568,24 @@ fn task_columns() -> String {
     )
 }
 
+/// Splits a task identifier such as `eng-12` into the upper-cased project key and the number.
+/// Project keys never contain `-`, so the number follows the last one.
+#[must_use]
+pub fn parse_task_identifier(value: &str) -> Option<(String, i64)> {
+    let (key, number) = value.trim().rsplit_once('-')?;
+    let key = key.to_ascii_uppercase();
+    let key_valid = !key.is_empty()
+        && key.len() <= 20
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_');
+    if !key_valid || number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let number = number.parse::<i64>().ok().filter(|number| *number > 0)?;
+    Some((key, number))
+}
+
 pub(super) fn parse_task_ref(value: Option<String>) -> Result<Option<TaskRef>, TaskError> {
     value
         .map(|json| serde_json::from_str(&json).map_err(|_| TaskError::Conflict))
@@ -3492,6 +3607,8 @@ fn task_record_from_row(
         workspace_id: parse_id(row.get("workspace_id"))?,
         project_id: parse_id(row.get("project_id"))?,
         status_id: parse_id(row.get("status_id"))?,
+        // Assigned by the `tasks_number_*` triggers, so never NULL once the insert finished.
+        number: row.get::<Option<i64>, _>("number").unwrap_or_default(),
         title: row.get("title"),
         description: row.get("description"),
         source_url: row.get("source_url"),

@@ -155,7 +155,7 @@ function NewChannelForm({ defaultCategoryId, defaultName, onDone }: { defaultCat
               <Hashtag aria-hidden />
               Public
             </span>
-            <span className="text-xs font-normal text-muted-foreground">Anyone in the workspace can find it and join.</span>
+            <span className="text-xs font-normal text-muted-foreground">Everyone in the workspace is in it.</span>
           </ToggleGroupItem>
           <ToggleGroupItem value="private" className="h-auto flex-col items-start gap-0.5 py-2 whitespace-normal">
             <span className="flex items-center gap-1.5">

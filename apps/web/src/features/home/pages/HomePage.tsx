@@ -15,6 +15,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import { useTasks } from '@/features/tasks/api/tasks'
+import { taskPath } from '@/lib/taskLinks'
 
 /** One linked row inside a home card. */
 function CardRow({ className, ...props }: ComponentProps<typeof Link>) {
@@ -130,7 +131,7 @@ export function HomePage() {
                   <CardEmpty>No open tasks — enjoy the calm.</CardEmpty>
                 ) : (
                   myOpenTasks.map((task) => (
-                    <CardRow key={task.id} to={`/tasks/${task.id}`}>
+                    <CardRow key={task.id} to={taskPath(task)}>
                       <TaskStatusIcon status={statuses.data.find((s) => s.id === task.statusId)} />
                       <RowMeta>
                         {task.identifier}

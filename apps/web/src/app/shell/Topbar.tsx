@@ -20,6 +20,7 @@ import { useCreatePage, usePageTree } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { ancestorsOf, pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
 import { docsHidden } from './productNavigation'
+import { taskParamMatches } from '@/lib/taskLinks'
 
 interface Crumb {
   label: string
@@ -42,7 +43,7 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
         crumbs.push({ label: 'Settings' })
         return { crumbs }
       }
-      const task = id ? taskNavigation.tasks.find((t) => t.id === id) : null
+      const task = id ? taskNavigation.tasks.find((t) => taskParamMatches(id, t)) : null
       if (task) {
         const status = taskNavigation.statuses.find((s) => s.id === task.statusId)
         const project = taskNavigation.projects.find((p) => p.id === task.projectId)

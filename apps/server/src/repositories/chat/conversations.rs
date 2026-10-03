@@ -12,7 +12,7 @@ use super::{
     Access, CONVERSATION_COLUMNS, CategoryRecord, ChatError, ChatEvent, ChatRepository,
     ConversationKind, ConversationRecord, Events, MessageKind, NotifyLevel, Written,
     conversation_from_row, conversation_record, current_conversation_record, finish, id_list,
-    load_access, load_actor, parse_id,
+    load_access, load_actor, parse_id, workspace_member_ids,
 };
 
 const NAME_MAX_CHARS: usize = 80;
@@ -98,7 +98,8 @@ impl ChatRepository {
         categories(&mut tx, workspace_id).await
     }
 
-    /// Every member may make a channel. The caller is its first member.
+    /// Every member may make a channel. The caller is its first member; a public channel
+    /// gets every workspace member.
     pub async fn create_channel(
         &self,
         workspace_id: Id,
@@ -125,6 +126,10 @@ impl ChatRepository {
         require_free_name(&mut tx, workspace_id, &name, None).await?;
         require_category(&mut tx, workspace_id, input.category_id).await?;
         require_workspace_members(&mut tx, workspace_id, &members).await?;
+        // Every workspace member is in a public channel, like the default one.
+        if input.kind == ConversationKind::Public {
+            members = workspace_member_ids(&mut tx, workspace_id).await?;
+        }
         let id = Id::new_v7();
         let position = next_position(&mut tx, workspace_id, input.category_id).await?;
         sqlx::query(
@@ -204,7 +209,24 @@ impl ChatRepository {
         .bind(conversation_id.to_string())
         .execute(&mut *tx)
         .await?;
+        // A channel that becomes public gets every workspace member, with everything read.
+        let added = if current.kind == ConversationKind::Private && kind == ConversationKind::Public
+        {
+            let current_members = super::member_ids(&mut tx, conversation_id).await?;
+            let added: Vec<Id> = workspace_member_ids(&mut tx, workspace_id)
+                .await?
+                .into_iter()
+                .filter(|id| !current_members.contains(id))
+                .collect();
+            add_members(&mut tx, conversation_id, &added, NotifyLevel::Mentions, now).await?;
+            added
+        } else {
+            Vec::new()
+        };
         let (mut events, record) = changed(&mut tx, workspace_id, conversation_id).await?;
+        for user_id in added {
+            emit_state(&mut tx, workspace_id, conversation_id, user_id, &mut events).await?;
+        }
         if current.kind == ConversationKind::Public && kind == ConversationKind::Private {
             // The channel is gone for everyone who is not in it.
             events.outsiders(
@@ -282,7 +304,7 @@ impl ChatRepository {
         finish(tx, events, record).await
     }
 
-    /// Nobody leaves the default channel or a DM.
+    /// Nobody leaves a public channel (every workspace member is in it) or a DM.
     pub async fn leave_channel(
         &self,
         workspace_id: Id,
@@ -349,7 +371,7 @@ impl ChatRepository {
         finish(tx, events, record).await
     }
 
-    /// The channel's creator and chat managers remove a member.
+    /// The channel's creator and chat managers remove a member of a private channel.
     pub async fn remove_channel_member(
         &self,
         workspace_id: Id,
@@ -706,6 +728,10 @@ fn require_leavable(access: &Access) -> Result<(), ChatError> {
         ))
     } else if access.conversation.kind == ConversationKind::Dm {
         Err(ChatError::Forbidden("A direct message cannot be left."))
+    } else if access.conversation.kind == ConversationKind::Public {
+        Err(ChatError::Forbidden(
+            "Every workspace member is in a public channel; only a private channel can be left.",
+        ))
     } else {
         Ok(())
     }

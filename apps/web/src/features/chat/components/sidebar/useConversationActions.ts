@@ -38,7 +38,8 @@ export function useConversationActions(conversation: Conversation) {
     /** Edit the channel. */
     canManage,
     canArchive: canManage && !conversation.isDefault,
-    canLeave: channel && conversation.isMember && !conversation.isDefault,
+    // every workspace member is in a public channel (#general too): only a private one can be left
+    canLeave: conversation.kind === 'private' && conversation.isMember,
     markRead: () => markRead.mutate(id, { onError: failed('mark as read') }),
     toggleFavorite: () => setFavorite.mutate({ conversationId: id, favorite: !state?.favorite }, { onError: failed(state?.favorite ? 'remove the star' : 'add the star') }),
     setNotify: (notify: NotifyLevel) => setNotify.mutate({ conversationId: id, notify }, { onError: failed('change the notification setting') }),

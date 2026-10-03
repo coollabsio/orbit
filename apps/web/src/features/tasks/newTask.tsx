@@ -4,6 +4,7 @@ import type { CreateTaskBody, TaskRecord } from '@/api/generated/types.gen'
 import { NewTaskDialog } from '@/features/tasks/components/NewTaskDialog'
 import type { GroupValues } from '@/features/views/layoutGroups'
 import { useCommand } from '@/shortcuts/useCommand'
+import { taskPath } from '@/lib/taskLinks'
 
 /** What the current page knows about a new task: its starting properties and where a created task opens. */
 export interface NewTaskSource {
@@ -31,7 +32,8 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
     const page = source.current
     setDialog((current) => current ?? {
       defaults: page?.defaults(request.values ?? []) ?? {},
-      onOpenTask: page?.onOpenTask ?? ((task) => navigate(`/tasks/${task.id}`)),
+      // the task page replaces the id with the identifier once the task loads
+      onOpenTask: page?.onOpenTask ?? ((task) => navigate(taskPath({ id: task.id }))),
       title: request.title,
       description: request.description,
     })
