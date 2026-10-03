@@ -3,17 +3,16 @@ import { useChatContext } from '../../api/chatContext'
 import type { Conversation } from '../../api/types'
 import { isSelfDm } from '../../lib/sidebar'
 import { fullTimestamp } from '../../lib/time'
-import { useChatLocation, useChatNavigation } from '../../useChatNavigation'
+import { useChatNavigation, useOpenPane } from '../../useChatNavigation'
 import { conversationTitle, useChatPeople } from './people'
 
 /** The block above the first message of a conversation. */
 export function ConversationStart({ conversation }: { conversation: Conversation }) {
   const { currentUserId } = useChatContext()
   const people = useChatPeople()
-  const location = useChatLocation()
   const { togglePane } = useChatNavigation()
   const title = conversationTitle(conversation, people, currentUserId)
-  const membersOpen = location.view === 'conversation' && location.pane === 'members' && !location.thread && !location.q
+  const membersOpen = useOpenPane() === 'members'
 
   if (isSelfDm(conversation)) {
     return (

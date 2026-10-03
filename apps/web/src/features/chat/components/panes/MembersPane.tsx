@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { People, UserAdd } from 'reicon-react'
+import { Crown, People, UserAdd } from 'reicon-react'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -10,13 +10,17 @@ import { useAddMembers, useOpenDm, useRemoveMember } from '@/features/chat/api/m
 import { useConversation } from '@/features/chat/api/queries'
 import type { Conversation } from '@/features/chat/api/types'
 import { canAddPeople, canManageChannel, chatErrorMessage, pickablePeople } from '@/features/chat/components/dialogs/channelLib'
+import { memberGroups } from '@/features/chat/lib/memberGroups'
 import { MemberPicker } from '@/features/chat/components/dialogs/MemberPicker'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
 import type { User } from '@/features/workspaces/models'
 import { RightPane, RightPaneBody, RightPaneEmpty, RightPaneError, RightPaneLoading } from './RightPane'
 
-/** The people in a conversation, grouped Online / Offline. A click on a person opens the direct message with them. */
+/**
+ * The people in a conversation, laid out like Discord's member list: online people under their role, offline people
+ * dimmed at the end. A click on a person opens the direct message with them.
+ */
 export function MembersPane({ conversationId }: { conversationId: string }) {
   const { workspaceId, currentUserId } = useChatContext()
   const conversationQuery = useConversation(conversationId)
@@ -29,13 +33,8 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
   const conversation = conversationQuery.data
   const members = membersQuery.data ?? []
   const currentUser = members.find((member) => member.id === currentUserId)
-  const people = (conversation?.memberIds ?? [])
-    .flatMap((id) => members.find((member) => member.id === id) ?? [])
-    .sort((a, b) => a.name.localeCompare(b.name))
-  const groups = [
-    { label: 'Online', people: people.filter((person) => online.has(person.id)) },
-    { label: 'Offline', people: people.filter((person) => !online.has(person.id)) },
-  ].filter((group) => group.people.length > 0)
+  const people = (conversation?.memberIds ?? []).flatMap((id) => members.find((member) => member.id === id) ?? [])
+  const groups = memberGroups(people, online)
   // every workspace member stays in a public channel, and removing yourself is "Leave" in the conversation menu
   const canRemove = Boolean(conversation && conversation.kind === 'private' && !conversation.isDefault && canManageChannel(conversation, currentUser))
 
@@ -62,7 +61,7 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
       title="Members"
       actions={conversation && canAddPeople(conversation, currentUser) ? <AddPeople conversation={conversation} people={pickablePeople(members, currentUserId, conversation.memberIds)} /> : null}
     >
-      <RightPaneBody>
+      <RightPaneBody className="pt-0">
         {conversationQuery.isPending || membersQuery.isPending ? (
           <RightPaneLoading />
         ) : conversationQuery.isError || membersQuery.isError ? (
@@ -77,29 +76,36 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
           <RightPaneEmpty icon={People} title="No members to show" description="Open a conversation from the sidebar to see who is in it." />
         ) : (
           groups.map((group) => (
-            <section key={group.label} aria-label={`${group.label}, ${group.people.length}`} className="mb-2">
-              <h3 className="px-2 py-1 text-xs text-muted-foreground">
-                {group.label} · {group.people.length}
+            <section key={group.label} aria-label={`${group.label}, ${group.people.length}`} data-online={group.online} className="group/members">
+              <h3 className="px-2 pt-4 pb-1 text-xs font-semibold text-muted-foreground">
+                {group.label} — {group.people.length}
               </h3>
-              <ul className="flex flex-col">
+              <ul className="flex flex-col gap-px">
                 {group.people.map((person) => (
-                  <li key={person.id} className="group flex items-center gap-1">
+                  <li
+                    key={person.id}
+                    className="group flex items-center gap-1 rounded-md transition-colors duration-150 ease-out focus-within:bg-muted hover-fine:hover:bg-muted group-data-[online=false]/members:opacity-40 group-data-[online=false]/members:focus-within:opacity-100 group-data-[online=false]/members:hover-fine:hover:opacity-100"
+                  >
                     <Button
                       variant="ghost"
-                      className="min-w-0 flex-1 justify-start gap-2 px-2 font-normal"
+                      className="h-[42px] min-w-0 flex-1 justify-start gap-3 px-2 text-[15px] font-medium text-muted-foreground group-focus-within:text-foreground hover:bg-transparent hover-fine:group-hover:text-foreground dark:hover:bg-transparent"
                       title={person.id === currentUserId ? 'Message yourself' : `Message ${person.name}`}
                       onClick={() => message(person)}
                     >
-                      <UserAvatar user={person} size={24} showOnline online={online.has(person.id)} />
+                      <UserAvatar user={person} size={32} showOnline={group.online} online={group.online} className="**:data-[slot=avatar-badge]:size-2.5" />
                       <span className="truncate">{person.name}</span>
-                      {person.id === currentUserId ? <span className="text-xs text-muted-foreground">you</span> : null}
-                      {person.role !== 'Member' ? <span className="text-xs text-muted-foreground">{person.role}</span> : null}
+                      {person.role === 'Owner' ? (
+                        <>
+                          <Crown className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+                          <span className="sr-only">Workspace owner</span>
+                        </>
+                      ) : null}
                     </Button>
                     {canRemove && person.id !== currentUserId ? (
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="text-muted-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 hover-fine:group-focus-within:opacity-100"
+                        className="mr-1 text-muted-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 hover-fine:group-focus-within:opacity-100"
                         aria-label={`Remove ${person.name}`}
                         disabled={removeMember.isPending}
                         onClick={() => remove(person)}

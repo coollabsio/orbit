@@ -12,7 +12,7 @@ import type { Conversation } from '@/features/chat/api/types'
 import type { ChatPane } from '@/features/chat/chatRoutes'
 import { EditChannelDialog } from '@/features/chat/components/dialogs/EditChannelDialog'
 import { conversationTitle } from '@/features/chat/lib/sidebar'
-import { useChatLocation, useChatNavigation } from '@/features/chat/useChatNavigation'
+import { useChatLocation, useChatNavigation, useOpenPane } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
 import { ChatBackLink } from './sidebar/ChatRow'
 import { ConversationIcon } from './sidebar/ConversationIcon'
@@ -51,7 +51,7 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
 
   const here = location.view === 'conversation' ? location : null
   const query = here?.q ?? ''
-  const openPane = here && !here.thread && !here.q ? here.pane : null
+  const openPane = useOpenPane()
   const title = conversationTitle(conversation, people, currentUserId ?? '')
   const channel = conversation.kind !== 'dm'
   const toggle = (pane: ChatPane) => () => navigation.togglePane(pane)

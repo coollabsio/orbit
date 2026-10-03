@@ -109,7 +109,8 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
     // Popups (menus, the emoji picker, dialogs) are portals: their `Esc` is theirs.
     if (event.key !== 'Escape' || event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return
-    const paneOpen = location.view === 'conversation' && Boolean(location.thread || location.q || location.pane)
+    // Esc closes a thread or a search; the members, pins, files and threads panes stay until their own close button
+    const paneOpen = location.view === 'conversation' && Boolean(location.thread || location.q)
     if (!paneOpen) return
     event.preventDefault()
     closePane()

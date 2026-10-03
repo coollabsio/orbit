@@ -1,12 +1,22 @@
 import { MoreH } from 'reicon-react'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
+import { ColorDot } from '@/components/common/ColorDot'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { refIdentifier, type TaskKeyRef } from '@/features/tasks/api/models'
+import { refIdentifier, type Project, type TaskKeyRef } from '@/features/tasks/api/models'
 import { breadcrumbParts } from '@/features/tasks/subIssuesLib'
 
-/** Header trail: ancestors (identifier + short title) root first, then the current identifier; >3 ancestors fold the middle. */
-export function TaskBreadcrumb({ ancestors, identifier, onOpen }: { ancestors: TaskKeyRef[]; identifier: string; onOpen: (taskId: string) => void }) {
+interface TaskBreadcrumbProps {
+  /** The task's project: the first crumb, which opens the project's task list. */
+  project?: Project
+  ancestors: TaskKeyRef[]
+  identifier: string
+  onOpen: (taskId: string) => void
+  onOpenProject?: (projectId: string) => void
+}
+
+/** Header trail: the project, ancestors (identifier + short title) root first, then the current identifier; >3 ancestors fold the middle. */
+export function TaskBreadcrumb({ project, ancestors, identifier, onOpen, onOpenProject }: TaskBreadcrumbProps) {
   const { head, hidden, tail } = breadcrumbParts(ancestors)
   const crumb = (ref: TaskKeyRef) => [
     <BreadcrumbItem key={ref.id} className="min-w-0">
@@ -24,6 +34,20 @@ export function TaskBreadcrumb({ ancestors, identifier, onOpen }: { ancestors: T
   return (
     <Breadcrumb className="min-w-0">
       <BreadcrumbList className="flex-nowrap text-xs">
+        {project ? (
+          <>
+            <BreadcrumbItem className="min-w-0">
+              <BreadcrumbLink
+                render={<Button type="button" variant="link" title={`Open ${project.name}`} onClick={() => onOpenProject?.(project.id)} />}
+                className="h-auto min-w-0 gap-1.5 p-0 text-xs font-medium text-foreground"
+              >
+                <ColorDot color={project.color} />
+                <span className="max-w-48 truncate max-[899px]:max-w-28">{project.name}</span>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+          </>
+        ) : null}
         {head.flatMap(crumb)}
         {hidden.length > 0 ? (
           <>

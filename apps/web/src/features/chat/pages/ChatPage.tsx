@@ -30,7 +30,7 @@ import { chatThemeVariables, useChatTheme } from '@/features/chat/lib/chatTheme'
 import { getLastOpenedConversation, setLastOpenedConversation } from '@/features/chat/lib/drafts'
 import { decodeMentions } from '@/features/chat/lib/mentionTokens'
 import { buildSidebarSections, conversationBadge } from '@/features/chat/lib/sidebar'
-import { useChatLocation, useChatNavigation } from '@/features/chat/useChatNavigation'
+import { useChatLocation, useChatNavigation, useOpenPane } from '@/features/chat/useChatNavigation'
 import { useOpenNewTask } from '@/features/tasks/newTask'
 import { useMembers } from '@/features/workspaces/api'
 import { useBindings, useCommand, useRunCommand } from '@/shortcuts/useCommand'
@@ -168,6 +168,7 @@ export function ChatPage() {
   const location = useChatLocation()
   const theme = useChatTheme()
   const navigation = useChatNavigation()
+  const openPane = useOpenPane()
   const { workspaceId } = useChatContext()
   const conversations = useConversations()
   const people = useMembers(workspaceId).data
@@ -206,11 +207,14 @@ export function ChatPage() {
     if (target) return <Navigate to={conversationPath(target.id)} replace />
   }
 
-  const pane = rightPaneOf(location)
+  // the URL's pane, else the pane the user left open: it stays beside every conversation until they close it
+  const urlPane = rightPaneOf(location)
+  const pane = urlPane ?? (openPane ? { kind: openPane } : null)
   const layout = paneLayout(areaWidth, paneWidth)
   const fits = !phone && layout.fits
   const inlinePane = conversation && pane && fits ? pane : null
-  const sheetPane = conversation && pane && !fits && pane.kind !== 'thread' ? pane : null
+  // a sheet covers the conversation, so only the URL opens one
+  const sheetPane = conversation && urlPane && !fits && urlPane.kind !== 'thread' ? urlPane : null
   const browseAction = (
     <Button type="button" onClick={() => setBrowseOpen(true)}>
       Browse channels

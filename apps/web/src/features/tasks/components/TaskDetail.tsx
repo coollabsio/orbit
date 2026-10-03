@@ -56,10 +56,12 @@ interface TaskDetailProps {
   onBack: () => void
   /** Opens another task (banner, relation rows, activity links). */
   onOpenTask?: (taskId: string) => void
+  /** Opens a project's task list (the breadcrumb's project crumb). */
+  onOpenProject?: (projectId: string) => void
 }
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
-export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDetailProps) {
+export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenProject }: TaskDetailProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const uploadAttachments = useUploadTaskAttachments(workspace.id, task?.id ?? '')
@@ -152,7 +154,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 min-[900px]:hidden" onClick={onBack} aria-label="Back to tasks">
           <ArrowLeft className="size-4" />
         </Button>
-        <TaskBreadcrumb ancestors={task?.ancestors ?? []} identifier={task?.identifier ?? 'Task'} onOpen={openTask} />
+        <TaskBreadcrumb project={project} ancestors={task?.ancestors ?? []} identifier={task?.identifier ?? 'Task'} onOpen={openTask} onOpenProject={onOpenProject} />
         {githubSyncPaused ? <Badge variant="secondary">GitHub sync paused</Badge> : null}
         <div className="flex-1" />
         {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={() => void trash()}>Delete</Button> : null}

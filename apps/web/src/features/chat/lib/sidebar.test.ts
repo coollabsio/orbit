@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Conversation, ConversationState, FollowedThread } from '../api/types'
-import { buildSidebarSections, chatBadges, conversationBadge, dmTitle, dropBefore, isSelfDm, unreadConversations } from './sidebar'
+import { buildSidebarSections, chatBadges, conversationBadge, dmTitle, dropBefore, isSelfDm, unjoinedChannelCount, unreadConversations } from './sidebar'
 import { testMessage } from './testMessage'
 
 const conversation = (id: string, overrides: Partial<Conversation> = {}): Conversation => ({
@@ -100,4 +100,14 @@ test('a dropped channel goes before the row, or before the one after it', () => 
   // Inside its own section the dragged channel does not count.
   expect(dropBefore(channels, 'b', 'a', 'after')).toBe('c')
   expect(dropBefore(channels, 'c', 'b', 'after')).toBeNull()
+})
+
+test('the channels left to join are public, not joined and not archived', () => {
+  const conversations = [
+    conversation('joined'),
+    conversation('open', { isMember: false }),
+    conversation('old', { isMember: false, archived: true }),
+    conversation('secret', { kind: 'private', isMember: false }),
+  ]
+  expect(unjoinedChannelCount(conversations)).toBe(1)
 })

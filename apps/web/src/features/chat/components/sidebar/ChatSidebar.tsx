@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type PointerEvent } from 'react'
 import { toast } from 'sonner'
-import { Add, Brush, ChevronDown, ChevronRight, DirectInbox, Edit, Layer, MoreH, Trash } from 'reicon-react'
+import { Add, Brush, ChevronDown, ChevronRight, DirectInbox, Edit, Hashtag, Layer, MoreH, Trash } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Button } from '@/components/ui/button'
@@ -208,6 +208,7 @@ export function ChatSidebar() {
     const badge = conversationBadge(conversation, stateById.get(id))
     return badge.bold || badge.count > 0
   }
+  const unjoined = unjoinedChannelCount(conversations.data ?? [])
   const built = conversations.data && currentUserId ? buildSidebarSections(conversations.data, categories ?? [], states ?? []) : []
 
   // Channel order and categories are shared, so only a chat admin drags them.
@@ -285,6 +286,24 @@ export function ChatSidebar() {
       <div className="flex shrink-0 flex-col gap-px px-2 pt-2">
         <PinnedRow to={UNREADS_PATH} icon={DirectInbox} label="Unreads" count={badges.unreads} active={location.view === 'unreads'} />
         <PinnedRow to={THREADS_PATH} icon={Layer} label="Threads" count={badges.threads} active={location.view === 'threads'} />
+        {unjoined > 0 ? (
+          // the list below shows joined channels only: this row says there are more, and opens the browser
+          <ChatRow>
+            <button
+              type="button"
+              className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+              onClick={() => show({ kind: 'browse' })}
+            >
+              <span className="flex size-[18px] shrink-0 items-center justify-center text-muted-foreground">
+                <Hashtag size={16} />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {unjoined} more {unjoined === 1 ? 'channel' : 'channels'} to join
+              </span>
+              <ChevronRight size={14} className="shrink-0 text-muted-foreground/70" />
+            </button>
+          </ChatRow>
+        ) : null}
       </div>
 
       <nav aria-label="Conversations" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 pt-3">

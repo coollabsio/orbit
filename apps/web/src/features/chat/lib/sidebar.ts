@@ -109,6 +109,11 @@ const lastActivity = (conversation: Conversation) => conversation.lastMessageAt 
 const byPosition = (a: Conversation, b: Conversation) => a.position - b.position || a.name.localeCompare(b.name)
 const byActivity = (a: Conversation, b: Conversation) => lastActivity(b) - lastActivity(a) || (a.id < b.id ? -1 : 1)
 
+/** How many public channels the user can join but has not: the sidebar points at them, since it lists joined ones only. */
+export function unjoinedChannelCount(conversations: readonly Conversation[]): number {
+  return conversations.filter((conversation) => conversation.kind === 'public' && !conversation.isMember && !conversation.archived).length
+}
+
 /**
  * The scrolling list of the chat sidebar: Favorites (hidden when empty; a favorite leaves its own group), each shared
  * category by position (kept when empty, so admins can fill it), "Channels" for channels without a category (hidden

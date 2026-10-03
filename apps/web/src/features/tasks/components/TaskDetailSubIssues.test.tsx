@@ -67,7 +67,7 @@ test('a sub-issue shows its ancestors in the header and its parent as a property
     />,
     { wrapper: Wrapper },
   )
-  expect(view.getByRole('navigation', { name: 'breadcrumb' }).textContent).toBe('ORB-0012Checkout redesignORB-0031')
+  expect(view.getByRole('navigation', { name: 'breadcrumb' }).textContent).toBe('LaunchORB-0012Checkout redesignORB-0031')
   expect(view.queryAllByRole('button', { name: 'Set parent' })).toHaveLength(0)
   fireEvent.click(view.getByRole('button', { name: 'Parent: ORB-0012 Checkout redesign' }))
   await userEvent.click(await view.findByRole('menuitem', { name: 'Remove parent' }))

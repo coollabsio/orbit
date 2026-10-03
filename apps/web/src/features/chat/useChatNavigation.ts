@@ -1,5 +1,7 @@
 import { useLocation, useNavigate } from 'react-router'
 import { conversationPath, parseChatLocation, threadPath, type ChatLocation, type ChatPane } from './chatRoutes'
+import { setStickyPane, useStickyPane } from './lib/stickyPane'
+import { useIsPhone } from './pages/useChatViewport'
 
 /** Router state of a full-view thread: where its close button and `Esc` go back to. */
 interface ThreadOrigin {
@@ -12,6 +14,19 @@ export function useChatLocation(): ChatLocation {
 }
 
 /**
+ * The pane (members, pins, files, threads) that is open beside the conversation: the one the URL names, else the one
+ * the user left open. `null` while a thread or a search has its place. On a phone a pane is a sheet over the
+ * conversation, so only the URL opens one there.
+ */
+export function useOpenPane(): ChatPane | null {
+  const here = useChatLocation()
+  const sticky = useStickyPane()
+  const phone = useIsPhone()
+  if (here.view !== 'conversation' || here.thread || here.q) return null
+  return here.pane ?? (phone ? null : sticky)
+}
+
+/**
  * Every chat navigation, so the history rules are in one place: opening a conversation, a pane or a full thread pushes;
  * closing, expanding and collapsing replace.
  */
@@ -20,6 +35,7 @@ export function useChatNavigation() {
   const location = useLocation()
   const here = parseChatLocation(location.pathname, location.search)
   const conversationId = here.view === 'conversation' || here.view === 'thread' ? here.conversationId : null
+  const openPane = useOpenPane()
 
   return {
     openConversation(id: string, messageId?: string | null) {
@@ -47,19 +63,21 @@ export function useChatNavigation() {
       const origin = (location.state as ThreadOrigin | null)?.chatOrigin
       navigate(origin ?? conversationPath(conversationId), { replace: true })
     },
-    /** Shows a pane, or closes it when it is already open. */
+    /** Shows a pane, or closes it when it is already open. An open pane stays open in every conversation. */
     togglePane(pane: ChatPane) {
       if (here.view !== 'conversation') return
-      const open = !here.thread && !here.q && here.pane === pane
-      navigate(conversationPath(here.conversationId, { pane: open ? null : pane }), { replace: open })
+      const open = openPane === pane
+      setStickyPane(open ? null : pane)
+      navigate(conversationPath(here.conversationId, { pane: open ? null : pane }), { replace: open || openPane !== null })
     },
     openSearch(query: string) {
       if (!conversationId) return
       navigate(conversationPath(conversationId, { q: query }), { replace: here.view === 'conversation' && Boolean(here.q) })
     },
-    /** Closes the right pane (thread, search or other) and keeps the conversation. */
+    /** Closes the right pane and keeps the conversation. Behind a thread or a search, the pane the user left open shows again. */
     closePane() {
       if (!conversationId) return
+      if (openPane) setStickyPane(null)
       navigate(conversationPath(conversationId), { replace: true })
     },
   }
