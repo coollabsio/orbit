@@ -18,7 +18,7 @@ export function ComposerUploads({
   const pending = uploads.filter((upload) => upload.status !== 'done')
 
   return (
-    <div data-slot="composer-uploads" className="flex shrink-0 flex-col gap-1.5 px-3 pb-1">
+    <div data-slot="composer-uploads" className="flex min-h-0 shrink flex-col gap-1.5 overflow-y-auto px-3 pb-1">
       <Attachments
         attachments={done}
         hasTextContent={false}

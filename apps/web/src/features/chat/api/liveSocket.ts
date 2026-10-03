@@ -9,13 +9,22 @@ export interface SocketLike {
   close(): void
 }
 
+/** A member in the `hello` frame: somebody who does not show as offline. */
+export interface HelloPresence {
+  user_id: string
+  status: 'online' | 'idle' | 'dnd'
+  emoji: string | null
+  text: string | null
+  expires_at: string | null
+}
+
 export interface LiveSocketOptions {
   /** `ws(s)://…/api/v1/workspaces/{id}/live`, without a query. */
   url: string
   /** A numbered event or a signal (typing, presence) of a topic. */
   onEvent: (topic: string, event: unknown) => void
-  /** The first frame of every connection: who is online now. */
-  onHello: (online: string[]) => void
+  /** The first frame of every connection: every member who does not show as offline, with their status. */
+  onHello: (presence: HelloPresence[]) => void
   /** Events were missed and the server cannot replay them: fetch the data again. */
   onResync: () => void
   onStatus: (status: ConnectionStatus) => void
@@ -80,7 +89,7 @@ export function openLiveSocket(options: LiveSocketOptions): LiveSocket {
   const receive = (data: unknown) => {
     watch()
     if (typeof data !== 'string') return
-    let frame: { type?: string; epoch?: string; seq?: number; online?: string[]; topic?: string; event?: unknown }
+    let frame: { type?: string; epoch?: string; seq?: number; presence?: HelloPresence[]; topic?: string; event?: unknown }
     try {
       frame = JSON.parse(data)
     } catch {
@@ -94,7 +103,7 @@ export function openLiveSocket(options: LiveSocketOptions): LiveSocket {
       attempt = 0
       open = true
       options.onStatus('connected')
-      options.onHello(frame.online ?? [])
+      options.onHello(frame.presence ?? [])
       for (const resolve of waiting.splice(0)) resolve()
     } else if (frame.type === 'resync') {
       lastSeq = helloSeq

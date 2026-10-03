@@ -38,6 +38,8 @@ import {
   updateChatState,
 } from '@/api/generated/sdk.gen'
 import type { ChatEvent as WireEvent, ChatFileRecord } from '@/api/generated/types.gen'
+import type { Notice } from '@/features/realtime/notify'
+import type { PresenceEntry, PresenceMap } from '@/features/realtime/presence'
 import type { ChatClient } from './client'
 import { type LiveSocket, type LiveSocketOptions, openLiveSocket } from './liveSocket'
 import { ChatError, type ChatEvent, type ConversationState } from './types'
@@ -64,6 +66,8 @@ export interface HttpChatClientOptions {
   readIntervalMs?: number
   /** The user's inbox changed on the server (a chat mention arrived, or reading a conversation read one). */
   onInboxChanged?: () => void
+  /** Something the user asked to be notified about happened, and the server chose this tab over a push. */
+  onNotify?: (notice: Notice) => void
   /** Opens the live socket; tests put their own in. */
   openSocket?: (options: LiveSocketOptions) => LiveSocket
   /** How long a send that could not reach the server waits for the connection to come back. Default 60000. */
@@ -91,11 +95,23 @@ interface WireTyping {
   user_id: string
 }
 
+/** A presence signal: what the others see of a member changed. `offline` carries nothing else. */
 interface WirePresence {
   type: 'presence'
   user_id: string
-  online: boolean
+  status: PresenceEntry['status'] | 'offline'
+  emoji?: string | null
+  text?: string | null
+  expires_at?: string | null
 }
+
+function toPresence(wire: Pick<WirePresence, 'status' | 'emoji' | 'text' | 'expires_at'>): PresenceEntry | null {
+  if (wire.status === 'offline') return null
+  return { status: wire.status, emoji: wire.emoji ?? null, text: wire.text ?? null, expiresAt: wire.expires_at ?? null }
+}
+
+const samePresence = (a: PresenceEntry, b: PresenceEntry) =>
+  a.status === b.status && a.emoji === b.emoji && a.text === b.text && a.expiresAt === b.expiresAt
 
 /**
  * Chat on the Orbit server, for one workspace and the signed-in user. A write's response lists the events that the
@@ -114,9 +130,12 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
   }
 
   let socket: LiveSocket | null = null
-  /** Who is online, from the socket's `hello` and its presence signals. `null` before the first `hello`. */
-  let online: Set<string> | null = null
-  let presenceWaiters: ((userIds: string[]) => void)[] = []
+  /** Who does not show as offline, from the socket's `hello` and its presence signals. `null` before the first `hello`. */
+  let presence: Map<string, PresenceEntry> | null = null
+  let presenceWaiters: ((presence: PresenceMap) => void)[] = []
+  /** What the tab last reported. A new connection starts as in use, so anything else goes again after each `hello`. */
+  let idle = false
+  let away = false
 
   function openSocket() {
     const url = `${(globalThis.location?.origin ?? 'http://localhost').replace(/^http/, 'ws')}/api/v1/workspaces/${workspaceId}/live`
@@ -124,22 +143,40 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
       url,
       onStatus: (status) => emit({ type: 'connection', status }),
       onResync: () => emit({ type: 'resync' }),
-      onHello(userIds) {
-        // A reconnect: tell the subscribers who came and went meanwhile.
-        const next = new Set(userIds)
-        for (const userId of online ?? []) if (!next.has(userId)) emit({ type: 'presence', userId, online: false })
-        for (const userId of next) if (online && !online.has(userId)) emit({ type: 'presence', userId, online: true })
-        online = next
-        for (const resolve of presenceWaiters.splice(0)) resolve(userIds)
+      onHello(members) {
+        const next = new Map<string, PresenceEntry>()
+        for (const member of members) {
+          const entry = toPresence(member)
+          if (entry) next.set(member.user_id, entry)
+        }
+        // A reconnect: tell the subscribers who left, who came and whose status changed meanwhile.
+        const previous = presence
+        presence = next
+        if (previous) {
+          for (const userId of previous.keys()) if (!next.has(userId)) emit({ type: 'presence', userId, presence: null })
+          for (const [userId, entry] of next) {
+            const before = previous.get(userId)
+            if (!before || !samePresence(before, entry)) emit({ type: 'presence', userId, presence: entry })
+          }
+        }
+        for (const resolve of presenceWaiters.splice(0)) resolve(new Map(next))
+        if (idle || away) socket?.send({ type: 'activity', idle, away })
       },
       onEvent(topic, event) {
         if (topic === 'presence') {
-          const { user_id: userId, online: isOnline } = event as WirePresence
-          if (isOnline) online?.add(userId)
-          else online?.delete(userId)
-          emit({ type: 'presence', userId, online: isOnline })
+          const wire = event as WirePresence | { type: 'self' }
+          if (wire.type === 'self') {
+            emit({ type: 'self.changed' })
+            return
+          }
+          const entry = toPresence(wire)
+          if (entry) presence?.set(wire.user_id, entry)
+          else presence?.delete(wire.user_id)
+          emit({ type: 'presence', userId: wire.user_id, presence: entry })
         } else if (topic === 'inbox') {
           options.onInboxChanged?.()
+        } else if (topic === 'notify') {
+          options.onNotify?.(event as Notice)
         } else if (topic === 'chat') {
           const wire = event as WireEvent | WireTyping
           if (wire.type === 'typing') {
@@ -228,7 +265,7 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
       }
     },
     /** Known from the socket's first frame. */
-    getPresence: () => (online ? Promise.resolve([...online]) : new Promise((resolve) => presenceWaiters.push(resolve))),
+    getPresence: () => (presence ? Promise.resolve(new Map(presence)) : new Promise((resolve) => presenceWaiters.push(resolve))),
 
     async sendMessage(input) {
       const body = {
@@ -388,6 +425,16 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     sendTyping(conversationId, threadRootId = null) {
       socket?.send({ type: 'typing', conversation_id: conversationId, thread_root_id: threadRootId })
     },
+    setIdle(next) {
+      if (idle === next) return
+      idle = next
+      socket?.send({ type: 'activity', idle, away })
+    },
+    setAway(next) {
+      if (away === next) return
+      away = next
+      socket?.send({ type: 'activity', idle, away })
+    },
 
     subscribe(listener) {
       listeners.add(listener)
@@ -397,7 +444,7 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         if (listeners.size > 0) return
         socket?.close()
         socket = null
-        online = null
+        presence = null
         presenceWaiters = []
       }
     },

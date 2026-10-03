@@ -2,8 +2,9 @@ import { useSyncExternalStore } from 'react'
 import type { ConnectionStatus } from './types'
 
 /**
- * Typing, presence and connection status change often and are never fetched, so they stay out of the query cache.
- * One set of stores for the page: `ChatProvider` resets them when the workspace changes.
+ * Typing and connection status change often and are never fetched, so they stay out of the query cache.
+ * One set of stores for the page: `ChatProvider` resets them when the workspace changes. Presence is app-wide and lives
+ * in `features/realtime/presence.ts`.
  */
 const TYPING_TTL = 10_000
 const NOBODY: readonly string[] = []
@@ -12,7 +13,6 @@ const listeners = new Set<() => void>()
 const typingTimers = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
 /** Immutable snapshots: a new array or set for each change, so `useSyncExternalStore` sees it. */
 const typingSnapshots = new Map<string, readonly string[]>()
-let online: ReadonlySet<string> = new Set()
 let connection: ConnectionStatus = 'connected'
 
 const typingKey = (conversationId: string, threadRootId?: string | null) => `${conversationId}:${threadRootId ?? ''}`
@@ -57,20 +57,6 @@ export function clearTyping(conversationId: string, threadRootId: string | null,
   snapshotTyping(key)
 }
 
-export function setPresence(userId: string, isOnline: boolean) {
-  if (online.has(userId) === isOnline) return
-  const next = new Set(online)
-  if (isOnline) next.add(userId)
-  else next.delete(userId)
-  online = next
-  emit()
-}
-
-export function setOnlineUsers(userIds: readonly string[]) {
-  online = new Set(userIds)
-  emit()
-}
-
 export function setConnectionStatus(status: ConnectionStatus) {
   if (connection === status) return
   connection = status
@@ -81,7 +67,6 @@ export function resetLiveStore() {
   for (const users of typingTimers.values()) for (const timer of users.values()) clearTimeout(timer)
   typingTimers.clear()
   typingSnapshots.clear()
-  online = new Set()
   connection = 'connected'
   emit()
 }
@@ -89,11 +74,6 @@ export function resetLiveStore() {
 /** Ids of the members typing in a conversation's composer, or in one of its threads. */
 export function useTyping(conversationId: string, threadRootId?: string | null): readonly string[] {
   return useSyncExternalStore(subscribe, () => typingSnapshots.get(typingKey(conversationId, threadRootId)) ?? NOBODY)
-}
-
-/** Ids of the members who are online. */
-export function usePresence(): ReadonlySet<string> {
-  return useSyncExternalStore(subscribe, () => online)
 }
 
 export function useConnectionStatus(): ConnectionStatus {

@@ -11,13 +11,14 @@ import { useChatContext } from '@/features/chat/api/chatContext'
 import type { Conversation } from '@/features/chat/api/types'
 import type { ChatPane } from '@/features/chat/chatRoutes'
 import { EditChannelDialog } from '@/features/chat/components/dialogs/EditChannelDialog'
-import { conversationTitle } from '@/features/chat/lib/sidebar'
+import { conversationTitle, dmProfilePerson } from '@/features/chat/lib/sidebar'
 import { useChatLocation, useChatNavigation, useOpenPane } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
 import { ChatBackLink } from './sidebar/ChatRow'
 import { ConversationIcon } from './sidebar/ConversationIcon'
 import { ConversationMenuItems } from './sidebar/ConversationMenuItems'
 import { useConversationActions } from './sidebar/useConversationActions'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 /** A header button that shows a right pane and closes it again; pressed while its pane is open. */
 function PaneToggle({ label, pressed, className, onToggle, children }: { label: string; pressed: boolean; className?: string; onToggle: () => void; children: ReactNode }) {
@@ -54,15 +55,21 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
   const openPane = useOpenPane()
   const title = conversationTitle(conversation, people, currentUserId ?? '')
   const channel = conversation.kind !== 'dm'
+  const dmPerson = dmProfilePerson(conversation, people, currentUserId)
   const toggle = (pane: ChatPane) => () => navigation.togglePane(pane)
 
   return (
     <PaneHeader data-slot="conversation-header" data-searching={searching || undefined} className="group/header @container/header max-[899px]:gap-1 max-[899px]:px-2">
       <ChatBackLink className="group-data-searching/header:hidden" />
       <div className="flex min-w-0 flex-1 items-center gap-2 group-data-searching/header:hidden">
-        <ConversationIcon conversation={conversation} people={people} currentUserId={currentUserId} size={20} group="stack" filled />
+        {/* a DM with one person (or with yourself): the avatar and the name open that profile */}
+        <ProfileTrigger userId={dmPerson?.id} name={dmPerson?.name ?? title} kind="avatar" tabIndex={-1} className="flex shrink-0">
+          <ConversationIcon conversation={conversation} people={people} currentUserId={currentUserId} size={20} group="stack" filled />
+        </ProfileTrigger>
         <PaneTitle render={<h1 />} className="max-w-[60%] shrink-0 text-sm">
-          {title}
+          <ProfileTrigger userId={dmPerson?.id} name={dmPerson?.name ?? title} className="max-w-full truncate align-bottom">
+            {title}
+          </ProfileTrigger>
         </PaneTitle>
         {channel && conversation.topic ? (
           <Tooltip>

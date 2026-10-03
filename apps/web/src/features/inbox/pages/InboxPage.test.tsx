@@ -21,7 +21,7 @@ test('inbox lists assignment notifications and opens the linked task', async () 
   client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 }])
   client.setQueryData(queryKeys.members('workspace-1'), [{
     id: 'user-owner', membershipId: 'm1', name: 'Owner', handle: 'owner', email: 'o@x',
-    role: 'Owner', color: '#000', online: false, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
+    role: 'Owner', color: '#000', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
   }])
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input instanceof Request ? input.url : input)
@@ -62,7 +62,7 @@ test('page comment mentions name the page and open it with the thread', async ()
   client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 }])
   client.setQueryData(queryKeys.members('workspace-1'), [{
     id: 'user-owner', membershipId: 'm1', name: 'Owner', handle: 'owner', email: 'o@x',
-    role: 'Owner', color: '#000', online: false, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
+    role: 'Owner', color: '#000', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
   }])
   client.setQueryData(queryKeys.pages.tree('workspace-1'), [{ id: 'page-7', title: 'Roadmap', parent_id: null, teamspace_id: 'ts', icon: null, position: 0, version: 1, updated_at: '2026-09-06T10:00:00Z' }])
   const mention = {
@@ -101,7 +101,7 @@ test('page body mentions name the editor and the page and open the page at the b
   client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 }])
   client.setQueryData(queryKeys.members('workspace-1'), [{
     id: 'user-owner', membershipId: 'm1', name: 'Orbit Owner', handle: 'owner', email: 'o@x',
-    role: 'Owner', color: '#000', online: false, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
+    role: 'Owner', color: '#000', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
   }])
   client.setQueryData(queryKeys.pages.tree('workspace-1'), [{ id: 'page-7', title: '[mention-test]', parent_id: null, teamspace_id: 'ts', icon: null, position: 0, version: 1, updated_at: '2026-09-06T10:00:00Z' }])
   const mention = {

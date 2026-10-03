@@ -9,6 +9,9 @@ import { useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { ChatProvider } from '@/features/chat/api/ChatProvider'
 import { useChatBadgeCount } from '@/features/chat/api/queries'
+import { useHasUnreadNotifications } from '@/features/inbox/api'
+import { startPushWorker } from '@/features/realtime/push'
+import { useUnreadFavicon } from '@/lib/favicon'
 import { chatEnabled } from './productNavigation'
 import { Outlet, useLocation } from 'react-router'
 import { SidebarLeft as PanelLeft } from 'reicon-react'
@@ -22,6 +25,7 @@ import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import { MobileDock } from './MobileDock'
+import { ProfilePopoverProvider } from './ProfilePopover'
 
 /** The signed-in app. Shortcuts exist only here, with the user's own keys; the sign-in pages have none. */
 export function AppShell() {
@@ -39,6 +43,11 @@ function Shell() {
   const { workspace } = useWorkspace()
   const live = useWorkspaceEvents(workspace.id)
   const chatBadge = useChatBadgeCount()
+  // The tab icon gets a dot while chat or the Inbox has something unread.
+  const inboxUnread = useHasUnreadNotifications(workspace.id).data ? 1 : 0
+  useUnreadFavicon(chatBadge + inboxUnread)
+  // Signed in: the worker that shows notifications may run. This asks for no permission.
+  useEffect(() => startPushWorker(), [])
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [collapsedPreference, setCollapsedPreference] = useState(() => window.localStorage.getItem('orbit:sidebar_collapsed') === 'true')
@@ -93,6 +102,7 @@ function Shell() {
   }, [collapsedPreference])
 
   return (
+    <ProfilePopoverProvider>
     <NewTaskProvider>
     <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
       {!live ? (
@@ -169,5 +179,6 @@ function Shell() {
       <SequenceHint />
     </div>
     </NewTaskProvider>
+    </ProfilePopoverProvider>
   )
 }

@@ -419,6 +419,10 @@ impl App {
         let scheduler = production.scheduler;
         let token = service_shutdown.clone();
         services.spawn(async move { run_scheduler_service(scheduler, database, token).await });
+        let push = crate::push::PushService::of(&self.database);
+        push.set_origin(&self.config.http.public_origin);
+        let token = service_shutdown.clone();
+        services.spawn(async move { push.run_inbox_service(token).await });
         let attachments = self.attachments.clone();
         let token = service_shutdown.clone();
         services.spawn(async move {

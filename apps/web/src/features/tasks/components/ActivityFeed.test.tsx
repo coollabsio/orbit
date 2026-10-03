@@ -35,7 +35,7 @@ const state: TaskViewState = {
   currentUserId: 'user-1',
   users: [{
     id: 'user-1', membershipId: 'membership-1', name: 'Andras', handle: 'andras',
-    email: 'andras@example.com', role: 'Owner', color: '#16a34a', online: true,
+    email: 'andras@example.com', role: 'Owner', color: '#16a34a',
     title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
   }],
   statuses: [], labels: [], tasks: [task],

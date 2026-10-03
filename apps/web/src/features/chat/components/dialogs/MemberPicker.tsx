@@ -4,6 +4,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { presenceOf, usePresence } from '@/features/realtime/presence'
 import type { User } from '@/features/workspaces/models'
 import { matchPeople } from './channelLib'
 
@@ -12,8 +13,6 @@ interface MemberPickerProps {
   people: User[]
   selectedIds: string[]
   onChange: (selectedIds: string[]) => void
-  /** Ids of the members who are online (`usePresence()`). */
-  online: ReadonlySet<string>
   /** Accessible name of the search field. */
   label: string
   placeholder?: string
@@ -24,8 +23,9 @@ interface MemberPickerProps {
  * Search field, chips for the chosen people and a list to choose from. Enter or a click toggles a person; Backspace in
  * an empty field removes the last chip. Shared by the new channel and new message dialogs and by "Add people".
  */
-export function MemberPicker({ people, selectedIds, onChange, online, label, placeholder = 'Search people…', autoFocus = false }: MemberPickerProps) {
+export function MemberPicker({ people, selectedIds, onChange, label, placeholder = 'Search people…', autoFocus = false }: MemberPickerProps) {
   const [search, setSearch] = useState('')
+  const presence = usePresence()
   const selected = selectedIds.flatMap((id) => people.find((person) => person.id === id) ?? [])
   const results = matchPeople(people, search)
 
@@ -73,7 +73,7 @@ export function MemberPicker({ people, selectedIds, onChange, online, label, pla
                 setSearch('')
               }}
             >
-              <UserAvatar user={person} size={24} showOnline online={online.has(person.id)} />
+              <UserAvatar user={person} size={24} status={presenceOf(presence, person.id).status} />
               <span className="truncate">{person.name}</span>
               <span className="truncate text-xs text-muted-foreground">@{person.handle}</span>
               {chosen ? <span className="sr-only">Chosen</span> : null}

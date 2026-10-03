@@ -8,7 +8,6 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useChatContext } from '@/features/chat/api/chatContext'
-import { usePresence } from '@/features/chat/api/liveStore'
 import { useCreateChannel } from '@/features/chat/api/mutations'
 import { useCategories } from '@/features/chat/api/queries'
 import { ChatError } from '@/features/chat/api/types'
@@ -47,7 +46,6 @@ function NewChannelForm({ defaultCategoryId, defaultName, onDone }: { defaultCat
   const { workspaceId, currentUserId } = useChatContext()
   const categories = useCategories().data ?? []
   const members = useMembers(workspaceId).data ?? []
-  const online = usePresence()
   const createChannel = useCreateChannel()
   const { openConversation } = useChatNavigation()
   const [name, setName] = useState(() => channelNameInput(defaultName))
@@ -170,7 +168,7 @@ function NewChannelForm({ defaultCategoryId, defaultName, onDone }: { defaultCat
       {kind === 'private' ? (
         <Field>
           <FieldLabel>Add people</FieldLabel>
-          <MemberPicker label="Add people" people={pickablePeople(members, currentUserId)} selectedIds={memberIds} onChange={setMemberIds} online={online} />
+          <MemberPicker label="Add people" people={pickablePeople(members, currentUserId)} selectedIds={memberIds} onChange={setMemberIds} />
           <FieldDescription>You are a member already. You can add more people later.</FieldDescription>
         </Field>
       ) : null}

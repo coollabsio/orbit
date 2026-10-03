@@ -95,7 +95,7 @@ export type AuthProblem = {
     type: string;
 };
 
-export type AuthUserResponse = {
+export type AuthUserResponse = ProfileFields & {
     /**
      * The profile picture; absent while the user has none. The URL changes with each upload.
      */
@@ -107,6 +107,10 @@ export type AuthUserResponse = {
      * May manage backups, the global audit log and account suspension.
      */
     installation_admin: boolean;
+    /**
+     * The presence and custom status the user set for themselves.
+     */
+    status: UserStatus;
 };
 
 export type AuthenticatedUser = {
@@ -918,6 +922,35 @@ export type LoginResponse = {
     user: AuthUserResponse;
 };
 
+export type MemberNoteBody = {
+    /**
+     * The note; an empty text removes it.
+     */
+    body: string;
+};
+
+/**
+ * What a profile popover shows of a member beside the member list's fields.
+ */
+export type MemberProfile = {
+    bio?: string | null;
+    /**
+     * The caller's private note about this member; nobody else can read it.
+     */
+    note?: string | null;
+    phone?: string | null;
+    pronouns?: string | null;
+    /**
+     * An IANA time zone name.
+     */
+    timezone?: string | null;
+    /**
+     * The job title.
+     */
+    title?: string | null;
+    user_id: string;
+};
+
 export type MemberRecord = {
     /**
      * The member's profile picture; absent while they have none.
@@ -1060,6 +1093,24 @@ export type MoveTeamspaceBody = {
  * Relation types a client can create. Duplicates go through `duplicate_of_id` on task updates.
  */
 export type NewTaskRelationType = 'blocks' | 'blocked_by' | 'related';
+
+/**
+ * Which events notify the user. They are all on until the user turns one off.
+ */
+export type NotificationPrefs = {
+    /**
+     * Every message of a channel whose notify level is "all".
+     */
+    channel_messages: boolean;
+    chat_mentions: boolean;
+    direct_messages: boolean;
+    /**
+     * Mentions in task comments, pages and page comments.
+     */
+    mentions: boolean;
+    task_assigned: boolean;
+    thread_replies: boolean;
+};
 
 export type NotificationRecord = {
     actor_user_id: string;
@@ -1856,6 +1907,12 @@ export type PageTaskRecord = {
  */
 export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage';
 
+/**
+ * The presence a user sets for themselves. A user without a connection is offline whatever
+ * they set; `Invisible` shows them as offline to everybody else while they are connected.
+ */
+export type Presence = 'online' | 'idle' | 'dnd' | 'invisible';
+
 export type PreviewInvitationBody = {
     token: string;
 };
@@ -1875,6 +1932,26 @@ export type Problem = {
     status: number;
     title: string;
     type: string;
+};
+
+/**
+ * The optional parts of a user's profile; the same in every workspace.
+ */
+export type ProfileFields = {
+    bio?: string | null;
+    /**
+     * As the user wrote it; not verified.
+     */
+    phone?: string | null;
+    pronouns?: string | null;
+    /**
+     * An IANA time zone name, such as `Europe/Budapest`.
+     */
+    timezone?: string | null;
+    /**
+     * The job title.
+     */
+    title?: string | null;
 };
 
 export type ProjectBody = {
@@ -1916,6 +1993,45 @@ export type ProjectUpdateBody = {
     expected_version: number;
     key: string;
     name: string;
+};
+
+export type PushKey = {
+    /**
+     * The `applicationServerKey` a browser subscribes with.
+     */
+    public_key: string;
+};
+
+export type PushSubscriptionBody = {
+    /**
+     * Its `auth` secret, base64url.
+     */
+    auth: string;
+    /**
+     * The URL of the browser's `PushSubscription`.
+     */
+    endpoint: string;
+    /**
+     * What the list of devices shows, e.g. "Firefox on Linux".
+     */
+    label: string;
+    /**
+     * Its `p256dh` key, base64url.
+     */
+    p256dh: string;
+};
+
+/**
+ * A browser the user gets pushes on.
+ */
+export type PushSubscriptionRecord = {
+    created_at: string;
+    /**
+     * The URL of the browser's `PushSubscription`; a browser finds its own row by it.
+     */
+    endpoint: string;
+    id: string;
+    label: string;
 };
 
 export type ReactionRecord = {
@@ -2388,6 +2504,13 @@ export type TeamspaceUpdateBody = {
     name?: string | null;
 };
 
+export type TestPushResult = {
+    /**
+     * How many of the user's browsers took the push.
+     */
+    sent: number;
+};
+
 /**
  * A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`
  * exclusive.
@@ -2450,7 +2573,34 @@ export type TrashedPage = {
 };
 
 export type UpdateMeBody = {
+    bio?: string | null;
     display_name: string;
+    phone?: string | null;
+    pronouns?: string | null;
+    timezone?: string | null;
+    /**
+     * The optional parts: absent leaves the part as it is, an empty text removes it.
+     */
+    title?: string | null;
+};
+
+/**
+ * A user's presence and custom status; the same in every workspace.
+ */
+export type UserStatus = {
+    /**
+     * The emoji of the custom status.
+     */
+    emoji?: string | null;
+    /**
+     * When the custom status ends; the presence stays.
+     */
+    expires_at?: string | null;
+    presence: Presence;
+    /**
+     * The text of the custom status.
+     */
+    text?: string | null;
 };
 
 export type ViewCreateBody = {
@@ -3189,7 +3339,7 @@ export type UpdateMeErrors = {
      */
     413: AuthProblem;
     /**
-     * invalid_display_name
+     * invalid_display_name, invalid_profile
      */
     422: AuthProblem;
     /**
@@ -3576,6 +3726,62 @@ export type PutShortcutsResponses = {
 
 export type PutShortcutsResponse = PutShortcutsResponses[keyof PutShortcutsResponses];
 
+export type PutStatusData = {
+    body: UserStatus;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/status';
+};
+
+export type PutStatusErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_status
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type PutStatusError = PutStatusErrors[keyof PutStatusErrors];
+
+export type PutStatusResponses = {
+    200: AuthUserResponse;
+};
+
+export type PutStatusResponse = PutStatusResponses[keyof PutStatusResponses];
+
 export type CreateDiscordEventData = {
     body: DiscordEventBody;
     headers?: {
@@ -3765,6 +3971,364 @@ export type GithubWebhookResponses = {
      */
     202: unknown;
 };
+
+export type GetNotificationPreferencesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/notification-preferences';
+};
+
+export type GetNotificationPreferencesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetNotificationPreferencesError = GetNotificationPreferencesErrors[keyof GetNotificationPreferencesErrors];
+
+export type GetNotificationPreferencesResponses = {
+    200: NotificationPrefs;
+};
+
+export type GetNotificationPreferencesResponse = GetNotificationPreferencesResponses[keyof GetNotificationPreferencesResponses];
+
+export type PutNotificationPreferencesData = {
+    body: NotificationPrefs;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/notification-preferences';
+};
+
+export type PutNotificationPreferencesErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type PutNotificationPreferencesError = PutNotificationPreferencesErrors[keyof PutNotificationPreferencesErrors];
+
+export type PutNotificationPreferencesResponses = {
+    200: NotificationPrefs;
+};
+
+export type PutNotificationPreferencesResponse = PutNotificationPreferencesResponses[keyof PutNotificationPreferencesResponses];
+
+export type GetPushKeyData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/key';
+};
+
+export type GetPushKeyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetPushKeyError = GetPushKeyErrors[keyof GetPushKeyErrors];
+
+export type GetPushKeyResponses = {
+    200: PushKey;
+};
+
+export type GetPushKeyResponse = GetPushKeyResponses[keyof GetPushKeyResponses];
+
+export type ListPushSubscriptionsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/subscriptions';
+};
+
+export type ListPushSubscriptionsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListPushSubscriptionsError = ListPushSubscriptionsErrors[keyof ListPushSubscriptionsErrors];
+
+export type ListPushSubscriptionsResponses = {
+    200: Array<PushSubscriptionRecord>;
+};
+
+export type ListPushSubscriptionsResponse = ListPushSubscriptionsResponses[keyof ListPushSubscriptionsResponses];
+
+export type CreatePushSubscriptionData = {
+    body: PushSubscriptionBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/subscriptions';
+};
+
+export type CreatePushSubscriptionErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_subscription
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreatePushSubscriptionError = CreatePushSubscriptionErrors[keyof CreatePushSubscriptionErrors];
+
+export type CreatePushSubscriptionResponses = {
+    200: PushSubscriptionRecord;
+};
+
+export type CreatePushSubscriptionResponse = CreatePushSubscriptionResponses[keyof CreatePushSubscriptionResponses];
+
+export type DeletePushSubscriptionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/push/subscriptions/{id}';
+};
+
+export type DeletePushSubscriptionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeletePushSubscriptionError = DeletePushSubscriptionErrors[keyof DeletePushSubscriptionErrors];
+
+export type DeletePushSubscriptionResponses = {
+    204: void;
+};
+
+export type DeletePushSubscriptionResponse = DeletePushSubscriptionResponses[keyof DeletePushSubscriptionResponses];
+
+export type SendTestPushData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/test';
+};
+
+export type SendTestPushErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SendTestPushError = SendTestPushErrors[keyof SendTestPushErrors];
+
+export type SendTestPushResponses = {
+    200: TestPushResult;
+};
+
+export type SendTestPushResponse = SendTestPushResponses[keyof SendTestPushResponses];
 
 export type SetupCompleteData = {
     body: SetupBody;
@@ -10152,6 +10716,124 @@ export type RecordPageVisitResponses = {
 };
 
 export type RecordPageVisitResponse = RecordPageVisitResponses[keyof RecordPageVisitResponses];
+
+export type GetMemberProfileData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/profiles/{user_id}';
+};
+
+export type GetMemberProfileErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetMemberProfileError = GetMemberProfileErrors[keyof GetMemberProfileErrors];
+
+export type GetMemberProfileResponses = {
+    200: MemberProfile;
+};
+
+export type GetMemberProfileResponse = GetMemberProfileResponses[keyof GetMemberProfileResponses];
+
+export type PutMemberNoteData = {
+    body: MemberNoteBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/profiles/{user_id}/note';
+};
+
+export type PutMemberNoteErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_note
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type PutMemberNoteError = PutMemberNoteErrors[keyof PutMemberNoteErrors];
+
+export type PutMemberNoteResponses = {
+    204: void;
+};
+
+export type PutMemberNoteResponse = PutMemberNoteResponses[keyof PutMemberNoteResponses];
 
 export type ListProjectsData = {
     body?: never;

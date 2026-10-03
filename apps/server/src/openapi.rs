@@ -28,6 +28,14 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::logout,
         crate::auth_routes::me,
         crate::auth_routes::update_me,
+        crate::auth_routes::put_status,
+        crate::auth_routes::push::get_push_key,
+        crate::auth_routes::push::list_push_subscriptions,
+        crate::auth_routes::push::create_push_subscription,
+        crate::auth_routes::push::delete_push_subscription,
+        crate::auth_routes::push::send_test_push,
+        crate::auth_routes::push::get_notification_preferences,
+        crate::auth_routes::push::put_notification_preferences,
         crate::auth_routes::get_shortcuts,
         crate::auth_routes::put_shortcuts,
         crate::auth_routes::upload_avatar,
@@ -43,6 +51,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::get_workspace,
         crate::workspace_routes::rename_workspace,
         crate::workspace_routes::list_members,
+        crate::workspace_routes::get_member_profile,
+        crate::workspace_routes::put_member_note,
         crate::workspace_routes::change_member_role,
         crate::workspace_routes::remove_member,
         crate::workspace_routes::transfer_ownership,
@@ -382,7 +392,12 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "400", "invalid_recovery_token");
             add_code(&mut responses, "422", "invalid_password");
         }
-        "update_me" => add_code(&mut responses, "422", "invalid_display_name"),
+        "update_me" => {
+            add_code(&mut responses, "422", "invalid_display_name");
+            add_code(&mut responses, "422", "invalid_profile");
+        }
+        "put_status" => add_code(&mut responses, "422", "invalid_status"),
+        "create_push_subscription" => add_code(&mut responses, "422", "invalid_subscription"),
         "put_shortcuts" => add_code(&mut responses, "422", "invalid_shortcuts"),
         "change_password" => {
             add_code(&mut responses, "401", "invalid_credentials");
@@ -443,7 +458,13 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             workspace_resource_errors(&mut responses);
             add_code(&mut responses, "422", "invalid_workspace_name");
         }
-        "list_members" => add_code(&mut responses, "404", "workspace_resource_not_found"),
+        "list_members" | "get_member_profile" => {
+            add_code(&mut responses, "404", "workspace_resource_not_found");
+        }
+        "put_member_note" => {
+            add_code(&mut responses, "404", "workspace_resource_not_found");
+            add_code(&mut responses, "422", "invalid_note");
+        }
         "change_member_role" | "remove_member" => {
             workspace_resource_errors(&mut responses);
             add_code(&mut responses, "409", "ownership_transfer_required");
@@ -556,6 +577,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "setup_complete"
             | "login"
             | "update_me"
+            | "put_status"
+            | "create_push_subscription"
+            | "put_notification_preferences"
             | "put_shortcuts"
             | "change_password"
             | "recovery_request"
@@ -563,6 +587,8 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_workspace"
             | "rename_workspace"
             | "list_members"
+            | "get_member_profile"
+            | "put_member_note"
             | "change_member_role"
             | "remove_member"
             | "transfer_ownership"

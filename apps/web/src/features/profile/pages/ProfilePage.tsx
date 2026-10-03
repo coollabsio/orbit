@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Eye, EyeSlash as EyeOff } from 'reicon-react'
 import { ApiProblem } from '@/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
-import { Field, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
 import { Button } from '@/components/ui/button'
 import { useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
 import { userColor } from '@/features/workspaces/api'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { avatarImage } from '@/features/profile/avatarImage'
+import { TimeZonePicker } from '@/features/profile/components/TimeZonePicker'
+import { PROFILE_LIMITS, phoneValid, profileChanges, profileDirty, profileFormOf, type ProfileForm } from '@/features/profile/profileLib'
 import { SettingsCard } from '@/components/common/SettingsCard'
-import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 
 
@@ -122,7 +124,10 @@ function AvatarField() {
   )
 }
 
-/** Account settings: display name and authenticated password change. */
+/** The bio counter shows from this many characters before the limit. */
+const BIO_COUNTER_FROM = 100
+
+/** Account settings: the profile other members see, and authenticated password change. */
 export function ProfilePage() {
   const user = useCurrentUser()
   const me = user.data
@@ -130,23 +135,30 @@ export function ProfilePage() {
   const changePasswordMutation = useChangePassword()
 
   const formRef = useRef<HTMLFormElement>(null)
-  const [name, setName] = useState(me?.display_name ?? '')
+  const saved = profileFormOf(me)
+  const savedKey = JSON.stringify(saved)
+  const [form, setForm] = useState(saved)
+  // the saved profile changed (loaded, saved, or edited in another tab): the form follows it
+  const [shownKey, setShownKey] = useState(savedKey)
+  if (shownKey !== savedKey) {
+    setShownKey(savedKey)
+    setForm(saved)
+  }
+  const set = (part: Partial<ProfileForm>) => setForm((current) => ({ ...current, ...part }))
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (me?.display_name != null) setName(me.display_name)
-  }, [me?.display_name])
-
-  const nameDirty = name.trim() !== (me?.display_name ?? '')
+  const dirty = profileDirty(me, form)
+  const bioLeft = PROFILE_LIMITS.bio - form.bio.length
+  const phoneInvalid = form.phone.trim() !== '' && !phoneValid(form.phone.trim())
 
   const saveDetails = (e: React.FormEvent) => {
     e.preventDefault()
-    const displayName = name.trim()
-    if (!displayName || !nameDirty || updateProfile.isPending) return
-    updateProfile.mutate({ display_name: displayName })
+    const changes = profileChanges(me, form)
+    if (!changes || updateProfile.isPending || phoneInvalid) return
+    updateProfile.mutate(changes)
   }
 
   const submitPassword = (e: React.FormEvent) => {
@@ -173,18 +185,13 @@ export function ProfilePage() {
       ? errorDetail(changePasswordMutation.error, 'Password could not be changed.')
       : null)
 
+  // Shown in `AccountLayout`, which has the pane, the header and the scrolling column.
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      <Pane className="relative">
-        <PaneHeader>
-          <PaneTitle>Account settings</PaneTitle>
-        </PaneHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex w-full min-w-0 flex-col gap-6 px-5 pt-5 pb-8 min-[900px]:px-10 min-[900px]:pt-7 min-[900px]:pb-10">
+    <>
             <form ref={formRef} onSubmit={saveDetails}>
               <SettingsCard
                 title="Profile details"
-                description="Your picture, display name and verified sign-in address."
+                description="Your picture, name and what the people in your workspaces see of you."
               >
                 <AvatarField />
                 <FieldGrid className="mt-4">
@@ -195,8 +202,8 @@ export function ProfilePage() {
                     <Input
                       id="profile-name"
                       required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      value={form.name}
+                      onChange={(e) => set({ name: e.target.value })}
                     />
                   </Field>
                   <Field>
@@ -205,10 +212,47 @@ export function ProfilePage() {
                     </FieldLabel>
                     <Input id="profile-email" value={me?.email ?? ''} readOnly />
                   </Field>
+                  <Field>
+                    <FieldLabel htmlFor="profile-title">Title</FieldLabel>
+                    <Input id="profile-title" maxLength={PROFILE_LIMITS.title} placeholder="Product designer" value={form.title} onChange={(e) => set({ title: e.target.value })} />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="profile-pronouns">Pronouns</FieldLabel>
+                    <Input id="profile-pronouns" maxLength={PROFILE_LIMITS.pronouns} placeholder="she/her" value={form.pronouns} onChange={(e) => set({ pronouns: e.target.value })} />
+                  </Field>
+                  <Field data-invalid={phoneInvalid || undefined}>
+                    <FieldLabel htmlFor="profile-phone">Phone number</FieldLabel>
+                    <Input
+                      id="profile-phone"
+                      type="tel"
+                      autoComplete="tel"
+                      maxLength={PROFILE_LIMITS.phone}
+                      placeholder="+1 555 010 0000"
+                      aria-invalid={phoneInvalid || undefined}
+                      value={form.phone}
+                      onChange={(e) => set({ phone: e.target.value })}
+                    />
+                    <FieldDescription>
+                      {phoneInvalid ? 'Use digits, spaces and + - ( ) . only.' : 'The people in your workspaces can see it.'}
+                    </FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="profile-timezone">Time zone</FieldLabel>
+                    <TimeZonePicker id="profile-timezone" value={form.timezone} onChange={(timezone) => set({ timezone })} />
+                  </Field>
+                  <Field className="min-[900px]:col-span-2">
+                    <FieldLabel htmlFor="profile-bio">Bio</FieldLabel>
+                    <Textarea id="profile-bio" maxLength={PROFILE_LIMITS.bio} rows={3} value={form.bio} onChange={(e) => set({ bio: e.target.value })} aria-describedby={bioLeft <= BIO_COUNTER_FROM ? 'profile-bio-count' : undefined} />
+                    {bioLeft <= BIO_COUNTER_FROM ? (
+                      <FieldDescription id="profile-bio-count" className="text-right text-xs tabular-nums">
+                        {form.bio.length} / {PROFILE_LIMITS.bio}
+                      </FieldDescription>
+                    ) : null}
+                  </Field>
                 </FieldGrid>
                 {updateProfile.isError ? (
                   <p className="text-xs text-destructive" role="alert">
-                    {errorDetail(updateProfile.error, 'Display name could not be saved.')}
+                    {errorDetail(updateProfile.error, 'Your profile could not be saved.')}
                   </p>
                 ) : null}
               </SettingsCard>
@@ -256,20 +300,17 @@ export function ProfilePage() {
                 </FieldGrid>
               </SettingsCard>
             </form>
-          </div>
-        </div>
-        {nameDirty ? (
+        {dirty ? (
           <UnsavedBar
             onReset={() => {
               if (updateProfile.isPending) return
-              setName(me?.display_name ?? '')
+              setForm(saved)
               updateProfile.reset()
             }}
             onSave={() => formRef.current?.requestSubmit()}
             saving={updateProfile.isPending}
           />
         ) : null}
-      </Pane>
-    </div>
+    </>
   )
 }

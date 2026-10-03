@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Crown, People, UserAdd } from 'reicon-react'
+import { Crown, People, User as UserIcon, UserAdd } from 'reicon-react'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useChatContext } from '@/features/chat/api/chatContext'
-import { usePresence } from '@/features/chat/api/liveStore'
 import { useAddMembers, useOpenDm, useRemoveMember } from '@/features/chat/api/mutations'
 import { useConversation } from '@/features/chat/api/queries'
 import type { Conversation } from '@/features/chat/api/types'
@@ -13,6 +13,8 @@ import { canAddPeople, canManageChannel, chatErrorMessage, pickablePeople } from
 import { memberGroups } from '@/features/chat/lib/memberGroups'
 import { MemberPicker } from '@/features/chat/components/dialogs/MemberPicker'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
+import { CustomStatusText } from '@/features/realtime/components/CustomStatusText'
+import { presenceOf, usePresence } from '@/features/realtime/presence'
 import { useMembers } from '@/features/workspaces/api'
 import type { User } from '@/features/workspaces/models'
 import { RightPane, RightPaneBody, RightPaneEmpty, RightPaneError, RightPaneLoading } from './RightPane'
@@ -25,7 +27,7 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
   const { workspaceId, currentUserId } = useChatContext()
   const conversationQuery = useConversation(conversationId)
   const membersQuery = useMembers(workspaceId)
-  const online = usePresence()
+  const presence = usePresence()
   const openDm = useOpenDm()
   const removeMember = useRemoveMember()
   const { openConversation } = useChatNavigation()
@@ -34,7 +36,7 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
   const members = membersQuery.data ?? []
   const currentUser = members.find((member) => member.id === currentUserId)
   const people = (conversation?.memberIds ?? []).flatMap((id) => members.find((member) => member.id === id) ?? [])
-  const groups = memberGroups(people, online)
+  const groups = memberGroups(people, presence)
   // every workspace member stays in a public channel, and removing yourself is "Leave" in the conversation menu
   const canRemove = Boolean(conversation && conversation.kind === 'private' && !conversation.isDefault && canManageChannel(conversation, currentUser))
 
@@ -81,40 +83,67 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
                 {group.label} — {group.people.length}
               </h3>
               <ul className="flex flex-col gap-px">
-                {group.people.map((person) => (
-                  <li
-                    key={person.id}
-                    className="group flex items-center gap-1 rounded-md transition-colors duration-150 ease-out focus-within:bg-muted hover-fine:hover:bg-muted group-data-[online=false]/members:opacity-40 group-data-[online=false]/members:focus-within:opacity-100 group-data-[online=false]/members:hover-fine:hover:opacity-100"
-                  >
-                    <Button
-                      variant="ghost"
-                      className="h-[42px] min-w-0 flex-1 justify-start gap-3 px-2 text-[15px] font-medium text-muted-foreground group-focus-within:text-foreground hover:bg-transparent hover-fine:group-hover:text-foreground dark:hover:bg-transparent"
-                      title={person.id === currentUserId ? 'Message yourself' : `Message ${person.name}`}
-                      onClick={() => message(person)}
+                {group.people.map((person) => {
+                  const shown = presenceOf(presence, person.id)
+                  return (
+                    <li
+                      key={person.id}
+                      className="group flex items-center gap-1 rounded-md transition-colors duration-150 ease-out focus-within:bg-muted hover-fine:hover:bg-muted group-data-[online=false]/members:opacity-40 group-data-[online=false]/members:focus-within:opacity-100 group-data-[online=false]/members:hover-fine:hover:opacity-100"
                     >
-                      <UserAvatar user={person} size={32} showOnline={group.online} online={group.online} className="**:data-[slot=avatar-badge]:size-2.5" />
-                      <span className="truncate">{person.name}</span>
-                      {person.role === 'Owner' ? (
-                        <>
-                          <Crown className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
-                          <span className="sr-only">Workspace owner</span>
-                        </>
-                      ) : null}
-                    </Button>
-                    {canRemove && person.id !== currentUserId ? (
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="mr-1 text-muted-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 hover-fine:group-focus-within:opacity-100"
-                        aria-label={`Remove ${person.name}`}
-                        disabled={removeMember.isPending}
-                        onClick={() => remove(person)}
+                        className="h-[42px] min-w-0 flex-1 justify-start gap-3 px-2 text-[15px] font-medium text-muted-foreground group-focus-within:text-foreground hover:bg-transparent hover-fine:group-hover:text-foreground dark:hover:bg-transparent"
+                        title={person.id === currentUserId ? 'Message yourself' : `Message ${person.name}`}
+                        onClick={() => message(person)}
                       >
-                        Remove
+                        <UserAvatar user={person} size={32} status={shown.status} />
+                        <span className="flex min-w-0 flex-col items-start leading-tight">
+                          <span className="flex max-w-full min-w-0 items-center gap-1.5">
+                            <span className="truncate">{person.name}</span>
+                            {person.role === 'Owner' ? (
+                              <>
+                                <Crown className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+                                <span className="sr-only">Workspace owner</span>
+                              </>
+                            ) : null}
+                          </span>
+                          {shown.emoji !== null || shown.text !== null ? (
+                            <span className="max-w-full truncate text-xs font-normal text-muted-foreground">
+                              <CustomStatusText emoji={shown.emoji} text={shown.text} />
+                            </span>
+                          ) : null}
+                        </span>
                       </Button>
-                    ) : null}
-                  </li>
-                ))}
+                      <ProfileTrigger
+                        userId={person.id}
+                        name={person.name}
+                        kind="plain"
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="mr-1 shrink-0 text-muted-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 hover-fine:group-focus-within:opacity-100"
+                            title="View profile"
+                          />
+                        }
+                      >
+                        <UserIcon aria-hidden="true" />
+                      </ProfileTrigger>
+                      {canRemove && person.id !== currentUserId ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mr-1 text-muted-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 hover-fine:group-focus-within:opacity-100"
+                          aria-label={`Remove ${person.name}`}
+                          disabled={removeMember.isPending}
+                          onClick={() => remove(person)}
+                        >
+                          Remove
+                        </Button>
+                      ) : null}
+                    </li>
+                  )
+                })}
               </ul>
             </section>
           ))
@@ -126,7 +155,6 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
 
 /** "Add people": a popover with the picker. The people on offer are workspace members who are not in the channel yet. */
 function AddPeople({ conversation, people }: { conversation: Conversation; people: User[] }) {
-  const online = usePresence()
   const addMembers = useAddMembers()
   const [open, setOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -167,7 +195,7 @@ function AddPeople({ conversation, people }: { conversation: Conversation; peopl
         }
       />
       <PopoverContent align="end" className="w-80">
-        <MemberPicker autoFocus label={`Add people to #${conversation.name}`} people={people} selectedIds={selectedIds} onChange={setSelectedIds} online={online} />
+        <MemberPicker autoFocus label={`Add people to #${conversation.name}`} people={people} selectedIds={selectedIds} onChange={setSelectedIds} />
         <Button disabled={selectedIds.length === 0 || addMembers.isPending} onClick={submit}>
           {selectedIds.length > 1 ? `Add ${selectedIds.length} people` : 'Add people'}
         </Button>

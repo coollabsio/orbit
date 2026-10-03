@@ -7,12 +7,14 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use orbit_platform::{Database, Id};
+use orbit_platform::{Database, Id, TimestampMillis};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, mpsc};
+
+use crate::repositories::identity::{Presence, UserStatus};
 
 /// Events kept for each workspace, for clients that reconnect.
 const BUFFERED_EVENTS: usize = 1000;
@@ -22,6 +24,11 @@ const QUEUED_FRAMES: usize = 256;
 /// How long a member stays online after the last connection closed, so a page reload does not
 /// show as offline and online again.
 const OFFLINE_GRACE: Duration = Duration::from_secs(10);
+/// How often the socket pings a connection; a live one answers each ping.
+pub(super) const HEARTBEAT: Duration = Duration::from_secs(25);
+/// How long after a connection was last heard from the user can still be at its tab: a little
+/// longer than one heartbeat.
+const HEARD_WINDOW: Duration = Duration::from_secs(35);
 
 /// Who an event is for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +65,7 @@ struct Inner {
     write_locks: Mutex<HashMap<Id, Arc<AsyncMutex<()>>>>,
     next_connection: AtomicU64,
     offline_grace: Duration,
+    heard_window: Duration,
 }
 
 #[derive(Default)]
@@ -68,11 +76,31 @@ struct Workspace {
     /// Members whose last connection closed a moment ago; still online. The value is that
     /// connection, so only its own timer takes the member offline.
     leaving: HashMap<Id, u64>,
+    /// What each online member set for themselves.
+    statuses: HashMap<Id, UserStatus>,
 }
 
 struct Connection {
     user_id: Id,
     sender: mpsc::Sender<Arc<str>>,
+    /// The tab had no input for a while.
+    idle: bool,
+    /// The window of the tab has been out of focus for a while: the user is not looking at it.
+    away: bool,
+    /// When the client last sent something (a frame, or the answer to a ping). A connection
+    /// whose network died stays silent long before its socket closes.
+    heard: Instant,
+}
+
+/// What the others see of a member who does not show as offline.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct Shown {
+    user_id: Id,
+    /// `online`, `idle` or `dnd`.
+    status: &'static str,
+    emoji: Option<String>,
+    text: Option<String>,
+    expires_at: Option<TimestampMillis>,
 }
 
 struct Buffered {
@@ -82,12 +110,12 @@ struct Buffered {
 }
 
 /// A new connection: its frames, and what to send first.
-pub(crate) struct Attached {
-    pub(crate) id: u64,
-    pub(crate) frames: mpsc::Receiver<Arc<str>>,
-    pub(crate) hello: String,
+pub struct Attached {
+    pub id: u64,
+    pub frames: mpsc::Receiver<Arc<str>>,
+    pub hello: String,
     /// The events the client missed; `None` when the hub cannot tell (the client must resync).
-    pub(crate) replay: Option<Vec<Arc<str>>>,
+    pub replay: Option<Vec<Arc<str>>>,
 }
 
 impl Workspace {
@@ -125,31 +153,102 @@ impl Workspace {
         self.deliver(recipients, &frame);
     }
 
-    fn presence(&mut self, user_id: Id, online: bool) {
-        self.signal(
-            &Recipients::Workspace,
-            "presence",
-            &json!({ "type": "presence", "user_id": user_id, "online": online }),
-        );
+    /// What the others see of a member; `None` for offline and for invisible.
+    fn shown(&self, user_id: Id) -> Option<Shown> {
+        // A custom status that ended is not shown, also when it ended while the member was
+        // connected.
+        let status = self
+            .statuses
+            .get(&user_id)?
+            .clone()
+            .at(TimestampMillis::now());
+        let mut tabs = self
+            .connections
+            .values()
+            .filter(|connection| connection.user_id == user_id)
+            .peekable();
+        // A member is idle when every tab is. One whose last tab closed a moment ago is not.
+        let all_idle = tabs.peek().is_some() && tabs.all(|connection| connection.idle);
+        let shown = match status.presence {
+            Presence::Invisible => return None,
+            Presence::Dnd => "dnd",
+            Presence::Idle => "idle",
+            Presence::Online if all_idle => "idle",
+            Presence::Online => "online",
+        };
+        Some(Shown {
+            user_id,
+            status: shown,
+            emoji: status.emoji,
+            text: status.text,
+            expires_at: status.expires_at,
+        })
     }
+
+    /// Everybody who does not show as offline.
+    fn all_shown(&self) -> Vec<Shown> {
+        let mut shown: Vec<Shown> = self
+            .statuses
+            .keys()
+            .filter_map(|user_id| self.shown(*user_id))
+            .collect();
+        shown.sort_unstable_by_key(|shown| shown.user_id);
+        shown
+    }
+
+    /// Changes something about a member and tells the workspace, if what the others see of the
+    /// member changed.
+    fn change(&mut self, user_id: Id, change: impl FnOnce(&mut Self)) {
+        let before = self.shown(user_id);
+        change(self);
+        let after = self.shown(user_id);
+        if before != after {
+            self.signal(
+                &Recipients::Workspace,
+                "presence",
+                &presence_event(user_id, after),
+            );
+        }
+    }
+}
+
+fn presence_event(user_id: Id, shown: Option<Shown>) -> Value {
+    let mut event = match shown {
+        Some(shown) => json!(shown),
+        None => json!({ "user_id": user_id, "status": "offline" }),
+    };
+    event["type"] = json!("presence");
+    event
 }
 
 impl LiveHub {
     /// The hub of this database (one for each open database; made on first use).
     #[must_use]
     pub fn of(database: &Database) -> Self {
-        Self::with_offline_grace(database, OFFLINE_GRACE)
+        Self::with(database, OFFLINE_GRACE, HEARD_WINDOW)
     }
 
     /// As [`Self::of`], with another offline delay if the database has no hub yet (tests).
     #[must_use]
     pub fn with_offline_grace(database: &Database, offline_grace: Duration) -> Self {
+        Self::with(database, offline_grace, HEARD_WINDOW)
+    }
+
+    /// As [`Self::of`], with another time for which a silent connection still counts as active,
+    /// if the database has no hub yet (tests).
+    #[must_use]
+    pub fn with_heard_window(database: &Database, heard_window: Duration) -> Self {
+        Self::with(database, OFFLINE_GRACE, heard_window)
+    }
+
+    fn with(database: &Database, offline_grace: Duration, heard_window: Duration) -> Self {
         let inner = database.extension(move || Inner {
             epoch: Id::new_v7().to_string(),
             workspaces: Mutex::new(HashMap::new()),
             write_locks: Mutex::new(HashMap::new()),
             next_connection: AtomicU64::new(1),
             offline_grace,
+            heard_window,
         });
         Self { inner }
     }
@@ -233,11 +332,106 @@ impl LiveHub {
             .unwrap_or_default()
     }
 
-    /// Adds a connection. `epoch` and `after` are what the client saw last, if it reconnects.
-    pub(crate) fn connect(
+    /// The user changed their presence or custom status: every workspace where they are online
+    /// shows it, and their own tabs read the status again.
+    pub fn set_status(&self, user_id: Id, status: &UserStatus) {
+        self.apply_status(user_id, status, true);
+    }
+
+    /// As [`Self::set_status`], for a status the user's tabs already read: they are not told to
+    /// read it again. The socket uses it when the status changed while it connected.
+    pub(crate) fn correct_status(&self, user_id: Id, status: &UserStatus) {
+        self.apply_status(user_id, status, false);
+    }
+
+    fn apply_status(&self, user_id: Id, status: &UserStatus, tell_own_tabs: bool) {
+        for workspace in self.workspaces().values_mut() {
+            if !workspace.statuses.contains_key(&user_id) {
+                continue;
+            }
+            workspace.change(user_id, |workspace| {
+                workspace.statuses.insert(user_id, status.clone());
+            });
+            if tell_own_tabs {
+                workspace.signal(
+                    &Recipients::Users(vec![user_id]),
+                    "presence",
+                    &json!({ "type": "self" }),
+                );
+            }
+        }
+    }
+
+    /// Sends a signal to the tabs of a user in every workspace: with `active_only`, to the tabs
+    /// the user is at (input lately, the window in focus or out of it for a moment only, and
+    /// the connection heard from lately: one whose network died is no tab the user is at).
+    /// `false` when it reached no tab.
+    pub fn signal_user(
+        &self,
+        user_id: Id,
+        active_only: bool,
+        topic: &str,
+        event: &impl Serialize,
+    ) -> bool {
+        let frame: Arc<str> = json!({ "topic": topic, "event": event }).to_string().into();
+        let mut reached = false;
+        for workspace in self.workspaces().values_mut() {
+            workspace.connections.retain(|_, connection| {
+                let active = !connection.idle
+                    && !connection.away
+                    && connection.heard.elapsed() <= self.inner.heard_window;
+                if connection.user_id != user_id || (active_only && !active) {
+                    return true;
+                }
+                let sent = connection.sender.try_send(Arc::clone(&frame)).is_ok();
+                reached |= sent;
+                sent
+            });
+        }
+        reached
+    }
+
+    /// The client of a connection sent something: its network is alive.
+    pub fn heard(&self, workspace_id: Id, connection_id: u64) {
+        if let Some(connection) = self
+            .workspaces()
+            .get_mut(&workspace_id)
+            .and_then(|workspace| workspace.connections.get_mut(&connection_id))
+        {
+            connection.heard = Instant::now();
+        }
+    }
+
+    /// A tab reports that its window has been out of focus for a while, or is in focus again.
+    /// It does not change what the others see of the member.
+    pub fn set_away(&self, workspace_id: Id, connection_id: u64, away: bool) {
+        if let Some(connection) = self
+            .workspaces()
+            .get_mut(&workspace_id)
+            .and_then(|workspace| workspace.connections.get_mut(&connection_id))
+        {
+            connection.away = away;
+        }
+    }
+
+    /// A tab reports that it has had no input for a while, or that it has input again.
+    pub fn set_idle(&self, workspace_id: Id, connection_id: u64, user_id: Id, idle: bool) {
+        if let Some(workspace) = self.workspaces().get_mut(&workspace_id) {
+            workspace.change(user_id, |workspace| {
+                if let Some(connection) = workspace.connections.get_mut(&connection_id) {
+                    connection.idle = idle;
+                }
+            });
+        }
+    }
+
+    /// Adds a connection. `status` is what the user set for themselves; `epoch` and `after` are
+    /// what the client saw last, if it reconnects.
+    pub fn connect(
         &self,
         workspace_id: Id,
         user_id: Id,
+        status: UserStatus,
         epoch: Option<&str>,
         after: Option<u64>,
     ) -> Attached {
@@ -245,13 +439,21 @@ impl LiveHub {
         let id = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
         let mut workspaces = self.workspaces();
         let workspace = workspaces.entry(workspace_id).or_default();
-        if !workspace.is_online(user_id) {
-            workspace.presence(user_id, true);
-        }
-        workspace.leaving.remove(&user_id);
-        workspace
-            .connections
-            .insert(id, Connection { user_id, sender });
+        // The new connection is not there yet: its `hello` tells it about itself.
+        workspace.change(user_id, |workspace| {
+            workspace.leaving.remove(&user_id);
+            workspace.statuses.insert(user_id, status);
+        });
+        workspace.change(user_id, |workspace| {
+            let connection = Connection {
+                user_id,
+                sender,
+                idle: false,
+                away: false,
+                heard: Instant::now(),
+            };
+            workspace.connections.insert(id, connection);
+        });
 
         // A replay is complete only if the buffer still starts at or before the first event
         // the client has not seen.
@@ -276,7 +478,7 @@ impl LiveHub {
             "type": "hello",
             "epoch": self.inner.epoch,
             "seq": workspace.seq,
-            "online": workspace.online(),
+            "presence": workspace.all_shown(),
         })
         .to_string();
         Attached {
@@ -288,13 +490,16 @@ impl LiveHub {
     }
 
     /// Removes a connection. The member goes offline a moment later, unless it connects again.
-    pub(crate) fn disconnect(&self, workspace_id: Id, connection_id: u64, user_id: Id) {
+    pub fn disconnect(&self, workspace_id: Id, connection_id: u64, user_id: Id) {
         {
             let mut workspaces = self.workspaces();
             let Some(workspace) = workspaces.get_mut(&workspace_id) else {
                 return;
             };
-            workspace.connections.remove(&connection_id);
+            // The tabs that stay can all be idle.
+            workspace.change(user_id, |workspace| {
+                workspace.connections.remove(&connection_id);
+            });
             if workspace.is_online(user_id) {
                 return;
             }
@@ -307,8 +512,10 @@ impl LiveHub {
             if let Some(workspace) = workspaces.get_mut(&workspace_id)
                 && workspace.leaving.get(&user_id) == Some(&connection_id)
             {
-                workspace.leaving.remove(&user_id);
-                workspace.presence(user_id, false);
+                workspace.change(user_id, |workspace| {
+                    workspace.leaving.remove(&user_id);
+                    workspace.statuses.remove(&user_id);
+                });
             }
         });
     }
@@ -316,10 +523,8 @@ impl LiveHub {
 
 #[cfg(test)]
 mod tests {
-    use orbit_platform::TestDatabase;
-    use serde_json::Value;
-
     use super::*;
+    use orbit_platform::TestDatabase;
 
     fn frames(attached: &mut Attached) -> Vec<Value> {
         std::iter::from_fn(|| attached.frames.try_recv().ok())
@@ -332,14 +537,14 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::of(&database);
         let (workspace, ada, bob) = (Id::new_v7(), Id::new_v7(), Id::new_v7());
-        let mut ada_tab = hub.connect(workspace, ada, None, None);
-        let mut bob_tab = hub.connect(workspace, bob, None, None);
+        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default(), None, None);
+        let mut bob_tab = hub.connect(workspace, bob, UserStatus::default(), None, None);
         assert!(
             ada_tab.replay.is_none(),
             "a first connection has nothing to replay"
         );
         // Ada saw Bob come online; nobody is told about themselves.
-        assert_eq!(frames(&mut ada_tab)[0]["event"]["online"], true);
+        assert_eq!(frames(&mut ada_tab)[0]["event"]["status"], "online");
         assert!(frames(&mut bob_tab).is_empty());
 
         hub.publish(
@@ -377,7 +582,7 @@ mod tests {
         // Bob reconnects after event 1: he gets event 3, and never Ada's event 2.
         let hello: Value = serde_json::from_str(&bob_tab.hello).unwrap();
         let epoch = hello["epoch"].as_str().unwrap();
-        let again = hub.connect(workspace, bob, Some(epoch), Some(1));
+        let again = hub.connect(workspace, bob, UserStatus::default(), Some(epoch), Some(1));
         let replay: Vec<Value> = again
             .replay
             .expect("the buffer reaches back to event 1")
@@ -387,12 +592,18 @@ mod tests {
         assert_eq!(seen(replay), [(3, 3)]);
         // Another epoch (a restarted server) or a number from the future cannot be replayed.
         assert!(
-            hub.connect(workspace, bob, Some("other"), Some(1))
-                .replay
-                .is_none()
+            hub.connect(
+                workspace,
+                bob,
+                UserStatus::default(),
+                Some("other"),
+                Some(1)
+            )
+            .replay
+            .is_none()
         );
         assert!(
-            hub.connect(workspace, bob, Some(epoch), Some(9))
+            hub.connect(workspace, bob, UserStatus::default(), Some(epoch), Some(9))
                 .replay
                 .is_none()
         );
@@ -403,7 +614,7 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::of(&database);
         let (workspace, ada) = (Id::new_v7(), Id::new_v7());
-        let first = hub.connect(workspace, ada, None, None);
+        let first = hub.connect(workspace, ada, UserStatus::default(), None, None);
         let hello: Value = serde_json::from_str(&first.hello).unwrap();
         let epoch = hello["epoch"].as_str().unwrap().to_owned();
         drop(first);
@@ -417,12 +628,12 @@ mod tests {
         }
         // Event 1 fell out of the buffer.
         assert!(
-            hub.connect(workspace, ada, Some(&epoch), Some(0))
+            hub.connect(workspace, ada, UserStatus::default(), Some(&epoch), Some(0))
                 .replay
                 .is_none()
         );
         assert!(
-            hub.connect(workspace, ada, Some(&epoch), Some(1))
+            hub.connect(workspace, ada, UserStatus::default(), Some(&epoch), Some(1))
                 .replay
                 .is_some()
         );
@@ -433,13 +644,13 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::with_offline_grace(&database, Duration::from_millis(40));
         let (workspace, ada, bob) = (Id::new_v7(), Id::new_v7(), Id::new_v7());
-        let mut ada_tab = hub.connect(workspace, ada, None, None);
-        let bob_tab = hub.connect(workspace, bob, None, None);
+        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default(), None, None);
+        let bob_tab = hub.connect(workspace, bob, UserStatus::default(), None, None);
         frames(&mut ada_tab);
 
         // A reload: the connection closes and a new one opens inside the delay.
         hub.disconnect(workspace, bob_tab.id, bob);
-        let bob_tab = hub.connect(workspace, bob, None, None);
+        let bob_tab = hub.connect(workspace, bob, UserStatus::default(), None, None);
         tokio::time::sleep(Duration::from_millis(80)).await;
         assert!(frames(&mut ada_tab).is_empty());
         assert_eq!(hub.online(workspace).len(), 2);
@@ -455,9 +666,132 @@ mod tests {
         assert_eq!(offline.len(), 1);
         assert_eq!(
             offline[0]["event"],
-            json!({ "type": "presence", "user_id": bob, "online": false })
+            json!({ "type": "presence", "user_id": bob, "status": "offline" })
         );
         assert_eq!(hub.online(workspace), [ada]);
+    }
+
+    #[tokio::test]
+    async fn the_others_see_the_status_a_member_set_and_idle_only_when_every_tab_is() {
+        let database = TestDatabase::new().await.unwrap();
+        let hub = LiveHub::of(&database);
+        let (workspace, ada, bob) = (Id::new_v7(), Id::new_v7(), Id::new_v7());
+        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default(), None, None);
+        let status = |presence| UserStatus {
+            presence,
+            text: Some("Lunch".to_owned()),
+            ..UserStatus::default()
+        };
+        let seen = |tab: &mut Attached| -> Vec<Value> {
+            frames(tab)
+                .into_iter()
+                .map(|frame| frame["event"].clone())
+                .filter(|event| event["type"] == "presence")
+                .collect()
+        };
+
+        // Invisible: Bob connects and nobody is told; the hello does not list him.
+        let first = hub.connect(workspace, bob, status(Presence::Invisible), None, None);
+        let hello: Value = serde_json::from_str(&first.hello).unwrap();
+        assert_eq!(hello["presence"].as_array().unwrap().len(), 1);
+        assert!(seen(&mut ada_tab).is_empty());
+        // `@here` and the per-member events still count him as connected.
+        assert_eq!(hub.online(workspace).len(), 2);
+
+        hub.set_status(bob, &status(Presence::Dnd));
+        let events = seen(&mut ada_tab);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["status"], "dnd");
+        assert_eq!(events[0]["text"], "Lunch");
+        // The same status again changes nothing for the others.
+        hub.set_status(bob, &status(Presence::Dnd));
+        assert!(seen(&mut ada_tab).is_empty());
+
+        // Online with two tabs: idle only when both are, online again when one has input, and
+        // idle again when the tab with input closes.
+        hub.set_status(bob, &UserStatus::default());
+        let second = hub.connect(workspace, bob, UserStatus::default(), None, None);
+        assert_eq!(seen(&mut ada_tab)[0]["status"], "online");
+        hub.set_idle(workspace, first.id, bob, true);
+        assert!(seen(&mut ada_tab).is_empty());
+        hub.set_idle(workspace, second.id, bob, true);
+        assert_eq!(seen(&mut ada_tab)[0]["status"], "idle");
+        hub.set_idle(workspace, second.id, bob, false);
+        assert_eq!(seen(&mut ada_tab)[0]["status"], "online");
+        hub.disconnect(workspace, second.id, bob);
+        assert_eq!(seen(&mut ada_tab)[0]["status"], "idle");
+
+        // A status change reaches the member's own tabs as a request to read it again.
+        let mut first = first;
+        let own: Vec<Value> = frames(&mut first)
+            .into_iter()
+            .map(|frame| frame["event"].clone())
+            .filter(|event| event["type"] == "self")
+            .collect();
+        assert_eq!(own.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_custom_status_that_ended_is_not_shown() {
+        let database = TestDatabase::new().await.unwrap();
+        let hub = LiveHub::of(&database);
+        let (workspace, ada, bob) = (Id::new_v7(), Id::new_v7(), Id::new_v7());
+        let lunch = UserStatus {
+            emoji: Some("🍜".to_owned()),
+            text: Some("Lunch".to_owned()),
+            expires_at: Some(TimestampMillis::from_millis(
+                TimestampMillis::now().as_millis() + 300,
+            )),
+            ..UserStatus::default()
+        };
+        let bob_tab = hub.connect(workspace, bob, lunch, None, None);
+        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default(), None, None);
+        let bob_in = |hello: &str| -> Value {
+            let hello: Value = serde_json::from_str(hello).unwrap();
+            let mut shown = hello["presence"].as_array().unwrap().iter();
+            shown
+                .find(|shown| shown["user_id"] == json!(bob))
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(bob_in(&ada_tab.hello)["text"], "Lunch");
+
+        // It ends while Bob is connected: a later hello and a later event do not carry it.
+        tokio::time::sleep(Duration::from_millis(450)).await;
+        let later = hub.connect(workspace, ada, UserStatus::default(), None, None);
+        assert_eq!(
+            bob_in(&later.hello),
+            json!({ "user_id": bob, "status": "online", "emoji": null, "text": null, "expires_at": null })
+        );
+        hub.set_idle(workspace, bob_tab.id, bob, true);
+        let events = frames(&mut ada_tab);
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0]["event"],
+            json!({ "type": "presence", "user_id": bob, "status": "idle", "emoji": null, "text": null,
+                "expires_at": null })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_is_silent_is_not_a_tab_the_user_is_at() {
+        let database = TestDatabase::new().await.unwrap();
+        let hub = LiveHub::with_heard_window(&database, Duration::from_millis(60));
+        let (workspace, ada) = (Id::new_v7(), Id::new_v7());
+        let mut tab = hub.connect(workspace, ada, UserStatus::default(), None, None);
+        let at_a_tab = || hub.signal_user(ada, true, "notify", &json!({}));
+        assert!(at_a_tab(), "a new connection was heard from");
+
+        // The network died: no frame and no answer to a ping.
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!(!at_a_tab());
+        assert_eq!(frames(&mut tab).len(), 1);
+        // It still gets what is for every tab.
+        assert!(hub.signal_user(ada, false, "notify", &json!({})));
+
+        hub.heard(workspace, tab.id);
+        assert!(at_a_tab());
+        assert_eq!(frames(&mut tab).len(), 2);
     }
 
     #[tokio::test]
@@ -466,10 +800,10 @@ mod tests {
         let hub = LiveHub::with_offline_grace(&database, Duration::from_millis(200));
         let (workspace, ada) = (Id::new_v7(), Id::new_v7());
 
-        let first = hub.connect(workspace, ada, None, None);
+        let first = hub.connect(workspace, ada, UserStatus::default(), None, None);
         hub.disconnect(workspace, first.id, ada);
         tokio::time::sleep(Duration::from_millis(120)).await;
-        let second = hub.connect(workspace, ada, None, None);
+        let second = hub.connect(workspace, ada, UserStatus::default(), None, None);
         hub.disconnect(workspace, second.id, ada);
 
         // The first timer ends here; the second delay has only started.
@@ -514,7 +848,7 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::of(&database);
         let (workspace, ada) = (Id::new_v7(), Id::new_v7());
-        let mut slow = hub.connect(workspace, ada, None, None);
+        let mut slow = hub.connect(workspace, ada, UserStatus::default(), None, None);
         for n in 0..=QUEUED_FRAMES {
             hub.publish(
                 workspace,

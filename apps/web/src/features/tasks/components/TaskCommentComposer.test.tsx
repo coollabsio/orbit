@@ -17,7 +17,7 @@ test('at-mentions resolve to workspace member ids', async () => {
   const sent: Array<{ body: string; ids: string[] }> = []
   const view = render(<TaskCommentComposer placeholder="Reply" pending={false} members={[{
     id: 'user-2', membershipId: 'm2', name: 'Ada', handle: 'ada', email: 'ada@orbit.test',
-    role: 'Member', color: '#000', online: false, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
+    role: 'Member', color: '#000', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
   }]} onSend={async (body, _files, mentionedUserIds) => { sent.push({ body, ids: mentionedUserIds }) }} />)
   await userEvent.type(view.getByPlaceholderText('Reply'), 'Hey @')
   fireEvent.mouseDown(await view.findByRole('button', { name: '@Ada' }))

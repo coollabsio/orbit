@@ -5,6 +5,7 @@ import { isSelfDm } from '../../lib/sidebar'
 import { fullTimestamp } from '../../lib/time'
 import { useChatNavigation, useOpenPane } from '../../useChatNavigation'
 import { conversationTitle, useChatPeople } from './people'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 /** The block above the first message of a conversation. */
 export function ConversationStart({ conversation }: { conversation: Conversation }) {
@@ -37,7 +38,17 @@ export function ConversationStart({ conversation }: { conversation: Conversation
       <p className="text-base font-semibold">This is the start of {title}</p>
       {conversation.topic ? <p className="max-w-[90ch] text-sm text-muted-foreground">{conversation.topic}</p> : null}
       <p className="text-xs text-muted-foreground">
-        {creator ? `Created by ${creator.name} on ${fullTimestamp(conversation.createdAt)}` : `Created on ${fullTimestamp(conversation.createdAt)}`}
+        {creator ? (
+          <>
+            Created by{' '}
+            <ProfileTrigger userId={creator.id} name={creator.name} className="font-medium text-foreground/85">
+              {creator.name}
+            </ProfileTrigger>{' '}
+            on {fullTimestamp(conversation.createdAt)}
+          </>
+        ) : (
+          `Created on ${fullTimestamp(conversation.createdAt)}`
+        )}
       </p>
       {conversation.isMember && !conversation.archived && !membersOpen ? (
         <Button variant="outline" size="sm" className="mt-2" onClick={() => togglePane('members')}>

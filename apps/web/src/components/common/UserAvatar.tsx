@@ -1,21 +1,21 @@
 import type { CSSProperties } from 'react'
 import { Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from '@/components/ui/avatar'
 import { cn } from 'cn'
+import { type MemberStatus, statusLabel } from './memberStatus'
+import { StatusMark } from './StatusMark'
 
 /** What the avatar needs of a person. A workspace member and a mail contact both fit. */
 export interface AvatarPerson {
   name: string
   color: string
   avatarUrl?: string | null
-  online?: boolean
 }
 
 interface UserAvatarProps {
   user: AvatarPerson | null | undefined
   size?: number
-  showOnline?: boolean
-  /** Presence from the caller (chat keeps it in its own store); wins over `user.online`. */
-  online?: boolean
+  /** Presence from the caller (`usePresenceOf`, or the user's own choice); no badge without it. */
+  status?: MemberStatus
   /** Fallback initials when there is no user (e.g. external senders). */
   name?: string
   className?: string
@@ -29,13 +29,23 @@ function initialsOf(label: string) {
     .join('')
 }
 
-export function UserAvatar({ user, size = 24, showOnline = false, online, name, className }: UserAvatarProps) {
+/** The presence badge of an avatar: 8px on avatars up to 24px, 10px up to 40px, 14px from 64px. Goes inside an `Avatar`. */
+export function AvatarStatusBadge({ status, size }: { status: MemberStatus; size: number }) {
+  const badge = size <= 24 ? 8 : size <= 40 ? 10 : size < 64 ? 12 : 14
+  return (
+    <AvatarBadge className="bg-background ring-background" style={{ width: badge, height: badge }}>
+      <StatusMark status={status} size={badge} />
+      <span className="sr-only">{statusLabel(status)}</span>
+    </AvatarBadge>
+  )
+}
+
+export function UserAvatar({ user, size = 24, status, name, className }: UserAvatarProps) {
   const label = user?.name ?? name ?? '?'
   const fallbackStyle: CSSProperties = user
     ? // the tint sits on the theme's muted surface and the initials lean toward its text colour: readable in both themes
       { background: `color-mix(in oklch, ${user.color} 26%, var(--muted))`, color: `color-mix(in oklch, ${user.color} 60%, var(--foreground))` }
     : {}
-  const presence = online ?? user?.online
   return (
     <Avatar
       className={cn('after:border-transparent', className)}
@@ -49,15 +59,7 @@ export function UserAvatar({ user, size = 24, showOnline = false, online, name, 
       >
         {initialsOf(label)}
       </AvatarFallback>
-      {showOnline && presence !== undefined ? (
-        // online is filled, offline is a hollow ring: the state does not depend on colour alone
-        <AvatarBadge
-          data-online={presence}
-          className="size-2 border-[1.5px] border-muted-foreground bg-background ring-background data-[online=true]:border-green-500 data-[online=true]:bg-green-500"
-        >
-          <span className="sr-only">{presence ? 'Online' : 'Offline'}</span>
-        </AvatarBadge>
-      ) : null}
+      {status ? <AvatarStatusBadge status={status} size={size} /> : null}
     </Avatar>
   )
 }

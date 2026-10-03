@@ -294,7 +294,7 @@ test('resync invalidates every chat query of the workspace and nothing else', ()
 test('typing, presence and connection events leave the cache alone', () => {
   const { client, ids } = setup()
   applyChatEvent(client, W, { type: 'typing', conversationId: 'c1', threadRootId: null, userId: 'u2' })
-  applyChatEvent(client, W, { type: 'presence', userId: 'u2', online: true })
+  applyChatEvent(client, W, { type: 'presence', userId: 'u2', presence: { status: 'online', emoji: null, text: null, expiresAt: null } })
   applyChatEvent(client, W, { type: 'connection', status: 'reconnecting' })
   expect(ids()).toEqual(['m1', 'm2'])
 })

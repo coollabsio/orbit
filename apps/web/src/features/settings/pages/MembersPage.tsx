@@ -5,6 +5,8 @@ import { ArrowRight, Notification as Bell, Copy, Add as Plus, SearchNormal as Se
 import { cn } from 'cn'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { AvatarStatusBadge } from '@/components/common/UserAvatar'
+import { presenceOf, usePresence } from '@/features/realtime/presence'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -20,6 +22,7 @@ import type { User } from '@/features/workspaces/models'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 import { useSlowPending } from '@/lib/useDebouncedValue'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
@@ -48,6 +51,7 @@ export function MembersPage() {
   const { workspace } = useWorkspace()
   const canManage = useCan('members.manage')
   const currentUser = useCurrentUser()
+  const presence = usePresence()
   const membersQuery = useMembers(workspace.id)
   const createInvitation = useCreateInvitation(workspace.id)
   const invitations = useInvitations(canManage ? workspace.id : null)
@@ -201,10 +205,15 @@ export function MembersPage() {
               {visible.map((user) => (
                 <MemberRow key={user.id} data-member-row>
                   <div className="flex min-w-0 items-center gap-2">
-                    <Avatar size="sm" className="size-7">
-                      <AvatarFallback className="rounded-lg text-[11px] font-semibold">{initial(user)}</AvatarFallback>
-                    </Avatar>
-                    <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
+                    <ProfileTrigger userId={user.id} name={user.name} kind="avatar" tabIndex={-1} className="flex shrink-0">
+                      <Avatar size="sm" className="size-7">
+                        <AvatarFallback className="rounded-lg text-[11px] font-semibold">{initial(user)}</AvatarFallback>
+                        <AvatarStatusBadge status={presenceOf(presence, user.id).status} size={28} />
+                      </Avatar>
+                    </ProfileTrigger>
+                    <ProfileTrigger userId={user.id} name={user.name} className="truncate text-[13px] font-medium text-foreground">
+                      {user.name}
+                    </ProfileTrigger>
                     {user.id === currentUser.data?.id ? (
                       <Badge data-tone="accent">
                         You

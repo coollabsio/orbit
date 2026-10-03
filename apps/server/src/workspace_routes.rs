@@ -9,7 +9,7 @@ use axum::http::header::{
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use orbit_domain::WorkspaceRole;
 use orbit_platform::{
@@ -110,6 +110,14 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/members",
             get(list_members),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/profiles/{user_id}",
+            get(get_member_profile),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/profiles/{user_id}/note",
+            put(put_member_note),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/members/{membership_id}",
@@ -350,6 +358,71 @@ async fn list_members(
         .await
         .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
     Ok(Json(Page { items, next_cursor }))
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/profiles/{user_id}", params(("workspace_id" = String, Path), ("user_id" = String, Path)), responses((status = 200, body = crate::repositories::workspaces::MemberProfile)))]
+async fn get_member_profile(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<crate::repositories::workspaces::MemberProfile>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/profiles/{user_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .profile(workspace_id, session.user.id, user_id)
+        .await
+        .map(Json)
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))
+}
+
+const MAX_NOTE_CHARS: usize = 1000;
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct MemberNoteBody {
+    /// The note; an empty text removes it.
+    body: String,
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/profiles/{user_id}/note", params(("workspace_id" = String, Path), ("user_id" = String, Path)), request_body = MemberNoteBody, responses((status = 204)))]
+async fn put_member_note(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<MemberNoteBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/profiles/{user_id}/note");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
+    let note = body.body.trim();
+    if note.chars().count() > MAX_NOTE_CHARS {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_note",
+            "Invalid note",
+            "A note may have 1000 characters.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    state
+        .workspaces
+        .set_note(
+            workspace_id,
+            session.user.id,
+            user_id,
+            note,
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Clone, Copy, Deserialize, ToSchema)]

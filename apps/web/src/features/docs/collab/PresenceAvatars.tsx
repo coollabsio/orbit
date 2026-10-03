@@ -1,6 +1,7 @@
 import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { Collaborator } from './presence'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 /** Avatars shown before the rest collapses into "+n". */
 export const PRESENCE_MAX = 4
@@ -26,12 +27,12 @@ export function PresenceAvatars({ people, max = PRESENCE_MAX }: { people: Collab
         <Tooltip key={person.id}>
           <TooltipTrigger
             render={
-              <Avatar
-                size="sm"
-                className="size-6 after:border-transparent"
-                data-presence-user={person.id}
-                aria-label={person.name}
+              <ProfileTrigger
+                userId={person.id}
+                name={person.name}
+                kind="avatar"
                 tabIndex={0}
+                render={<Avatar size="sm" className="size-6 after:border-transparent" data-presence-user={person.id} aria-label={person.name} />}
               />
             }
           >

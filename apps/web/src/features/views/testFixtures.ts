@@ -13,7 +13,6 @@ export function member(id: string, name: string): User {
     email: `${name.toLowerCase()}@orbit.test`,
     role: 'Member',
     color: '#e0457b',
-    online: false,
     title: '',
     roleIds: [], can: NO_MEMBER_ABILITIES,
     version: 1,

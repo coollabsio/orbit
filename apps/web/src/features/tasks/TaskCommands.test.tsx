@@ -26,7 +26,7 @@ const workspace = testWorkspace()
 const todo: TaskStatusDef = { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#aaa', category: 'unstarted', position: 0, version: 1 }
 const doing: TaskStatusDef = { ...todo, id: 'doing', name: 'Doing', category: 'started', position: 1 }
 const launch = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1 } as Project
-const ada: User = { id: 'user-1', membershipId: 'membership-1', name: 'Ada Lovelace', handle: 'ada', email: 'ada@example.com', role: 'Member', color: '#8b5cf6', online: true, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1 }
+const ada: User = { id: 'user-1', membershipId: 'membership-1', name: 'Ada Lovelace', handle: 'ada', email: 'ada@example.com', role: 'Member', color: '#8b5cf6', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1 }
 const bo: User = { ...ada, id: 'user-2', membershipId: 'membership-2', name: 'Bo Diddley', handle: 'bo', email: 'bo@example.com' }
 
 const task = (index: number, patch: Partial<Task> = {}): Task => ({

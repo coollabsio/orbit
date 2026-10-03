@@ -12,6 +12,7 @@ import { dayLabel, timeOfDay } from '@/lib/format'
 import { usePageVersion, usePageVersions } from '@/features/docs/api/pageVersions'
 // Type-only: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageRef } from '@/features/docs/editor/pageEditorContext'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 // Same lazy chunk as the page editor: BlockNote loads only when a preview shows.
 const PageEditor = lazy(() => import('@/features/docs/editor/PageEditor').then((module) => ({ default: module.PageEditor })))
@@ -219,6 +220,7 @@ export function PageHistoryPane({ workspaceId, pageId, readCurrent, resolvePage,
                   onSelect={setPicked}
                   title={timeOfDay(version.created_at)}
                   author={version.created_by?.display_name ?? 'Former member'}
+                  authorId={version.created_by?.id}
                   note={KIND_LABEL[version.kind]}
                 />
               ))}
@@ -271,10 +273,12 @@ interface VersionOptionProps {
   onSelect: (id: string) => void
   title: string
   author?: string
+  /** The author's profile opens from the name; absent for a former member. */
+  authorId?: string
   note?: string | null
 }
 
-function VersionOption({ id, selected, onSelect, title, author, note }: VersionOptionProps) {
+function VersionOption({ id, selected, onSelect, title, author, authorId, note }: VersionOptionProps) {
   return (
     <div
       role="option"
@@ -295,10 +299,11 @@ function VersionOption({ id, selected, onSelect, title, author, note }: VersionO
     >
       <span className="text-[13px] font-medium text-foreground">{title}</span>
       {author ? (
-        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        // not a tab stop: the list moves with the arrow keys
+        <ProfileTrigger userId={authorId} name={author} tabIndex={-1} className="flex w-fit max-w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <UserAvatar user={null} name={author} size={16} />
           <span className="truncate">{author}</span>
-        </span>
+        </ProfileTrigger>
       ) : null}
       {note ? <span className="text-[11px] text-muted-foreground/80">{note}</span> : null}
     </div>

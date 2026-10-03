@@ -288,6 +288,13 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0039_task_numbers.sql"),
                     false,
                 ),
+                Migration::new(
+                    40,
+                    include_str!(
+                        "../../../../apps/server/migrations/0040_presence_profiles_push.sql"
+                    ),
+                    false,
+                ),
             ],
         )
     }

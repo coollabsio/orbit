@@ -244,9 +244,14 @@ async fn next(socket: &mut Socket) -> Option<Value> {
 }
 
 /// Every frame that is waiting, as `(topic, event type)`.
+/// The (topic, type) of the frames that wait, without the `notify` signals: those are sent
+/// after the write's response, so they have no fixed place among the write's events.
 async fn drain(socket: &mut Socket) -> Vec<(String, String)> {
     let mut seen = Vec::new();
     while let Some(frame) = next(socket).await {
+        if frame["topic"] == "notify" {
+            continue;
+        }
         seen.push((
             frame["topic"].as_str().unwrap_or_default().to_owned(),
             frame["event"]["type"]
@@ -292,7 +297,8 @@ async fn the_handshake_needs_a_session_and_membership() {
     ));
 
     let (mut socket, hello) = server.client(&owner).await;
-    assert_eq!(hello["online"], json!([owner.id]));
+    assert_eq!(hello["presence"][0]["user_id"], json!(owner.id));
+    assert_eq!(hello["presence"][0]["status"], "online");
     assert_eq!(hello["seq"], 0);
 
     // A frame the server does not know closes the socket.
@@ -319,7 +325,7 @@ async fn chat_events_go_to_the_members_who_may_see_them() {
     let (mut owner_socket, _) = server.client(&owner).await;
     let (mut ada_socket, hello) = server.client(&ada).await;
     let (mut bob_socket, _) = server.client(&bob).await;
-    assert_eq!(hello["online"].as_array().unwrap().len(), 2);
+    assert_eq!(hello["presence"].as_array().unwrap().len(), 2);
     // Each earlier client saw the later ones come online.
     assert_eq!(drain(&mut owner_socket).await.len(), 2);
     assert_eq!(
@@ -345,6 +351,11 @@ async fn chat_events_go_to_the_members_who_may_see_them() {
     assert_eq!(state["event"]["type"], "state.changed");
     assert_eq!(state["event"]["state"]["unread_count"], 1);
     assert_eq!(state["event"]["state"]["mention_count"], 1);
+    // Ada is at this tab, so the mention notifies her here and not by push.
+    let notice = next(&mut ada_socket).await.unwrap();
+    assert_eq!(notice["topic"], "notify");
+    assert_eq!(notice["event"]["url"], format!("/chat/{general}"));
+    assert_eq!(notice["event"]["sound"], "mention");
     assert!(next(&mut ada_socket).await.is_none());
     let chat = |types: &[&str]| -> Vec<(String, String)> {
         types

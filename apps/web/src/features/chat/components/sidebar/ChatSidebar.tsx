@@ -21,6 +21,7 @@ import { useChatLocation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
 import { ChatRow, ChatRowEnd, ChatRowLink, ChatRowName, CountBadge } from './ChatRow'
 import { ChatThemeDialog } from './ChatThemeDialog'
+import { ChatUserBar } from './ChatUserBar'
 import { ConversationRow } from './ConversationRow'
 import { ResizeHandle } from './ResizeHandle'
 import { visibleRows } from './sidebarRows'
@@ -374,6 +375,8 @@ export function ChatSidebar() {
           )
         })}
       </nav>
+
+      <ChatUserBar />
 
       <ResizeHandle edge="right" width={width} range={SIDEBAR_WIDTH} label="Resize the chat sidebar" onResize={setWidth} />
 

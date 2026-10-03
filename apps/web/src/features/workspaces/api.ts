@@ -55,7 +55,6 @@ export function memberFromRecord(member: MemberRecord): User {
     role: ROLE_LABELS[member.role],
     color: userColor(member.user_id),
     avatarUrl: member.avatar_url ?? null,
-    online: false,
     title: '',
     roleIds: [],
     version: member.version,

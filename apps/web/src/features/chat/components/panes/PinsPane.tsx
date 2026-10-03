@@ -43,7 +43,7 @@ export function PinsPane({ conversationId }: { conversationId: string }) {
           <ul aria-label="Pinned messages" className="flex flex-col gap-1">
             {pins.data.map((message) => (
               <li key={message.id} className="flex flex-col gap-1 rounded-lg p-2 hover-fine:hover:bg-muted/50">
-                <MessageByline message={message} members={members} />
+                <MessageByline message={message} members={members} profile />
                 <MessageBody message={message} />
                 <div className="-ml-2 flex items-center gap-1">
                   <Button variant="ghost" size="xs" onClick={() => jump(message)}>

@@ -4,6 +4,7 @@ import type { Message } from '@/features/chat/api/types'
 import { MessageBody } from '@/features/chat/components/messages/MessageBody'
 import { fullTimestamp, messageTime } from '@/features/chat/lib/time'
 import type { User } from '@/features/workspaces/models'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 /**
  * A message as the Unreads and Threads views show it: avatar, author, time and the rendered body. `clamp` keeps it to
@@ -13,10 +14,15 @@ export function MessagePreview({ message, people, clamp = false, className }: { 
   const author = people.find((person) => person.id === message.authorId)
   return (
     <div data-slot="message-preview" data-clamp={clamp || undefined} className={cn('flex min-w-0 gap-2.5 data-clamp:pointer-events-none', className)}>
-      <UserAvatar user={author} name="?" size={28} className="mt-0.5 shrink-0 max-[899px]:mt-0" />
+      {/* a clamped preview is one link as a whole: no profile there */}
+      <ProfileTrigger userId={clamp ? null : author?.id} name={author?.name ?? 'Unknown'} kind="avatar" tabIndex={-1} className="mt-0.5 flex shrink-0 self-start max-[899px]:mt-0">
+        <UserAvatar user={author} name="?" size={28} />
+      </ProfileTrigger>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="truncate text-[13px] font-semibold text-foreground">{author?.name ?? 'Unknown'}</span>
+          <ProfileTrigger userId={clamp ? null : author?.id} name={author?.name ?? 'Unknown'} className="truncate text-[13px] font-semibold text-foreground">
+            {author?.name ?? 'Unknown'}
+          </ProfileTrigger>
           <time className="shrink-0 text-xs text-muted-foreground" dateTime={new Date(message.createdAt).toISOString()} title={fullTimestamp(message.createdAt)}>
             {messageTime(message.createdAt)}
           </time>

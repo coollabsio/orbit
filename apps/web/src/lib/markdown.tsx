@@ -6,9 +6,10 @@ import { appNavigate } from './navigateBridge'
 import { CodeBlock } from '@/components/common/CodeBlock'
 import { EmojiText } from '@/components/common/Emoji'
 import { InternalLink } from '@/components/common/InternalLink'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from './utils'
-import { isMentionBoundary, type MentionToken } from './mentions'
+import { isMentionBoundary, mentionedUserId, type MentionToken } from './mentions'
 
 /* ---------- inline (the chat reference linkify / mentionify / renderMarkdownText) ---------- */
 
@@ -152,9 +153,16 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
           {value}
         </a>
       ) : (
-        <span key={key} className="rounded-sm bg-primary/10 px-0.5 font-medium text-primary dark:bg-primary/20">
+        // a span, not a button: the name stays part of the text that can be selected and copied
+        <ProfileTrigger
+          key={key}
+          userId={mentionedUserId(matched.label, sortedTokens)}
+          name={matched.label}
+          inText
+          render={<span className="rounded-sm bg-primary/10 px-0.5 font-medium text-primary dark:bg-primary/20" />}
+        >
           {value}
-        </span>
+        </ProfileTrigger>
       ),
     )
     cursor += matched.label.length + 1

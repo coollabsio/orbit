@@ -12,7 +12,7 @@ import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
 
 const member = (id: string, role: User['role'], can: Partial<User['can']> = {}): User => ({
   id, membershipId: `membership-${id}`, name: id, handle: id, email: `${id}@orbit.test`, role,
-  color: '#000', online: false, title: '', roleIds: [], version: 1, can: { ...NO_MEMBER_ABILITIES, ...can },
+  color: '#000', title: '', roleIds: [], version: 1, can: { ...NO_MEMBER_ABILITIES, ...can },
 })
 
 test('mounted member management excludes ordinary owner roles and exposes protected transfer', () => {

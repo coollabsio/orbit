@@ -2101,3 +2101,144 @@ async fn a_dm_gets_its_member_back_after_the_member_returns_to_the_workspace() {
     );
     fixture.assert_counters_exact("dm repaired").await;
 }
+
+/// Records the pushes it is asked to send.
+#[derive(Default)]
+struct RecordedPushes(std::sync::Mutex<Vec<(String, Value)>>);
+
+impl orbit_server::push::PushSender for RecordedPushes {
+    fn send(
+        &self,
+        _vapid: orbit_server::push::Vapid,
+        subscription: orbit_server::push::Subscription,
+        payload: Vec<u8>,
+    ) -> futures_util::future::BoxFuture<'static, Result<(), orbit_server::push::SendError>> {
+        self.0.lock().unwrap().push((
+            subscription.endpoint,
+            serde_json::from_slice(&payload).unwrap(),
+        ));
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test]
+async fn a_message_is_pushed_to_the_members_it_is_for() {
+    let fixture = Fixture::new().await;
+    let pushes = Arc::new(RecordedPushes::default());
+    // Before the first send: the database keeps the first push service it gets.
+    let push = orbit_server::push::PushService::with_sender(&fixture.database, pushes.clone());
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    for member in [&ada, &bob, &fixture.owner] {
+        let session: String = sqlx::query_scalar("SELECT id FROM sessions WHERE user_id = ?")
+            .bind(member.id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+        push.subscribe(
+            member.id,
+            session.parse().unwrap(),
+            &format!("https://fcm.googleapis.com/fcm/send/{}", member.id),
+            "key",
+            "auth",
+            "Browser",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO user_avatars (user_id, mime_type, bytes, updated_at) VALUES (?, 'image/png', x'89', 7)")
+        .bind(fixture.owner.id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let general = fixture.general().await;
+    // The pushes of a send go out after the response: wait for as many as the send must make.
+    let pushed = |count: usize| {
+        let pushes = pushes.clone();
+        async move {
+            for _ in 0..100 {
+                if pushes.0.lock().unwrap().len() >= count {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            // Nothing more may follow.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            std::mem::take(&mut *pushes.0.lock().unwrap())
+        }
+    };
+    let endpoint = |member: &Member| format!("https://fcm.googleapis.com/fcm/send/{}", member.id);
+
+    // A plain channel message at the default level ("mentions"): nobody.
+    fixture.send(&fixture.owner, &general, "hello").await;
+    assert!(pushed(0).await.is_empty());
+
+    // A mention: that member only, with the name in place of the token; never the author.
+    let body = format!("<@{}> can you check\nthe <#{general}> import?", ada.id);
+    fixture.send(&fixture.owner, &general, &body).await;
+    let sent = pushed(1).await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, endpoint(&ada));
+    assert_eq!(sent[0].1["title"], "Owner in #general");
+    assert_eq!(sent[0].1["body"], "@ada can you check the #general import?");
+    assert_eq!(sent[0].1["url"], format!("/chat/{general}"));
+    assert_eq!(sent[0].1["sound"], "mention");
+    assert_eq!(
+        sent[0].1["icon"],
+        format!("/api/v1/users/{}/avatar?v=7", fixture.owner.id)
+    );
+
+    // A token gets a name only for a member the message mentions and for a public channel of
+    // the workspace: a private channel and somebody unknown stay without a name.
+    let secret = fixture
+        .channel(&fixture.owner, "secret", "private", &[])
+        .await;
+    let body = format!(
+        "<@{}> see <#{secret}> and <#{general}>, ask <@{}>",
+        ada.id,
+        Id::new_v7()
+    );
+    fixture.send(&fixture.owner, &general, &body).await;
+    let sent = pushed(1).await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0].1["body"],
+        "@ada see #channel and #general, ask @someone"
+    );
+
+    // Bob set the channel to "all": he gets every message. Ada muted it: not even a mention.
+    let state = |level: &str| json!({ "notify": level });
+    let path = format!("/conversations/{general}/state");
+    fixture.ok(&bob, "PATCH", &path, Some(state("all"))).await;
+    fixture.ok(&ada, "PATCH", &path, Some(state("muted"))).await;
+    fixture
+        .send(&fixture.owner, &general, &format!("<@{}> again", ada.id))
+        .await;
+    let sent = pushed(1).await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, endpoint(&bob));
+    assert_eq!(sent[0].1["sound"], "message");
+
+    // A reply in a thread: its followers (the root's author), not a channel set to "all".
+    let root = fixture.send(&ada, &general, "root").await;
+    pushed(1).await;
+    fixture
+        .reply(&fixture.owner, &general, &root, "reply")
+        .await;
+    let sent = pushed(0).await;
+    assert!(
+        sent.is_empty(),
+        "Ada follows the thread but muted the channel; Bob does not follow: {sent:?}"
+    );
+    fixture
+        .ok(&ada, "PATCH", &path, Some(state("mentions")))
+        .await;
+    fixture
+        .reply(&fixture.owner, &general, &root, "second reply")
+        .await;
+    let sent = pushed(1).await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, endpoint(&ada));
+    assert_eq!(sent[0].1["url"], format!("/chat/{general}?thread={root}"));
+}

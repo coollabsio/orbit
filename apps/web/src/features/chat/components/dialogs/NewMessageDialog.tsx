@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useChatContext } from '@/features/chat/api/chatContext'
-import { usePresence } from '@/features/chat/api/liveStore'
 import { useOpenDm } from '@/features/chat/api/mutations'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
@@ -35,7 +34,6 @@ export function NewMessageDialog({ open, onOpenChange }: NewMessageDialogProps) 
 function NewMessageForm({ onDone }: { onDone: () => void }) {
   const { workspaceId, currentUserId } = useChatContext()
   const members = useMembers(workspaceId).data ?? []
-  const online = usePresence()
   const openDm = useOpenDm()
   const { openConversation } = useChatNavigation()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -69,7 +67,6 @@ function NewMessageForm({ onDone }: { onDone: () => void }) {
           setSelectedIds(ids)
           if (openDm.isError) openDm.reset()
         }}
-        online={online}
       />
       {openDm.isError ? (
         <p role="alert" className="text-sm text-destructive">

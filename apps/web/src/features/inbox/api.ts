@@ -33,6 +33,23 @@ export function useNotifications(workspaceId: string, unread = false) {
   })
 }
 
+/** Whether the inbox has an unread notification: one row is enough to know. */
+export function useHasUnreadNotifications(workspaceId: string) {
+  return useQuery({
+    // under the list's key, so what refreshes the inbox refreshes this
+    queryKey: [...queryKeys.notifications(workspaceId, true), 'any'] as const,
+    queryFn: async () => {
+      const { data } = await listNotifications({
+        client: apiClient,
+        path: { workspace_id: workspaceId },
+        query: { unread: true, limit: 1 },
+        throwOnError: true,
+      })
+      return required(data, 'Notifications response was empty.').items.length > 0
+    },
+  })
+}
+
 export function useMarkNotificationRead(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
