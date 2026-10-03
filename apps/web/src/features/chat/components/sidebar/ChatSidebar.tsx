@@ -16,7 +16,7 @@ import { EditChannelDialog } from '@/features/chat/components/dialogs/EditChanne
 import { NewChannelDialog } from '@/features/chat/components/dialogs/NewChannelDialog'
 import { NewMessageDialog } from '@/features/chat/components/dialogs/NewMessageDialog'
 import { chatSidebarVariables, useChatTheme } from '@/features/chat/lib/chatTheme'
-import { buildSidebarSections, conversationBadge, dropBefore, type SidebarSection } from '@/features/chat/lib/sidebar'
+import { buildSidebarSections, conversationBadge, dropBefore, unjoinedChannelCount, type SidebarSection } from '@/features/chat/lib/sidebar'
 import { useChatLocation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
 import { ChatRow, ChatRowEnd, ChatRowLink, ChatRowName, CountBadge } from './ChatRow'
