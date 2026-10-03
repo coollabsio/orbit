@@ -1,12 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { apiClient, type createApiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
+import { disablePushForSignOut } from '@/features/realtime/push'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
 import {
   changePassword,
   login,
   logout,
   me,
+  putStatus,
   recoveryComplete,
   recoveryRequest,
   removeAvatar,
@@ -23,6 +26,7 @@ import type {
   SetupBody,
   AuthUserResponse,
   UpdateMeBody,
+  UserStatus,
 } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 
@@ -79,7 +83,11 @@ export function useLogin() {
 export function useLogout() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async () => { await logout({ client: apiClient, throwOnError: true }) },
+    mutationFn: async () => {
+      // While the session still lets the server forget this browser.
+      await disablePushForSignOut()
+      await logout({ client: apiClient, throwOnError: true })
+    },
     onSuccess: () => {
       queryClient.clear()
       clearViewSessionEdits()
@@ -119,6 +127,10 @@ export function useCompleteRecovery() {
   })
 }
 
+/**
+ * Saves the profile. The body has the name and only the optional parts (title, pronouns, time zone, bio) that changed:
+ * an absent part stays as it is, an empty text removes it (`profileChanges` builds it).
+ */
 export function useUpdateProfile() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -128,6 +140,10 @@ export function useUpdateProfile() {
     },
     onSuccess: (user) => {
       queryClient.setQueryData(queryKeys.currentUser, user)
+      // the name is in the members lists, the other parts in the profile that the popover reads (one for each workspace)
+      void queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => queryKey.at(-1) === 'members' || (queryKey.at(-2) === 'profiles' && queryKey.at(-1) === user.id),
+      })
     },
   })
 }
@@ -146,6 +162,33 @@ export function useSetAvatar() {
       queryClient.setQueryData(queryKeys.currentUser, user)
       // members lists carry the avatar URL; realtime refreshes them for everybody else
       void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.at(-1) === 'members' })
+    },
+  })
+}
+
+/**
+ * Sets the presence and the custom status together. The menu shows the choice at once; a refused request puts the
+ * previous status back and says so.
+ */
+export function useSetStatus() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: UserStatus) => {
+      const { data } = await putStatus({ client: apiClient, body, throwOnError: true })
+      return required(data, 'Status response was empty.')
+    },
+    onMutate: async (status) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.currentUser })
+      const previous = queryClient.getQueryData<AuthUserResponse | null>(queryKeys.currentUser)
+      if (previous) queryClient.setQueryData<AuthUserResponse>(queryKeys.currentUser, { ...previous, status })
+      return { previous }
+    },
+    onError: (_error, _status, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.currentUser, context.previous)
+      toast.error('Could not update your status. Try again.')
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData(queryKeys.currentUser, user)
     },
   })
 }

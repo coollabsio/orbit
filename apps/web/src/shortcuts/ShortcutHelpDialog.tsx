@@ -78,7 +78,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div className="border-t px-4 py-2.5 text-[13px]">
-          <Link to="/settings/shortcuts" className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={onClose}>Customize shortcuts</Link>
+          <Link to="/profile/shortcuts" className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={onClose}>Customize shortcuts</Link>
         </div>
       </DialogContent>
     </Dialog>

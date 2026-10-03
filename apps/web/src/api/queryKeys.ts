@@ -7,10 +7,17 @@ export const queryKeys = {
   currentUser: ['current-user'] as const,
   sessions: ['sessions'] as const,
   shortcuts: ['shortcuts'] as const,
+  /** The browsers the user gets notifications on. */
+  pushDevices: ['push-devices'] as const,
+  /** Whether this browser is one of them: its push endpoint, or `null`. */
+  pushThisDevice: ['push-this-device'] as const,
+  notificationPreferences: ['notification-preferences'] as const,
   backups: ['admin', 'backups'] as const,
   workspace,
   workspaces: ['workspaces'] as const,
   members: (workspaceId: string) => [...workspace(workspaceId), 'members'] as const,
+  /** What the profile popover shows of one member beside the members list, with the caller's private note. */
+  memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
   projects: (workspaceId: string) => [...workspace(workspaceId), 'projects'] as const,

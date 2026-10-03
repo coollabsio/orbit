@@ -7,6 +7,7 @@ use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, ChatEvents, ChatState, ChatWrite, RequestIdExtension};
+use crate::push::PushService;
 use crate::repositories::chat::{
     ChatError, FollowedThreadRecord, MessageCursor, MessagePage, MessageRecord, SearchInput,
     SearchPage, SendInput, ThreadPage,
@@ -130,13 +131,16 @@ pub(crate) async fn send_chat_message(
         also_in_channel: body.also_in_channel,
         nonce: body.nonce,
     };
-    call.write(
-        &state,
-        state
-            .chat
-            .send_message(call.workspace_id, call.actor_id, input),
-    )
-    .await
+    let written = call
+        .write(
+            &state,
+            state
+                .chat
+                .send_message(call.workspace_id, call.actor_id, input),
+        )
+        .await?;
+    PushService::of(state.identity.database()).chat_message(&written.result);
+    Ok(written)
 }
 
 #[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}", params(("workspace_id" = String, Path), ("message_id" = String, Path)), request_body = ChatEditBody, responses((status = 200, body = ChatWrite<MessageRecord>)))]

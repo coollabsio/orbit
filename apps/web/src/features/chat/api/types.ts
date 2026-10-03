@@ -1,3 +1,5 @@
+import type { PresenceEntry } from '@/features/realtime/presence'
+
 /** Ids are opaque strings; message ids sort by creation time. Times are integer milliseconds. */
 
 export type ConversationKind = 'public' | 'private' | 'dm'
@@ -176,7 +178,10 @@ export type ChatEvent =
   | { type: 'state.changed'; state: ConversationState }
   | { type: 'thread.changed'; state: ThreadState }
   | { type: 'typing'; conversationId: string; threadRootId: string | null; userId: string }
-  | { type: 'presence'; userId: string; online: boolean }
+  /** What the others see of a member changed; `null` is offline. */
+  | { type: 'presence'; userId: string; presence: PresenceEntry | null }
+  /** The signed-in user changed their own status, in this tab or another: fetch the current user again. */
+  | { type: 'self.changed' }
   | { type: 'connection'; status: ConnectionStatus }
   /** The client missed events: refetch every chat query. */
   | { type: 'resync' }

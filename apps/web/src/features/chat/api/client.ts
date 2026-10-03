@@ -1,3 +1,4 @@
+import type { PresenceMap } from '@/features/realtime/presence'
 import type {
   Attachment,
   Category,
@@ -75,8 +76,8 @@ export interface ChatClient {
   /** Messages that have attachments, newest first. */
   listFiles(conversationId: string): Promise<Message[]>
   searchMessages(input: SearchInput): Promise<SearchPage>
-  /** Ids of the members who are online. */
-  getPresence(): Promise<string[]>
+  /** Every member who does not show as offline, with their status. */
+  getPresence(): Promise<PresenceMap>
 
   sendMessage(input: SendMessageInput): Promise<Message>
   editMessage(messageId: string, body: string): Promise<Message>
@@ -119,6 +120,10 @@ export interface ChatClient {
 
   uploadAttachment(file: File, options?: UploadOptions): Promise<Attachment>
   sendTyping(conversationId: string, threadRootId?: string | null): void
+  /** The tab went idle (no input for a while) or is in use again. Only a change is sent. */
+  setIdle(idle: boolean): void
+  /** The window has been out of focus for a while, or has the focus again. Only a change is sent. */
+  setAway(away: boolean): void
 
   subscribe(listener: (event: ChatEvent) => void): () => void
 }

@@ -342,6 +342,7 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
       break
     case 'typing':
     case 'presence':
+    case 'self.changed':
     case 'connection':
       break
   }

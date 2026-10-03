@@ -70,27 +70,62 @@ test('a refused request rejects with a chat error', async () => {
   expect(events).toEqual([])
 })
 
+const member = (userId: string, status: 'online' | 'idle' | 'dnd' = 'online', text: string | null = null) => ({ user_id: userId, status, emoji: null, text, expires_at: null })
+const entry = (status: 'online' | 'idle' | 'dnd' = 'online', text: string | null = null) => ({ status, emoji: null, text, expiresAt: null })
+
 test('the live socket gives presence, typing and chat events to the subscribers', async () => {
   const { client, events, sent, live } = setup(() => Response.json({}))
   const presence = client.getPresence()
-  live.onHello(['u1', 'u2'])
-  expect(await presence).toEqual(['u1', 'u2'])
-  live.onEvent('presence', { type: 'presence', user_id: 'u3', online: true })
+  live.onHello([member('u1'), member('u2', 'idle'), member('u5', 'online', 'Lunch')])
+  expect([...(await presence)]).toEqual([['u1', entry()], ['u2', entry('idle')], ['u5', entry('online', 'Lunch')]])
+  // The first hello is the whole list: nothing to tell apart yet.
+  expect(events).toEqual([])
+  live.onEvent('presence', { type: 'presence', user_id: 'u3', status: 'dnd', emoji: '🎧', text: 'Focus', expires_at: '2030-01-01T00:00:00Z' })
+  live.onEvent('presence', { type: 'presence', user_id: 'u1', status: 'offline' })
+  live.onEvent('presence', { type: 'self' })
   live.onEvent('chat', { type: 'typing', conversation_id: 'c1', thread_root_id: null, user_id: 'u2' })
   live.onEvent('chat', { type: 'state.changed', state })
   live.onStatus('reconnecting')
-  // After a reconnect the new list says who left and who came meanwhile.
-  live.onHello(['u1', 'u3', 'u4'])
+  const focus = { status: 'dnd' as const, emoji: '🎧', text: 'Focus', expiresAt: '2030-01-01T00:00:00Z' }
   expect(events).toEqual([
-    { type: 'presence', userId: 'u3', online: true },
+    { type: 'presence', userId: 'u3', presence: focus },
+    { type: 'presence', userId: 'u1', presence: null },
+    { type: 'self.changed' },
     { type: 'typing', conversationId: 'c1', threadRootId: null, userId: 'u2' },
     { type: 'state.changed', state: { conversationId: 'c1', lastReadMessageId: 'm9', unreadCount: 0, mentionCount: 0, notify: 'all', favorite: false } },
     { type: 'connection', status: 'reconnecting' },
-    { type: 'presence', userId: 'u2', online: false },
-    { type: 'presence', userId: 'u4', online: true },
   ])
+  events.length = 0
+  // After a reconnect the new list says who left, who came and whose status or custom status changed meanwhile.
+  live.onHello([member('u2', 'dnd'), { ...member('u3', 'dnd', 'Focus'), emoji: '🎧', expires_at: '2030-01-01T00:00:00Z' }, member('u4'), member('u5')])
+  expect(events).toEqual([
+    { type: 'presence', userId: 'u2', presence: entry('dnd') },
+    { type: 'presence', userId: 'u4', presence: entry() },
+    { type: 'presence', userId: 'u5', presence: entry() },
+  ])
+  expect([...(await client.getPresence()).keys()]).toEqual(['u2', 'u3', 'u4', 'u5'])
   client.sendTyping('c1')
   expect(sent).toEqual([{ type: 'typing', conversation_id: 'c1', thread_root_id: null }])
+})
+
+test('the activity frame goes out on a change only, and idle goes again after each hello', () => {
+  const { client, sent, live } = setup(() => Response.json({}))
+  live.onHello([])
+  client.setIdle(false)
+  expect(sent).toEqual([])
+  client.setIdle(true)
+  client.setIdle(true)
+  expect(sent).toEqual([{ type: 'activity', idle: true, away: false }])
+  // A new connection starts as not idle on the server.
+  live.onHello([])
+  expect(sent).toEqual([{ type: 'activity', idle: true, away: false }, { type: 'activity', idle: true, away: false }])
+  client.setIdle(false)
+  live.onHello([])
+  expect(sent).toEqual([{ type: 'activity', idle: true, away: false }, { type: 'activity', idle: true, away: false }, { type: 'activity', idle: false, away: false }])
+  // The window out of focus for a while goes the same way.
+  client.setAway(true)
+  live.onHello([])
+  expect(sent.slice(3)).toEqual([{ type: 'activity', idle: false, away: true }, { type: 'activity', idle: false, away: true }])
 })
 
 test('a send that cannot reach the server goes again when the connection is back', async () => {
@@ -117,4 +152,27 @@ test('a send that the server refused does not go again', async () => {
   expect(client.sendMessage({ conversationId: 'c1', body: 'Hi', nonce: 'n1' })).rejects.toMatchObject({ name: 'ChatError', unreached: false })
   await new Promise((resolve) => setTimeout(resolve, 10))
   expect(requests.length).toBe(1)
+})
+
+test('a notify signal goes to the notify callback only, not to the chat subscribers', () => {
+  let live!: LiveSocketOptions
+  const notices: unknown[] = []
+  let inbox = 0
+  const client = createHttpChatClient({
+    workspaceId: 'w1',
+    currentUserId: 'u1',
+    onNotify: (notice) => notices.push(notice),
+    onInboxChanged: () => (inbox += 1),
+    openSocket: (options) => {
+      live = options
+      return { send() {}, seen: () => false, reconnected: () => Promise.resolve(), close() {} }
+    },
+  })
+  const events: ChatEvent[] = []
+  client.subscribe((event) => events.push(event))
+  const notice = { title: 'Ada', body: 'Lunch?', url: '/chat/c1?thread=m1', tag: 'chat:c1', sound: 'mention' }
+  live.onEvent('notify', notice)
+  expect(notices).toEqual([notice])
+  expect(inbox).toBe(0)
+  expect(events).toEqual([])
 })

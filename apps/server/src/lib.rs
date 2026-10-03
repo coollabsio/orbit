@@ -17,6 +17,7 @@ pub mod openapi;
 pub mod page_comment_routes;
 pub mod page_file_routes;
 pub mod page_routes;
+pub mod push;
 pub mod repositories;
 pub mod router;
 mod secret_box;

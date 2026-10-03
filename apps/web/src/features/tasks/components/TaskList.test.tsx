@@ -37,7 +37,7 @@ const launch = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', k
 const docs = { ...launch, id: 'project-2', name: 'Docs', key: 'DOC' } as Project
 const user: User = {
   id: 'user-1', membershipId: 'membership-1', name: 'Ada Lovelace', handle: 'ada', email: 'ada@example.com',
-  role: 'Member', color: '#8b5cf6', online: true, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
+  role: 'Member', color: '#8b5cf6', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
 }
 
 function task(index: number): Task {

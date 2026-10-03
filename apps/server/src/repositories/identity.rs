@@ -3,9 +3,11 @@ use orbit_platform::{
     AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, SessionRecord, TimestampMillis,
     generate_opaque_token, normalize_email,
 };
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use super::chat::join_public_channels;
 use super::teamspaces::insert_default_teamspace;
@@ -71,6 +73,79 @@ pub enum IdentityError {
     InvalidIdentifier,
     #[error("session or token is invalid or expired")]
     InvalidCredential,
+}
+
+/// The presence a user sets for themselves. A user without a connection is offline whatever
+/// they set; `Invisible` shows them as offline to everybody else while they are connected.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Presence {
+    #[default]
+    Online,
+    Idle,
+    Dnd,
+    Invisible,
+}
+
+impl Presence {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Online => "online",
+            Self::Idle => "idle",
+            Self::Dnd => "dnd",
+            Self::Invisible => "invisible",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "idle" => Self::Idle,
+            "dnd" => Self::Dnd,
+            "invisible" => Self::Invisible,
+            _ => Self::Online,
+        }
+    }
+}
+
+/// A user's presence and custom status; the same in every workspace.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UserStatus {
+    pub presence: Presence,
+    /// The emoji of the custom status.
+    pub emoji: Option<String>,
+    /// The text of the custom status.
+    pub text: Option<String>,
+    /// When the custom status ends; the presence stays.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub expires_at: Option<TimestampMillis>,
+}
+
+impl UserStatus {
+    /// The status without a custom status that ended before `now`.
+    #[must_use]
+    pub fn at(mut self, now: TimestampMillis) -> Self {
+        if self.expires_at.is_some_and(|end| end <= now) {
+            self.emoji = None;
+            self.text = None;
+            self.expires_at = None;
+        }
+        self
+    }
+}
+
+/// The optional parts of a user's profile; the same in every workspace.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, ToSchema)]
+pub struct ProfileFields {
+    /// The job title.
+    pub title: Option<String>,
+    pub pronouns: Option<String>,
+    /// An IANA time zone name, such as `Europe/Budapest`.
+    pub timezone: Option<String>,
+    pub bio: Option<String>,
+    /// As the user wrote it; not verified.
+    pub phone: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -644,18 +719,45 @@ impl IdentityRepository {
         Ok(())
     }
 
-    pub async fn update_display_name_audited(
+    /// The optional parts of the user's profile.
+    pub async fn profile_fields(&self, user_id: Id) -> Result<ProfileFields, IdentityError> {
+        let row =
+            sqlx::query("SELECT title, pronouns, timezone, bio, phone FROM users WHERE id = ?")
+                .bind(user_id.to_string())
+                .fetch_optional(self.database.pool())
+                .await?;
+        Ok(
+            row.map_or_else(ProfileFields::default, |row| ProfileFields {
+                title: row.get("title"),
+                pronouns: row.get("pronouns"),
+                timezone: row.get("timezone"),
+                bio: row.get("bio"),
+                phone: row.get("phone"),
+            }),
+        )
+    }
+
+    /// Replaces the user's name and the optional parts of their profile. Callers check the
+    /// lengths first.
+    pub async fn update_profile_audited(
         &self,
         user_id: Id,
         display_name: &str,
+        fields: &ProfileFields,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let changed = sqlx::query(
-            "UPDATE users SET display_name = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+            "UPDATE users SET display_name = ?, title = ?, pronouns = ?, timezone = ?, bio = ?, phone = ?, \
+             updated_at = ?, version = version + 1 WHERE id = ?",
         )
         .bind(display_name)
+        .bind(&fields.title)
+        .bind(&fields.pronouns)
+        .bind(&fields.timezone)
+        .bind(&fields.bio)
+        .bind(&fields.phone)
         .bind(now.as_millis())
         .bind(user_id.to_string())
         .execute(&mut *transaction)
@@ -664,8 +766,57 @@ impl IdentityRepository {
         if changed == 0 {
             return Err(IdentityError::InvalidCredential);
         }
-        record_profile_update(&mut transaction, user_id, "display_name", request_id, now).await?;
+        record_profile_update(&mut transaction, user_id, "profile", request_id, now).await?;
         transaction.commit().await?;
+        Ok(())
+    }
+
+    /// The user's presence and custom status at `now`.
+    pub async fn status(
+        &self,
+        user_id: Id,
+        now: TimestampMillis,
+    ) -> Result<UserStatus, IdentityError> {
+        let row = sqlx::query(
+            "SELECT presence, emoji, text, expires_at FROM user_status WHERE user_id = ?",
+        )
+        .bind(user_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?;
+        Ok(row.map_or_else(UserStatus::default, |row| {
+            UserStatus {
+                presence: Presence::parse(row.get("presence")),
+                emoji: row.get("emoji"),
+                text: row.get("text"),
+                expires_at: row
+                    .get::<Option<i64>, _>("expires_at")
+                    .map(TimestampMillis::from_millis),
+            }
+            .at(now)
+        }))
+    }
+
+    /// Replaces the user's presence and custom status. Callers check the lengths first.
+    pub async fn set_status(
+        &self,
+        user_id: Id,
+        status: &UserStatus,
+        now: TimestampMillis,
+    ) -> Result<(), IdentityError> {
+        sqlx::query(
+            "INSERT INTO user_status (user_id, presence, emoji, text, expires_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET \
+             presence = excluded.presence, emoji = excluded.emoji, text = excluded.text, \
+             expires_at = excluded.expires_at, updated_at = excluded.updated_at",
+        )
+        .bind(user_id.to_string())
+        .bind(status.presence.as_str())
+        .bind(&status.emoji)
+        .bind(&status.text)
+        .bind(status.expires_at.map(TimestampMillis::as_millis))
+        .bind(now.as_millis())
+        .execute(self.database.pool())
+        .await?;
         Ok(())
     }
 

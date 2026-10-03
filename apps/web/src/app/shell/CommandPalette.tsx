@@ -158,14 +158,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_profile', icon: Users, title: 'Go to Profile', meta: 'Navigation', to: '/profile', command: 'nav.profile', keywords: 'profile account password name' },
       { id: 'nav_settings', icon: Settings, title: 'Go to Settings', meta: 'Navigation', to: '/settings', command: 'nav.settings', keywords: 'settings preferences' },
       { id: 'nav_members', icon: Users, title: 'Go to Members', meta: 'Navigation', to: '/settings/members', keywords: 'members invitations people' },
-      { id: 'nav_sessions', icon: ShieldCheck, title: 'Go to Sessions', meta: 'Navigation', to: '/settings/sessions', keywords: 'sessions devices' },
+      { id: 'nav_sessions', icon: ShieldCheck, title: 'Go to Sessions', meta: 'Navigation', to: '/profile/sessions', keywords: 'sessions devices' },
+      { id: 'nav_notifications', icon: Settings, title: 'Go to Notification settings', meta: 'Navigation', to: '/profile/notifications', keywords: 'notifications push sounds alerts' },
       { id: 'nav_trash', icon: Trash2, title: 'Go to Task trash', meta: 'Navigation', to: '/tasks-trash', command: 'nav.trash', keywords: 'trash deleted tasks' },
       { id: 'nav_page_trash', icon: Trash2, title: 'Go to Page trash', meta: 'Navigation', to: '/docs/trash', keywords: 'trash deleted pages docs' },
       { id: 'nav_mine', icon: SquareCheck, title: 'Go to My tasks', meta: 'Navigation', to: '/tasks?view=mine', command: 'nav.mine', keywords: 'my tasks assigned' },
       { id: 'nav_week', icon: SquareCheck, title: 'Go to Current week', meta: 'Navigation', to: '/tasks?view=current_week', command: 'nav.week', keywords: 'current week due' },
       { id: 'nav_overdue', icon: SquareCheck, title: 'Go to Overdue', meta: 'Navigation', to: '/tasks?view=overdue', command: 'nav.overdue', keywords: 'overdue late' },
       { id: 'nav_views', icon: SquareCheck, title: 'Go to Views', meta: 'Navigation', to: '/views', command: 'nav.views', keywords: 'views saved filters' },
-      { id: 'nav_shortcuts', icon: Settings, title: 'Go to Keyboard shortcuts', meta: 'Navigation', to: '/settings/shortcuts', keywords: 'keyboard shortcuts keys hotkeys customize' },
+      { id: 'nav_shortcuts', icon: Settings, title: 'Go to Keyboard shortcuts', meta: 'Navigation', to: '/profile/shortcuts', keywords: 'keyboard shortcuts keys hotkeys customize' },
     ]
     const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
       id: t.id,

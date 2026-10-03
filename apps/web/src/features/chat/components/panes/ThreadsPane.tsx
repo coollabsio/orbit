@@ -33,7 +33,7 @@ export function ThreadsPane({ conversationId }: { conversationId: string }) {
               const repliers = root.replyUserIds.slice(0, 3).flatMap((id) => members.find((member) => member.id === id) ?? [])
               return (
                 <li key={root.id} className="flex flex-col gap-1 rounded-lg p-2 hover-fine:hover:bg-muted/50">
-                  <MessageByline message={root} members={members} />
+                  <MessageByline message={root} members={members} profile />
                   {/* a long root shows its first lines only; the thread shows all of it */}
                   <div className="max-h-28 overflow-hidden">
                     <MessageBody message={root} />

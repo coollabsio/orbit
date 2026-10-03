@@ -27,7 +27,7 @@ export function ComposerInput({ ref, value, people, conversations, className, on
   }, [value])
 
   return (
-    <div data-slot="composer-input" className="relative flex min-h-0 shrink flex-col">
+    <div data-slot="composer-input" className="relative flex min-h-10 shrink flex-col">
       <div
         ref={mirror}
         aria-hidden="true"

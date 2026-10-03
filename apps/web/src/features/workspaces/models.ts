@@ -18,7 +18,6 @@ export interface User {
   color: string
   /** Profile picture URL; initials on `color` show while it is absent or loading. */
   avatarUrl?: string | null
-  online: boolean
   title: string
   roleIds: string[]
   version: number

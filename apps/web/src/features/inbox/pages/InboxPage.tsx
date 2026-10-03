@@ -13,6 +13,7 @@ import { useMembers } from '@/features/workspaces/api'
 import { isMention, notificationCopy, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
 import { usePageTree } from '@/features/docs/api/pages'
 import { useSlowPending } from '@/lib/useDebouncedValue'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 type InboxTab = 'all' | 'unread' | 'mentions'
 
@@ -91,8 +92,9 @@ export function InboxPage() {
               const page = notification.page_id ? pageTree.data?.find((item) => item.id === notification.page_id) : undefined
               const copy = notificationCopy(notification, page?.title, actor?.name)
               return (
+                // the actor's avatar is beside the row button, not inside it: a button cannot hold another one
+                <div key={notification.id} className="relative">
                 <Button
-                  key={notification.id}
                   variant="ghost"
                   className="h-auto min-h-14 w-full min-w-0 justify-start gap-2.5 rounded-none border-x-0 border-t-0 border-b-border px-3 py-1.5 text-left font-normal"
                   onClick={() => {
@@ -110,9 +112,7 @@ export function InboxPage() {
                   <span className="flex w-2 shrink-0 justify-center">
                     {!notification.read_at ? <span className="size-2 shrink-0 rounded-full bg-primary" /> : null}
                   </span>
-                  <Avatar className="size-7">
-                    <AvatarFallback>{(actor?.name ?? '?').charAt(0).toUpperCase()}</AvatarFallback>
-                  </Avatar>
+                  <span aria-hidden="true" className="size-7 shrink-0" />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate text-[13px] text-foreground data-unread:font-semibold" data-unread={!notification.read_at || undefined}>
                       {copy.title}
@@ -123,6 +123,13 @@ export function InboxPage() {
                     {relativeTime(notification.created_at)}
                   </span>
                 </Button>
+                {/* over the spacer: 12px padding, the 8px unread column and the 10px gap */}
+                <ProfileTrigger userId={actor?.id} name={actor?.name ?? 'Unknown'} kind="avatar" className="absolute top-1/2 left-[30px] flex -translate-y-1/2">
+                  <Avatar className="size-7">
+                    <AvatarFallback>{(actor?.name ?? '?').charAt(0).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </ProfileTrigger>
+                </div>
               )
             })
           )}

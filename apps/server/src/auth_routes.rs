@@ -22,9 +22,13 @@ use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::audit::AuditOutcome;
+use crate::live::LiveHub;
 use crate::repositories::identity::{
-    AuthenticatedSession, IdentityError, IdentityRepository, SetupError, SetupRequest,
+    AuthenticatedSession, IdentityError, IdentityRepository, ProfileFields, SetupError,
+    SetupRequest, UserStatus,
 };
+
+pub(crate) mod push;
 
 const SESSION_COOKIE: &str = "__Host-orbit_session";
 const DEV_SESSION_COOKIE: &str = "orbit_session_dev";
@@ -155,6 +159,21 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/me", get(me).patch(update_me))
+        .route("/api/v1/auth/status", put(put_status))
+        .route("/api/v1/push/key", get(push::get_push_key))
+        .route(
+            "/api/v1/push/subscriptions",
+            get(push::list_push_subscriptions).post(push::create_push_subscription),
+        )
+        .route(
+            "/api/v1/push/subscriptions/{id}",
+            delete(push::delete_push_subscription),
+        )
+        .route("/api/v1/push/test", post(push::send_test_push))
+        .route(
+            "/api/v1/notification-preferences",
+            get(push::get_notification_preferences).put(push::put_notification_preferences),
+        )
         .route(
             "/api/v1/auth/shortcuts",
             get(get_shortcuts).put(put_shortcuts),
@@ -361,6 +380,10 @@ struct AuthUserResponse {
     installation_admin: bool,
     /// The profile picture; absent while the user has none. The URL changes with each upload.
     avatar_url: Option<String>,
+    /// The presence and custom status the user set for themselves.
+    status: UserStatus,
+    #[serde(flatten)]
+    profile: ProfileFields,
 }
 
 /// Where a user's profile picture is served. The version query lets browsers cache it for good.
@@ -384,7 +407,19 @@ async fn user_response(
         .avatar_updated_at(user.id)
         .await
         .map_err(|_| ApiError::internal(instance, request_id))?;
+    let status = state
+        .repository
+        .status(user.id, TimestampMillis::now())
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id))?;
+    let profile = state
+        .repository
+        .profile_fields(user.id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id))?;
     Ok(AuthUserResponse {
+        status,
+        profile,
         avatar_url: avatar_url(user.id, avatar_updated_at),
         id: user.id.to_string(),
         email: user.email,
@@ -541,8 +576,20 @@ async fn login(
         .await
         .ok()
         .flatten();
+    let status = state
+        .repository
+        .status(user.id, TimestampMillis::now())
+        .await
+        .unwrap_or_default();
+    let profile = state
+        .repository
+        .profile_fields(user.id)
+        .await
+        .unwrap_or_default();
     let mut response = Json(LoginResponse {
         user: AuthUserResponse {
+            status,
+            profile,
             avatar_url: avatar_url(user.id, avatar_updated_at),
             id: user.id.to_string(),
             email: user.email,
@@ -630,9 +677,50 @@ async fn me(
 #[serde(deny_unknown_fields)]
 struct UpdateMeBody {
     display_name: String,
+    /// The optional parts: absent leaves the part as it is, an empty text removes it.
+    title: Option<String>,
+    pronouns: Option<String>,
+    timezone: Option<String>,
+    bio: Option<String>,
+    phone: Option<String>,
 }
 
-#[utoipa::path(patch, path = "/api/v1/auth/me", request_body = UpdateMeBody, responses((status = 200, body = AuthUserResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_display_name", body = ProblemBody, content_type = "application/problem+json")))]
+const MAX_PHONE_CHARS: usize = 32;
+const MAX_TITLE_CHARS: usize = 80;
+const MAX_PRONOUNS_CHARS: usize = 40;
+const MAX_TIMEZONE_CHARS: usize = 64;
+const MAX_BIO_CHARS: usize = 500;
+
+/// A part of the profile from a request: `current` when absent, nothing when empty; `None`
+/// when it is too long.
+fn profile_part(
+    sent: Option<String>,
+    current: Option<String>,
+    max_chars: usize,
+) -> Option<Option<String>> {
+    let Some(sent) = sent else {
+        return Some(current);
+    };
+    let sent = sent.trim();
+    (sent.chars().count() <= max_chars).then(|| (!sent.is_empty()).then(|| sent.to_owned()))
+}
+
+/// A phone number as people write it: at least one digit, and digits, spaces and `+ - ( ) .`
+/// only.
+fn phone_shaped(phone: &str) -> bool {
+    phone.chars().any(|c| c.is_ascii_digit())
+        && phone
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '+' | '-' | '(' | ')' | '.'))
+}
+
+/// The shape of an IANA time zone name; the web app owns the list of names.
+fn timezone_shaped(name: &str) -> bool {
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '+' | '-'))
+}
+
+#[utoipa::path(patch, path = "/api/v1/auth/me", request_body = UpdateMeBody, responses((status = 200, body = AuthUserResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_display_name or invalid_profile", body = ProblemBody, content_type = "application/problem+json")))]
 async fn update_me(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -653,11 +741,38 @@ async fn update_me(
         ));
     }
     let display_name = display_name.to_owned();
+    let current = state
+        .repository
+        .profile_fields(session.user.id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    let fields = (|| {
+        Some(ProfileFields {
+            title: profile_part(body.title, current.title, MAX_TITLE_CHARS)?,
+            pronouns: profile_part(body.pronouns, current.pronouns, MAX_PRONOUNS_CHARS)?,
+            timezone: profile_part(body.timezone, current.timezone, MAX_TIMEZONE_CHARS)
+                .filter(|zone| zone.as_deref().is_none_or(timezone_shaped))?,
+            bio: profile_part(body.bio, current.bio, MAX_BIO_CHARS)?,
+            phone: profile_part(body.phone, current.phone, MAX_PHONE_CHARS)
+                .filter(|phone| phone.as_deref().is_none_or(phone_shaped))?,
+        })
+    })()
+    .ok_or_else(|| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_profile",
+            "Invalid profile",
+            "The title may have 80 characters, the pronouns 40, the time zone 64, the bio 500 and the phone number 32 (digits, spaces and + - ( ) . only).",
+            instance,
+            request_id.as_ref(),
+        )
+    })?;
     state
         .repository
-        .update_display_name_audited(
+        .update_profile_audited(
             session.user.id,
             &display_name,
+            &fields,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -669,6 +784,65 @@ async fn update_me(
     };
     Ok(Json(
         user_response(&state, user, instance, request_id.as_ref()).await?,
+    ))
+}
+
+const MAX_STATUS_EMOJI_CHARS: usize = 32;
+const MAX_STATUS_TEXT_CHARS: usize = 100;
+
+/// Trims the custom status and drops its empty parts; `None` when a part is too long or the
+/// status ends in the past.
+fn checked_status(status: UserStatus, now: TimestampMillis) -> Option<UserStatus> {
+    let part = |value: Option<String>, max: usize| {
+        let value = value.map(|value| value.trim().to_owned());
+        match value {
+            Some(value) if value.chars().count() > max => Err(()),
+            Some(value) if value.is_empty() => Ok(None),
+            value => Ok(value),
+        }
+    };
+    let emoji = part(status.emoji, MAX_STATUS_EMOJI_CHARS).ok()?;
+    let text = part(status.text, MAX_STATUS_TEXT_CHARS).ok()?;
+    let custom = emoji.is_some() || text.is_some();
+    if custom && status.expires_at.is_some_and(|end| end <= now) {
+        return None;
+    }
+    Some(UserStatus {
+        presence: status.presence,
+        emoji,
+        text,
+        expires_at: status.expires_at.filter(|_| custom),
+    })
+}
+
+#[utoipa::path(put, path = "/api/v1/auth/status", request_body = UserStatus, responses((status = 200, body = AuthUserResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_status", body = ProblemBody, content_type = "application/problem+json")))]
+async fn put_status(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<UserStatus>,
+) -> Result<Json<AuthUserResponse>, ApiError> {
+    let instance = "/api/v1/auth/status";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let now = TimestampMillis::now();
+    let status = checked_status(body, now).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_status",
+            "Invalid status",
+            "The emoji may have 32 characters and the text 100; the end time must be in the future.",
+            instance,
+            request_id.as_ref(),
+        )
+    })?;
+    state
+        .repository
+        .set_status(session.user.id, &status, now)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    LiveHub::of(state.repository.database()).set_status(session.user.id, &status);
+    Ok(Json(
+        user_response(&state, session.user, instance, request_id.as_ref()).await?,
     ))
 }
 
@@ -1352,7 +1526,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{AuthState, CookieMode, SetupLaunch, auth_router, initialize_auth};
-    use crate::repositories::identity::{IdentityRepository, SetupRequest};
+    use crate::repositories::identity::{IdentityRepository, Presence, SetupRequest, UserStatus};
 
     #[tokio::test]
     async fn auth_login_uses_a_host_only_secure_cookie() {
@@ -1982,6 +2156,84 @@ mod tests {
         let me: Value = serde_json::from_slice(&body(me).await).unwrap();
         assert_eq!(me["display_name"], "Ada Lovelace");
         assert_eq!(me["email"], "Owner@Example.com");
+    }
+
+    #[tokio::test]
+    async fn status_is_checked_stored_and_ends() {
+        let (app, repository, _database) = application(CookieMode::secure()).await;
+        let cookie = login_cookie(&app, "correct horse battery").await;
+        let put = |value: Value| {
+            app.clone().oneshot(json_cookie_request(
+                "PUT",
+                "/api/v1/auth/status",
+                &cookie,
+                value,
+            ))
+        };
+
+        let me = app
+            .clone()
+            .oneshot(cookie_request("GET", "/api/v1/auth/me", &cookie))
+            .await
+            .unwrap();
+        let me: Value = serde_json::from_slice(&body(me).await).unwrap();
+        assert_eq!(
+            me["status"],
+            json!({ "presence": "online", "emoji": null, "text": null, "expires_at": null })
+        );
+
+        let too_long = put(json!({ "presence": "dnd", "emoji": null, "text": "x".repeat(101), "expires_at": null })).await.unwrap();
+        assert_eq!(too_long.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let past = put(json!({ "presence": "dnd", "emoji": null, "text": "Lunch", "expires_at": "2020-01-01T00:00:00.000Z" })).await.unwrap();
+        assert_eq!(past.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let unknown =
+            put(json!({ "presence": "away", "emoji": null, "text": null, "expires_at": null }))
+                .await
+                .unwrap();
+        assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+
+        // The text is trimmed; an end time without a custom status is dropped.
+        let set = put(
+            json!({ "presence": "dnd", "emoji": "🍜", "text": "  Lunch ", "expires_at": null }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(set.status(), StatusCode::OK);
+        let set: Value = serde_json::from_slice(&body(set).await).unwrap();
+        assert_eq!(
+            set["status"],
+            json!({ "presence": "dnd", "emoji": "🍜", "text": "Lunch", "expires_at": null })
+        );
+        let bare = put(json!({ "presence": "invisible", "emoji": " ", "text": null, "expires_at": "2999-01-01T00:00:00.000Z" })).await.unwrap();
+        let bare: Value = serde_json::from_slice(&body(bare).await).unwrap();
+        assert_eq!(
+            bare["status"],
+            json!({ "presence": "invisible", "emoji": null, "text": null, "expires_at": null })
+        );
+
+        // A custom status that ended is gone; the presence stays.
+        let owner: String = sqlx::query_scalar("SELECT id FROM users")
+            .fetch_one(repository.database().pool())
+            .await
+            .unwrap();
+        let owner: orbit_platform::Id = owner.parse().unwrap();
+        let now = TimestampMillis::now();
+        let later = TimestampMillis::from_millis(now.as_millis() + 60_000);
+        let status = UserStatus {
+            presence: Presence::Idle,
+            emoji: None,
+            text: Some("Lunch".to_owned()),
+            expires_at: Some(later),
+        };
+        repository.set_status(owner, &status, now).await.unwrap();
+        assert_eq!(repository.status(owner, now).await.unwrap(), status);
+        assert_eq!(
+            repository.status(owner, later).await.unwrap(),
+            UserStatus {
+                presence: Presence::Idle,
+                ..UserStatus::default()
+            }
+        );
     }
 
     #[tokio::test]

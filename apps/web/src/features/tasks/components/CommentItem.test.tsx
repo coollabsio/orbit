@@ -12,7 +12,7 @@ import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
 
 const author: User = {
   id: 'user-1', membershipId: 'm1', name: 'Orbit Developers', handle: 'orbit', email: 'dev@orbit.test',
-  role: 'Owner', color: '#4ade80', online: true, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
+  role: 'Owner', color: '#4ade80', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
 }
 
 function wrapper() {

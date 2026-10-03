@@ -11,7 +11,7 @@ const status = (id: string, projectId: string, name: string, category: TaskStatu
 })
 const member = (id: string, name: string): User => ({
   id, membershipId: `membership-${id}`, name, handle: id, email: `${id}@orbit.test`, role: 'Member',
-  color: '#888888', online: false, title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
+  color: '#888888', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
 })
 const label = (id: string, name: string): LabelRecord => ({ id, name, color: '#888888', version: 1, workspace_id: 'workspace-1' })
 const project = (id: string, name: string): ProjectRecord => ({

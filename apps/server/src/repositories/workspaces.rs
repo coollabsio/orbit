@@ -42,6 +42,22 @@ pub struct WorkspaceRecord {
     pub deleted_at: Option<TimestampMillis>,
 }
 
+/// What a profile popover shows of a member beside the member list's fields.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct MemberProfile {
+    #[schema(value_type = String)]
+    pub user_id: Id,
+    /// The job title.
+    pub title: Option<String>,
+    pub pronouns: Option<String>,
+    /// An IANA time zone name.
+    pub timezone: Option<String>,
+    pub bio: Option<String>,
+    pub phone: Option<String>,
+    /// The caller's private note about this member; nobody else can read it.
+    pub note: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct MemberRecord {
     #[schema(value_type = String)]
@@ -429,6 +445,74 @@ impl WorkspaceRepository {
         .fetch_all(self.database.pool())
         .await?;
         page(rows, limit, |row| member_from_row(row, actor))
+    }
+
+    /// The profile of a member of the workspace, with the caller's private note about them.
+    pub async fn profile(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        user_id: Id,
+    ) -> Result<MemberProfile, WorkspaceError> {
+        require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        let row = sqlx::query(
+            "SELECT users.title, users.pronouns, users.timezone, users.bio, users.phone, \
+             user_notes.body AS note \
+             FROM memberships JOIN users ON users.id = memberships.user_id \
+             LEFT JOIN user_notes ON user_notes.subject_id = users.id AND user_notes.author_id = ? \
+             WHERE memberships.workspace_id = ? AND memberships.user_id = ?",
+        )
+        .bind(actor_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(WorkspaceError::NotFound)?;
+        Ok(MemberProfile {
+            user_id,
+            title: row.get("title"),
+            pronouns: row.get("pronouns"),
+            timezone: row.get("timezone"),
+            bio: row.get("bio"),
+            phone: row.get("phone"),
+            note: row.get("note"),
+        })
+    }
+
+    /// Replaces the caller's private note about a member; an empty note removes it. Callers
+    /// check the length first.
+    pub async fn set_note(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        user_id: Id,
+        body: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        require_actor(&mut *transaction, workspace_id, user_id).await?;
+        if body.is_empty() {
+            sqlx::query("DELETE FROM user_notes WHERE author_id = ? AND subject_id = ?")
+                .bind(actor_id.to_string())
+                .bind(user_id.to_string())
+                .execute(&mut *transaction)
+                .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO user_notes (author_id, subject_id, body, updated_at) \
+                 VALUES (?, ?, ?, ?) ON CONFLICT (author_id, subject_id) DO UPDATE SET \
+                 body = excluded.body, updated_at = excluded.updated_at",
+            )
+            .bind(actor_id.to_string())
+            .bind(user_id.to_string())
+            .bind(body)
+            .bind(now.as_millis())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn invitations(

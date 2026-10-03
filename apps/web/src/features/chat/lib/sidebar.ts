@@ -82,6 +82,14 @@ export function isSelfDm(conversation: Conversation): boolean {
   return conversation.kind === 'dm' && conversation.selfDm
 }
 
+/** The one person a DM is with (yourself, for the DM with yourself): whose profile its header opens. None for a group DM. */
+export function dmProfilePerson<T extends ChatPerson>(conversation: Conversation, people: readonly T[], currentUserId: string | null): T | undefined {
+  if (conversation.kind !== 'dm' || !currentUserId) return undefined
+  const peers = dmPeerIds(conversation, currentUserId)
+  const id = peers.length === 1 ? peers[0] : isSelfDm(conversation) ? currentUserId : undefined
+  return people.find((person) => person.id === id)
+}
+
 /** A DM has no name: its title is the other members' names. */
 export function dmTitle(conversation: Conversation, people: readonly ChatPerson[], currentUserId: string): string {
   const nameOf = (id: string) => people.find((person) => person.id === id)?.name ?? 'Unknown'

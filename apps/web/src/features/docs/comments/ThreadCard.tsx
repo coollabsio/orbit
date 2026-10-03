@@ -18,6 +18,7 @@ import { COMMENT_PLACEHOLDERS, commentEditorDictionary } from './dictionary'
 import { CommentMembersContext } from './mentionContext'
 import { commentEditorSchema } from './mentions'
 import type { OrbitThreadMetadata } from './threadStore'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 export const FORMER_MEMBER = 'Former member'
 
@@ -40,7 +41,11 @@ function useMember(userId: string | undefined) {
 function MemberAvatar({ userId, size }: { userId: string; size: number }) {
   const { name, member } = useMember(userId)
   const user = member?.color ? { name: member.name, color: member.color } : undefined
-  return <UserAvatar user={user} name={name} size={size} className="shrink-0" />
+  return (
+    <ProfileTrigger userId={member?.id} name={name} kind="avatar" tabIndex={-1} className="flex shrink-0 self-start">
+      <UserAvatar user={user} name={name} size={size} />
+    </ProfileTrigger>
+  )
 }
 
 /** Catches store failures (the store already reported them through `onError`). */
@@ -176,7 +181,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, selected = false, o
 function CommentRow({ thread, comment }: { thread: ThreadData; comment: CommentData }) {
   const comments = useExtension(CommentsExtension)
   const store = comments.threadStore
-  const { name } = useMember(comment.userId)
+  const { name, member } = useMember(comment.userId)
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const editor = useCreateBlockNote({
@@ -207,9 +212,9 @@ function CommentRow({ thread, comment }: { thread: ThreadData; comment: CommentD
       <MemberAvatar userId={comment.userId} size={24} />
       <div className="min-w-0 flex-1">
         <div className="flex h-6 items-center gap-1.5">
-          <span className="min-w-0 truncate text-[13px] font-medium text-foreground" data-comment-author="">
-            {name}
-          </span>
+          <ProfileTrigger userId={member?.id} name={name} className="min-w-0 truncate text-[13px] font-medium text-foreground">
+            <span data-comment-author="">{name}</span>
+          </ProfileTrigger>
           <time className="shrink-0 text-xs text-muted-foreground" dateTime={comment.createdAt.toISOString()} title={fullDate(comment.createdAt.toISOString())}>
             {commentTime(comment.createdAt)}
             {edited ? ' · edited' : ''}

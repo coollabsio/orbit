@@ -13,6 +13,7 @@ import type { TaskComment, TaskViewState } from '@/features/tasks/api/models'
 import { useDeleteTaskComment, useUpdateTaskComment } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { agoLabel } from '@/features/tasks/tasksLib'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 interface CommentItemProps {
   state: TaskViewState
@@ -48,10 +49,14 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
         )}
         data-reply={reply || undefined}
       >
-        <UserAvatar user={author} size={20} name={name} />
+        <ProfileTrigger userId={author?.id} name={name} kind="avatar" tabIndex={-1} className="flex shrink-0 self-start">
+          <UserAvatar user={author} size={20} name={name} />
+        </ProfileTrigger>
         <div className="min-w-0 flex-1">
           <div className="flex min-h-5 items-center gap-1.5">
-            <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{name}</span>
+            <ProfileTrigger userId={author?.id} name={name} className="min-w-0 truncate text-[13px] font-semibold text-foreground">
+              {name}
+            </ProfileTrigger>
             <span className="shrink-0 text-[11px] leading-none text-muted-foreground/70" aria-hidden="true">·</span>
             <time className="shrink-0 text-[11px] font-medium text-muted-foreground" dateTime={comment.createdAt}>
               {agoLabel(comment.createdAt)}

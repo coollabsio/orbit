@@ -2,12 +2,15 @@ import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/api/queryKeys'
 import { type ReactNode, useEffect } from 'react'
 import { useCurrentUser } from '@/features/auth/api'
+import { useAwayMinutes, watchAway, watchIdle } from '@/features/realtime/idle'
+import { handleNotice } from '@/features/realtime/notify'
+import { replacePresence, resetPresence, setPresence } from '@/features/realtime/presence'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { ChatContext } from './chatContext'
 import type { ChatClient } from './client'
 import { applyChatEvent } from './events'
 import { createHttpChatClient } from './httpClient'
-import { clearTyping, noteTyping, resetLiveStore, setConnectionStatus, setOnlineUsers, setPresence } from './liveStore'
+import { clearTyping, noteTyping, resetLiveStore, setConnectionStatus } from './liveStore'
 
 /** One client for each workspace and user, kept for the page lifetime so chat state survives navigation. */
 const clients = new Map<string, ChatClient>()
@@ -22,6 +25,7 @@ function clientFor(workspaceId: string, currentUserId: string, queryClient: Quer
       currentUserId,
       // Chat writes are not in the workspace's change feed, so the inbox learns of a chat mention here.
       onInboxChanged: () => void queryClient.invalidateQueries({ queryKey: [...queryKeys.workspace(workspaceId), 'notifications'] }),
+      onNotify: (notice) => void handleNotice(notice).catch(() => {}),
     })
     clients.set(key, client)
   }
@@ -42,9 +46,10 @@ export function ChatProvider({ enabled = true, children }: { enabled?: boolean; 
     if (!client) return
     let active = true
     resetLiveStore()
+    resetPresence()
     void client
       .getPresence()
-      .then((userIds) => active && setOnlineUsers(userIds))
+      .then((presence) => active && replacePresence(presence))
       .catch(() => {})
     const unsubscribe = client.subscribe((event) => {
       switch (event.type) {
@@ -52,7 +57,10 @@ export function ChatProvider({ enabled = true, children }: { enabled?: boolean; 
           if (event.userId !== currentUserId) noteTyping(event.conversationId, event.threadRootId, event.userId)
           break
         case 'presence':
-          setPresence(event.userId, event.online)
+          setPresence(event.userId, event.presence)
+          break
+        case 'self.changed':
+          void queryClient.invalidateQueries({ queryKey: queryKeys.currentUser })
           break
         case 'connection':
           setConnectionStatus(event.status)
@@ -70,6 +78,12 @@ export function ChatProvider({ enabled = true, children }: { enabled?: boolean; 
       unsubscribe()
     }
   }, [client, currentUserId, queryClient, workspaceId])
+
+  // The others see the user as idle after ten minutes without input in this tab.
+  useEffect(() => (client ? watchIdle((idle) => client.setIdle(idle)) : undefined), [client])
+  // A window out of focus for the time the user chose: their other devices get the notifications too.
+  const [awayMinutes] = useAwayMinutes()
+  useEffect(() => (client ? watchAway((away) => client.setAway(away), awayMinutes * 60_000) : undefined), [client, awayMinutes])
 
   return <ChatContext.Provider value={{ client, workspaceId, currentUserId }}>{children}</ChatContext.Provider>
 }

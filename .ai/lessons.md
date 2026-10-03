@@ -29,6 +29,7 @@
 ## Orbit is multi-app
 - Features that belong to one app (task views, task presets) nest under that app in the sidebar and headers; never add them as top-level Workspace items next to Tasks/Docs/Mail/Chat (user, 2026-09-25).
 - Contextual actions (e.g. "Save view") appear only when they can do something; do not show them on an unchanged page.
+- Settings that belong to the person (profile, notifications, sessions, keyboard shortcuts) go in Account settings (`/profile/*`, `AccountLayout`), each as its own page. Workspace Settings (`/settings/*`) has only what belongs to the workspace (user, 2026-10-03).
 
 ## Reference discipline
 - **When the user names a screen by the reference's name, build that exact screen at the reference's mount point — not a lookalike inside an existing page.** "Server settings" in the chat reference is its own route whose sidebar replaces the channel sidebar, opened from the server dropdown; I first put its tabs into the app-wide Settings page and had to redo it (2026-08-29). Also copy data semantics, not just markup: the member list groups by primary role and names take the highest role's color.

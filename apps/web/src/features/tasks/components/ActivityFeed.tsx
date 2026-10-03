@@ -11,6 +11,7 @@ import { buildMentionTokens } from '@/lib/mentions'
 import { activityChangeText, agoLabel, buildFeed, type CommentThread } from '@/features/tasks/tasksLib'
 import { CommentItem } from './CommentItem'
 import { TaskCommentComposer } from './TaskCommentComposer'
+import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
 interface ActivityFeedProps {
   task: Task
@@ -77,10 +78,19 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
           <Fragment key={item.id}>
             <TimelineRow>
               <span className="inline-flex size-3.5 shrink-0 items-center justify-center">
-                {status ? <TaskStatusIcon status={status} size={14} /> : <UserAvatar user={actor} size={14} />}
+                {status ? (
+                  <TaskStatusIcon status={status} size={14} />
+                ) : (
+                  <ProfileTrigger userId={actor?.id} name={actor?.name ?? 'Someone'} kind="avatar" tabIndex={-1} className="relative z-1 flex">
+                    <UserAvatar user={actor} size={14} />
+                  </ProfileTrigger>
+                )}
               </span>
               <span className="truncate">
-                <span className="font-medium text-foreground">{item.actorName ?? actor?.name ?? 'Someone'}</span> <ActivityText item={item} state={state} onOpenTask={onOpenTask} /> · {agoLabel(item.createdAt)}
+                <ProfileTrigger userId={actor?.id} name={actor?.name ?? item.actorName ?? 'Someone'} className="font-medium text-foreground">
+                  {item.actorName ?? actor?.name ?? 'Someone'}
+                </ProfileTrigger>{' '}
+                <ActivityText item={item} state={state} onOpenTask={onOpenTask} /> · {agoLabel(item.createdAt)}
               </span>
             </TimelineRow>
             {hiddenCount > 0 && item.id === runId ? (
