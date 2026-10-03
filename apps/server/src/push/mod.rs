@@ -8,7 +8,9 @@
 //! notifications (task assigned, mentions) are picked up from the `notifications` table by
 //! [`PushService::run_inbox_service`], so their writers do not know about push.
 //!
-//! A push is best effort: it is tried once, and a restart loses the ones that wait.
+//! A push is best effort: a busy push service gets it a second time, and a restart loses the
+//! ones that wait. A notification is worth little minutes later, and the unread counts and
+//! the Inbox show what was missed, so pushes are not kept in the job queue.
 
 pub mod webpush;
 
@@ -47,6 +49,10 @@ const TITLE_CHARS: usize = 120;
 const BODY_CHARS: usize = 180;
 /// The browsers one user gets pushes on. The oldest go when another subscribes.
 const MAX_SUBSCRIPTIONS: i64 = 20;
+/// Pushes to a subscription that may fail in a row before it is removed.
+const MAX_FAILURES: i64 = 5;
+/// How long a push waits before it goes again to a push service that was busy.
+const RETRY_AFTER: Duration = Duration::from_secs(1);
 /// The members of a conversation who are notified of a message at the same time.
 const CONCURRENT_MEMBERS: usize = 8;
 /// The channel tokens of one message that are looked up; the others show as `#channel`.
@@ -169,7 +175,10 @@ pub struct NotificationPrefs {
 pub enum SendError {
     /// The browser unsubscribed: the subscription can go.
     Gone,
+    /// The push service refused the push: the same push would be refused again.
     Failed(String),
+    /// The push service is busy or did not answer: the push can go again in a moment.
+    Busy(String),
 }
 
 /// The server's identity towards the push services.
@@ -231,7 +240,6 @@ impl PushSender for WebPushSender {
     ) -> BoxFuture<'static, Result<(), SendError>> {
         let client = self.client.clone();
         Box::pin(async move {
-            let failed = |reason: &str| SendError::Failed(reason.to_owned());
             if !allowed_endpoint(&subscription.endpoint) {
                 return Err(SendError::Gone);
             }
@@ -262,10 +270,13 @@ impl PushSender for WebPushSender {
                 .timeout(SEND_TIMEOUT)
                 .send()
                 .await
-                .map_err(|_| failed("the push service did not answer"))?;
+                .map_err(|_| SendError::Busy("the push service did not answer".to_owned()))?;
             match response.status().as_u16() {
                 200..=299 => Ok(()),
                 404 | 410 => Err(SendError::Gone),
+                status @ (429 | 500..=599) => {
+                    Err(SendError::Busy(format!("push service status {status}")))
+                }
                 status => Err(SendError::Failed(format!("push service status {status}"))),
             }
         })
@@ -575,23 +586,54 @@ impl PushService {
                 p256dh: row.get("p256dh"),
                 auth: row.get("auth"),
             };
-            let send = self
-                .inner
-                .sender
-                .send(vapid.clone(), subscription, payload.clone());
-            Some(async move { (id, send.await) })
+            let sender = Arc::clone(&self.inner.sender);
+            let (vapid, payload) = (vapid.clone(), payload.clone());
+            Some(async move {
+                let first = sender.send(vapid.clone(), subscription.clone(), payload.clone());
+                let mut result = first.await;
+                // A busy push service gets the push once more.
+                if matches!(result, Err(SendError::Busy(_))) {
+                    tokio::time::sleep(RETRY_AFTER).await;
+                    result = sender.send(vapid, subscription, payload).await;
+                }
+                (id, result)
+            })
         });
         let mut sent = 0;
         for (id, result) in futures_util::future::join_all(sends).await {
             match result {
-                Ok(()) => sent += 1,
+                Ok(()) => {
+                    sent += 1;
+                    sqlx::query(
+                        "UPDATE push_subscriptions SET failures = 0 WHERE id = ? AND failures > 0",
+                    )
+                    .bind(id)
+                    .execute(self.database.pool())
+                    .await?;
+                }
                 Err(SendError::Gone) => {
                     sqlx::query("DELETE FROM push_subscriptions WHERE id = ?")
                         .bind(id)
                         .execute(self.database.pool())
                         .await?;
                 }
-                Err(SendError::Failed(reason)) => tracing::warn!(reason, "push not sent"),
+                // A subscription that fails again and again (a key the push service no longer
+                // takes, a service that is gone) is removed; the browser subscribes again when
+                // the user turns notifications on.
+                Err(SendError::Failed(reason) | SendError::Busy(reason)) => {
+                    tracing::warn!(reason, "push not sent");
+                    sqlx::query(
+                        "UPDATE push_subscriptions SET failures = failures + 1 WHERE id = ?",
+                    )
+                    .bind(&id)
+                    .execute(self.database.pool())
+                    .await?;
+                    sqlx::query("DELETE FROM push_subscriptions WHERE id = ? AND failures >= ?")
+                        .bind(&id)
+                        .bind(MAX_FAILURES)
+                        .execute(self.database.pool())
+                        .await?;
+                }
             }
         }
         Ok(sent)

@@ -278,3 +278,32 @@ async fn a_member_reads_profiles_of_the_workspace_and_a_note_is_its_authors_only
     assert_eq!(status, StatusCode::NOT_FOUND);
     let _ = (ada, bob);
 }
+
+#[tokio::test]
+async fn saves_of_different_parts_at_the_same_time_keep_both_parts() {
+    let fixture = Fixture::new().await;
+    let patch = |body: Value| {
+        fixture.send(
+            "PATCH",
+            "/api/v1/auth/me",
+            &fixture.owner_cookie,
+            Some(body),
+        )
+    };
+    // Each request names one part: neither may write the other part back to what it was.
+    for round in 0..10 {
+        let title = format!("Title {round}");
+        let bio = format!("Bio {round}");
+        let (first, second) = tokio::join!(
+            patch(json!({ "display_name": "Owner", "title": title })),
+            patch(json!({ "display_name": "Owner", "bio": bio })),
+        );
+        assert_eq!(first.0, StatusCode::OK);
+        assert_eq!(second.0, StatusCode::OK);
+        let (_, me) = fixture
+            .send("GET", "/api/v1/auth/me", &fixture.owner_cookie, None)
+            .await;
+        assert_eq!(me["title"], title.as_str());
+        assert_eq!(me["bio"], bio.as_str());
+    }
+}

@@ -16,10 +16,13 @@ use orbit_server::task_routes::{TaskState, task_router};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-/// Records what it is asked to send; an endpoint with "gone" in it answers as an ended one.
+/// Records what it is asked to send. An endpoint with "gone" in it answers as an ended one,
+/// one with "refused" is refused every time, and one with "busy" is busy the first time.
 #[derive(Default)]
 struct FakeSender {
     sent: Mutex<Vec<(String, Value)>>,
+    /// Every endpoint a send was tried for, with the ones that failed.
+    tried: Mutex<Vec<String>>,
 }
 
 impl PushSender for FakeSender {
@@ -29,14 +32,24 @@ impl PushSender for FakeSender {
         subscription: Subscription,
         payload: Vec<u8>,
     ) -> BoxFuture<'static, Result<(), SendError>> {
-        let gone = subscription.endpoint.contains("gone");
-        if !gone {
-            self.sent.lock().unwrap().push((
-                subscription.endpoint,
-                serde_json::from_slice(&payload).unwrap(),
-            ));
-        }
-        Box::pin(async move { if gone { Err(SendError::Gone) } else { Ok(()) } })
+        let endpoint = subscription.endpoint;
+        let earlier = {
+            let mut tried = self.tried.lock().unwrap();
+            tried.push(endpoint.clone());
+            tried.iter().filter(|tried| **tried == endpoint).count() - 1
+        };
+        let result = if endpoint.contains("gone") {
+            Err(SendError::Gone)
+        } else if endpoint.contains("refused") {
+            Err(SendError::Failed("refused".to_owned()))
+        } else if endpoint.contains("busy") && earlier == 0 {
+            Err(SendError::Busy("busy".to_owned()))
+        } else {
+            let payload = serde_json::from_slice(&payload).unwrap();
+            self.sent.lock().unwrap().push((endpoint, payload));
+            Ok(())
+        };
+        Box::pin(async move { result })
     }
 }
 
@@ -524,4 +537,55 @@ async fn inbox_notifications_are_pushed_once() {
     assert!(sent[0].1["icon"].is_null());
     assert_eq!(fixture.push.push_inbox().await.unwrap(), 0);
     assert!(fixture.sent().is_empty());
+}
+
+#[tokio::test]
+async fn a_busy_push_service_gets_the_push_again_and_a_subscription_that_keeps_failing_goes() {
+    let fixture = Fixture::new().await;
+    let owner = fixture.owner_id;
+    let busy = "https://fcm.googleapis.com/fcm/send/busy";
+    let refused = "https://fcm.googleapis.com/fcm/send/refused";
+    fixture.subscribe(&fixture.owner_cookie, busy).await;
+    fixture.subscribe(&fixture.owner_cookie, refused).await;
+    let failures = |endpoint: &'static str| {
+        let pool = fixture.database.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT failures FROM push_subscriptions WHERE endpoint = ?",
+            )
+            .bind(endpoint)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    // The busy one takes the push at the second try and does not count as failed.
+    assert_eq!(fixture.push.push(owner, &notice()).await.unwrap(), 1);
+    assert_eq!(fixture.sent()[0].0, busy);
+    let tries = |endpoint: &str| {
+        let tried = fixture.sender.tried.lock().unwrap();
+        tried.iter().filter(|tried| *tried == endpoint).count()
+    };
+    assert_eq!(tries(busy), 2);
+    assert_eq!(tries(refused), 1, "a refused push is not sent again");
+    assert_eq!(failures(busy).await, Some(0));
+    assert_eq!(failures(refused).await, Some(1));
+
+    // The refused one is removed at its fifth failure in a row.
+    for _ in 0..3 {
+        fixture.push.push(owner, &notice()).await.unwrap();
+    }
+    assert_eq!(failures(refused).await, Some(4));
+    fixture.push.push(owner, &notice()).await.unwrap();
+    assert_eq!(failures(refused).await, None);
+    assert_eq!(failures(busy).await, Some(0));
+
+    // A push that goes through sets the count back.
+    sqlx::query("UPDATE push_subscriptions SET failures = 3")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    fixture.push.push(owner, &notice()).await.unwrap();
+    assert_eq!(failures(busy).await, Some(0));
 }

@@ -45,12 +45,16 @@ self.addEventListener('push', (event) => {
   )
 })
 
+const OUTSIDE_APP = /^\/(login|setup|recovery|accept-invitation|oauth)(\/|$)/
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const url = appPath(event.notification.data && event.notification.data.url)
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (windows) => {
-      const open = windows.find((client) => client.focused) || windows.find((client) => client.visibilityState === 'visible') || windows[0]
+      // A window on a page outside the app (sign-in, setup, an invitation) has nobody who takes the message.
+      const inApp = windows.filter((client) => !OUTSIDE_APP.test(new URL(client.url).pathname))
+      const open = inApp.find((client) => client.focused) || inApp.find((client) => client.visibilityState === 'visible') || inApp[0]
       if (!open) return self.clients.openWindow(url)
       open.postMessage({ type: 'orbit:navigate', url })
       try {

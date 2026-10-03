@@ -295,6 +295,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    41,
+                    include_str!("../../../../apps/server/migrations/0041_push_failures.sql"),
+                    false,
+                ),
             ],
         )
     }

@@ -148,6 +148,17 @@ pub struct ProfileFields {
     pub phone: Option<String>,
 }
 
+/// A change to the optional parts of a profile. For each part: `None` leaves it as it is,
+/// `Some(None)` removes it and `Some(Some(text))` sets it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProfileChanges {
+    pub title: Option<Option<String>>,
+    pub pronouns: Option<Option<String>>,
+    pub timezone: Option<Option<String>>,
+    pub bio: Option<Option<String>>,
+    pub phone: Option<Option<String>>,
+}
+
 #[derive(Debug, Error)]
 pub enum SuspensionError {
     #[error("only an installation administrator may suspend accounts")]
@@ -737,32 +748,43 @@ impl IdentityRepository {
         )
     }
 
-    /// Replaces the user's name and the optional parts of their profile. Callers check the
-    /// lengths first.
+    /// Sets the user's name and changes the optional parts of their profile. The parts that
+    /// the change leaves out stay as they are in the same statement, so two saves at once do
+    /// not undo each other. Callers check the lengths first.
     pub async fn update_profile_audited(
         &self,
         user_id: Id,
         display_name: &str,
-        fields: &ProfileFields,
+        changes: &ProfileChanges,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let changed = sqlx::query(
-            "UPDATE users SET display_name = ?, title = ?, pronouns = ?, timezone = ?, bio = ?, phone = ?, \
+        let mut update = sqlx::query(
+            "UPDATE users SET display_name = ?, \
+             title = CASE WHEN ? THEN ? ELSE title END, \
+             pronouns = CASE WHEN ? THEN ? ELSE pronouns END, \
+             timezone = CASE WHEN ? THEN ? ELSE timezone END, \
+             bio = CASE WHEN ? THEN ? ELSE bio END, \
+             phone = CASE WHEN ? THEN ? ELSE phone END, \
              updated_at = ?, version = version + 1 WHERE id = ?",
         )
-        .bind(display_name)
-        .bind(&fields.title)
-        .bind(&fields.pronouns)
-        .bind(&fields.timezone)
-        .bind(&fields.bio)
-        .bind(&fields.phone)
-        .bind(now.as_millis())
-        .bind(user_id.to_string())
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected();
+        .bind(display_name);
+        for part in [
+            &changes.title,
+            &changes.pronouns,
+            &changes.timezone,
+            &changes.bio,
+            &changes.phone,
+        ] {
+            update = update.bind(part.is_some()).bind(part.clone().flatten());
+        }
+        let changed = update
+            .bind(now.as_millis())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
         if changed == 0 {
             return Err(IdentityError::InvalidCredential);
         }
