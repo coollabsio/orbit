@@ -24,8 +24,8 @@ use utoipa::ToSchema;
 use crate::audit::AuditOutcome;
 use crate::live::LiveHub;
 use crate::repositories::identity::{
-    AuthenticatedSession, IdentityError, IdentityRepository, ProfileFields, SetupError,
-    SetupRequest, UserStatus,
+    AuthenticatedSession, IdentityError, IdentityRepository, ProfileChanges, ProfileFields,
+    SetupError, SetupRequest, UserStatus,
 };
 
 pub(crate) mod push;
@@ -691,18 +691,24 @@ const MAX_PRONOUNS_CHARS: usize = 40;
 const MAX_TIMEZONE_CHARS: usize = 64;
 const MAX_BIO_CHARS: usize = 500;
 
-/// A part of the profile from a request: `current` when absent, nothing when empty; `None`
-/// when it is too long.
+/// The change a request asks for one part of the profile: none when the part is absent, its
+/// removal when it is empty. `Err` when the text is too long or `shaped` says no.
 fn profile_part(
     sent: Option<String>,
-    current: Option<String>,
     max_chars: usize,
-) -> Option<Option<String>> {
+    shaped: impl Fn(&str) -> bool,
+) -> Result<Option<Option<String>>, ()> {
     let Some(sent) = sent else {
-        return Some(current);
+        return Ok(None);
     };
     let sent = sent.trim();
-    (sent.chars().count() <= max_chars).then(|| (!sent.is_empty()).then(|| sent.to_owned()))
+    if sent.is_empty() {
+        return Ok(Some(None));
+    }
+    if sent.chars().count() > max_chars || !shaped(sent) {
+        return Err(());
+    }
+    Ok(Some(Some(sent.to_owned())))
 }
 
 /// A phone number as people write it: at least one digit, and digits, spaces and `+ - ( ) .`
@@ -741,23 +747,17 @@ async fn update_me(
         ));
     }
     let display_name = display_name.to_owned();
-    let current = state
-        .repository
-        .profile_fields(session.user.id)
-        .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-    let fields = (|| {
-        Some(ProfileFields {
-            title: profile_part(body.title, current.title, MAX_TITLE_CHARS)?,
-            pronouns: profile_part(body.pronouns, current.pronouns, MAX_PRONOUNS_CHARS)?,
-            timezone: profile_part(body.timezone, current.timezone, MAX_TIMEZONE_CHARS)
-                .filter(|zone| zone.as_deref().is_none_or(timezone_shaped))?,
-            bio: profile_part(body.bio, current.bio, MAX_BIO_CHARS)?,
-            phone: profile_part(body.phone, current.phone, MAX_PHONE_CHARS)
-                .filter(|phone| phone.as_deref().is_none_or(phone_shaped))?,
+    let any = |_: &str| true;
+    let changes = (|| {
+        Ok(ProfileChanges {
+            title: profile_part(body.title, MAX_TITLE_CHARS, any)?,
+            pronouns: profile_part(body.pronouns, MAX_PRONOUNS_CHARS, any)?,
+            timezone: profile_part(body.timezone, MAX_TIMEZONE_CHARS, timezone_shaped)?,
+            bio: profile_part(body.bio, MAX_BIO_CHARS, any)?,
+            phone: profile_part(body.phone, MAX_PHONE_CHARS, phone_shaped)?,
         })
     })()
-    .ok_or_else(|| {
+    .map_err(|(): ()| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_profile",
@@ -772,7 +772,7 @@ async fn update_me(
         .update_profile_audited(
             session.user.id,
             &display_name,
-            &fields,
+            &changes,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
