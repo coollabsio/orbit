@@ -221,9 +221,10 @@ export function useTask(workspaceId: string, taskId: string | undefined) {
 }
 
 /**
- * Route segments that name a task by identifier (`ENG-12`), resolved to its id. Outside `tasks.all` on purpose: a
- * task write must not refetch it (after a move the old identifier names nothing), and it never goes stale (numbers
- * are never reused, so an old identifier keeps leading to its task, whose page then replaces the URL).
+ * Route segments that name a task by identifier (`ENG-12`), resolved to its id. Outside `tasks.all` on purpose: an
+ * identifier always names the same task, so a task write has nothing to refetch here and an entry never goes stale.
+ * Numbers are never reused and the server keeps resolving a task's old identifiers after it moves to another
+ * project; the task page then replaces the URL with the current one.
  */
 const taskAliasKey = (workspaceId: string, param: string) => ['task-alias', workspaceId, normalizeTaskParam(param)] as const
 

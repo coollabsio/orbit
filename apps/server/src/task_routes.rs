@@ -24,7 +24,7 @@ use crate::repositories::task_filter::{
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
     CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
-    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate,
+    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
 
@@ -2097,17 +2097,7 @@ fn project_key(
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<String, ApiError> {
-    let value = value.trim().to_ascii_uppercase();
-    if value.is_empty()
-        || value.len() > 20
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
-    {
-        Err(validation("key", instance, request_id))
-    } else {
-        Ok(value)
-    }
+    normalize_project_key(&value).ok_or_else(|| validation("key", instance, request_id))
 }
 
 fn color(

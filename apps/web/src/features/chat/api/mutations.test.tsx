@@ -22,6 +22,7 @@ const general: Conversation = {
   memberIds: ['u1', 'u2'],
   isMember: true,
   isDefault: true,
+  selfDm: false,
   archived: false,
   createdBy: 'u2',
   createdAt: 1,

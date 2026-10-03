@@ -420,6 +420,11 @@ export type ChatWriteConversationRecord = {
          * Order inside its category.
          */
         position: number;
+        /**
+         * A DM that was opened with its creator alone: their own place for notes. A DM whose other
+         * members left the workspace is not one.
+         */
+        self_dm: boolean;
         topic: string;
     };
     seq: number;
@@ -615,6 +620,11 @@ export type ConversationRecord = {
      * Order inside its category.
      */
     position: number;
+    /**
+     * A DM that was opened with its creator alone: their own place for notes. A DM whose other
+     * members left the workspace is not one.
+     */
+    self_dm: boolean;
     topic: string;
 };
 

@@ -6,8 +6,23 @@ export interface WorkspaceTaskSnapshot {
   entries: Array<[readonly unknown[], unknown]>
 }
 
+/** A row of a cached relations list (`TaskRelationRecord`): the other task as a short `RelatedTask`. */
+function isRelationOf(item: unknown, taskId: string): item is { task: Record<string, unknown> } {
+  if (!item || typeof item !== 'object' || !('task' in item)) return false
+  const related = item.task
+  return related !== null && typeof related === 'object' && 'id' in related && related.id === taskId && 'status_id' in related
+}
+
 function mapTaskData(data: unknown, taskId: string, replace: (task: TaskRecord) => TaskRecord): unknown {
   if (!data || typeof data !== 'object') return data
+  // a relations list: the related task keeps its own fields (status, title, version…) and takes their new values
+  if (Array.isArray(data)) {
+    return data.map((item) => {
+      if (!isRelationOf(item, taskId)) return item
+      const next = replace(item.task as TaskRecord) as Record<string, unknown>
+      return { ...item, task: Object.fromEntries(Object.keys(item.task).map((key) => [key, next[key]])) }
+    })
+  }
   if ('id' in data && data.id === taskId && 'workspace_id' in data) return replace(data as TaskRecord)
   if ('items' in data && Array.isArray(data.items)) {
     return { ...data, items: data.items.map((item) => mapTaskData(item, taskId, replace)) }
@@ -18,6 +33,7 @@ function mapTaskData(data: unknown, taskId: string, replace: (task: TaskRecord) 
   return data
 }
 
+/** Patches every cached copy of a task: detail, lists, sub-issues, and the task inside other tasks' relations lists. */
 export function patchWorkspaceTask(
   queryClient: QueryClient,
   workspaceId: string,
@@ -36,8 +52,9 @@ export function restoreWorkspaceTasks(queryClient: QueryClient, snapshot: Worksp
 }
 
 /**
- * Replaces the cached copies of a task with a server record. Create/update/bulk responses carry no `ancestors`
- * (GET /tasks/{id} only), so a cached breadcrumb is kept until the refetch that follows every write replaces it.
+ * Replaces the cached copies of a task (relation rows included) with a server record. Create/update/bulk responses
+ * carry no `ancestors` (GET /tasks/{id} only), so a cached breadcrumb is kept until the refetch that follows every
+ * write replaces it.
  */
 export function reconcileWorkspaceTask(
   queryClient: QueryClient,

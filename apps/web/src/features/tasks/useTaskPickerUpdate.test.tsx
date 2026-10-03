@@ -68,3 +68,79 @@ test('a failed save shows a toast with Retry and drops the waiting pick', async 
   expect(bodies).toEqual([{ expected_version: 1, status_id: 'doing' }])
   errorToast.mockRestore()
 })
+
+test('two pickers of one task share its queue: the second waits and sends the version the first save returned', async () => {
+  const api = heldApi()
+  const task = { id: 'task-shared', version: 1 }
+  // e.g. the status and priority pickers of one list row
+  const { result } = renderHook(() => ({
+    status: useTaskPickerUpdate(task, 'Status update failed.'),
+    priority: useTaskPickerUpdate(task, 'Priority update failed.'),
+  }), { wrapper })
+
+  act(() => result.current.status({ status_id: 'doing' }))
+  await waitFor(() => expect(api.bodies).toHaveLength(1))
+  act(() => result.current.priority({ priority: 'high' }))
+  expect(api.bodies).toEqual([{ expected_version: 1, status_id: 'doing' }])
+
+  act(() => api.release())
+  await waitFor(() => expect(api.bodies).toHaveLength(2))
+  expect(api.bodies[1]).toEqual({ expected_version: 2, priority: 'high' })
+  act(() => api.release())
+})
+
+test('waiting changes from different pickers merge into one save; a later value for the same field wins', async () => {
+  const api = heldApi()
+  const task = { id: 'task-merged', version: 4 }
+  const { result } = renderHook(() => ({
+    status: useTaskPickerUpdate(task, 'Status update failed.'),
+    priority: useTaskPickerUpdate(task, 'Priority update failed.'),
+  }), { wrapper })
+
+  act(() => result.current.status({ status_id: 'doing' }))
+  await waitFor(() => expect(api.bodies).toHaveLength(1))
+  act(() => result.current.status({ status_id: 'review' }))
+  act(() => result.current.priority({ priority: 'high' }))
+  act(() => result.current.status({ status_id: 'done' }))
+
+  act(() => api.release())
+  await waitFor(() => expect(api.bodies).toHaveLength(2))
+  expect(api.bodies[1]).toEqual({ expected_version: 5, status_id: 'done', priority: 'high' })
+  act(() => api.release())
+  // the queue is idle again: nothing else goes out, and the next pick uses the caller's version
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(api.bodies).toHaveLength(2)
+})
+
+test('a waiting change still goes out when the picker that started the save has unmounted', async () => {
+  const api = heldApi()
+  const task = { id: 'task-unmounted', version: 1 }
+  // a list row whose status change makes it leave the filtered list, and the same task in a relation row
+  const row = renderHook(() => useTaskPickerUpdate(task, 'Status update failed.'), { wrapper })
+  const relation = renderHook(() => useTaskPickerUpdate(task, 'Status update failed.'), { wrapper })
+
+  act(() => row.result.current({ status_id: 'done' }))
+  await waitFor(() => expect(api.bodies).toHaveLength(1))
+  row.unmount()
+  act(() => relation.result.current({ priority: 'low' }))
+
+  act(() => api.release())
+  await waitFor(() => expect(api.bodies).toHaveLength(2))
+  expect(api.bodies[1]).toEqual({ expected_version: 2, priority: 'low' })
+  act(() => api.release())
+})
+
+test('different tasks do not wait for each other', async () => {
+  const api = heldApi()
+  const { result } = renderHook(() => ({
+    first: useTaskPickerUpdate({ id: 'task-a', version: 1 }, 'Status update failed.'),
+    second: useTaskPickerUpdate({ id: 'task-b', version: 7 }, 'Status update failed.'),
+  }), { wrapper })
+
+  act(() => result.current.first({ status_id: 'doing' }))
+  act(() => result.current.second({ status_id: 'done' }))
+  await waitFor(() => expect(api.bodies).toHaveLength(2))
+  expect(api.bodies).toEqual([{ expected_version: 1, status_id: 'doing' }, { expected_version: 7, status_id: 'done' }])
+  act(() => api.release())
+  act(() => api.release())
+})

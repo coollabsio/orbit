@@ -5,7 +5,7 @@ import { testMessage } from './testMessage'
 
 const conversation = (id: string, overrides: Partial<Conversation> = {}): Conversation => ({
   id, kind: 'public', name: id, topic: '', categoryId: null, position: 0, memberIds: ['u1'], isMember: true,
-  isDefault: false, archived: false, createdBy: 'u1', createdAt: 0, lastMessageAt: null, ...overrides,
+  isDefault: false, selfDm: false, archived: false, createdBy: 'u1', createdAt: 0, lastMessageAt: null, ...overrides,
 })
 const state = (conversationId: string, overrides: Partial<ConversationState> = {}): ConversationState => ({
   conversationId, lastReadMessageId: null, unreadCount: 0, mentionCount: 0, notify: 'mentions', favorite: false, ...overrides,
@@ -73,22 +73,23 @@ test('sidebar sections: favorites, categories by position, Channels, then DMs by
 test('the DM with yourself comes first among the direct messages', () => {
   const conversations = [
     conversation('d-new', { kind: 'dm', name: '', memberIds: ['u1', 'u2'], lastMessageAt: 20 }),
-    conversation('notes', { kind: 'dm', name: '', memberIds: ['u1'], lastMessageAt: 5 }),
+    conversation('notes', { kind: 'dm', name: '', memberIds: ['u1'], selfDm: true, lastMessageAt: 5 }),
     conversation('d-old', { kind: 'dm', name: '', memberIds: ['u1', 'u3'], lastMessageAt: 10 }),
   ]
-  const dms = buildSidebarSections(conversations, [], [], 'u1').find((section) => section.kind === 'dms')
+  const dms = buildSidebarSections(conversations, [], []).find((section) => section.kind === 'dms')
   expect(dms?.conversations.map((item) => item.id)).toEqual(['notes', 'd-new', 'd-old'])
-  expect(isSelfDm(conversations[1], 'u1')).toBe(true)
-  expect(isSelfDm(conversations[0], 'u1')).toBe(false)
-  expect(isSelfDm(conversation('c1', { memberIds: ['u1'] }), 'u1')).toBe(false)
-  expect(isSelfDm(conversations[1], null)).toBe(false)
+  expect(isSelfDm(conversations[1])).toBe(true)
+  expect(isSelfDm(conversations[0])).toBe(false)
+  // a 1:1 DM whose other member left the workspace is not the user's notes
+  expect(isSelfDm(conversation('d-left', { kind: 'dm', memberIds: ['u1'] }))).toBe(false)
 })
 
 test('a DM is titled by its other members', () => {
   const people = [{ id: 'u1', name: 'Me' }, { id: 'u2', name: 'Ada' }, { id: 'u3', name: 'Grace' }]
   expect(dmTitle(conversation('d1', { kind: 'dm', memberIds: ['u1', 'u2'] }), people, 'u1')).toBe('Ada')
   expect(dmTitle(conversation('d2', { kind: 'dm', memberIds: ['u1', 'u2', 'u3'] }), people, 'u1')).toBe('Ada, Grace')
-  expect(dmTitle(conversation('d3', { kind: 'dm', memberIds: ['u1'] }), people, 'u1')).toBe('Me (you)')
+  expect(dmTitle(conversation('d3', { kind: 'dm', memberIds: ['u1'], selfDm: true }), people, 'u1')).toBe('Me (you)')
+  expect(dmTitle(conversation('d4', { kind: 'dm', memberIds: ['u1'] }), people, 'u1')).toBe('Former member')
 })
 
 test('a dropped channel goes before the row, or before the one after it', () => {

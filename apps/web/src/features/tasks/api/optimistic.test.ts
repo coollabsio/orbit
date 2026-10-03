@@ -78,3 +78,35 @@ test('descendants come from every cached task query, at any depth', () => {
   expect(cachedDescendantIds(client, 'workspace-a', 'task-1').sort()).toEqual(['task-2', 'task-3', 'task-4'])
   expect(cachedDescendantIds(client, 'workspace-a', 'task-9')).toEqual([])
 })
+
+test('an update reaches the task inside cached relations lists and sub-issues, and a failed one is rolled back', () => {
+  const client = new QueryClient()
+  const related = { id: 'task-1', project_id: 'project-1', number: 1, status_id: 'todo', title: 'Before', version: 1 }
+  const other = { ...related, id: 'task-2', title: 'Other' }
+  const relations = [
+    { id: 'rel-1', type: 'blocks', direction: 'outgoing', created_at: '2026-09-04T10:00:00Z', task: related },
+    { id: 'rel-2', type: 'related', direction: 'incoming', created_at: '2026-09-04T10:00:00Z', task: other },
+  ]
+  const relationsKey = queryKeys.taskRelations('workspace-a', 'task-9')
+  const subIssuesKey = [...queryKeys.tasks.all('workspace-a'), 'sub-issues', 'task-9']
+  const commentsKey = queryKeys.comments('workspace-a', 'task-9')
+  const comments = [{ id: 'task-1', body: 'a comment is not a task' }]
+  client.setQueryData(relationsKey, relations)
+  client.setQueryData(subIssuesKey, { items: [task('workspace-a')], next_cursor: null })
+  client.setQueryData(commentsKey, comments)
+  const relatedTasks = () => client.getQueryData<typeof relations>(relationsKey)!.map((relation) => relation.task)
+
+  const snapshot = patchWorkspaceTask(client, 'workspace-a', 'task-1', { status_id: 'done', priority: 'high' })
+  // only the fields a relation row carries; the version waits for the server
+  expect(relatedTasks()).toEqual([{ ...related, status_id: 'done' }, other])
+  expect(client.getQueryData<PageTaskRecord>(subIssuesKey)?.items[0]).toMatchObject({ status_id: 'done', priority: 'high', version: 1 })
+
+  restoreWorkspaceTasks(client, snapshot)
+  expect(client.getQueryData<unknown>(relationsKey)).toEqual(relations)
+
+  patchWorkspaceTask(client, 'workspace-a', 'task-1', { status_id: 'done' })
+  reconcileWorkspaceTask(client, 'workspace-a', { ...task('workspace-a', 2), status_id: 'done', title: 'Server title' })
+  expect(relatedTasks()).toEqual([{ ...related, status_id: 'done', title: 'Server title', version: 2 }, other])
+  expect(client.getQueryData<PageTaskRecord>(subIssuesKey)?.items[0]).toMatchObject({ status_id: 'done', title: 'Server title', version: 2 })
+  expect(client.getQueryData<unknown>(commentsKey)).toEqual(comments)
+})

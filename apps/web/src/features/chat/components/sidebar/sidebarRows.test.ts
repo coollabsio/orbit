@@ -13,6 +13,7 @@ const conversation = (id: string, kind: Conversation['kind'] = 'public'): Conver
   memberIds: [],
   isMember: true,
   isDefault: false,
+  selfDm: false,
   archived: false,
   createdBy: 'u1',
   createdAt: 0,

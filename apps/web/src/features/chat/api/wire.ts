@@ -39,6 +39,7 @@ export function toConversation(record: ConversationRecord, currentUserId: string
     memberIds: record.member_ids,
     isMember: record.member_ids.includes(currentUserId),
     isDefault: record.is_default,
+    selfDm: record.self_dm,
     archived: record.archived,
     createdBy: record.created_by,
     createdAt: millis(record.created_at),

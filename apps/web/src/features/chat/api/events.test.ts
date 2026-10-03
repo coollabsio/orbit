@@ -9,7 +9,7 @@ const W = 'w1'
 
 const conversation = (id: string, overrides: Partial<Conversation> = {}): Conversation => ({
   id, kind: 'public', name: id, topic: '', categoryId: null, position: 0, memberIds: ['u1'], isMember: true,
-  isDefault: false, archived: false, createdBy: 'u1', createdAt: 0, lastMessageAt: 100, ...overrides,
+  isDefault: false, selfDm: false, archived: false, createdBy: 'u1', createdAt: 0, lastMessageAt: 100, ...overrides,
 })
 const state = (conversationId: string, unreadCount = 0): ConversationState => ({
   conversationId, lastReadMessageId: null, unreadCount, mentionCount: 0, notify: 'mentions', favorite: false,

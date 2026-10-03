@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        38
+        39
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 38
+            binary_version: 39
         }
     ));
 }
@@ -1943,13 +1943,36 @@ async fn task_numbers_migration_backfills_allocates_and_never_reuses() {
     assert_eq!(db.scalar::<i64>(&number(first)).await.unwrap(), 2);
     assert_eq!(db.scalar::<i64>(&counter(ops)).await.unwrap(), 2);
     assert_eq!(db.scalar::<i64>(&counter(eng)).await.unwrap(), 4);
-    // Rewriting the same project keeps the number.
+    // The old identifier stays behind as an alias, though the same UPDATE cleared `number`.
+    let aliases = |task: Id| {
+        format!(
+            "SELECT COALESCE(GROUP_CONCAT(project_key || '-' || number, ','), '') FROM ( \
+             SELECT projects.project_key, task_number_aliases.number FROM task_number_aliases \
+             JOIN projects ON projects.id = task_number_aliases.project_id \
+             WHERE task_number_aliases.task_id = '{task}' \
+             ORDER BY projects.project_key, task_number_aliases.number)"
+        )
+    };
+    assert_eq!(db.scalar::<String>(&aliases(first)).await.unwrap(), "ENG-1");
+    // Moving back takes a new number; both earlier identifiers remain aliases.
+    db.execute(&format!(
+        "UPDATE tasks SET project_id = '{eng}', status_id = '{eng_todo}', number = NULL WHERE id = '{first}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&number(first)).await.unwrap(), 5);
+    assert_eq!(
+        db.scalar::<String>(&aliases(first)).await.unwrap(),
+        "ENG-1,OPS-2"
+    );
+    // Rewriting the same project keeps the number and leaves no alias.
     db.execute(&format!(
         "UPDATE tasks SET project_id = '{eng}' WHERE id = '{second}'"
     ))
     .await
     .unwrap();
     assert_eq!(db.scalar::<i64>(&number(second)).await.unwrap(), 2);
+    assert_eq!(db.scalar::<String>(&aliases(second)).await.unwrap(), "");
 
     // An explicit number (an import) moves the counter forward only.
     let imported = Id::new_v7();
@@ -1960,6 +1983,16 @@ async fn task_numbers_migration_backfills_allocates_and_never_reuses() {
     .await
     .unwrap();
     assert_eq!(db.scalar::<i64>(&counter(eng)).await.unwrap(), 10);
+    // Aliases go with their task.
+    db.execute(&format!("DELETE FROM tasks WHERE id = '{first}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM task_number_aliases")
+            .await
+            .unwrap(),
+        0
+    );
     let error = db
         .execute(&format!(
             "UPDATE tasks SET number = 2 WHERE id = '{fourth}'"

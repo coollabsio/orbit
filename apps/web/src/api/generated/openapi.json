@@ -26480,6 +26480,7 @@
               "position",
               "member_ids",
               "is_default",
+              "self_dm",
               "archived",
               "created_by",
               "created_at",
@@ -26533,6 +26534,10 @@
                 "type": "integer",
                 "format": "int64",
                 "description": "Order inside its category."
+              },
+              "self_dm": {
+                "type": "boolean",
+                "description": "A DM that was opened with its creator alone: their own place for notes. A DM whose other\nmembers left the workspace is not one."
               },
               "topic": {
                 "type": "string"
@@ -27012,6 +27017,7 @@
           "position",
           "member_ids",
           "is_default",
+          "self_dm",
           "archived",
           "created_by",
           "created_at",
@@ -27065,6 +27071,10 @@
             "type": "integer",
             "format": "int64",
             "description": "Order inside its category."
+          },
+          "self_dm": {
+            "type": "boolean",
+            "description": "A DM that was opened with its creator alone: their own place for notes. A DM whose other\nmembers left the workspace is not one."
           },
           "topic": {
             "type": "string"

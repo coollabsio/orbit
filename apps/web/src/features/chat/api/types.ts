@@ -17,6 +17,8 @@ export interface Conversation {
   isMember: boolean
   /** `#general`: everybody is in it and it cannot be left, archived or made private. */
   isDefault: boolean
+  /** A DM the user opened with themselves alone: their notes. A DM whose other members left is not one. */
+  selfDm: boolean
   archived: boolean
   createdBy: string
   createdAt: number

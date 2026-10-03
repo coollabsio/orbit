@@ -208,7 +208,7 @@ export function ChatSidebar() {
     const badge = conversationBadge(conversation, stateById.get(id))
     return badge.bold || badge.count > 0
   }
-  const built = conversations.data && currentUserId ? buildSidebarSections(conversations.data, categories ?? [], states ?? [], currentUserId) : []
+  const built = conversations.data && currentUserId ? buildSidebarSections(conversations.data, categories ?? [], states ?? []) : []
 
   // Channel order and categories are shared, so only a chat admin drags them.
   const placeChannel = usePlaceChannel()

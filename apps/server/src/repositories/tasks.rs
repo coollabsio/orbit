@@ -1288,17 +1288,26 @@ impl TaskRepository {
     }
 
     /// Resolves a `{task_id}` path segment: a task UUID, or an identifier such as `ENG-12`
-    /// (case-insensitive) of a task in a live project of the workspace. Only resolves; the
-    /// caller still reads the task through an access-checked method.
+    /// (case-insensitive) of a task in a live project of the workspace. An identifier the task
+    /// had before it moved to another project keeps resolving while no live task holds it.
+    /// Only resolves; the caller still reads the task through an access-checked method.
     pub async fn resolve_task_id(&self, workspace_id: Id, value: &str) -> Result<Id, TaskError> {
         if let Ok(id) = value.parse::<Id>() {
             return Ok(id);
         }
         let (key, number) = parse_task_identifier(value).ok_or(TaskError::NotFound)?;
         sqlx::query_scalar::<_, String>(
-            "SELECT tasks.id FROM tasks JOIN projects ON projects.id = tasks.project_id \
-             WHERE tasks.workspace_id = ? AND projects.project_key = ? AND tasks.number = ? \
-             AND projects.deleted_at IS NULL",
+            "SELECT task_id FROM ( \
+             SELECT tasks.id AS task_id, 0 AS alias FROM tasks \
+             JOIN projects ON projects.id = tasks.project_id \
+             WHERE projects.workspace_id = ?1 AND projects.project_key = ?2 AND tasks.number = ?3 \
+             AND projects.deleted_at IS NULL \
+             UNION ALL \
+             SELECT task_number_aliases.task_id, 1 FROM task_number_aliases \
+             JOIN projects ON projects.id = task_number_aliases.project_id \
+             WHERE projects.workspace_id = ?1 AND projects.project_key = ?2 \
+             AND task_number_aliases.number = ?3 AND projects.deleted_at IS NULL \
+             ) ORDER BY alias LIMIT 1",
         )
         .bind(workspace_id.to_string())
         .bind(key)
@@ -2477,21 +2486,10 @@ pub(super) async fn update_task_in_tx(
             field: "duplicate_of_id",
         });
     }
-    if update.changes.title.is_some() || update.changes.description.is_some() {
-        let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_issue_links WHERE workspace_id = ? AND task_id = ?)")
-            .bind(workspace_id.to_string())
-            .bind(update.id.to_string())
-            .fetch_one(&mut **tx)
-            .await?;
-        if linked {
-            return Err(TaskError::GithubContentReadOnly);
-        }
-    }
     let project_id = update.changes.project_id.unwrap_or(current.project_id);
     let moves_project = project_id != current.project_id;
-    if moves_project {
-        // GitHub sync finds the task through its project's repository connection; in another
-        // project the next sync would conflict, so the move is refused instead.
+    let edits_content = update.changes.title.is_some() || update.changes.description.is_some();
+    if edits_content || moves_project {
         let linked: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM github_issue_links WHERE workspace_id = ? AND task_id = ?)",
         )
@@ -2500,7 +2498,13 @@ pub(super) async fn update_task_in_tx(
         .fetch_one(&mut **tx)
         .await?;
         if linked {
-            return Err(TaskError::GithubLinkedMove);
+            // GitHub sync finds the task through its project's repository connection; in
+            // another project the next sync would conflict, so a move is refused too.
+            return Err(if edits_content {
+                TaskError::GithubContentReadOnly
+            } else {
+                TaskError::GithubLinkedMove
+            });
         }
     }
     // Only these changes can move the task into or out of the Duplicate status.
@@ -2603,7 +2607,8 @@ pub(super) async fn update_task_in_tx(
         });
     }
     // A project move clears `number`; the `tasks_number_project_change` trigger assigns the
-    // target project's next one (clearing it here keeps the old number from colliding there).
+    // target project's next one (clearing it here keeps the old number from colliding there)
+    // and keeps the old identifier in `task_number_aliases`.
     sqlx::query("UPDATE tasks SET project_id = ?, number = CASE WHEN project_id = ? THEN number ELSE NULL END, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, parent_task_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
         .bind(project_id.to_string()).bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_task_id.map(|id| id.to_string())).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
     if parent_task_id != current.parent_task_id {
@@ -3568,18 +3573,26 @@ fn task_columns() -> String {
     )
 }
 
+/// The one rule for project keys: trimmed and upper-cased, 1 to 20 of `A-Z`, `0-9` and `_`.
+/// Returns the stored form, or `None` when `value` is not a key.
+#[must_use]
+pub fn normalize_project_key(value: &str) -> Option<String> {
+    let key = value.trim().to_ascii_uppercase();
+    let valid = !key.is_empty()
+        && key.len() <= 20
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_');
+    valid.then_some(key)
+}
+
 /// Splits a task identifier such as `eng-12` into the upper-cased project key and the number.
 /// Project keys never contain `-`, so the number follows the last one.
 #[must_use]
 pub fn parse_task_identifier(value: &str) -> Option<(String, i64)> {
     let (key, number) = value.trim().rsplit_once('-')?;
-    let key = key.to_ascii_uppercase();
-    let key_valid = !key.is_empty()
-        && key.len() <= 20
-        && key
-            .bytes()
-            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_');
-    if !key_valid || number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+    let key = normalize_project_key(key)?;
+    if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
     let number = number.parse::<i64>().ok().filter(|number| *number > 0)?;

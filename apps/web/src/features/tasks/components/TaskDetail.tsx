@@ -453,10 +453,8 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask }: TaskDet
                     startValue={task.dueStartAt ?? null}
                     value={task.dueAt}
                     onClear={() => {
-                      updateTask.mutate({
-                        taskId: task.id,
-                        body: { expected_version: task.version, due_start_at: null, due_at: null },
-                      })
+                      // through the same queue as the picks, so Clear right after a pick does not send a stale version
+                      saveDueDate({ due_start_at: null, due_at: null })
                       setDueDateOpen(false)
                     }}
                     onChange={({ start, end }) => saveDueDate({ due_start_at: start, due_at: end })}

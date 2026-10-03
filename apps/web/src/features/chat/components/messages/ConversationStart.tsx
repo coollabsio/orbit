@@ -15,7 +15,7 @@ export function ConversationStart({ conversation }: { conversation: Conversation
   const title = conversationTitle(conversation, people, currentUserId)
   const membersOpen = location.view === 'conversation' && location.pane === 'members' && !location.thread && !location.q
 
-  if (isSelfDm(conversation, currentUserId)) {
+  if (isSelfDm(conversation)) {
     return (
       <div data-slot="conversation-start" className="flex flex-col items-start gap-1 px-4 pt-8 pb-4 max-[899px]:px-3">
         <p className="text-base font-semibold">This is your space</p>

@@ -2,7 +2,7 @@ import { Hashtag, Lock } from 'reicon-react'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
 import { usePresence } from '@/features/chat/api/liveStore'
 import type { Conversation } from '@/features/chat/api/types'
-import { dmPeerIds } from '@/features/chat/lib/sidebar'
+import { dmPeerIds, isSelfDm } from '@/features/chat/lib/sidebar'
 import type { User } from '@/features/workspaces/models'
 
 /**
@@ -37,8 +37,8 @@ export function ConversationIcon({
   }
   const peerIds = dmPeerIds(conversation, currentUserId ?? '')
   if (peerIds.length <= 1) {
-    // the DM with yourself shows your avatar without a presence dot
-    const id = peerIds[0] ?? currentUserId
+    // the DM with yourself shows your avatar without a presence dot; a DM whose other members left has no avatar
+    const id = peerIds[0] ?? (isSelfDm(conversation) ? currentUserId : undefined)
     return <UserAvatar user={people.find((person) => person.id === id)} size={size} showOnline={peerIds.length === 1} online={id ? online.has(id) : false} />
   }
   if (group === 'stack') return <UserAvatarStack users={people.filter((person) => peerIds.includes(person.id))} size={size} />

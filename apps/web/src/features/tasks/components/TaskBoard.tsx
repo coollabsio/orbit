@@ -75,6 +75,9 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
   })
   // the placeholder takes the dragged card's height
   const [dragHeight, setDragHeight] = useState(0)
+  // the card whose header date picker is open: it stays in the header after the first pick gives the task a date,
+  // so the picker is not unmounted while a range or a time is still being picked
+  const [settingDueId, setSettingDueId] = useState<string | null>(null)
 
   const dragEnabled = canDrag(display)
   const { columns, lanes } = boardGrid(tasks, display, groupContext)
@@ -88,10 +91,11 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const status = statusById.get(task.statusId)
     const cardLabels = has('labels') ? task.labels.flatMap((id) => labelById.get(id) ?? []) : []
     // a missing due date or assignee is set from a quiet glyph in the header that shows on hover
-    const setDue = has('due_date') && !task.dueAt
+    const setDue = has('due_date') && (!task.dueAt || settingDueId === task.id)
+    const showDue = has('due_date') && Boolean(task.dueAt) && !setDue
     const showTop = has('status') || has('id') || Boolean(task.blocked) || has('assignee') || setDue || has('priority')
     const showProgress = has('sub_issue_progress') && (task.subIssueCount ?? 0) > 0
-    const showMeta = showProgress || has('project') || (has('due_date') && Boolean(task.dueAt)) || has('created') || has('updated')
+    const showMeta = showProgress || has('project') || showDue || has('created') || has('updated')
     return (
       <article
         data-board-card
@@ -136,7 +140,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
               {task.blocked ? <BlockedIndicator /> : null}
             </span>
             <span className="flex items-center gap-1">
-              {setDue ? <DueDatePicker task={task} status={status} empty="icon" className="hover-fine:opacity-0 hover-fine:group-hover/card:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100" /> : null}
+              {setDue ? <DueDatePicker task={task} status={status} empty="icon" onOpenChange={(open) => setSettingDueId((current) => open ? task.id : current === task.id ? null : current)} className="hover-fine:opacity-0 hover-fine:group-hover/card:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100" /> : null}
               {has('assignee') ? (
                 <AssigneePicker
                   task={task}
@@ -174,7 +178,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/70">
             {showProgress ? <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} /> : null}
             {has('project') ? <ProjectChip project={projectById.get(task.projectId)} /> : null}
-            {has('due_date') && task.dueAt ? <DueDatePicker task={task} status={status} /> : null}
+            {showDue ? <DueDatePicker task={task} status={status} /> : null}
             {has('created') ? <DateStamp property="created" iso={task.createdAt} /> : null}
             {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} /> : null}
           </div>

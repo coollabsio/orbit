@@ -6706,6 +6706,40 @@ async fn moving_a_task_between_projects_maps_its_status_and_renumbers_it() {
     let (status, read) = call(&fixture, "GET", &task_uri(&fixture, "ops-2"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(read["id"], moved["id"]);
+    // The identifier it had before the move keeps leading to it, under its new number.
+    let old_identifier = format!("{}-1", project_key_of(&fixture, &fixture.project_id).await);
+    let (status, read) = call(
+        &fixture,
+        "GET",
+        &task_uri(&fixture, &old_identifier.to_lowercase()),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{old_identifier}");
+    assert_eq!(read["id"], moved["id"]);
+    assert_eq!(read["project_id"], other);
+    assert_eq!(read["number"], 2);
+    // A live task always wins: OPS-1 is still the task created there, not an alias.
+    let (status, read) = call(&fixture, "GET", &task_uri(&fixture, "OPS-1"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(read["title"], "Ops one");
+    // Moved back, it takes a new number; every identifier it ever had resolves to it.
+    let (status, returned) = call(
+        &fixture,
+        "PATCH",
+        &uri,
+        Some(json!({"expected_version": moved["version"], "project_id": fixture.project_id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{returned}");
+    assert_eq!(returned["number"], 2);
+    for identifier in [old_identifier.as_str(), "OPS-2"] {
+        let (status, read) = call(&fixture, "GET", &task_uri(&fixture, identifier), None).await;
+        assert_eq!(status, StatusCode::OK, "{identifier}");
+        assert_eq!(read["id"], moved["id"], "{identifier}");
+        assert_eq!(read["number"], 2, "{identifier}");
+        assert_eq!(read["project_id"], fixture.project_id, "{identifier}");
+    }
 
     // No status of the same name: the first one of the same category.
     let (status, review) = call(

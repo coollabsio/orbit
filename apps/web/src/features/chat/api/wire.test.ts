@@ -38,6 +38,7 @@ const conversation: ConversationRecord = {
   position: 3,
   member_ids: ['u1', 'u2'],
   is_default: false,
+  self_dm: false,
   archived: false,
   created_by: 'u2',
   created_at: '2026-10-01T00:00:00.000Z',

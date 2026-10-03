@@ -69,6 +69,7 @@ const conversation = (id: string, patch: Partial<Conversation> = {}): Conversati
   memberIds: [],
   isMember: true,
   isDefault: false,
+  selfDm: false,
   archived: false,
   createdBy: 'u1',
   createdAt: 0,

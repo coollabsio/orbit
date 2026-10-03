@@ -116,8 +116,7 @@ function ChatCommands() {
   const bindings = useBindings()
   const runCommand = useRunCommand()
 
-  const { currentUserId } = useChatContext()
-  const ids = sidebarOrder(buildSidebarSections(conversations ?? [], categories ?? [], states ?? [], currentUserId))
+  const ids = sidebarOrder(buildSidebarSections(conversations ?? [], categories ?? [], states ?? []))
   const currentId = location.view === 'conversation' || location.view === 'thread' ? location.conversationId : null
   const isUnread = (id: string) => {
     const conversation = conversations?.find((candidate) => candidate.id === id)

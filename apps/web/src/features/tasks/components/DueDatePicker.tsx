@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Calendar } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -12,15 +12,27 @@ import { DueDateChip } from './TaskPropertyChips'
  * Due-date chip that opens the date picker in place (list rows and board cards). Every pick saves at once and the
  * picker stays open (to extend a day to a range or change the time); Clear saves and closes. Without a date it shows
  * a quiet "No date" placeholder, or only a calendar glyph (`empty="icon"`). Font size comes from `className`.
+ * `onOpenChange` tells the caller when the picker opens and closes (also when it unmounts while open), so a caller
+ * that places the chip by whether the task has a date can keep this one mounted until the picking is over.
  */
-export function DueDatePicker({ task, status, empty = 'label', className }: {
+export function DueDatePicker({ task, status, empty = 'label', className, onOpenChange }: {
   task: Task
   status: TaskStatusDef | undefined
   empty?: 'label' | 'icon'
   className?: string
+  onOpenChange?: (open: boolean) => void
 }) {
   const save = useTaskPickerUpdate(task, 'Due date update failed.')
-  const [open, setOpen] = useState(false)
+  const [open, setOpenState] = useState(false)
+  const notify = useRef(onOpenChange)
+  useEffect(() => {
+    notify.current = onOpenChange
+  })
+  useEffect(() => () => notify.current?.(false), [])
+  const setOpen = (next: boolean) => {
+    setOpenState(next)
+    onOpenChange?.(next)
+  }
   return (
     <div className={cn('flex', className)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <Popover open={open} onOpenChange={setOpen}>

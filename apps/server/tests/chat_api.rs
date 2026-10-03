@@ -679,6 +679,7 @@ async fn private_channels_and_dms_do_not_exist_for_other_members() {
     let same = fixture.ok(&bob, "POST", "/dms", open(&[&ada])).await;
     assert_eq!(dm["result"]["id"], same["result"]["id"]);
     assert_eq!(dm["result"]["kind"], "dm");
+    assert_eq!(dm["result"]["self_dm"], false);
     let group = fixture
         .ok(&ada, "POST", "/dms", open(&[&bob, &fixture.owner]))
         .await;
@@ -931,6 +932,7 @@ async fn a_dm_with_only_yourself_is_a_place_for_notes() {
         .await;
     assert_eq!(notes["result"]["id"], same["result"]["id"]);
     assert_eq!(notes["result"]["member_ids"], json!([me.id.to_string()]));
+    assert_eq!(notes["result"]["self_dm"], true);
     let notes = notes["result"]["id"].as_str().unwrap();
     let root = fixture
         .send(&me, notes, &format!("A note for <@{}>", me.id))

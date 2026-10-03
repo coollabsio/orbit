@@ -72,21 +72,23 @@ export interface ChatPerson {
   name: string
 }
 
-/** The members of a DM other than the current user. Empty for a DM with yourself. */
+/** The members of a DM other than the current user. Empty for the user's own notes, or when the others left the workspace. */
 export function dmPeerIds(conversation: Conversation, currentUserId: string): string[] {
   return conversation.memberIds.filter((id) => id !== currentUserId)
 }
 
-/** A DM with only the current user in it: their own place for notes, drafts and links. */
-export function isSelfDm(conversation: Conversation, currentUserId: string | null): boolean {
-  return conversation.kind === 'dm' && currentUserId !== null && dmPeerIds(conversation, currentUserId).length === 0
+/** The DM the user opened with themselves alone: their own place for notes, drafts and links. */
+export function isSelfDm(conversation: Conversation): boolean {
+  return conversation.kind === 'dm' && conversation.selfDm
 }
 
 /** A DM has no name: its title is the other members' names. */
 export function dmTitle(conversation: Conversation, people: readonly ChatPerson[], currentUserId: string): string {
   const nameOf = (id: string) => people.find((person) => person.id === id)?.name ?? 'Unknown'
+  if (isSelfDm(conversation)) return `${nameOf(currentUserId)} (you)`
   const peers = dmPeerIds(conversation, currentUserId)
-  if (peers.length === 0) return `${nameOf(currentUserId)} (you)`
+  // the other members left the workspace
+  if (peers.length === 0) return 'Former member'
   return peers.map(nameOf).join(', ')
 }
 
@@ -117,7 +119,6 @@ export function buildSidebarSections(
   conversations: readonly Conversation[],
   categories: readonly Category[],
   states: readonly ConversationState[],
-  currentUserId: string | null = null,
 ): SidebarSection[] {
   const favoriteIds = new Set(states.filter((state) => state.favorite).map((state) => state.conversationId))
   const joined = conversations.filter((conversation) => conversation.isMember && !conversation.archived)
@@ -165,7 +166,7 @@ export function buildSidebarSections(
     category: null,
     conversations: rest
       .filter((conversation) => conversation.kind === 'dm')
-      .sort((a, b) => Number(isSelfDm(b, currentUserId)) - Number(isSelfDm(a, currentUserId)) || byActivity(a, b)),
+      .sort((a, b) => Number(isSelfDm(b)) - Number(isSelfDm(a)) || byActivity(a, b)),
   })
   return sections
 }
