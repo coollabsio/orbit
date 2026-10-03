@@ -50,6 +50,8 @@ pub struct MemberRecord {
     pub user_id: Id,
     pub email: String,
     pub display_name: String,
+    /// The member's profile picture; absent while they have none.
+    pub avatar_url: Option<String>,
     pub role: WorkspaceRole,
     /// Whether the caller may change this member's role.
     pub can_change_role: bool,
@@ -412,9 +414,12 @@ impl WorkspaceRepository {
         let actor = require_actor(self.database.pool(), workspace_id, actor_id).await?;
         let rows = sqlx::query(
             "SELECT memberships.id, memberships.user_id, memberships.role, memberships.version, \
-             memberships.created_at, users.email, users.display_name, users.suspended_at \
+             memberships.created_at, users.email, users.display_name, users.suspended_at, \
+             user_avatars.updated_at AS avatar_updated_at \
              FROM memberships \
-             JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = ? \
+             JOIN users ON users.id = memberships.user_id \
+             LEFT JOIN user_avatars ON user_avatars.user_id = memberships.user_id \
+             WHERE memberships.workspace_id = ? \
              AND (? IS NULL OR memberships.id > ?) ORDER BY memberships.id LIMIT ?",
         )
         .bind(workspace_id.to_string())
@@ -2019,6 +2024,7 @@ fn member_from_row(
         user_id,
         email: row.get("email"),
         display_name: row.get("display_name"),
+        avatar_url: crate::auth_routes::avatar_url(user_id, row.get("avatar_updated_at")),
         role,
         can_change_role: actor
             .change_member_role(role, WorkspaceRole::Member)

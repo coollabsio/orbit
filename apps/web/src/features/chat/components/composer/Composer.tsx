@@ -206,7 +206,7 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
       data-thread={inThread ? '' : undefined}
       // Chat merges live updates itself, so its focus must not pause the workspace's realtime refresh.
       data-realtime-safe=""
-      className="shrink-0 px-4 pb-3 max-[899px]:px-2 max-[899px]:pb-2"
+      className="shrink-0 px-4 pb-3 max-[899px]:px-2 max-[899px]:pb-2 max-[899px]:not-focus-within:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
     >
       <div className="relative">
         {mention.open ? (

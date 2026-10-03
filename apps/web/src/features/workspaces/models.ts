@@ -16,6 +16,8 @@ export interface User {
   email: string
   role: 'Owner' | 'Admin' | 'Member'
   color: string
+  /** Profile picture URL; initials on `color` show while it is absent or loading. */
+  avatarUrl?: string | null
   online: boolean
   title: string
   roleIds: string[]

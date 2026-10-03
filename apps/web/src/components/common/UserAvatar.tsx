@@ -1,11 +1,12 @@
 import type { CSSProperties } from 'react'
-import { Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar'
+import { Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from '@/components/ui/avatar'
 import { cn } from 'cn'
 
 /** What the avatar needs of a person. A workspace member and a mail contact both fit. */
 export interface AvatarPerson {
   name: string
   color: string
+  avatarUrl?: string | null
   online?: boolean
 }
 
@@ -41,6 +42,7 @@ export function UserAvatar({ user, size = 24, showOnline = false, online, name, 
       style={{ width: size, height: size }}
       title={label}
     >
+      {user?.avatarUrl ? <AvatarImage src={user.avatarUrl} alt="" /> : null}
       <AvatarFallback
         className="font-semibold"
         style={{ fontSize: Math.max(9, Math.round(size * 0.38)), ...fallbackStyle }}

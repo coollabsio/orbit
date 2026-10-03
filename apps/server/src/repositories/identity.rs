@@ -11,6 +11,12 @@ use super::chat::join_public_channels;
 use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditOutcome};
 
+/// A stored profile picture.
+pub struct Avatar {
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Clone)]
 pub struct SetupRequest {
     pub token: String,
@@ -658,39 +664,84 @@ impl IdentityRepository {
         if changed == 0 {
             return Err(IdentityError::InvalidCredential);
         }
-        audit::record_global(
-            &mut transaction,
-            Some(user_id),
-            "account.updated",
-            AuditOutcome::Success,
-            "user",
-            Some(user_id),
-            request_id,
-            serde_json::json!({"fields":["display_name"]}),
-            now,
-        )
-        .await?;
-        let workspaces: Vec<String> =
-            sqlx::query_scalar("SELECT workspace_id FROM memberships WHERE user_id = ?")
+        record_profile_update(&mut transaction, user_id, "display_name", request_id, now).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// When the user's profile picture last changed; `None` while they have none.
+    pub async fn avatar_updated_at(&self, user_id: Id) -> Result<Option<i64>, IdentityError> {
+        Ok(
+            sqlx::query_scalar("SELECT updated_at FROM user_avatars WHERE user_id = ?")
                 .bind(user_id.to_string())
-                .fetch_all(&mut *transaction)
-                .await?;
-        for workspace in workspaces {
-            audit::record(
-                &mut transaction,
-                workspace
-                    .parse()
-                    .map_err(|_| IdentityError::InvalidCredential)?,
-                Some(user_id),
-                "member.profile_updated",
-                AuditOutcome::Success,
-                "user",
-                Some(user_id),
-                request_id,
-                serde_json::json!({"fields":["display_name"]}),
-                now,
-            )
-            .await?;
+                .fetch_optional(self.database.pool())
+                .await?,
+        )
+    }
+
+    /// The user's profile picture, for the user and for people who share a workspace with them.
+    pub async fn avatar(
+        &self,
+        viewer_id: Id,
+        user_id: Id,
+    ) -> Result<Option<Avatar>, IdentityError> {
+        let row = sqlx::query(
+            "SELECT mime_type, bytes FROM user_avatars WHERE user_id = ?1 AND (?1 = ?2 OR EXISTS ( \
+             SELECT 1 FROM memberships AS theirs JOIN memberships AS mine \
+             ON mine.workspace_id = theirs.workspace_id \
+             WHERE theirs.user_id = ?1 AND mine.user_id = ?2))",
+        )
+        .bind(user_id.to_string())
+        .bind(viewer_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?;
+        Ok(row.map(|row| Avatar {
+            mime_type: row.get("mime_type"),
+            bytes: row.get("bytes"),
+        }))
+    }
+
+    /// Replaces the user's profile picture. Callers check the format and size first.
+    pub async fn set_avatar_audited(
+        &self,
+        user_id: Id,
+        mime_type: &str,
+        bytes: &[u8],
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "INSERT INTO user_avatars (user_id, mime_type, bytes, updated_at) VALUES (?, ?, ?, ?) \
+             ON CONFLICT (user_id) DO UPDATE SET mime_type = excluded.mime_type, \
+             bytes = excluded.bytes, updated_at = excluded.updated_at",
+        )
+        .bind(user_id.to_string())
+        .bind(mime_type)
+        .bind(bytes)
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        record_profile_update(&mut transaction, user_id, "avatar", request_id, now).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Removes the user's profile picture; nothing happens when they have none.
+    pub async fn remove_avatar_audited(
+        &self,
+        user_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), IdentityError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let removed = sqlx::query("DELETE FROM user_avatars WHERE user_id = ?")
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+        if removed > 0 {
+            record_profile_update(&mut transaction, user_id, "avatar", request_id, now).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -1310,6 +1361,53 @@ fn constant_time_eq(stored: &[u8], supplied: &[u8; 32]) -> bool {
         difference |= left ^ right;
     }
     difference == 0
+}
+
+/// Audits a profile change globally and in each of the user's workspaces. The workspace
+/// events also tell connected clients (realtime) to reload the members list.
+async fn record_profile_update(
+    transaction: &mut Transaction<'_, Sqlite>,
+    user_id: Id,
+    field: &str,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<(), IdentityError> {
+    let metadata = serde_json::json!({ "fields": [field] });
+    audit::record_global(
+        transaction,
+        Some(user_id),
+        "account.updated",
+        AuditOutcome::Success,
+        "user",
+        Some(user_id),
+        request_id,
+        metadata.clone(),
+        now,
+    )
+    .await?;
+    let workspaces: Vec<String> =
+        sqlx::query_scalar("SELECT workspace_id FROM memberships WHERE user_id = ?")
+            .bind(user_id.to_string())
+            .fetch_all(&mut **transaction)
+            .await?;
+    for workspace in workspaces {
+        audit::record(
+            transaction,
+            workspace
+                .parse()
+                .map_err(|_| IdentityError::InvalidCredential)?,
+            Some(user_id),
+            "member.profile_updated",
+            AuditOutcome::Success,
+            "user",
+            Some(user_id),
+            request_id,
+            metadata.clone(),
+            now,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

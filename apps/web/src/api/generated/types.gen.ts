@@ -96,6 +96,10 @@ export type AuthProblem = {
 };
 
 export type AuthUserResponse = {
+    /**
+     * The profile picture; absent while the user has none. The URL changes with each upload.
+     */
+    avatar_url?: string | null;
     display_name: string;
     email: string;
     id: string;
@@ -117,6 +121,15 @@ export type AuthenticatedUser = {
 export type AutoClosed = {
     id: string;
     status_id: string;
+};
+
+export type AvatarImage = Blob | File;
+
+export type AvatarUploadBody = {
+    /**
+     * A PNG, JPEG or WebP image of at most 512 KiB.
+     */
+    file: Blob | File;
 };
 
 /**
@@ -907,6 +920,10 @@ export type LoginResponse = {
 
 export type MemberRecord = {
     /**
+     * The member's profile picture; absent while they have none.
+     */
+    avatar_url?: string | null;
+    /**
      * Whether the caller may change this member's role.
      */
     can_change_role: boolean;
@@ -1666,6 +1683,10 @@ export type PageLabelRecord = {
 
 export type PageMemberRecord = {
     items: Array<{
+        /**
+         * The member's profile picture; absent while they have none.
+         */
+        avatar_url?: string | null;
         /**
          * Whether the caller may change this member's role.
          */
@@ -2869,6 +2890,114 @@ export type SetAccountSuspensionResponses = {
 
 export type SetAccountSuspensionResponse = SetAccountSuspensionResponses[keyof SetAccountSuspensionResponses];
 
+export type RemoveAvatarData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/avatar';
+};
+
+export type RemoveAvatarErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type RemoveAvatarError = RemoveAvatarErrors[keyof RemoveAvatarErrors];
+
+export type RemoveAvatarResponses = {
+    200: AuthUserResponse;
+};
+
+export type RemoveAvatarResponse = RemoveAvatarResponses[keyof RemoveAvatarResponses];
+
+export type UploadAvatarData = {
+    body: AvatarUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/avatar';
+};
+
+export type UploadAvatarErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_avatar
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type UploadAvatarError = UploadAvatarErrors[keyof UploadAvatarErrors];
+
+export type UploadAvatarResponses = {
+    200: AuthUserResponse;
+};
+
+export type UploadAvatarResponse = UploadAvatarResponses[keyof UploadAvatarResponses];
+
 export type LoginData = {
     body: LoginBody;
     headers?: {
@@ -3736,6 +3865,64 @@ export type SetupStatusResponses = {
 };
 
 export type SetupStatusResponse = SetupStatusResponses[keyof SetupStatusResponses];
+
+export type UserAvatarData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/users/{user_id}/avatar';
+};
+
+export type UserAvatarErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * avatar_not_found
+     */
+    404: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UserAvatarError = UserAvatarErrors[keyof UserAvatarErrors];
+
+export type UserAvatarResponses = {
+    200: AvatarImage;
+};
+
+export type UserAvatarResponse = UserAvatarResponses[keyof UserAvatarResponses];
 
 export type ListWorkspacesData = {
     body?: never;

@@ -39,8 +39,13 @@ export function workspacesQueryOptions(client: ApiClient = apiClient) {
 
 const ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member' } as const
 
+/** A stable color per user, for the initials of people without a profile picture. */
+export function userColor(userId: string) {
+  const hue = [...userId].reduce((total, character) => total + character.charCodeAt(0), 0) % 360
+  return `hsl(${hue} 55% 48%)`
+}
+
 export function memberFromRecord(member: MemberRecord): User {
-  const hue = [...member.user_id].reduce((total, character) => total + character.charCodeAt(0), 0) % 360
   return {
     id: member.user_id,
     membershipId: member.id,
@@ -48,7 +53,8 @@ export function memberFromRecord(member: MemberRecord): User {
     handle: member.email.split('@')[0] ?? member.email,
     email: member.email,
     role: ROLE_LABELS[member.role],
-    color: `hsl(${hue} 55% 48%)`,
+    color: userColor(member.user_id),
+    avatarUrl: member.avatar_url ?? null,
     online: false,
     title: '',
     roleIds: [],

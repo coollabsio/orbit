@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Extension, FromRequest, Path, Request, State};
-use axum::http::header::{CONTENT_TYPE, COOKIE, RETRY_AFTER, SET_COOKIE};
+use axum::extract::{DefaultBodyLimit, Extension, FromRequest, Multipart, Path, Request, State};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use orbit_platform::{
     AuthenticatedUser, ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor,
     PasswordService, RequestId, ThrottleDecision, TimestampMillis,
@@ -159,6 +159,14 @@ pub fn auth_router(state: AuthState) -> Router {
             "/api/v1/auth/shortcuts",
             get(get_shortcuts).put(put_shortcuts),
         )
+        .route(
+            "/api/v1/auth/avatar",
+            put(upload_avatar)
+                .delete(remove_avatar)
+                // the image plus the multipart framing
+                .layer(DefaultBodyLimit::max(MAX_AVATAR_BYTES + 16 * 1024)),
+        )
+        .route("/api/v1/users/{user_id}/avatar", get(user_avatar))
         .route("/api/v1/auth/password", post(change_password))
         .route("/api/v1/auth/recovery/request", post(recovery_request))
         .route("/api/v1/auth/recovery/complete", post(recovery_complete))
@@ -351,6 +359,13 @@ struct AuthUserResponse {
     display_name: String,
     /// May manage backups, the global audit log and account suspension.
     installation_admin: bool,
+    /// The profile picture; absent while the user has none. The URL changes with each upload.
+    avatar_url: Option<String>,
+}
+
+/// Where a user's profile picture is served. The version query lets browsers cache it for good.
+pub(crate) fn avatar_url(user_id: Id, updated_at: Option<i64>) -> Option<String> {
+    updated_at.map(|version| format!("/api/v1/users/{user_id}/avatar?v={version}"))
 }
 
 async fn user_response(
@@ -364,7 +379,13 @@ async fn user_response(
         .is_installation_admin(user.id)
         .await
         .map_err(|_| ApiError::internal(instance, request_id))?;
+    let avatar_updated_at = state
+        .repository
+        .avatar_updated_at(user.id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id))?;
     Ok(AuthUserResponse {
+        avatar_url: avatar_url(user.id, avatar_updated_at),
         id: user.id.to_string(),
         email: user.email,
         display_name: user.display_name,
@@ -513,8 +534,16 @@ async fn login(
         }
     };
     // Nothing here may fail: the session exists, so the response must carry its cookie.
+    // A failed avatar read only leaves the picture out.
+    let avatar_updated_at = state
+        .repository
+        .avatar_updated_at(user.id)
+        .await
+        .ok()
+        .flatten();
     let mut response = Json(LoginResponse {
         user: AuthUserResponse {
+            avatar_url: avatar_url(user.id, avatar_updated_at),
             id: user.id.to_string(),
             email: user.email,
             display_name: user.display_name,
@@ -713,6 +742,179 @@ async fn put_shortcuts(
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
     Ok(Json(body))
+}
+
+/// Largest accepted profile picture. The web app uploads a 256 px square, far below this.
+const MAX_AVATAR_BYTES: usize = 512 * 1024;
+
+/// The image type by its magic bytes; anything else (SVG included) is refused.
+fn avatar_mime_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+struct AvatarUploadBody {
+    /// A PNG, JPEG or WebP image of at most 512 KiB.
+    #[schema(value_type = String, format = Binary)]
+    file: Vec<u8>,
+}
+
+#[derive(ToSchema)]
+#[schema(value_type = String, format = Binary)]
+#[allow(dead_code)]
+struct AvatarImage(Vec<u8>);
+
+#[utoipa::path(put, path = "/api/v1/auth/avatar", request_body(content = AvatarUploadBody, content_type = "multipart/form-data"), responses((status = 200, body = AuthUserResponse), (status = 400, description = "invalid_multipart", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 413, description = "avatar_too_large", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_avatar", body = ProblemBody, content_type = "application/problem+json")))]
+async fn upload_avatar(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    mut multipart: Multipart,
+) -> Result<Json<AuthUserResponse>, ApiError> {
+    let instance = "/api/v1/auth/avatar";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let invalid_multipart = || {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_multipart",
+            "Invalid multipart upload",
+            "Send the image as the multipart field \"file\".",
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let too_large = || {
+        ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "avatar_too_large",
+            "Image too large",
+            "The image must be at most 512 KiB.",
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let mut image = None;
+    while let Some(field) = multipart.next_field().await.map_err(|error| {
+        if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            too_large()
+        } else {
+            invalid_multipart()
+        }
+    })? {
+        if field.name() == Some("file") {
+            let bytes = field.bytes().await.map_err(|error| {
+                if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                    too_large()
+                } else {
+                    invalid_multipart()
+                }
+            })?;
+            image = Some(bytes);
+        }
+    }
+    let image = image.ok_or_else(invalid_multipart)?;
+    if image.len() > MAX_AVATAR_BYTES {
+        return Err(too_large());
+    }
+    let mime_type = avatar_mime_type(&image).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_avatar",
+            "Invalid image",
+            "Upload a PNG, JPEG or WebP image.",
+            instance,
+            request_id.as_ref(),
+        )
+    })?;
+    state
+        .repository
+        .set_avatar_audited(
+            session.user.id,
+            mime_type,
+            &image,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    Ok(Json(
+        user_response(&state, session.user, instance, request_id.as_ref()).await?,
+    ))
+}
+
+#[utoipa::path(delete, path = "/api/v1/auth/avatar", responses((status = 200, body = AuthUserResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+async fn remove_avatar(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<AuthUserResponse>, ApiError> {
+    let instance = "/api/v1/auth/avatar";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    state
+        .repository
+        .remove_avatar_audited(
+            session.user.id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    Ok(Json(
+        user_response(&state, session.user, instance, request_id.as_ref()).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/users/{user_id}/avatar", params(("user_id" = String, Path)), responses((status = 200, body = AvatarImage, content_type = "image/*"), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 404, description = "avatar_not_found", body = ProblemBody, content_type = "application/problem+json")))]
+async fn user_avatar(
+    State(state): State<AuthState>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Response, ApiError> {
+    let instance = "/api/v1/users/{user_id}/avatar";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    // a user without a picture and a user the caller shares no workspace with look the same
+    let not_found = || {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "avatar_not_found",
+            "Avatar not found",
+            "This user has no profile picture.",
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let user_id = user_id.parse::<Id>().map_err(|_| not_found())?;
+    let avatar = state
+        .repository
+        .avatar(session.user.id, user_id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .ok_or_else(not_found)?;
+    let content_type = HeaderValue::from_str(&avatar.mime_type)
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    let mut response = avatar.bytes.into_response();
+    let response_headers = response.headers_mut();
+    response_headers.insert(CONTENT_TYPE, content_type);
+    response_headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    // the URL carries the upload time, so a new picture is a new URL
+    response_headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=31536000, immutable"),
+    );
+    Ok(response)
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1783,6 +1985,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn avatar_upload_serve_and_remove() {
+        let (app, repository, database) = application(CookieMode::secure()).await;
+        let cookie = login_cookie(&app, "correct horse battery").await;
+        let png = b"\x89PNG\r\n\x1a\nnot really pixels".to_vec();
+
+        let svg = app
+            .clone()
+            .oneshot(avatar_request(&cookie, b"<svg onload=alert(1)/>"))
+            .await
+            .unwrap();
+        assert_eq!(svg.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let too_large = app
+            .clone()
+            .oneshot(avatar_request(
+                &cookie,
+                &vec![0x89; super::MAX_AVATAR_BYTES + 1],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let uploaded = app
+            .clone()
+            .oneshot(avatar_request(&cookie, &png))
+            .await
+            .unwrap();
+        assert_eq!(uploaded.status(), StatusCode::OK);
+        let uploaded: Value = serde_json::from_slice(&body(uploaded).await).unwrap();
+        let url = uploaded["avatar_url"].as_str().unwrap().to_owned();
+        let profile_events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_events WHERE action = 'member.profile_updated' AND workspace_id IS NOT NULL",
+        )
+        .fetch_one(database.pool()).await.unwrap();
+        assert_eq!(profile_events, 1);
+
+        let me = app
+            .clone()
+            .oneshot(cookie_request("GET", "/api/v1/auth/me", &cookie))
+            .await
+            .unwrap();
+        let me: Value = serde_json::from_slice(&body(me).await).unwrap();
+        assert_eq!(me["avatar_url"], url.as_str());
+
+        let image = app
+            .clone()
+            .oneshot(cookie_request("GET", &url, &cookie))
+            .await
+            .unwrap();
+        assert_eq!(image.status(), StatusCode::OK);
+        assert_eq!(image.headers()[header::CONTENT_TYPE], "image/png");
+        assert_eq!(image.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(body(image).await, png);
+
+        // only people who share a workspace with the owner see the picture
+        let owner: orbit_platform::Id = me["id"].as_str().unwrap().parse().unwrap();
+        let stranger = orbit_platform::Id::new_v7();
+        sqlx::query(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+             VALUES (?, 'stranger@example.com', 'stranger@example.com', 'Stranger', 'x', 0, 0)",
+        )
+        .bind(stranger.to_string())
+        .execute(database.pool())
+        .await
+        .unwrap();
+        assert!(repository.avatar(stranger, owner).await.unwrap().is_none());
+        assert!(repository.avatar(owner, owner).await.unwrap().is_some());
+
+        let removed = app
+            .clone()
+            .oneshot(cookie_request("DELETE", "/api/v1/auth/avatar", &cookie))
+            .await
+            .unwrap();
+        assert_eq!(removed.status(), StatusCode::OK);
+        let removed: Value = serde_json::from_slice(&body(removed).await).unwrap();
+        assert!(removed["avatar_url"].is_null());
+        let gone = app
+            .oneshot(cookie_request("GET", &url, &cookie))
+            .await
+            .unwrap();
+        assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn patch_me_rejects_empty_or_whitespace_display_name() {
         let (app, _, _database) = application(CookieMode::secure()).await;
         let cookie = login_cookie(&app, "correct horse battery").await;
@@ -2073,6 +2358,20 @@ mod tests {
             .header(header::COOKIE, cookie)
             .header(header::ORIGIN, "https://orbit.test")
             .body(Body::empty())
+            .unwrap()
+    }
+
+    fn avatar_request(cookie: &str, image: &[u8]) -> Request<Body> {
+        let mut multipart = b"--avatar\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\n\r\n".to_vec();
+        multipart.extend_from_slice(image);
+        multipart.extend_from_slice(b"\r\n--avatar--\r\n");
+        Request::builder()
+            .method("PUT")
+            .uri("/api/v1/auth/avatar")
+            .header(header::CONTENT_TYPE, "multipart/form-data; boundary=avatar")
+            .header(header::COOKIE, cookie)
+            .header(header::ORIGIN, "https://orbit.test")
+            .body(Body::from(multipart))
             .unwrap()
     }
 

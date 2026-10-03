@@ -6,7 +6,10 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
 import { Button } from '@/components/ui/button'
-import { useChangePassword, useCurrentUser, useUpdateProfile } from '@/features/auth/api'
+import { useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
+import { userColor } from '@/features/workspaces/api'
+import { UserAvatar } from '@/components/common/UserAvatar'
+import { avatarImage } from '@/features/profile/avatarImage'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
@@ -57,6 +60,66 @@ function PasswordInput({
 
 function errorDetail(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
+}
+
+/** Profile picture with upload and remove. The picture is cropped and scaled in the browser first. */
+function AvatarField() {
+  const me = useCurrentUser().data
+  const setAvatar = useSetAvatar()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [readError, setReadError] = useState<string | null>(null)
+
+  const pick = async (file: File | undefined) => {
+    if (!file) return
+    setReadError(null)
+    setAvatar.reset()
+    let image: Blob
+    try {
+      image = await avatarImage(file)
+    } catch {
+      setReadError('This image could not be read. Use a PNG, JPEG or WebP file.')
+      return
+    }
+    setAvatar.mutate(image)
+  }
+
+  const error = readError ?? (setAvatar.isError ? errorDetail(setAvatar.error, 'The picture could not be saved.') : null)
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <UserAvatar
+        user={me ? { name: me.display_name, color: userColor(me.id), avatarUrl: me.avatar_url } : null}
+        size={64}
+      />
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" disabled={setAvatar.isPending} onClick={() => inputRef.current?.click()}>
+            {setAvatar.isPending ? 'Saving…' : me?.avatar_url ? 'Change picture' : 'Upload picture'}
+          </Button>
+          {me?.avatar_url ? (
+            <Button type="button" variant="ghost" disabled={setAvatar.isPending} onClick={() => setAvatar.mutate(null)}>
+              Remove
+            </Button>
+          ) : null}
+        </div>
+        {error ? (
+          <p className="text-xs text-destructive" role="alert">{error}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">Cropped to a square. People in your workspaces see it.</p>
+        )}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        aria-label="Profile picture"
+        onChange={(event) => {
+          void pick(event.target.files?.[0])
+          event.target.value = ''
+        }}
+      />
+    </div>
+  )
 }
 
 /** Account settings: display name and authenticated password change. */
@@ -121,9 +184,10 @@ export function ProfilePage() {
             <form ref={formRef} onSubmit={saveDetails}>
               <SettingsCard
                 title="Profile details"
-                description="Your display name and verified sign-in address."
+                description="Your picture, display name and verified sign-in address."
               >
-                <FieldGrid>
+                <AvatarField />
+                <FieldGrid className="mt-4">
                   <Field>
                     <FieldLabel htmlFor="profile-name">
                       Name <RequiredMark />

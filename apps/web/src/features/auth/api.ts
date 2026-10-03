@@ -9,9 +9,11 @@ import {
   me,
   recoveryComplete,
   recoveryRequest,
+  removeAvatar,
   setupComplete,
   setupStatus,
   updateMe,
+  uploadAvatar,
 } from '@/api/generated/sdk.gen'
 import type {
   ChangePasswordBody,
@@ -19,6 +21,7 @@ import type {
   RecoveryCompleteBody,
   RecoveryRequestBody,
   SetupBody,
+  AuthUserResponse,
   UpdateMeBody,
 } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
@@ -125,6 +128,24 @@ export function useUpdateProfile() {
     },
     onSuccess: (user) => {
       queryClient.setQueryData(queryKeys.currentUser, user)
+    },
+  })
+}
+
+/** Upload (a 256 px square from `avatarImage`) or remove (`null`) the profile picture. */
+export function useSetAvatar() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (image: Blob | null) => {
+      const { data } = image
+        ? await uploadAvatar({ client: apiClient, body: { file: image }, throwOnError: true })
+        : await removeAvatar({ client: apiClient, throwOnError: true })
+      return required(data, 'Avatar response was empty.')
+    },
+    onSuccess: (user: AuthUserResponse) => {
+      queryClient.setQueryData(queryKeys.currentUser, user)
+      // members lists carry the avatar URL; realtime refreshes them for everybody else
+      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.at(-1) === 'members' })
     },
   })
 }

@@ -253,7 +253,7 @@ export function ChatSidebar() {
     <aside
       data-slot="chat-sidebar"
       aria-label="Chat"
-      className="relative flex min-h-0 shrink-0 flex-col border-r bg-background max-[899px]:w-full! max-[899px]:border-r-0 max-[899px]:group-data-[view=detail]/chat:hidden"
+      className="relative flex min-h-0 shrink-0 flex-col border-r bg-background max-[899px]:w-full! max-[899px]:border-r-0 max-[899px]:pt-[env(safe-area-inset-top,0px)] max-[899px]:group-data-[view=detail]/chat:hidden"
       data-themed={theme ? '' : undefined}
       style={{ width, ...chatSidebarVariables(theme) }}
     >

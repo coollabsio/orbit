@@ -295,11 +295,11 @@ export function ChatPage() {
       <div
         data-slot="chat-page"
         data-view={location.view === 'home' ? 'index' : 'detail'}
-        className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground dark:[--background:var(--card)]"
+        className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground max-[899px]:-mt-[env(safe-area-inset-top,0px)] dark:[--background:var(--card)]"
         style={chatThemeVariables(theme)}
       >
         <ChatSidebar />
-        <div ref={areaRef} data-slot="chat-area" className="flex min-h-0 min-w-0 flex-1 max-[899px]:group-data-[view=index]/chat:hidden">
+        <div ref={areaRef} data-slot="chat-area" className="flex min-h-0 min-w-0 flex-1 max-[899px]:pt-[env(safe-area-inset-top,0px)] max-[899px]:group-data-[view=index]/chat:hidden">
           <main data-slot="chat-main" className="flex min-h-0 min-w-0 flex-1 flex-col">
             {main}
           </main>

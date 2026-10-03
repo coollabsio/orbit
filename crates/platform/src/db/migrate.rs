@@ -280,12 +280,17 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     38,
-                    include_str!("../../../../apps/server/migrations/0038_task_numbers.sql"),
+                    include_str!("../../../../apps/server/migrations/0038_user_avatars.sql"),
                     false,
                 ),
                 Migration::new(
                     39,
-                    include_str!("../../../../apps/server/migrations/0039_task_number_aliases.sql"),
+                    include_str!("../../../../apps/server/migrations/0039_task_numbers.sql"),
+                    false,
+                ),
+                Migration::new(
+                    40,
+                    include_str!("../../../../apps/server/migrations/0040_task_number_aliases.sql"),
                     false,
                 ),
             ],

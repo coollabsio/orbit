@@ -11,7 +11,7 @@ CREATE TABLE task_number_aliases (
 
 CREATE INDEX task_number_aliases_task ON task_number_aliases (task_id);
 
--- Replaces the trigger of 0038. `OLD` holds the row as it was before the moving UPDATE, so
+-- Replaces the trigger of 0039. `OLD` holds the row as it was before the moving UPDATE, so
 -- `OLD.number` is the old number even though that UPDATE clears `number` itself.
 DROP TRIGGER tasks_number_project_change;
 

@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useTheme, type Theme } from '@/lib/themeContext'
 import { useCurrentUser, useLogout } from '@/features/auth/api'
+import { userColor } from '@/features/workspaces/api'
+import { UserAvatar } from '@/components/common/UserAvatar'
 
 const THEMES: { value: Theme; label: string }[] = [
   { value: 'light', label: 'Light' },
@@ -30,7 +32,6 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const [appearanceOpen, setAppearanceOpen] = useState(false)
 
   const userName = me?.display_name ?? 'Account'
-  const initial = (me?.display_name || me?.email || 'A').charAt(0).toUpperCase()
 
   return (
     <DropdownMenu onOpenChange={(open) => { if (!open) setAppearanceOpen(false) }}>
@@ -44,7 +45,12 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
           />
         }
       >
-        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">{initial}</span>
+        <UserAvatar
+          user={me ? { name: me.display_name || me.email, color: userColor(me.id), avatarUrl: me.avatar_url } : null}
+          name={userName}
+          size={20}
+          className="shrink-0"
+        />
         {!collapsed ? (
           <span className="flex min-w-0 flex-1 text-left">
             <span className="min-w-0 truncate text-xs font-medium text-foreground">{userName}</span>
