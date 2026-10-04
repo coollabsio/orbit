@@ -63,7 +63,11 @@ CREATE TABLE push_subscriptions (
     auth TEXT NOT NULL CHECK (length(auth) BETWEEN 1 AND 100),
     -- What the user sees in the list of devices, e.g. "Firefox on Linux".
     label TEXT NOT NULL CHECK (length(label) <= 120),
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    -- How many pushes to it failed in a row. A push service that refuses the subscription again
+    -- and again (not "gone", which removes it at once) will not take it later either: the server
+    -- removes it after a few failures. A push that goes through sets the count back to zero.
+    failures INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0)
 );
 
 CREATE INDEX push_subscriptions_user ON push_subscriptions (user_id);
