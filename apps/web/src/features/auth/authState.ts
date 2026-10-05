@@ -1,14 +1,15 @@
 import type { AuthUserResponse } from '@/api/generated/types.gen'
 
-type QueryStatus = 'pending' | 'error' | 'success'
-
 interface AuthGateInput {
+  /** `undefined` until the setup status has loaded once. */
   setupComplete: boolean | undefined
+  /** `null` is signed out (a 401); `undefined` until the user has loaded once. */
   user: AuthUserResponse | null | undefined
-  userStatus: QueryStatus
+  /** A first load that does not work. A failed refetch of data the gate already has is not this. */
+  failed: boolean
 }
 
-export type AuthGateState = 'loading' | 'setup' | 'login' | 'authenticated'
+export type AuthGateState = 'loading' | 'unavailable' | 'setup' | 'login' | 'authenticated'
 
 export function initialLoginValues(development: boolean) {
   return development
@@ -22,9 +23,9 @@ export const recoveryRequestCopy = {
 }
 
 export function authGateState(input: AuthGateInput): AuthGateState {
-  if (input.setupComplete === undefined) return 'loading'
-  if (!input.setupComplete) return 'setup'
-  if (input.userStatus === 'pending') return 'loading'
-  if (!input.user) return 'login'
-  return 'authenticated'
+  // What the gate knows decides first: with a user from before, a failed refetch keeps the app on screen.
+  if (input.setupComplete === false) return 'setup'
+  if (input.setupComplete && input.user === null) return 'login'
+  if (input.setupComplete && input.user) return 'authenticated'
+  return input.failed ? 'unavailable' : 'loading'
 }

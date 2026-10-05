@@ -21,15 +21,18 @@ export function messageKey(message: Message): string {
   return message.nonce ?? message.id
 }
 
-/** A plain message that may share a group: not a system row, not deleted, not an "also sent to channel" reply. */
+/**
+ * A plain message that may share a group: not a system row, not deleted, not an "also sent to channel" reply, and not
+ * a forward (it is somebody else's words, so it stands alone under its own name).
+ */
 function groupable(message: Message): boolean {
-  return message.kind === 'message' && !message.deleted && !message.alsoInChannel
+  return message.kind === 'message' && !message.deleted && !message.alsoInChannel && !message.forwarded
 }
 
 /**
  * Messages (ascending) to render rows: a day separator before the first message of each local day, the "New" line
  * before the first unread message of another member, and for each message whether it starts a group (avatar, name,
- * time) or continues one.
+ * time) or continues one. An inline reply always starts one.
  */
 export function buildMessageRows(messages: readonly Message[], options: MessageRowOptions = {}): MessageRow[] {
   const { lastReadMessageId, currentUserId } = options
@@ -57,6 +60,8 @@ export function buildMessageRows(messages: readonly Message[], options: MessageR
       !isNew &&
       groupable(previous) &&
       groupable(message) &&
+      // A reply shows its quote above the avatar and name.
+      !message.replyToId &&
       previous.authorId === message.authorId &&
       message.createdAt - previous.createdAt < CONTINUE_WITHIN &&
       message.createdAt - groupStartedAt < GROUP_SPAN

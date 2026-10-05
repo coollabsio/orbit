@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { reportConnection } from '@/lib/connection'
 import type { ConnectionStatus } from './types'
 
 /**
@@ -60,6 +61,8 @@ export function clearTyping(conversationId: string, threadRootId: string | null,
 export function setConnectionStatus(status: ConnectionStatus) {
   if (connection === status) return
   connection = status
+  // The banner in the app shell reads the shared status; `ConnectionLine` in the composer reads this store.
+  reportConnection('chat', status === 'reconnecting')
   emit()
 }
 
@@ -68,6 +71,7 @@ export function resetLiveStore() {
   typingTimers.clear()
   typingSnapshots.clear()
   connection = 'connected'
+  reportConnection('chat', false)
   emit()
 }
 

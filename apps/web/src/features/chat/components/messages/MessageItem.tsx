@@ -7,7 +7,9 @@ import { fullTimestamp, gutterTime, messageTime } from '../../lib/time'
 import { isCoarsePointer, useDelayed } from './environment'
 import { MessageBody } from './MessageBody'
 import { MessageEditor } from './MessageEditor'
+import { MessageForward } from './MessageForward'
 import { useMessageList } from './messageListContext'
+import { MessageQuote } from './MessageQuote'
 import { MessageReactions } from './MessageReactions'
 import { MessageToolbar } from './MessageToolbar'
 import { ReplySummary } from './ReplySummary'
@@ -122,6 +124,7 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
       onTouchCancel={cancelPress}
     >
       {confirmed && !editing && !message.deleted ? <MessageToolbar message={message} /> : null}
+      {message.replyToId && !message.deleted ? <MessageQuote message={message} active={active} /> : null}
       {/* The measure: at most 90 characters of text beside the avatar column. */}
       <div className="relative flex max-w-[calc(90ch+3rem)] gap-3 text-[15px] max-[899px]:gap-2 max-[899px]:text-sm">
         <div className="flex w-9 shrink-0 justify-center max-[899px]:w-[30px]">
@@ -174,7 +177,12 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
             <MessageEditor message={message} />
           ) : (
             <div className="in-data-[state=failed]:text-muted-foreground in-data-[state=sending]:opacity-60">
-              <MessageBody message={message} />
+              {/* A row cached before forwards existed has no `forwarded`. */}
+              {message.forwarded && !message.deleted ? (
+                <MessageForward message={message} origin={message.forwarded} active={active} />
+              ) : (
+                <MessageBody message={message} />
+              )}
             </div>
           )}
           {message.sendState === 'failed' ? <FailedNote message={message} /> : null}

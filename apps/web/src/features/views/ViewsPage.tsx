@@ -83,7 +83,7 @@ export function ViewsPage() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {viewsQuery.isPending ? (
           <p className="p-4 text-[13px] text-muted-foreground">Loading views…</p>
-        ) : viewsQuery.isError ? (
+        ) : viewsQuery.isError && viewsQuery.data === undefined ? (
           <div className="flex h-full flex-col p-2 *:flex-1">
             <EmptyState icon={Layer} title="Views unavailable" description="The server could not load views." />
           </div>

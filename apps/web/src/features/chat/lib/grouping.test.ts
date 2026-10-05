@@ -86,3 +86,25 @@ test('an optimistic row keeps its key when the confirmed message replaces it', (
   expect(sending.at(-1)?.key).toBe('n1')
   expect(confirmed.at(-1)?.key).toBe('n1')
 })
+
+test('a reply starts a group, and the next message continues it', () => {
+  const rows = buildMessageRows([
+    testMessage({ id: 'm1', createdAt: at(1, 10, 0) }),
+    testMessage({ id: 'm2', createdAt: at(1, 10, 1), replyToId: 'm0', replyTo: { id: 'm0', authorId: 'u2', body: 'Hi' } }),
+    testMessage({ id: 'm3', createdAt: at(1, 10, 2) }),
+    // The quoted message was deleted: the line still shows.
+    testMessage({ id: 'm4', createdAt: at(1, 10, 3), replyToId: 'm0' }),
+  ])
+  expect(shape(rows)).toEqual(['day', 'start:m1', 'start:m2', 'cont:m3', 'start:m4'])
+})
+
+test('a forward stands alone: it starts a group, and so does the message after it', () => {
+  const forwarded = { messageId: 'm0', conversationId: 'c2', authorId: 'u2', createdAt: at(1, 9, 0) }
+  const rows = buildMessageRows([
+    testMessage({ id: 'm1', createdAt: at(1, 10, 0) }),
+    testMessage({ id: 'm2', createdAt: at(1, 10, 1), forwarded }),
+    testMessage({ id: 'm3', createdAt: at(1, 10, 2) }),
+    testMessage({ id: 'm4', createdAt: at(1, 10, 3) }),
+  ])
+  expect(shape(rows)).toEqual(['day', 'start:m1', 'start:m2', 'start:m3', 'cont:m4'])
+})

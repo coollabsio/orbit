@@ -93,7 +93,7 @@ export function MembersPage() {
   }, [users, search, roleFilter, sortBy])
 
   if (membersQuery.isPending) return <SettingsCard title="Members"><p>Loading workspace members…</p></SettingsCard>
-  if (membersQuery.isError) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
+  if (membersQuery.isError && membersQuery.data === undefined) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage))
   const currentPage = Math.min(page, lastPage)

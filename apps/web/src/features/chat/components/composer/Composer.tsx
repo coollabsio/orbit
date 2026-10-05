@@ -9,7 +9,7 @@ import {
   type Ref,
   useId,
 } from 'react'
-import { At, Paperclip2, Send2, SmileCircle } from 'reicon-react'
+import { At, Paperclip2, Send2, SmileCircle, Xmark } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { MentionPopover } from '@/components/common/MentionPopover'
@@ -20,9 +20,11 @@ import { clipboardFiles } from '@/lib/attachmentLib'
 import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
 import { useChatContext } from '../../api/chatContext'
 import { useSendMessage, useSendTyping } from '../../api/mutations'
-import { MESSAGE_MAX_LENGTH, type Conversation } from '../../api/types'
+import { MESSAGE_MAX_LENGTH, type Conversation, type Message } from '../../api/types'
 import { clearDraft, getDraft, setDraft } from '../../lib/drafts'
+import { completeEmoticon, replaceEmoticons } from '../../lib/emoticons'
 import { encodeMentions, extractMentions } from '../../lib/mentionTokens'
+import { quoteOf } from '../../lib/quote'
 import { useCoarsePointer } from '../messages/environment'
 import { conversationTitle, useChatPeople } from '../messages/people'
 import { ComposerInput } from './ComposerInput'
@@ -49,6 +51,10 @@ interface ComposerProps {
   conversation: Conversation
   /** Set in a thread: the message is a reply, and "Also send to #channel" shows. */
   threadRootId?: string | null
+  /** The message that the next message answers: the "Replying to" bar shows. It is not kept in the draft. */
+  replyTo?: Message | null
+  /** The reply ended: it was cancelled (the bar's button, `Esc`) or sent. */
+  onClearReply?: () => void
   /** Takes focus when it mounts (not on a touch screen, where that opens the keyboard). */
   autoFocus?: boolean
   /** `↑` in an empty composer. Returns false when there is no message to edit. */
@@ -63,7 +69,7 @@ interface ComposerProps {
  * emoji show in the field as the reader will get them), files, a draft kept
  * in `localStorage`, and the typing signal. `Enter` sends (a new line on a touch screen), `Shift+Enter` is a new line.
  */
-export function Composer({ ref, conversation, threadRootId = null, autoFocus = false, onEditLast, onFocusList, onSent }: ComposerProps) {
+export function Composer({ ref, conversation, threadRootId = null, replyTo = null, onClearReply, autoFocus = false, onEditLast, onFocusList, onSent }: ComposerProps) {
   const { workspaceId, currentUserId } = useChatContext()
   const people = useChatPeople()
   const coarse = useCoarsePointer()
@@ -110,7 +116,8 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
 
   useImperativeHandle(ref, () => ({ focus: () => input.current?.focus(), addFiles: add }))
 
-  const body = encodeMentions(text.trim(), people.members, people.channels)
+  // `:)` as the last word has no white space after it yet, so the body that is sent converts every emoticon
+  const body = encodeMentions(replaceEmoticons(text.trim()), people.members, people.channels)
   const attachments = uploads.flatMap((upload) => (upload.attachment ? [upload.attachment] : []))
   const uploadsReady = uploads.every((upload) => upload.status === 'done')
   const remaining = MESSAGE_MAX_LENGTH - body.length
@@ -131,12 +138,13 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
         return
       }
     }
-    send({ conversationId, threadRootId, body, attachments, alsoInChannel: inThread && alsoInChannel })
+    send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body, attachments, alsoInChannel: inThread && alsoInChannel })
     // The message is now a row of the list (it stays there with "Not sent" if the send fails), so the draft is done.
     setTextState('')
     clearDraft(workspaceId, conversationId, threadRootId)
     clear()
     setAlsoInChannel(false)
+    onClearReply?.()
     mention.close()
     emoji.close()
     onSent?.()
@@ -168,6 +176,15 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
     const { value, selectionStart } = event.target
     // `:joy:` typed in full becomes the emoji
     if (emoji.complete(value, selectionStart)) return
+    // `:D` and then a space or a new line becomes the emoji (typed, not uncovered by deleting what came after it)
+    const emoticon = value.length > text.length ? completeEmoticon(value, selectionStart) : null
+    if (emoticon) {
+      setText(emoticon.text)
+      mention.close()
+      emoji.close()
+      requestAnimationFrame(() => input.current?.setSelectionRange(emoticon.cursor, emoticon.cursor))
+      return
+    }
     setText(value)
     mention.update(value, selectionStart)
     emoji.update(value, selectionStart)
@@ -178,6 +195,12 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
     // closes the pane. It never clears the text.
     if (mention.handleKeyDown(event) || emoji.handleKeyDown(event)) {
       event.stopPropagation()
+      return
+    }
+    // `Esc` cancels the reply first; the next one reaches the view.
+    if (event.key === 'Escape' && replyTo) {
+      event.stopPropagation()
+      onClearReply?.()
       return
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !coarse) {
@@ -214,9 +237,32 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
         ) : emoji.open ? (
           <EmojiSuggestions id={emojiListId} query={emoji.query} suggestions={emoji.suggestions} activeIndex={emoji.activeIndex} onSelect={emoji.insert} onHover={emoji.setActiveIndex} />
         ) : null}
+        {replyTo ? (
+          <div
+            data-slot="composer-reply"
+            className="flex items-center gap-2 rounded-t-lg border border-b-0 border-input bg-muted/40 pl-3 text-xs text-muted-foreground"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              Replying to <span className="font-medium text-foreground">{people.byId.get(replyTo.authorId)?.name ?? 'Unknown'}</span>
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Cancel reply"
+              title="Cancel reply"
+              onClick={() => {
+                onClearReply?.()
+                input.current?.focus()
+              }}
+            >
+              <Xmark className="size-5" />
+            </Button>
+          </div>
+        ) : null}
         <div
           data-slot="composer-box"
-          className="flex max-h-[50cqh] flex-col rounded-lg border border-input bg-background dark:bg-input/30"
+          data-replying={replyTo ? '' : undefined}
+          className="flex max-h-[50cqh] flex-col rounded-lg border border-input bg-background data-replying:rounded-t-none dark:bg-input/30"
         >
           <ComposerInput
             ref={input}
@@ -224,7 +270,7 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
             people={people.members}
             conversations={people.channels}
             rows={1}
-            aria-label={inThread ? 'Reply in thread' : `Message ${title}`}
+            aria-label={inThread ? 'Reply in Thread' : `Message ${title}`}
             aria-controls={emoji.open ? emojiListId : undefined}
             aria-activedescendant={emoji.open ? `${emojiListId}-${emoji.activeIndex}` : undefined}
             placeholder={inThread ? 'Reply…' : `Message ${title}`}
@@ -263,6 +309,7 @@ export function Composer({ ref, conversation, threadRootId = null, autoFocus = f
               </PopoverTrigger>
               <PopoverContent side="top" align="start" finalFocus={input} className="w-auto gap-0 p-0">
                 <EmojiPicker
+                  custom
                   onPick={(emoji) => {
                     setEmojiOpen(false)
                     insertAtCursor(emoji)

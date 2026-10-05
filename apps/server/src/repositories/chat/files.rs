@@ -85,6 +85,39 @@ pub(super) async fn attach_files(
     load_files(conn, std::slice::from_mut(message)).await
 }
 
+/// Gives a forward the files of the message it copies: new rows that point at the same blobs,
+/// in the same order, so they are read with the access of the forward's own conversation and
+/// stay when the original goes. The forwarder is their uploader. Both messages are in one
+/// workspace, and a message has at most [`MAX_MESSAGE_FILES`] files, so the copy has too.
+pub(super) async fn copy_files(
+    conn: &mut SqliteConnection,
+    source: &MessageRecord,
+    message: &mut MessageRecord,
+) -> Result<(), ChatError> {
+    if source.attachments.is_empty() {
+        return Ok(());
+    }
+    // New ids ascend, so `ORDER BY created_at, id` keeps the order of the original.
+    for file in &source.attachments {
+        sqlx::query(
+            "INSERT INTO chat_message_files (id, workspace_id, message_id, conversation_id, blob_id, \
+             file_name, mime_type, size_bytes, width, height, uploaded_by, created_at) \
+             SELECT ?, workspace_id, ?, ?, blob_id, file_name, mime_type, size_bytes, width, height, \
+             ?, ? FROM chat_message_files WHERE id = ? AND message_id = ?",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(message.id.to_string())
+        .bind(message.conversation_id.to_string())
+        .bind(message.author_id.to_string())
+        .bind(message.created_at.as_millis())
+        .bind(file.id.to_string())
+        .bind(source.id.to_string())
+        .execute(&mut *conn)
+        .await?;
+    }
+    load_files(conn, std::slice::from_mut(message)).await
+}
+
 impl ChatRepository {
     /// Succeeds for a member of the live workspace. Run before reading an upload body.
     pub async fn authorize_upload(&self, workspace_id: Id, actor_id: Id) -> Result<(), ChatError> {

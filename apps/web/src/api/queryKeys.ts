@@ -71,6 +71,11 @@ export const queryKeys = {
     detail: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'detail', importId] as const,
     tree: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'tree', importId] as const,
   },
+  /**
+   * Deliberately outside the workspace prefix: the list changes rarely, and the chat socket says when it does
+   * (`emoji.changed`), so a task or page event must not fetch it again.
+   */
+  customEmoji: (workspaceId: string) => ['custom-emoji', workspaceId] as const,
   tasks: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'tasks'] as const,
     list: (workspaceId: string, filters: TaskFilters = {}) =>

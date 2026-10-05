@@ -520,6 +520,7 @@ async fn seed_chat(
             SendInput {
                 conversation_id,
                 thread_root_id,
+                reply_to_id: None,
                 body,
                 file_ids: Vec::new(),
                 online: Vec::new(),

@@ -252,6 +252,15 @@ export type ChatEditBody = {
     body: string;
 };
 
+export type ChatEmojiImage = Blob | File;
+
+export type ChatEmojiUploadBody = {
+    /**
+     * A PNG, JPEG, WebP or GIF image of at most 256 KiB.
+     */
+    file: Blob | File;
+};
+
 /**
  * One change, as the live socket sends it and as a write's response lists it.
  */
@@ -281,6 +290,8 @@ export type ChatEvent = {
 } | {
     state: ThreadStateRecord;
     type: 'thread.changed';
+} | {
+    type: 'emoji.changed';
 };
 
 /**
@@ -321,6 +332,18 @@ export type ChatFileUploadBody = {
 
 export type ChatFollowBody = {
     following: boolean;
+};
+
+export type ChatForwardBody = {
+    /**
+     * Where the copy goes: a conversation the caller can write to.
+     */
+    conversation_id: string;
+    /**
+     * Made by the caller (1–64 bytes). A forward that is tried again with the same nonce
+     * returns the first copy.
+     */
+    nonce: string;
 };
 
 export type ChatLinkPreview = {
@@ -378,6 +401,10 @@ export type ChatSendBody = {
      * the first message.
      */
     nonce: string;
+    /**
+     * The message this one quotes (an inline reply): a message of the same conversation.
+     */
+    reply_to_id?: string | null;
     /**
      * The root message, for a thread reply.
      */
@@ -504,6 +531,7 @@ export type ChatWriteMessageRecord = {
          */
         deleted: boolean;
         edited_at: string | null;
+        forwarded: null | ForwardedRecord;
         /**
          * UUIDv7: message ids sort by creation time, and every list orders by them.
          */
@@ -522,6 +550,12 @@ export type ChatWriteMessageRecord = {
          * Thread summary; meaningful on a root only.
          */
         reply_count: number;
+        reply_to: null | ReplyToRecord;
+        /**
+         * The message this one quotes (an inline reply, not a thread reply). The id stays when the
+         * quoted message is deleted.
+         */
+        reply_to_id: string | null;
         /**
          * The first reply authors (at most five).
          */
@@ -754,6 +788,24 @@ export type CreateWorkspaceBody = {
     name: string;
 };
 
+export type CustomEmojiRecord = {
+    /**
+     * A GIF.
+     */
+    animated: boolean;
+    created_at: string;
+    created_by: string;
+    id: string;
+    /**
+     * 2 to 32 characters of `a-z 0-9 _`; written `:name:`.
+     */
+    name: string;
+    /**
+     * Same-origin image path. The image of an id never changes.
+     */
+    url: string;
+};
+
 export type DeliveryBody = 'manual' | 'smtp';
 
 export type DiscordEventBody = {
@@ -812,6 +864,20 @@ export type FollowedThreadRecord = {
     last_reply: null | MessageRecord;
     root: MessageRecord;
     state: ThreadStateRecord;
+};
+
+/**
+ * Where a forwarded message came from: the original message as it was when it was forwarded.
+ * The original may be gone, or in a conversation that the reader cannot open.
+ */
+export type ForwardedRecord = {
+    author_id: string;
+    conversation_id: string;
+    /**
+     * When the original message was sent.
+     */
+    created_at: string;
+    message_id: string;
 };
 
 export type GithubLink = {
@@ -1063,6 +1129,7 @@ export type MessageRecord = {
      */
     deleted: boolean;
     edited_at: string | null;
+    forwarded: null | ForwardedRecord;
     /**
      * UUIDv7: message ids sort by creation time, and every list orders by them.
      */
@@ -1081,6 +1148,12 @@ export type MessageRecord = {
      * Thread summary; meaningful on a root only.
      */
     reply_count: number;
+    reply_to: null | ReplyToRecord;
+    /**
+     * The message this one quotes (an inline reply, not a thread reply). The id stays when the
+     * quoted message is deleted.
+     */
+    reply_to_id: string | null;
     /**
      * The first reply authors (at most five).
      */
@@ -2173,6 +2246,18 @@ export type ReplyPreviewRecord = {
     author_id: string;
     body: string;
     created_at: string;
+};
+
+/**
+ * The message that a message quotes, shown above it.
+ */
+export type ReplyToRecord = {
+    author_id: string;
+    /**
+     * The first 200 characters of the quoted body.
+     */
+    body: string;
+    id: string;
 };
 
 export type RestoreBody = {
@@ -6497,6 +6582,241 @@ export type OpenChatDmResponses = {
 
 export type OpenChatDmResponse = OpenChatDmResponses[keyof OpenChatDmResponses];
 
+export type ListChatEmojiData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/emoji';
+};
+
+export type ListChatEmojiErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatEmojiError = ListChatEmojiErrors[keyof ListChatEmojiErrors];
+
+export type ListChatEmojiResponses = {
+    200: Array<CustomEmojiRecord>;
+};
+
+export type ListChatEmojiResponse = ListChatEmojiResponses[keyof ListChatEmojiResponses];
+
+export type CreateChatEmojiData = {
+    body: ChatEmojiUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query: {
+        /**
+         * 2 to 32 characters of `a-z 0-9 _`. Upper case letters are stored in lower case.
+         */
+        name: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/chat/emoji';
+};
+
+export type CreateChatEmojiErrors = {
+    /**
+     * invalid_proxy_headers, invalid_multipart
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, emoji_name_taken, emoji_limit_reached
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, emoji_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, invalid_emoji
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateChatEmojiError = CreateChatEmojiErrors[keyof CreateChatEmojiErrors];
+
+export type CreateChatEmojiResponses = {
+    201: CustomEmojiRecord;
+};
+
+export type CreateChatEmojiResponse = CreateChatEmojiResponses[keyof CreateChatEmojiResponses];
+
+export type DeleteChatEmojiData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        emoji_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}';
+};
+
+export type DeleteChatEmojiErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteChatEmojiError = DeleteChatEmojiErrors[keyof DeleteChatEmojiErrors];
+
+export type DeleteChatEmojiResponses = {
+    204: void;
+};
+
+export type DeleteChatEmojiResponse = DeleteChatEmojiResponses[keyof DeleteChatEmojiResponses];
+
+export type GetChatEmojiImageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        emoji_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}/image';
+};
+
+export type GetChatEmojiImageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetChatEmojiImageError = GetChatEmojiImageErrors[keyof GetChatEmojiImageErrors];
+
+export type GetChatEmojiImageResponses = {
+    200: ChatEmojiImage;
+};
+
+export type GetChatEmojiImageResponse = GetChatEmojiImageResponses[keyof GetChatEmojiImageResponses];
+
 export type UploadChatFileData = {
     body: ChatFileUploadBody;
     headers?: {
@@ -6805,6 +7125,69 @@ export type EditChatMessageResponses = {
 };
 
 export type EditChatMessageResponse = EditChatMessageResponses[keyof EditChatMessageResponses];
+
+export type ForwardChatMessageData = {
+    body: ChatForwardBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/forward';
+};
+
+export type ForwardChatMessageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ForwardChatMessageError = ForwardChatMessageErrors[keyof ForwardChatMessageErrors];
+
+export type ForwardChatMessageResponses = {
+    200: ChatWriteMessageRecord;
+};
+
+export type ForwardChatMessageResponse = ForwardChatMessageResponses[keyof ForwardChatMessageResponses];
 
 export type PinChatMessageData = {
     body: ChatPinBody;

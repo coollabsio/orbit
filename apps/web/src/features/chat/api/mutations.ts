@@ -6,7 +6,7 @@ import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions } from '
 import { patchMessage, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
-import type { Attachment, Category, Conversation, ConversationState, Message, NotifyLevel, ThreadState } from './types'
+import type { Attachment, Category, Conversation, ConversationState, Message, NotifyLevel, ReplyQuote, ThreadState } from './types'
 
 const TYPING_INTERVAL = 8000
 /** When the typing signal was last sent, for each composer (conversation or thread). */
@@ -26,6 +26,8 @@ function useChatMutation<TInput, TResult>(run: (client: ChatClient, input: TInpu
 export interface SendInput {
   conversationId: string
   threadRootId?: string | null
+  /** An inline reply: `quoteOf` the message it answers. */
+  replyTo?: ReplyQuote | null
   /** Stored form: run the composer text through `encodeMentions` first. */
   body: string
   attachments?: Attachment[]
@@ -41,6 +43,9 @@ function optimisticMessage(input: SendMessageInput, authorId: string): Message {
     id: `~${String(now).padStart(15, '0')}-${input.nonce}`,
     conversationId: input.conversationId,
     threadRootId,
+    replyToId: input.replyTo?.id ?? null,
+    replyTo: input.replyTo ?? null,
+    forwarded: null,
     kind: 'message',
     authorId,
     body: input.body,
@@ -98,14 +103,24 @@ export function useSendMessage() {
     /** Sends a failed message again, under the same nonce. */
     retry: (message: Message) => {
       if (!message.nonce) return
-      const { conversationId, threadRootId, body, attachments, alsoInChannel, nonce } = message
-      mutation.mutate({ conversationId, threadRootId, body, attachments, alsoInChannel, nonce })
+      // A quote whose message was deleted meanwhile is `null` by now: the message then goes as a plain one.
+      const { conversationId, threadRootId, replyTo, body, attachments, alsoInChannel, nonce } = message
+      mutation.mutate({ conversationId, threadRootId, replyTo, body, attachments, alsoInChannel, nonce })
     },
     /** Removes a failed message. */
     discard: (message: Message) => {
       updateOutbox(queryClient, workspaceId, (waiting) => waiting.filter((item) => item.id !== message.id))
     },
   }
+}
+
+/**
+ * Copies a message into another conversation. No optimistic row: the copy shows when the server answers. The caller
+ * makes the nonce, so the same forward can go again and gives the first copy.
+ */
+export function useForwardMessage() {
+  return useChatMutation(
+    (client, input: { messageId: string; conversationId: string; nonce: string }) => client.forwardMessage(input.messageId, input.conversationId, input.nonce))
 }
 
 export function useEditMessage() {

@@ -93,11 +93,37 @@ export interface ReplyPreview {
 /** `pin`, `join` and `leave` are one-line system rows; `authorId` is the member who did it. */
 export type MessageKind = 'message' | 'pin' | 'join' | 'leave'
 
+/** The message that a reply quotes, shown on one line above the reply. */
+export interface ReplyQuote {
+  id: string
+  authorId: string
+  /** The start of the quoted message's stored body, with its mention tokens. */
+  body: string
+}
+
+/** Where a forwarded message was copied from. The original may be gone, or in a conversation the reader cannot open. */
+export interface ForwardOrigin {
+  messageId: string
+  conversationId: string
+  authorId: string
+  /** When the original message was sent. */
+  createdAt: number
+}
+
 export interface Message {
   id: string
   conversationId: string
   /** Set on a thread reply. A root message has `null`. */
   threadRootId: string | null
+  /** Set on an inline reply: the message it quotes. It stays when that message is deleted. */
+  replyToId: string | null
+  /** The quote of `replyToId`; `null` when that message was deleted. */
+  replyTo: ReplyQuote | null
+  /**
+   * Set on a forward: a new message of the forwarder whose body and attachments are a copy of the original. It cannot
+   * be edited and does not change with the original. A row cached before forwards existed has no such field.
+   */
+  forwarded: ForwardOrigin | null
   kind: MessageKind
   authorId: string
   /** Markdown source. Mentions are tokens: `<@userId>`, `<#conversationId>`, `<!channel>`, `<!here>`. */
@@ -209,6 +235,8 @@ export type ChatEvent =
   | { type: 'presence'; userId: string; presence: PresenceEntry | null }
   /** The signed-in user changed their own status, in this tab or another: fetch the current user again. */
   | { type: 'self.changed' }
+  /** A custom emoji of the workspace was added or deleted: fetch the list again. */
+  | { type: 'emoji.changed' }
   | { type: 'connection'; status: ConnectionStatus }
   /** The client missed events: refetch every chat query. */
   | { type: 'resync' }

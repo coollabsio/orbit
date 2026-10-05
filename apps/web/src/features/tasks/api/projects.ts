@@ -93,7 +93,8 @@ export function useAllStatuses(workspaceId: string, projects: ProjectRecord[]) {
   return {
     data: results.flatMap((result) => result.data ?? []),
     isPending: results.some((result) => result.isPending),
-    isError: results.some((result) => result.isError),
+    // A failed refetch of statuses that are already here is not an error for the page.
+    isError: results.some((result) => result.isError && result.data === undefined),
     error: results.find((result) => result.error)?.error ?? null,
   }
 }

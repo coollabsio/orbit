@@ -2,10 +2,12 @@ import type { ComponentProps } from 'react'
 import {
   Copy,
   Edit,
+  Forward,
   Link2,
   Message as MessageIcon,
   Pin,
   PinOff,
+  Reply,
   SmileCircle,
   TaskSquare,
   Trash,
@@ -20,6 +22,7 @@ import { useDeleteMessage, useMarkUnread, useSetPinned, useToggleReaction } from
 import type { Message } from '../../api/types'
 import { useChatHost } from '../../chatHost'
 import { messagePath } from '../../chatRoutes'
+import { canEdit, canForward } from '../../lib/forward'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { useChatNavigation } from '../../useChatNavigation'
 import { useChatPeople } from './people'
@@ -40,8 +43,12 @@ export interface MessageAction {
 }
 
 interface MessageActionOptions {
-  /** In a thread there is no "Reply in thread". */
+  /** In a thread there is no "Reply in Thread". */
   inThread: boolean
+  /** Makes the message the composer's reply target. Absent where the user cannot write: no "Reply" then. */
+  onReply?: (message: Message) => void
+  /** Opens the forward dialog for the message. */
+  onForward: (message: Message) => void
   onAddReaction: (message: Message) => void
   onEdit: (message: Message) => void
   /** Called before "Mark as unread" is sent, so the view stops marking itself read before the new state arrives. */
@@ -52,11 +59,11 @@ interface MessageActionOptions {
  * What a member can do with a message. The `…` menu, the right-click menu and the mobile action sheet all show
  * `actionsFor(message)`, so they never differ.
  */
-export function useMessageActions({ inThread, onAddReaction, onEdit, onMarkUnread }: MessageActionOptions) {
+export function useMessageActions({ inThread, onReply, onForward, onAddReaction, onEdit, onMarkUnread }: MessageActionOptions) {
   const { currentUserId } = useChatContext()
   const people = useChatPeople()
   const host = useChatHost()
-  const { openThreadPane } = useChatNavigation()
+  const { openConversation, openThreadPane, showInThread } = useChatNavigation()
   const { mutate: toggleReaction } = useToggleReaction()
   const { mutate: setPinned } = useSetPinned()
   const { mutate: markUnread } = useMarkUnread()
@@ -72,6 +79,18 @@ export function useMessageActions({ inThread, onAddReaction, onEdit, onMarkUnrea
   function openThread(message: Message) {
     if (message.threadRootId) openThreadPane(message.conversationId, message.threadRootId, message.id)
     else openThreadPane(message.conversationId, message.id)
+  }
+
+  /** Jumps to the message that a reply quotes: in the open thread for one of its replies, else in the conversation. */
+  function openQuoted(message: Message) {
+    if (!message.replyToId) return
+    if (inThread && message.threadRootId) showInThread(message.threadRootId, message.replyToId)
+    else openConversation(message.conversationId, message.replyToId)
+  }
+
+  /** Jumps to the message that a forward is a copy of, in its own conversation. */
+  function openOrigin(message: Message) {
+    if (message.forwarded) openConversation(message.forwarded.conversationId, message.forwarded.messageId)
   }
 
   function copy(text: string, done: string) {
@@ -99,8 +118,14 @@ export function useMessageActions({ inThread, onAddReaction, onEdit, onMarkUnrea
     if (!message.deleted) {
       actions.push({ key: 'react', label: 'Add reaction', icon: SmileCircle, run: () => onAddReaction(message) })
     }
+    if (onReply && !message.deleted) {
+      actions.push({ key: 'reply', label: 'Reply', icon: Reply, run: () => onReply(message) })
+    }
     if (!inThread) {
-      actions.push({ key: 'thread', label: 'Reply in thread', icon: MessageIcon, run: () => openThread(message) })
+      actions.push({ key: 'thread', label: 'Reply in Thread', icon: MessageIcon, run: () => openThread(message) })
+    }
+    if (canForward(message)) {
+      actions.push({ key: 'forward', label: 'Forward', icon: Forward, run: () => onForward(message) })
     }
     actions.push({
       key: 'link',
@@ -137,12 +162,12 @@ export function useMessageActions({ inThread, onAddReaction, onEdit, onMarkUnrea
         },
       },
     )
-    if (own) actions.push({ key: 'edit', label: 'Edit', icon: Edit, run: () => onEdit(message) })
+    if (canEdit(message, currentUserId)) actions.push({ key: 'edit', label: 'Edit', icon: Edit, run: () => onEdit(message) })
     if (own || moderator) {
       actions.push({ key: 'delete', label: 'Delete', icon: Trash, destructive: true, run: () => void remove(message) })
     }
     return actions
   }
 
-  return { actionsFor, react, openThread }
+  return { actionsFor, react, openThread, openQuoted, openOrigin }
 }

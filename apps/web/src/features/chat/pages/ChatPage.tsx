@@ -31,6 +31,7 @@ import { getLastOpenedConversation, setLastOpenedConversation } from '@/features
 import { decodeMentions } from '@/features/chat/lib/mentionTokens'
 import { buildSidebarSections, conversationBadge } from '@/features/chat/lib/sidebar'
 import { useChatLocation, useChatNavigation, useOpenPane } from '@/features/chat/useChatNavigation'
+import { useProjects } from '@/features/tasks/api/projects'
 import { useOpenNewTask } from '@/features/tasks/newTask'
 import { useMembers } from '@/features/workspaces/api'
 import { useBindings, useCommand, useRunCommand } from '@/shortcuts/useCommand'
@@ -173,6 +174,7 @@ export function ChatPage() {
   const conversations = useConversations()
   const people = useMembers(workspaceId).data
   const openNewTask = useOpenNewTask()
+  const projects = useProjects(workspaceId).data
   const phone = useIsPhone()
   const [areaRef, areaWidth] = useElementWidth()
   const [paneWidth, setPaneWidth] = useStoredWidth('orbit:chat:pane_width', PANE_WIDTH)
@@ -195,6 +197,7 @@ export function ChatPage() {
       const target = orbitLinkTarget(url, window.location.origin)
       return target ? <ChatLinkChip kind={target.kind} id={target.id} hidden={hidden}>{plain}</ChatLinkChip> : plain
     },
+    taskKeys: (projects ?? []).map((project) => project.key),
     createTask: (message: ChatMessage) => {
       const source = conversations.data?.find((candidate) => candidate.id === message.conversationId)
       const text = decodeMentions(message.body, people ?? [], conversations.data ?? [])
@@ -230,7 +233,7 @@ export function ChatPage() {
     main = <UnreadsView />
   } else if (location.view === 'threads') {
     main = <ThreadsView />
-  } else if (conversations.isError) {
+  } else if (conversations.isError && conversations.data === undefined) {
     main = (
       <Pane>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[13px] text-muted-foreground" role="alert">

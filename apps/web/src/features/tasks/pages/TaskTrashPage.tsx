@@ -17,7 +17,7 @@ export function TaskTrashPage() {
   const restoreProject = useRestoreProject(workspace.id)
   const restoring = useSlowPending(restore.isPending || restoreProject.isPending)
   if (trash.isPending || projects.isPending) return <EmptyState icon={Trash2} title="Loading trash" description="Loading deleted projects and tasks." />
-  if (trash.isError || projects.isError) return <div><EmptyState icon={Trash2} title="Trash unavailable" description="The server could not load deleted records." /><Button variant="outline" onClick={() => { void trash.refetch(); void projects.refetch() }}>Retry</Button></div>
+  if ((trash.isError && trash.data === undefined) || (projects.isError && projects.data === undefined)) return <div><EmptyState icon={Trash2} title="Trash unavailable" description="The server could not load deleted records." /><Button variant="outline" onClick={() => { void trash.refetch(); void projects.refetch() }}>Retry</Button></div>
   // deleted projects first, then deleted tasks
   const count = projects.data.length + trash.data.length
   return (

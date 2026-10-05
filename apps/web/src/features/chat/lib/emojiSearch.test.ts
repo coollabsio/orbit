@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { buildEmojiIndex, emojiNamed, searchEmojiIndex } from './emojiSearch'
+import { buildEmojiIndex, completedEmoji, emojiNamed, searchEmojiIndex, suggestEmoji } from './emojiSearch'
 
 const index = buildEmojiIndex(
   [
@@ -35,4 +35,23 @@ test('a full name gives its emoji', () => {
   expect(emojiNamed(index, '+1')).toBe('👍')
   expect(emojiNamed(index, 'JOY')).toBe('😂')
   expect(emojiNamed(index, 'jo')).toBeNull()
+})
+
+test('the custom emoji of the workspace come first in the list, as the text :name:', () => {
+  expect(suggestEmoji(['joystick', 'cat_jam', 'parrot'], index, 'jo')).toEqual([
+    { emoji: ':joystick:', name: 'joystick' },
+    { emoji: '😂', name: 'joy' },
+    { emoji: '😹', name: 'joy_cat' },
+  ])
+  // the limit counts both kinds, and the list works before the standard emoji loaded
+  expect(suggestEmoji(['joystick'], index, 'jo', 2).map((entry) => entry.emoji)).toEqual([':joystick:', '😂'])
+  expect(suggestEmoji(['joystick'], [], 'jo').map((entry) => entry.emoji)).toEqual([':joystick:'])
+  expect(suggestEmoji([], index, 'jo').map((entry) => entry.emoji)).toEqual(['😂', '😹'])
+})
+
+test('a custom emoji typed in full stays as typed; a standard one becomes its character', () => {
+  const custom = new Set(['parrot'])
+  expect(completedEmoji(custom, index, 'parrot')).toBeNull()
+  expect(completedEmoji(custom, index, 'joy')).toBe('😂')
+  expect(completedEmoji(custom, index, 'nothing')).toBeNull()
 })

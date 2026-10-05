@@ -9,8 +9,8 @@ use utoipa::{IntoParams, ToSchema};
 use super::{Call, ChatEvents, ChatState, ChatWrite, RequestIdExtension};
 use crate::push::PushService;
 use crate::repositories::chat::{
-    ChatError, FollowedThreadRecord, MessageCursor, MessagePage, MessageRecord, SearchInput,
-    SearchPage, SendInput, ThreadPage,
+    ChatError, FollowedThreadRecord, ForwardInput, MessageCursor, MessagePage, MessageRecord,
+    SearchInput, SearchPage, SendInput, ThreadPage,
 };
 use crate::task_routes::{ApiError, ApiJson, ApiQuery};
 
@@ -61,6 +61,10 @@ pub(crate) struct ChatSendBody {
     body: String,
     /// The root message, for a thread reply.
     thread_root_id: Option<String>,
+    /// The message this one quotes (an inline reply): a message of the same conversation.
+    #[serde(default)]
+    #[schema(required = false)]
+    reply_to_id: Option<String>,
     /// A thread reply that also shows in the conversation.
     #[serde(default)]
     #[schema(required = false)]
@@ -72,6 +76,16 @@ pub(crate) struct ChatSendBody {
     file_ids: Vec<String>,
     /// Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns
     /// the first message.
+    nonce: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChatForwardBody {
+    /// Where the copy goes: a conversation the caller can write to.
+    conversation_id: String,
+    /// Made by the caller (1–64 bytes). A forward that is tried again with the same nonce
+    /// returns the first copy.
     nonce: String,
 }
 
@@ -125,6 +139,11 @@ pub(crate) async fn send_chat_message(
             .as_deref()
             .map(|id| call.body_id(id, "thread_root_id"))
             .transpose()?,
+        reply_to_id: body
+            .reply_to_id
+            .as_deref()
+            .map(|id| call.body_id(id, "reply_to_id"))
+            .transpose()?,
         file_ids: call.body_ids(&body.file_ids, "file_ids")?,
         online: state.hub.online(call.workspace_id),
         body: body.body,
@@ -137,6 +156,37 @@ pub(crate) async fn send_chat_message(
             state
                 .chat
                 .send_message(call.workspace_id, call.actor_id, input),
+        )
+        .await?;
+    PushService::of(state.identity.database()).chat_message(&written.result);
+    Ok(written)
+}
+
+/// Sends a copy of a message the caller can read to the main list of another conversation (or
+/// the same one), as the caller's own message: the body and the files of the original as they
+/// are now, with `forwarded` set. The copy mentions nobody and cannot be edited. System rows
+/// and deleted messages cannot be forwarded.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/forward", params(("workspace_id" = String, Path), ("message_id" = String, Path)), request_body = ChatForwardBody, responses((status = 200, body = ChatWrite<MessageRecord>)))]
+pub(crate) async fn forward_chat_message(
+    State(state): State<ChatState>,
+    Path((workspace, message)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<ChatForwardBody>,
+) -> Result<Json<ChatWrite<MessageRecord>>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let input = ForwardInput {
+        message_id: call.id(&message)?,
+        conversation_id: call.body_id(&body.conversation_id, "conversation_id")?,
+        nonce: body.nonce,
+    };
+    let written = call
+        .write(
+            &state,
+            state
+                .chat
+                .forward_message(call.workspace_id, call.actor_id, input),
         )
         .await?;
     PushService::of(state.identity.database()).chat_message(&written.result);

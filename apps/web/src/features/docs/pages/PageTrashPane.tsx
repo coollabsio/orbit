@@ -79,7 +79,7 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
         <Spinner className="text-muted-foreground" />
       </div>
     )
-  } else if (trash.isError) {
+  } else if (trash.isError && trash.data === undefined) {
     body = (
       <div className="flex flex-1 flex-col p-6">
         <EmptyState

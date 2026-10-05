@@ -88,3 +88,49 @@ test('an ended session does not reconnect', async () => {
   expect(log.at(-1)).toBe('reconnecting')
   live.close()
 })
+
+test('back online, a waiting socket reconnects at once', async () => {
+  const sockets: FakeSocket[] = []
+  // A long backoff: only the `online` event can bring the second socket within the test.
+  const live = openLiveSocket({
+    url: 'ws://orbit/live',
+    retryMs: 60_000,
+    createSocket: (url) => {
+      const socket = new FakeSocket(url)
+      sockets.push(socket)
+      return socket
+    },
+    onEvent: () => {},
+    onHello: () => {},
+    onResync: () => {},
+    onStatus: () => {},
+  })
+  sockets[0].frame({ type: 'hello', epoch: 'e1', seq: 2, presence: [] })
+  sockets[0].frame({ seq: 3, topic: 'chat', event: { type: 'message.created' } })
+  // A connected socket is left alone.
+  window.dispatchEvent(new Event('online'))
+  expect(sockets.length).toBe(1)
+
+  sockets[0].onclose?.({ code: 1006 })
+  expect(sockets.length).toBe(1)
+  window.dispatchEvent(new Event('online'))
+  expect(sockets.length).toBe(2)
+  expect(sockets[1].url).toBe('ws://orbit/live?epoch=e1&after=3')
+  // The new socket is connecting: a second signal does not open a third.
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(sockets.length).toBe(2)
+
+  // The tab becoming visible does the same as `online`.
+  sockets[1].onclose?.({ code: 1006 })
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(sockets.length).toBe(3)
+
+  // An ended session stays ended.
+  sockets[2].onclose?.({ code: 4401 })
+  window.dispatchEvent(new Event('online'))
+  expect(sockets.length).toBe(3)
+
+  live.close()
+  window.dispatchEvent(new Event('online'))
+  expect(sockets.length).toBe(3)
+})

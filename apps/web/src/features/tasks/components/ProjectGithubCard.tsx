@@ -19,7 +19,7 @@ export function ProjectGithubCard({ workspaceId, projectId, onPendingChange }: {
   const remove = useDeleteGithubProjectConnection(workspaceId, projectId)
 
   if (query.isPending) return <SettingsCard title="GitHub">Loading GitHub settings.</SettingsCard>
-  if (query.isError) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
+  if (query.isError && query.data === undefined) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
 
   return <GithubCardContent
     key={`${projectId}:${query.data.repository}:${query.data.label}`}

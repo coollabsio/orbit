@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
 import { queryKeys } from '@/api/queryKeys'
+import { connectionRetryDelay, retryConnectionFailure } from '@/lib/connection'
 import {
   acceptInvitation,
   previewInvitation,
@@ -64,7 +65,8 @@ export function memberFromRecord(member: MemberRecord): User {
 }
 
 export function useWorkspaces() {
-  return useQuery(workspacesQueryOptions())
+  // A core query: a network or 5xx failure retries with backoff.
+  return useQuery({ ...workspacesQueryOptions(), retry: retryConnectionFailure, retryDelay: connectionRetryDelay })
 }
 
 export function useMembers(workspaceId: string | null) {

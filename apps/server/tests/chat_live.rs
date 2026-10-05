@@ -480,3 +480,65 @@ async fn a_client_that_reconnects_gets_what_it_missed_or_a_resync() {
     assert_eq!(next(&mut socket).await.unwrap()["type"], "resync");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_new_or_deleted_emoji_tells_every_member_to_read_the_list_again() {
+    let (server, owner) = Server::start().await;
+    let ada = server.user("ada", true).await;
+    let (mut owner_socket, _) = server.client(&owner).await;
+    let (mut ada_socket, _) = server.client(&ada).await;
+    drain(&mut owner_socket).await;
+
+    let boundary = "orbit-test-boundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"emoji\"\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x3b");
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let response = server
+        .http
+        .post(format!(
+            "{}/api/v1/workspaces/{}/chat/emoji?name=blink",
+            server.base, server.workspace
+        ))
+        .header("origin", &server.base)
+        .header("cookie", format!("{COOKIE}={}", owner.token))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 201);
+    let emoji: Value = response.json().await.unwrap();
+    for socket in [&mut owner_socket, &mut ada_socket] {
+        let frame = next(socket).await.unwrap();
+        assert_eq!(frame["topic"], "chat");
+        assert_eq!(frame["event"], json!({ "type": "emoji.changed" }));
+    }
+
+    let response = server
+        .http
+        .delete(format!(
+            "{}/api/v1/workspaces/{}/chat/emoji/{}",
+            server.base,
+            server.workspace,
+            emoji["id"].as_str().unwrap()
+        ))
+        .header("origin", &server.base)
+        .header("cookie", format!("{COOKIE}={}", owner.token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 204);
+    for socket in [&mut owner_socket, &mut ada_socket] {
+        assert_eq!(
+            drain(socket).await,
+            [("chat".to_owned(), "emoji.changed".to_owned())]
+        );
+    }
+    server.stop().await;
+}

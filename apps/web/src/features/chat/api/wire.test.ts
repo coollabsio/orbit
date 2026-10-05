@@ -8,6 +8,9 @@ const message: MessageRecord = {
   id: 'm2',
   conversation_id: 'c1',
   thread_root_id: 'm1',
+  reply_to_id: 'm0',
+  reply_to: { id: 'm0', author_id: 'u1', body: 'Is it <@u2>?' },
+  forwarded: null,
   kind: 'message',
   author_id: 'u2',
   body: '<@u1> done',
@@ -52,6 +55,9 @@ test('a wire message becomes a chat message with millisecond times', () => {
       id: 'm2',
       conversationId: 'c1',
       threadRootId: 'm1',
+      replyToId: 'm0',
+      replyTo: { id: 'm0', authorId: 'u1', body: 'Is it <@u2>?' },
+      forwarded: null,
       kind: 'message',
       authorId: 'u2',
       body: '<@u1> done',
@@ -111,4 +117,17 @@ test('a failed request becomes the chat error the UI knows', () => {
   expect(toChatError(new TypeError('Failed to fetch')).code).toBe('offline')
   const known = new ChatError('upload_failed', 'x')
   expect(toChatError(known)).toBe(known)
+})
+
+test('a reply whose message was deleted keeps the id and has no quote', () => {
+  const event = toEvent({ type: 'message.updated', message: { ...message, reply_to: null } }, 'u1')
+  expect(event).toMatchObject({ message: { replyToId: 'm0', replyTo: null } })
+})
+
+test('a forward carries where the original came from', () => {
+  const forwarded = { message_id: 'm0', conversation_id: 'c9', author_id: 'u3', created_at: '2026-10-01T09:30:00.000Z' }
+  const event = toEvent({ type: 'message.created', message: { ...message, forwarded } }, 'u1')
+  expect(event).toMatchObject({
+    message: { forwarded: { messageId: 'm0', conversationId: 'c9', authorId: 'u3', createdAt: Date.UTC(2026, 9, 1, 9, 30) } },
+  })
 })

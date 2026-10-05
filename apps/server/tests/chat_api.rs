@@ -2366,3 +2366,735 @@ async fn the_server_does_not_read_a_local_address_for_a_preview() {
         assert_eq!(answer["preview"], Value::Null, "{path}");
     }
 }
+
+#[tokio::test]
+async fn a_reply_quotes_a_message_of_its_conversation_and_keeps_the_id_of_a_deleted_one() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let general = fixture.general().await;
+    let other = fixture
+        .channel(&fixture.owner, "other", "public", &[&ada])
+        .await;
+    let long = "é".repeat(250);
+    let target = fixture.send(&fixture.owner, &general, &long).await;
+    let before = fixture.counts(&fixture.owner, &general).await;
+
+    let sent = fixture
+        .send_with(
+            &ada,
+            &general,
+            json!({ "body": "I agree", "reply_to_id": target }),
+        )
+        .await;
+    let reply = sent["result"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(sent["result"]["reply_to_id"], target);
+    assert_eq!(sent["result"]["thread_root_id"], Value::Null);
+    assert_eq!(
+        sent["result"]["reply_to"],
+        json!({ "id": target, "author_id": fixture.owner.id.to_string(), "body": "é".repeat(200) })
+    );
+    // The event that the other members get carries the quote too.
+    assert_eq!(sent["events"][0]["type"], "message.created");
+    assert_eq!(sent["events"][0]["message"]["reply_to"]["id"], target);
+    // A quote is a plain message for its target's author: unread, not a mention.
+    let after = fixture.counts(&fixture.owner, &general).await;
+    assert_eq!(after, (before.0 + 1, before.1));
+    // A message without a quote has both fields, null.
+    let plain = fixture
+        .send_with(&ada, &general, json!({ "body": "plain" }))
+        .await;
+    assert_eq!(plain["result"]["reply_to_id"], Value::Null);
+    assert_eq!(plain["result"]["reply_to"], Value::Null);
+
+    let listed = |messages: Value, id: &str| -> Value {
+        messages["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["id"] == id)
+            .unwrap_or_else(|| panic!("{id} is not listed"))
+            .clone()
+    };
+    let path = format!("/conversations/{general}/messages");
+    let message = listed(fixture.ok(&ada, "GET", &path, None).await, &reply);
+    assert_eq!(message["reply_to"]["body"], "é".repeat(200));
+
+    // The target must be a message of the same conversation.
+    let elsewhere = fixture.send(&fixture.owner, &other, "elsewhere").await;
+    for bad in [elsewhere, Id::new_v7().to_string()] {
+        let (status, problem) = fixture
+            .call(
+                &ada,
+                "POST",
+                &path,
+                Some(json!({ "body": "no", "reply_to_id": bad, "nonce": fixture.next_nonce() })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+        assert_eq!(problem["code"], "chat_not_found");
+    }
+    let (status, problem) = fixture
+        .call(
+            &ada,
+            "POST",
+            &path,
+            Some(
+                json!({ "body": "no", "reply_to_id": "not-an-id", "nonce": fixture.next_nonce() }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert_eq!(problem["code"], "validation_failed");
+
+    // An edit of the target shows in the quote.
+    fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &format!("/messages/{target}"),
+            Some(json!({ "body": "short now" })),
+        )
+        .await;
+    let message = listed(fixture.ok(&ada, "GET", &path, None).await, &reply);
+    assert_eq!(message["reply_to"]["body"], "short now");
+
+    // The target is removed: the reply keeps its id and has nothing to quote.
+    fixture
+        .ok(
+            &fixture.owner,
+            "DELETE",
+            &format!("/messages/{target}"),
+            None,
+        )
+        .await;
+    let message = listed(fixture.ok(&ada, "GET", &path, None).await, &reply);
+    assert_eq!(message["reply_to_id"], target);
+    assert_eq!(message["reply_to"], Value::Null);
+
+    // A deleted root that stays for its replies is not quoted, by an old reply or a new one.
+    let root = fixture.send(&fixture.owner, &general, "a root").await;
+    let quoting = fixture
+        .send_with(
+            &ada,
+            &general,
+            json!({ "body": "quoting", "reply_to_id": root }),
+        )
+        .await["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fixture.reply(&ada, &general, &root, "in the thread").await;
+    fixture
+        .ok(&fixture.owner, "DELETE", &format!("/messages/{root}"), None)
+        .await;
+    let message = listed(fixture.ok(&ada, "GET", &path, None).await, &quoting);
+    assert_eq!(message["reply_to_id"], root);
+    assert_eq!(message["reply_to"], Value::Null);
+    let (status, _) = fixture
+        .call(
+            &ada,
+            "POST",
+            &path,
+            Some(json!({ "body": "no", "reply_to_id": root, "nonce": fixture.next_nonce() })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    fixture.assert_counters_exact("after replies").await;
+}
+
+const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b";
+
+impl Fixture {
+    /// Uploads an emoji image; returns the status and the answer.
+    async fn add_emoji(&self, member: &Member, name: &str, bytes: &[u8]) -> (StatusCode, Value) {
+        let boundary = "orbit-test-boundary";
+        let mut body = Vec::new();
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"emoji\"\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/v1/workspaces/{}/chat/emoji?name={name}",
+                self.workspace_id
+            ))
+            .header(header::COOKIE, &member.cookie)
+            .header(
+                header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(Body::from(body))
+            .unwrap();
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+}
+
+#[tokio::test]
+async fn custom_emoji_are_added_by_managers_and_read_by_members() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let admin = fixture.add_member("grace").await;
+    sqlx::query("UPDATE memberships SET role = 'admin' WHERE user_id = ?")
+        .bind(admin.id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (outsider_id, outsider_email) = fixture.add_user("mallory").await;
+    let outsider = fixture
+        .session(outsider_id, outsider_email, "mallory")
+        .await;
+
+    // A member does not add an emoji; an admin does. The name is stored in lower case.
+    let (status, problem) = fixture.add_emoji(&ada, "party", PNG).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "chat_forbidden");
+    let (status, created) = fixture.add_emoji(&admin, "Party_Parrot2", PNG).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_owned();
+    let url = format!(
+        "/api/v1/workspaces/{}/chat/emoji/{id}/image",
+        fixture.workspace_id
+    );
+    assert_eq!(created["name"], "party_parrot2");
+    assert_eq!(created["animated"], false);
+    assert_eq!(created["url"], url);
+    assert_eq!(created["created_by"], admin.id.to_string());
+    assert!(created["created_at"].is_string());
+    let (status, animated) = fixture.add_emoji(&fixture.owner, "blink", GIF).await;
+    assert_eq!(status, StatusCode::CREATED, "{animated}");
+    assert_eq!(animated["animated"], true);
+
+    // What is refused, and with which code.
+    let too_large = [PNG, vec![0_u8; 256 * 1024].as_slice()].concat();
+    let largest = [PNG, vec![0_u8; 256 * 1024 - PNG.len()].as_slice()].concat();
+    for (name, bytes, expected, code) in [
+        (
+            "svg",
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".as_slice(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_emoji",
+        ),
+        (
+            "big",
+            too_large.as_slice(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "emoji_too_large",
+        ),
+        (
+            "a",
+            PNG,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+        ),
+        (
+            "with-dash",
+            PNG,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+        ),
+        (
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            PNG,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+        ),
+        (
+            "PARTY_parrot2",
+            PNG,
+            StatusCode::CONFLICT,
+            "emoji_name_taken",
+        ),
+    ] {
+        let (status, problem) = fixture.add_emoji(&admin, name, bytes).await;
+        assert_eq!(status, expected, "{name}: {problem}");
+        assert_eq!(problem["code"], code, "{name}: {problem}");
+    }
+    let (status, problem) = fixture.add_emoji(&admin, "largest", &largest).await;
+    assert_eq!(status, StatusCode::CREATED, "{problem}");
+    let largest_id = problem["id"].as_str().unwrap().to_owned();
+
+    // Every member reads the list (by name) and the images.
+    let listed = fixture.ok(&ada, "GET", "/emoji", None).await;
+    let names: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|emoji| emoji["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["blink", "largest", "party_parrot2"]);
+    assert_eq!(listed[2], created);
+    let image = |member: &Member, url: &str| {
+        let request = Request::builder()
+            .uri(url)
+            .header(header::COOKIE, &member.cookie)
+            .body(Body::empty())
+            .unwrap();
+        fixture.app.clone().oneshot(request)
+    };
+    let response = image(&ada, &url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "private, max-age=31536000, immutable"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&bytes[..], PNG);
+    let response = image(&ada, animated["url"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/gif");
+
+    // An emoji is a reaction by its name.
+    let general = fixture.general().await;
+    let message = fixture.send(&fixture.owner, &general, "hello").await;
+    let reacted = fixture
+        .ok(
+            &ada,
+            "PUT",
+            &format!("/messages/{message}/reactions/:party_parrot2:"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        reacted["result"]["reactions"][0]["emoji"],
+        ":party_parrot2:"
+    );
+
+    // Somebody who is not in the workspace gets nothing.
+    let (status, _) = fixture.call(&outsider, "GET", "/emoji", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        image(&outsider, &url).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let (status, _) = fixture.add_emoji(&outsider, "mine", PNG).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = fixture
+        .call(&outsider, "DELETE", &format!("/emoji/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A member does not delete; an admin does, and the image goes with it.
+    let (status, problem) = fixture
+        .call(&ada, "DELETE", &format!("/emoji/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    let (status, _) = fixture
+        .call(&admin, "DELETE", &format!("/emoji/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, problem) = fixture
+        .call(&admin, "DELETE", &format!("/emoji/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "chat_not_found");
+    assert_eq!(
+        image(&ada, &url).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        fixture
+            .ok(&ada, "GET", "/emoji", None)
+            .await
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    // The name is free again.
+    let (status, _) = fixture.add_emoji(&admin, "party_parrot2", PNG).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // A workspace has at most 200.
+    let now = TimestampMillis::now().as_millis();
+    for index in 0..197 {
+        sqlx::query(
+            "INSERT INTO custom_emoji (id, workspace_id, name, mime_type, bytes, created_by, created_at) \
+             VALUES (?, ?, ?, 'image/png', ?, ?, ?)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&fixture.workspace_id)
+        .bind(format!("filler_{index}"))
+        .bind(PNG)
+        .bind(fixture.owner.id.to_string())
+        .bind(now)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    }
+    let (status, problem) = fixture.add_emoji(&admin, "one_more", PNG).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "emoji_limit_reached");
+    let (status, _) = fixture
+        .call(&admin, "DELETE", &format!("/emoji/{largest_id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = fixture.add_emoji(&admin, "one_more", PNG).await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+impl Fixture {
+    /// Forwards a message to a conversation; returns the status and the answer.
+    async fn forward(
+        &self,
+        member: &Member,
+        message: &str,
+        conversation: &str,
+    ) -> (StatusCode, Value) {
+        self.call(
+            member,
+            "POST",
+            &format!("/messages/{message}/forward"),
+            Some(json!({ "conversation_id": conversation, "nonce": self.next_nonce() })),
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+async fn a_forward_is_a_copy_with_its_files_that_mentions_nobody_and_outlives_the_original() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    let general = fixture.general().await;
+    let source = fixture
+        .channel(&fixture.owner, "source", "private", &[&ada])
+        .await;
+    let target = fixture.channel(&ada, "target", "private", &[&bob]).await;
+
+    // The original: a file, and mentions of a member of the destination and of everyone.
+    let file = fixture.upload(&fixture.owner, "plan.png", PNG).await;
+    let body = format!("<@{}> look <!channel>", bob.id);
+    let sent = fixture
+        .send_with(
+            &fixture.owner,
+            &source,
+            json!({ "body": body, "file_ids": [file["id"]] }),
+        )
+        .await;
+    let original = sent["result"]["id"].as_str().unwrap().to_owned();
+    let original_url = file["url"].as_str().unwrap().to_owned();
+    let before = fixture.counts(&bob, &target).await;
+
+    let (status, written) = fixture.forward(&ada, &original, &target).await;
+    assert_eq!(status, StatusCode::OK, "{written}");
+    let forward = written["result"].clone();
+    let forward_id = forward["id"].as_str().unwrap().to_owned();
+    assert_ne!(forward_id, original);
+    assert_eq!(forward["conversation_id"], target);
+    assert_eq!(forward["author_id"], ada.id.to_string());
+    assert_eq!(forward["kind"], "message");
+    assert_eq!(forward["body"], body);
+    assert_eq!(forward["thread_root_id"], Value::Null);
+    assert_eq!(forward["reply_to_id"], Value::Null);
+    assert_eq!(forward["edited_at"], Value::Null);
+    let origin = json!({
+        "message_id": original,
+        "conversation_id": source,
+        "author_id": fixture.owner.id.to_string(),
+        "created_at": sent["result"]["created_at"],
+    });
+    assert_eq!(forward["forwarded"], origin);
+    // The other members get the same event as for a sent message.
+    assert_eq!(written["events"][0]["type"], "message.created");
+    assert_eq!(written["events"][0]["message"]["forwarded"], origin);
+
+    // The file is a new row with the same content, readable with the destination's access:
+    // bob is not in the source and cannot open the original's file.
+    let copies = forward["attachments"].as_array().unwrap();
+    assert_eq!(copies.len(), 1);
+    assert_ne!(copies[0]["id"], file["id"]);
+    for field in ["file_name", "mime_type", "size_bytes", "width", "height"] {
+        assert_eq!(copies[0][field], file[field], "{field}");
+    }
+    let copy_url = copies[0]["url"].as_str().unwrap().to_owned();
+    assert_eq!(fixture.download(&bob, &copy_url).await, StatusCode::OK);
+    assert_eq!(
+        fixture.download(&bob, &original_url).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        fixture.download(&fixture.owner, &copy_url).await,
+        StatusCode::NOT_FOUND
+    );
+    let blobs: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT blob_id) FROM chat_message_files")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(blobs, 1);
+
+    // It is unread for the destination's other member, and the tokens in the copied body
+    // mention nobody: no counter, no mention row, no inbox item.
+    let after = fixture.counts(&bob, &target).await;
+    assert_eq!(after, (before.0 + 1, before.1));
+    assert_eq!(
+        forward["mentions"],
+        json!({ "user_ids": [], "channel": false, "here": false })
+    );
+    let mention_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chat_message_mentions WHERE message_id = ?")
+            .bind(&forward_id)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(mention_rows, 0);
+    let notified: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE chat_message_id = ?")
+            .bind(&forward_id)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(notified, 0);
+    fixture.assert_counters_exact("after a forward").await;
+
+    // The list, the search, the files list and the pins carry `forwarded`.
+    let (ids, page) = fixture.main_ids(&bob, &target, "").await;
+    assert_eq!(ids.last(), Some(&forward_id));
+    assert_eq!(
+        page["items"].as_array().unwrap().last().unwrap()["forwarded"],
+        origin
+    );
+    let found = fixture
+        .ok(
+            &bob,
+            "GET",
+            &format!("/search?query=look&conversation_id={target}"),
+            None,
+        )
+        .await;
+    assert!(found.to_string().contains(&forward_id), "{found}");
+    let files = fixture
+        .ok(&bob, "GET", &format!("/conversations/{target}/files"), None)
+        .await;
+    assert_eq!(files[0]["forwarded"], origin);
+    // It is pinned and reacted to as any message, and a plain message has `forwarded: null`.
+    let pinned = fixture
+        .ok(
+            &bob,
+            "PUT",
+            &format!("/messages/{forward_id}/pin"),
+            Some(json!({ "pinned": true })),
+        )
+        .await;
+    assert_eq!(pinned["result"]["forwarded"], origin);
+    let pins = fixture
+        .ok(&bob, "GET", &format!("/conversations/{target}/pins"), None)
+        .await;
+    assert_eq!(pins[0]["forwarded"], origin);
+    fixture
+        .ok(
+            &bob,
+            "PUT",
+            &format!("/messages/{forward_id}/reactions/%F0%9F%91%8D"),
+            None,
+        )
+        .await;
+    let quote = fixture
+        .send_with(
+            &bob,
+            &target,
+            json!({ "body": "thanks", "reply_to_id": forward_id }),
+        )
+        .await;
+    assert_eq!(quote["result"]["reply_to"]["id"], forward_id);
+    assert_eq!(quote["result"]["forwarded"], Value::Null);
+    assert!(
+        quote["result"]
+            .as_object()
+            .unwrap()
+            .contains_key("forwarded")
+    );
+
+    // A forward is not edited, by its author either.
+    let (status, problem) = fixture
+        .call(
+            &ada,
+            "PATCH",
+            &format!("/messages/{forward_id}"),
+            Some(json!({ "body": "changed" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "chat_forbidden");
+
+    // A forward of the forward names the first original, and copies the file again.
+    let (status, second) = fixture.forward(&bob, &forward_id, &general).await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["result"]["forwarded"], origin);
+    assert_eq!(second["result"]["author_id"], bob.id.to_string());
+    assert_eq!(second["result"]["body"], body);
+    let second_url = second["result"]["attachments"][0]["url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(second_url, copy_url);
+
+    // The original changes and then goes: the forwards stay as they were, files too.
+    fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &format!("/messages/{original}"),
+            Some(json!({ "body": "rewritten" })),
+        )
+        .await;
+    fixture
+        .ok(
+            &fixture.owner,
+            "DELETE",
+            &format!("/messages/{original}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        fixture.download(&fixture.owner, &original_url).await,
+        StatusCode::NOT_FOUND
+    );
+    let (_, page) = fixture.main_ids(&bob, &target, "").await;
+    let kept = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == forward_id)
+        .expect("the forward stays");
+    assert_eq!(kept["body"], body);
+    assert_eq!(kept["forwarded"], origin);
+    assert_eq!(kept["attachments"].as_array().unwrap().len(), 1);
+    assert_eq!(fixture.download(&bob, &copy_url).await, StatusCode::OK);
+    assert_eq!(
+        fixture.download(&fixture.owner, &second_url).await,
+        StatusCode::OK
+    );
+
+    // The forwarder deletes the forward as any own message; its file row goes with it.
+    fixture
+        .ok(&ada, "DELETE", &format!("/messages/{forward_id}"), None)
+        .await;
+    assert_eq!(
+        fixture.download(&bob, &copy_url).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        fixture.download(&fixture.owner, &second_url).await,
+        StatusCode::OK
+    );
+    fixture.assert_counters_exact("after the deletes").await;
+}
+
+#[tokio::test]
+async fn a_forward_needs_a_readable_source_and_a_writable_destination() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    let general = fixture.general().await;
+    let secret = fixture
+        .channel(&fixture.owner, "secret", "private", &[&ada])
+        .await;
+    let open = fixture.channel(&fixture.owner, "open", "public", &[]).await;
+    let hidden = fixture.send(&fixture.owner, &secret, "Hidden").await;
+    let public = fixture.send(&fixture.owner, &general, "Public").await;
+    let count = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM chat_messages WHERE kind = 'message'")
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap()
+    };
+    let messages = count().await;
+
+    // A source the caller cannot read does not exist; nor does a destination it cannot see.
+    let (status, problem) = fixture.forward(&bob, &hidden, &general).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "chat_not_found");
+    let (status, problem) = fixture.forward(&bob, &public, &secret).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "chat_not_found");
+    let (status, _) = fixture
+        .forward(&bob, &Id::new_v7().to_string(), &general)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A destination the caller reads but is not a member of, or that is archived, is refused.
+    let cy = fixture.add_member("cy").await;
+    let (status, problem) = fixture.forward(&cy, &public, &open).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "chat_forbidden");
+    fixture
+        .ok(
+            &fixture.owner,
+            "POST",
+            &format!("/conversations/{open}/archive"),
+            None,
+        )
+        .await;
+    let (status, problem) = fixture.forward(&ada, &public, &open).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "chat_forbidden");
+
+    // System rows and deleted roots are not forwarded; a thread reply is, into the main list.
+    let reply = fixture.reply(&ada, &general, &public, "Reply").await;
+    fixture
+        .ok(
+            &fixture.owner,
+            "DELETE",
+            &format!("/messages/{public}"),
+            None,
+        )
+        .await;
+    let (status, _) = fixture.forward(&ada, &public, &secret).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, page) = fixture.main_ids(&ada, &secret, "").await;
+    let system = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["kind"] != "message")
+        .map(|message| message["id"].as_str().unwrap().to_owned());
+    if let Some(system) = system {
+        let (status, _) = fixture.forward(&ada, &system, &general).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+    assert_eq!(count().await, messages + 1);
+    let (status, written) = fixture.forward(&ada, &reply, &secret).await;
+    assert_eq!(status, StatusCode::OK, "{written}");
+    assert_eq!(written["result"]["thread_root_id"], Value::Null);
+    assert_eq!(written["result"]["forwarded"]["message_id"], reply);
+
+    // The same nonce again gives the first copy, and unknown fields are refused.
+    let path = format!("/messages/{reply}/forward");
+    let body = json!({ "conversation_id": general, "nonce": "same" });
+    let first = fixture.ok(&ada, "POST", &path, Some(body.clone())).await;
+    let again = fixture.ok(&ada, "POST", &path, Some(body)).await;
+    assert_eq!(first["result"]["id"], again["result"]["id"]);
+    let (status, _) = fixture
+        .call(
+            &ada,
+            "POST",
+            &path,
+            Some(json!({ "conversation_id": general, "nonce": "x", "body": "mine" })),
+        )
+        .await;
+    assert!(status.is_client_error());
+    let (status, problem) = fixture
+        .call(
+            &ada,
+            "POST",
+            &path,
+            Some(json!({ "conversation_id": general, "nonce": "" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    fixture.assert_counters_exact("after the refusals").await;
+}

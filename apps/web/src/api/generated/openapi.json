@@ -8246,6 +8246,525 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/chat/emoji": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::emoji"
+        ],
+        "summary": "The custom emoji of the workspace, by name.",
+        "operationId": "list_chat_emoji",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomEmojiRecord"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::chat_routes::emoji"
+        ],
+        "summary": "Adds a custom emoji. Only workspace owners and admins. A workspace has at most 200.",
+        "operationId": "create_chat_emoji",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "2 to 32 characters of `a-z 0-9 _`. Upper case letters are stored in lower case.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatEmojiUploadBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomEmojiRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_multipart",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, chat_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, emoji_name_taken, emoji_limit_reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large, emoji_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed, invalid_emoji",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}": {
+      "delete": {
+        "tags": [
+          "crate::chat_routes::emoji"
+        ],
+        "summary": "Deletes a custom emoji. Only workspace owners and admins. Messages and reactions that name\nit keep their `:name:` text.",
+        "operationId": "delete_chat_emoji",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "emoji_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, chat_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}/image": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::emoji"
+        ],
+        "summary": "The image of a custom emoji. It never changes, so browsers keep it.",
+        "operationId": "get_chat_emoji_image",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "emoji_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "image/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatEmojiImage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/chat/files": {
       "post": {
         "tags": [
@@ -8964,6 +9483,159 @@
           },
           "422": {
             "description": "validation_failed, chat_message_too_long",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/forward": {
+      "post": {
+        "tags": [
+          "crate::chat_routes::messages"
+        ],
+        "summary": "Sends a copy of a message the caller can read to the main list of another conversation (or\nthe same one), as the caller's own message: the body and the files of the original as they\nare now, with `forwarded` set. The copy mentions nobody and cannot be edited. System rows\nand deleted messages cannot be forwarded.",
+        "operationId": "forward_chat_message",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatForwardBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatWrite_MessageRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, chat_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -27644,6 +28316,23 @@
         },
         "additionalProperties": false
       },
+      "ChatEmojiImage": {
+        "type": "string",
+        "format": "binary"
+      },
+      "ChatEmojiUploadBody": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "A PNG, JPEG, WebP or GIF image of at most 256 KiB."
+          }
+        }
+      },
       "ChatEvent": {
         "oneOf": [
           {
@@ -27805,6 +28494,21 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "A custom emoji was added or deleted: read the list again.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "emoji.changed"
+                ]
+              }
+            }
           }
         ],
         "description": "One change, as the live socket sends it and as a write's response lists it."
@@ -27902,6 +28606,24 @@
         "properties": {
           "following": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatForwardBody": {
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "nonce"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "description": "Where the copy goes: a conversation the caller can write to."
+          },
+          "nonce": {
+            "type": "string",
+            "description": "Made by the caller (1–64 bytes). A forward that is tried again with the same nonce\nreturns the first copy."
           }
         },
         "additionalProperties": false
@@ -28021,6 +28743,13 @@
           "nonce": {
             "type": "string",
             "description": "Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns\nthe first message."
+          },
+          "reply_to_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The message this one quotes (an inline reply): a message of the same conversation."
           },
           "thread_root_id": {
             "type": [
@@ -28323,7 +29052,10 @@
               "reply_count",
               "last_reply_at",
               "reply_user_ids",
-              "last_reply"
+              "last_reply",
+              "reply_to_id",
+              "reply_to",
+              "forwarded"
             ],
             "properties": {
               "also_in_channel": {
@@ -28360,6 +29092,17 @@
                   "null"
                 ],
                 "format": "date-time"
+              },
+              "forwarded": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ForwardedRecord",
+                    "description": "Set on a forward: a copy of another message's body and files. It mentions nobody\n(`mentions` is empty whatever the body says) and cannot be edited."
+                  }
+                ]
               },
               "id": {
                 "type": "string",
@@ -28408,6 +29151,24 @@
                 "type": "integer",
                 "format": "int64",
                 "description": "Thread summary; meaningful on a root only."
+              },
+              "reply_to": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ReplyToRecord",
+                    "description": "Null when the message quotes nothing, or the quoted message is deleted."
+                  }
+                ]
+              },
+              "reply_to_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The message this one quotes (an inline reply, not a thread reply). The id stays when the\nquoted message is deleted."
               },
               "reply_user_ids": {
                 "type": "array",
@@ -29018,6 +29779,41 @@
         },
         "additionalProperties": false
       },
+      "CustomEmojiRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "animated",
+          "url",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "animated": {
+            "type": "boolean",
+            "description": "A GIF."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "2 to 32 characters of `a-z 0-9 _`; written `:name:`."
+          },
+          "url": {
+            "type": "string",
+            "description": "Same-origin image path. The image of an id never changes."
+          }
+        }
+      },
       "DeliveryBody": {
         "type": "string",
         "enum": [
@@ -29215,6 +30011,32 @@
           },
           "state": {
             "$ref": "#/components/schemas/ThreadStateRecord"
+          }
+        }
+      },
+      "ForwardedRecord": {
+        "type": "object",
+        "description": "Where a forwarded message came from: the original message as it was when it was forwarded.\nThe original may be gone, or in a conversation that the reader cannot open.",
+        "required": [
+          "message_id",
+          "conversation_id",
+          "author_id",
+          "created_at"
+        ],
+        "properties": {
+          "author_id": {
+            "type": "string"
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the original message was sent."
+          },
+          "message_id": {
+            "type": "string"
           }
         }
       },
@@ -29976,7 +30798,10 @@
           "reply_count",
           "last_reply_at",
           "reply_user_ids",
-          "last_reply"
+          "last_reply",
+          "reply_to_id",
+          "reply_to",
+          "forwarded"
         ],
         "properties": {
           "also_in_channel": {
@@ -30013,6 +30838,17 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "forwarded": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ForwardedRecord",
+                "description": "Set on a forward: a copy of another message's body and files. It mentions nobody\n(`mentions` is empty whatever the body says) and cannot be edited."
+              }
+            ]
           },
           "id": {
             "type": "string",
@@ -30061,6 +30897,24 @@
             "type": "integer",
             "format": "int64",
             "description": "Thread summary; meaningful on a root only."
+          },
+          "reply_to": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReplyToRecord",
+                "description": "Null when the message quotes nothing, or the quoted message is deleted."
+              }
+            ]
+          },
+          "reply_to_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The message this one quotes (an inline reply, not a thread reply). The id stays when the\nquoted message is deleted."
           },
           "reply_user_ids": {
             "type": "array",
@@ -32912,6 +33766,27 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "ReplyToRecord": {
+        "type": "object",
+        "description": "The message that a message quotes, shown above it.",
+        "required": [
+          "id",
+          "author_id",
+          "body"
+        ],
+        "properties": {
+          "author_id": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "description": "The first 200 characters of the quoted body."
+          },
+          "id": {
+            "type": "string"
           }
         }
       },

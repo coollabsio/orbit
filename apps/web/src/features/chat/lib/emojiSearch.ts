@@ -40,6 +40,20 @@ export function searchEmojiIndex(index: readonly EmojiShortcode[], query: string
   return results
 }
 
+/**
+ * The `:name` list: the workspace's custom emoji that match first, then the standard ones. A custom emoji is an entry
+ * whose `emoji` is the text `:name:`, which is what a message keeps of it.
+ */
+export function suggestEmoji(custom: Iterable<string>, index: readonly EmojiShortcode[], query: string, limit = 8): EmojiShortcode[] {
+  const first = searchEmojiIndex(Array.from(custom, (name) => ({ emoji: `:${name}:`, name })), query, limit)
+  return [...first, ...searchEmojiIndex(index, query, limit - first.length)]
+}
+
+/** What `:name:` typed in full becomes: the standard emoji, or `null` to leave the text (a custom emoji stays `:name:`). */
+export function completedEmoji(custom: { has(name: string): boolean }, index: readonly EmojiShortcode[], name: string): string | null {
+  return custom.has(name) ? null : emojiNamed(index, name)
+}
+
 /** The emoji whose name is exactly this, for `:joy:` typed in full. */
 export function emojiNamed(index: readonly EmojiShortcode[], name: string): string | null {
   const text = name.toLowerCase()

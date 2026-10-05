@@ -45,6 +45,12 @@ export function useChatNavigation() {
     openThreadPane(id: string, rootId: string, messageId?: string | null) {
       navigate(conversationPath(id, { thread: rootId, m: messageId }))
     },
+    /** Scrolls the open thread to one of its messages, in the pane or the full view it is in. */
+    showInThread(rootId: string, messageId: string) {
+      if (!conversationId) return
+      if (here.view === 'thread') navigate(threadPath(conversationId, rootId, messageId), { state: location.state })
+      else navigate(conversationPath(conversationId, { thread: rootId, m: messageId }))
+    },
     /** Opens the thread in full view, and remembers this page as the place to close to. */
     openThreadFull(id: string, rootId: string, messageId?: string | null) {
       navigate(threadPath(id, rootId, messageId), { state: { chatOrigin: location.pathname + location.search } satisfies ThreadOrigin })

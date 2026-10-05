@@ -1,8 +1,10 @@
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
+import { queryKeys } from '@/api/queryKeys'
+import { quoteOf } from '../lib/quote'
 import { sortFollowedThreads } from '../lib/sidebar'
 import type { MessageCursor } from './client'
 import { chatKeys } from './keys'
-import type { ChatEvent, Conversation, ConversationState, FollowedThread, Message, MessagePage, ThreadPage } from './types'
+import type { ChatEvent, Conversation, ConversationState, FollowedThread, Message, MessagePage, ReplyQuote, ThreadPage } from './types'
 
 export type MessagePages = InfiniteData<MessagePage, MessageCursor>
 export type ThreadPages = InfiniteData<ThreadPage, MessageCursor>
@@ -21,16 +23,21 @@ function patchList(items: Message[], messageId: string, update: Update): Message
   })
 }
 
-function patchPages<T extends MessagePage>(data: InfiniteData<T, MessageCursor> | undefined, messageId: string, update: Update) {
+/** Applies `patch` to the items of every page. Returns the same data when no page changed. */
+function mapPages<T extends MessagePage>(data: InfiniteData<T, MessageCursor> | undefined, patch: (items: Message[]) => Message[]) {
   if (!data) return data
   let changed = false
   const pages = data.pages.map((page) => {
-    const items = patchList(page.items, messageId, update)
+    const items = patch(page.items)
     if (items === page.items) return page
     changed = true
     return { ...page, items }
   })
   return changed ? { ...data, pages } : data
+}
+
+function patchPages<T extends MessagePage>(data: InfiniteData<T, MessageCursor> | undefined, messageId: string, update: Update) {
+  return mapPages(data, (items) => patchList(items, messageId, update))
 }
 
 /**
@@ -111,6 +118,25 @@ export function patchMessage(
       return [thread]
     })
   })
+}
+
+/**
+ * Gives the replies that quote a message its new quote; `null` when the message is gone. The server sends no event
+ * to the replies, so the client does it: in the conversation's lists, in the thread of the message, and in the outbox.
+ */
+function patchQuotes(
+  queryClient: QueryClient,
+  workspaceId: string,
+  target: { conversationId: string; messageId: string; threadRootId: string | null },
+  replyTo: ReplyQuote | null,
+) {
+  const { conversationId, messageId, threadRootId } = target
+  // A reaction or a pin updates the message too: a quote that says the same stays as it is.
+  const stale = (item: Message) => item.replyToId === messageId && (item.replyTo?.body ?? null) !== (replyTo?.body ?? null)
+  const requote = (items: Message[]) => (items.some(stale) ? items.map((item) => (stale(item) ? { ...item, replyTo } : item)) : items)
+  queryClient.setQueriesData<MessagePages>({ queryKey: chatKeys.messagesOf(workspaceId, conversationId) }, (data) => mapPages(data, requote))
+  queryClient.setQueryData<ThreadPages>(chatKeys.thread(workspaceId, threadRootId ?? messageId), (data) => mapPages(data, requote))
+  if (queryClient.getQueryData<Message[]>(chatKeys.outbox(workspaceId))) updateOutbox(queryClient, workspaceId, requote)
 }
 
 /** The Threads list's order, as the server sends it: newest reply first. */
@@ -206,6 +232,8 @@ function messageCreated(queryClient: QueryClient, workspaceId: string, message: 
 function messageUpdated(queryClient: QueryClient, workspaceId: string, message: Message) {
   const { conversationId, threadRootId } = message
   patchMessage(queryClient, workspaceId, { conversationId, messageId: message.id, threadRootId }, () => message)
+  // An edit changes the quote; a deleted root that stays for its replies has nothing left to quote.
+  patchQuotes(queryClient, workspaceId, { conversationId, messageId: message.id, threadRootId }, message.deleted ? null : quoteOf(message))
   if (threadRootId === null && message.kind === 'message') {
     placeThreadRoot(queryClient, workspaceId, message)
     if (message.replyCount > 0) refetchFollowedIfMissing(queryClient, workspaceId, message.id)
@@ -274,6 +302,7 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
         void queryClient.invalidateQueries({ queryKey: chatKeys.followedThreads(workspaceId) })
       }
       patchMessage(queryClient, workspaceId, event, () => null)
+      patchQuotes(queryClient, workspaceId, event, null)
       if (event.threadRootId === null) queryClient.removeQueries({ queryKey: chatKeys.thread(workspaceId, event.messageId) })
       else void queryClient.invalidateQueries({ queryKey: chatKeys.threads(workspaceId, event.conversationId) })
       break
@@ -337,8 +366,13 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
       }
       break
     }
+    case 'emoji.changed':
+      void queryClient.invalidateQueries({ queryKey: queryKeys.customEmoji(workspaceId) })
+      break
     case 'resync':
       void queryClient.invalidateQueries({ queryKey: chatKeys.all(workspaceId) })
+      // the custom emoji are the workspace's (outside the chat prefix), and their event may be among the missed ones
+      void queryClient.invalidateQueries({ queryKey: queryKeys.customEmoji(workspaceId) })
       break
     case 'typing':
     case 'presence':

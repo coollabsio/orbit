@@ -198,6 +198,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::conversations::place_chat_channel,
         crate::chat_routes::messages::list_chat_messages,
         crate::chat_routes::messages::send_chat_message,
+        crate::chat_routes::messages::forward_chat_message,
         crate::chat_routes::messages::edit_chat_message,
         crate::chat_routes::messages::delete_chat_message,
         crate::chat_routes::messages::add_chat_reaction,
@@ -220,6 +221,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::files::list_chat_files,
         crate::chat_routes::messages::list_chat_search,
         crate::chat_routes::links::get_chat_link_preview,
+        crate::chat_routes::emoji::list_chat_emoji,
+        crate::chat_routes::emoji::create_chat_emoji,
+        crate::chat_routes::emoji::delete_chat_emoji,
+        crate::chat_routes::emoji::get_chat_emoji_image,
     )
 )]
 struct ApiDocument;
@@ -1007,7 +1012,21 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "422", "validation_failed");
         return;
     }
-    if operation_id == "download_chat_file" {
+    if matches!(operation_id, "download_chat_file" | "get_chat_emoji_image") {
+        return;
+    }
+    if operation_id == "create_chat_emoji" {
+        add_code(responses, "400", "invalid_multipart");
+        add_code(responses, "403", "chat_forbidden");
+        add_code(responses, "409", "emoji_name_taken");
+        add_code(responses, "409", "emoji_limit_reached");
+        add_code(responses, "413", "emoji_too_large");
+        add_code(responses, "422", "validation_failed");
+        add_code(responses, "422", "invalid_emoji");
+        return;
+    }
+    if operation_id == "delete_chat_emoji" {
+        add_code(responses, "403", "chat_forbidden");
         return;
     }
     if !operation_id.starts_with("list_") {

@@ -6,7 +6,7 @@ import type { MenuAnchor } from './useMessageActions'
 /** What every row of one message list shares; `MessageList` provides it. */
 export interface MessageListContextValue {
   currentUserId: string | null
-  /** The list shows a thread: no "Reply in thread" and no reply summary rows. */
+  /** The list shows a thread: no "Reply in Thread" and no reply summary rows. */
   inThread: boolean
   phone: boolean
   people: ChatPeople
@@ -14,6 +14,14 @@ export interface MessageListContextValue {
   quickEmojis: string[]
   react: (message: Message, emoji: string) => void
   openThread: (message: Message) => void
+  /** Makes the message the composer's reply target. Absent where the user cannot write. */
+  reply?: (message: Message) => void
+  /** Jumps to the message that a reply quotes. */
+  openQuoted: (message: Message) => void
+  /** Jumps to the message that a forward is a copy of. */
+  openOrigin: (message: Message) => void
+  /** Opens the forward dialog for the message. */
+  forward: (message: Message) => void
   openMenu: (message: Message, anchor: MenuAnchor, align: 'start' | 'end') => void
   /** The full emoji picker, to add a reaction. */
   openPicker: (message: Message, anchor: MenuAnchor, align: 'start' | 'end') => void

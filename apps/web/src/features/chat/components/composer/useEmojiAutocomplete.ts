@@ -1,5 +1,6 @@
-import { useState, type KeyboardEvent, type RefObject } from 'react'
-import { emojiNamed, loadEmojiIndex, searchEmojiIndex, type EmojiShortcode } from '../../lib/emojiSearch'
+import { useContext, useState, type KeyboardEvent, type RefObject } from 'react'
+import { CustomEmojiContext } from '@/lib/customEmojiContext'
+import { completedEmoji, loadEmojiIndex, suggestEmoji, type EmojiShortcode } from '../../lib/emojiSearch'
 
 /** `:na` at the start of the text or after a space: two characters open the list, as in Discord. */
 const OPEN = /(?:^|\s):([a-z0-9_+-]{2,})$/i
@@ -15,14 +16,16 @@ interface EmojiQuery {
 
 /**
  * Emoji by name in a text field: `:jo` opens a list (↑/↓, Enter or Tab inserts, Esc closes), and `:joy:` typed in
- * full becomes the emoji at once. The emoji data loads the first time a `:` is typed.
+ * full becomes the emoji at once. The emoji data loads the first time a `:` is typed. The workspace's custom emoji come
+ * first in the list and are inserted as `:name:`, which is also what stays when one is typed in full.
  */
 export function useEmojiAutocomplete(text: string, setText: (next: string) => void, inputRef: RefObject<HTMLTextAreaElement | null>) {
+  const custom = useContext(CustomEmojiContext)
   const [index, setIndex] = useState<EmojiShortcode[] | null>(null)
   const [state, setState] = useState<EmojiQuery | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
 
-  const suggestions = state && index ? searchEmojiIndex(index, state.query) : []
+  const suggestions = state ? suggestEmoji(custom.keys(), index ?? [], state.query) : []
   const open = suggestions.length > 0
 
   function replace(from: number, to: number, insertion: string, value: string) {
@@ -50,7 +53,7 @@ export function useEmojiAutocomplete(text: string, setText: (next: string) => vo
   /** After the user typed: turns a `:name:` that ends at the caret into its emoji. Returns true when it did. */
   function complete(value: string, cursor: number): boolean {
     const match = index ? COMPLETE.exec(value.slice(0, cursor)) : null
-    const emoji = match && index ? emojiNamed(index, match[1]) : null
+    const emoji = match && index ? completedEmoji(custom, index, match[1]) : null
     if (!match || !emoji) return false
     // no space after it: the user types the next character
     replace(cursor - match[1].length - 2, cursor, emoji, value)

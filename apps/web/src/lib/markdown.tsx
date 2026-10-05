@@ -4,11 +4,14 @@
 // message content and embed cards.
 import { appNavigate } from './navigateBridge'
 import { CodeBlock } from '@/components/common/CodeBlock'
-import { EmojiText } from '@/components/common/Emoji'
+import { Emoji } from '@/components/common/Emoji'
 import { InternalLink } from '@/components/common/InternalLink'
+import { MarkdownText } from '@/components/common/MarkdownText'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from './utils'
+import { InternalLinkContext } from './internalLinkContext'
+import { MarkdownTextContext } from './markdownTextContext'
 import { isMentionBoundary, mentionedUserId, type MentionToken } from './mentions'
 
 /* ---------- inline (the chat reference linkify / mentionify / renderMarkdownText) ---------- */
@@ -52,14 +55,14 @@ function internalPath(url: string): string | null {
   return url.startsWith(`${origin}/`) ? url.slice(origin.length) : null
 }
 
-/** Plain text with its emoji as Twemoji images. */
+/** Plain text with its emoji as Twemoji images, unless the host draws it (`MarkdownTextContext`). */
 function emojify(text: string, key: string): React.ReactNode {
-  return <EmojiText key={key} text={text} />
+  return <MarkdownText key={key} text={text} />
 }
 
 /** `keyPrefix` keeps the keys apart when a caller puts the parts of more than one run of text in one list. */
 function linkifyText(text: string, keyPrefix: string): React.ReactNode[] {
-  const urlRegex = /https?:\/\/[^\s<]+/g
+  const urlRegex = /https?:\/\/[^\s<>]+/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
@@ -172,7 +175,8 @@ export function mentionifyText(text: string, keyPrefix: string, mentionTokens: M
   return parts.length > 0 ? parts : [text]
 }
 
-const EMOJI_SHORTCODES: Record<string, string> = {
+/** The few names that become a character when a message is shown. They come before a custom emoji of the same name. */
+export const EMOJI_SHORTCODES: Record<string, string> = {
   white_check_mark: '✅',
   check: '✅',
   heavy_check_mark: '✔️',
@@ -183,9 +187,15 @@ const EMOJI_SHORTCODES: Record<string, string> = {
   information_source: 'ℹ️',
 }
 
+/**
+ * Inline markdown. A backslash before an ASCII punctuation character is an escape, as in standard markdown: the
+ * character shows without the backslash and starts nothing (`\*not bold\*`, `\:warning:`). Before a letter, a digit
+ * or a space the backslash stays (`C:\Users`), and inline code keeps every backslash. A URL in angle brackets
+ * (`<https://…>`) is the link alone, as in Discord: the brackets do not show and the host draws no chip or card for it.
+ */
 export function renderMarkdownText(text: string, keyPrefix: string, mentionTokens: MentionToken[] = []): React.ReactNode[] {
   const tokenRegex =
-    /(<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\*\*[^*]+?\*\*|__[^_]+?__|~~[^~]+?~~|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
+    /(\\[!-/:-@[-`{-~]|<https?:\/\/[^\s<>]+>|<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\*\*[^*]+?\*\*|__[^_]+?__|~~[^~]+?~~|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let tokenIndex = 0
@@ -198,7 +208,24 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
 
     const token = match[0]
     const key = `${keyPrefix}-${match.index}-${tokenIndex}`
-    if (token.startsWith('<img') || token.startsWith('![')) {
+    if (token.startsWith('\\')) {
+      parts.push(token.slice(1))
+    } else if (token.startsWith('<http')) {
+      const url = token.slice(1, -1)
+      const path = internalPath(url)
+      parts.push(
+        path ? (
+          // the plain link of `InternalLink`: no host, so no chip
+          <InternalLinkContext key={key} value={null}>
+            <InternalLink url={url} path={path} />
+          </InternalLinkContext>
+        ) : (
+          <a key={key} href={safeHref(url)} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+            {url}
+          </a>
+        ),
+      )
+    } else if (token.startsWith('<img') || token.startsWith('![')) {
       const htmlSource = token.match(/\ssrc\s*=\s*(["'])(.*?)\1/i)?.[2]
       const htmlAlt = token.match(/\salt\s*=\s*(["'])(.*?)\1/i)?.[2]
       const markdownImage = token.match(/^!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)$/)
@@ -212,7 +239,8 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
       if (linkMatch) {
         parts.push(
           <a key={key} href={safeHref(linkMatch[2])} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-            {renderMarkdownText(linkMatch[1], `${key}-link`, mentionTokens)}
+            {/* the label is already a link: the host puts no link of its own inside it */}
+            <MarkdownTextContext value={null}>{renderMarkdownText(linkMatch[1], `${key}-link`, mentionTokens)}</MarkdownTextContext>
           </a>,
         )
       } else {
@@ -225,7 +253,8 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
         </code>,
       )
     } else if (token.startsWith(':')) {
-      parts.push(EMOJI_SHORTCODES[token.slice(1, -1)] || token)
+      // a custom emoji of the workspace shows its image; any other name stays text
+      parts.push(EMOJI_SHORTCODES[token.slice(1, -1)] || <Emoji key={key} value={token} />)
     } else if (token.startsWith('**') || token.startsWith('__')) {
       parts.push(<strong key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-strong`, mentionTokens)}</strong>)
     } else if (token.startsWith('~~')) {

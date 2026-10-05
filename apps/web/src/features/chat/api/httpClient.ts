@@ -9,6 +9,7 @@ import {
   deleteChatMessage,
   editChatMessage,
   followChatThread,
+  forwardChatMessage,
   getChatThread,
   joinChatChannel,
   leaveChatChannel,
@@ -277,6 +278,7 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
       const body = {
         body: input.body,
         thread_root_id: input.threadRootId ?? null,
+        reply_to_id: input.replyTo?.id ?? null,
         also_in_channel: input.alsoInChannel ?? false,
         file_ids: (input.attachments ?? []).map((attachment) => attachment.id),
         nonce: input.nonce,
@@ -293,6 +295,10 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         await Promise.race([socket.reconnected(), wait])
         return toMessage((await send()).result)
       }
+    },
+    async forwardMessage(messageId, conversationId, nonce) {
+      const body = { conversation_id: conversationId, nonce }
+      return toMessage((await write(forwardChatMessage({ ...at({ message_id: messageId }), body }))).result)
     },
     async editMessage(messageId, body) {
       return toMessage((await write(editChatMessage({ ...at({ message_id: messageId }), body: { body } }))).result)

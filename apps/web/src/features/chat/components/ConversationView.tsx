@@ -10,6 +10,7 @@ import type { Conversation, ConversationState } from '../api/types'
 import { useChatLocation, useChatNavigation } from '../useChatNavigation'
 import { Composer, type ComposerHandle } from './composer/Composer'
 import { ConnectionLine, TypingLine } from './composer/StatusLines'
+import { useReplyTarget } from './composer/useReplyTarget'
 import { ConversationStart } from './messages/ConversationStart'
 import { useWindowFocused } from './messages/environment'
 import { MessageList, type MessageListHandle } from './messages/MessageList'
@@ -69,6 +70,7 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
   // "Mark as unread" stops automatic mark-read until the user leaves the conversation.
   const [suspended, setSuspended] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [replyTo, setReplyTo] = useReplyTarget()
 
   const query = useMessages(conversationId, { around: view.around })
   const messages = [...flattenMessages(query.data), ...useUnconfirmedMessages(conversationId)]
@@ -173,6 +175,7 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
           onJumpToLatest={toLatest}
           onJumpToFirstUnread={typeof cursor === 'string' ? () => setView({ around: cursor, openAt: 'unread', turn: view.turn }) : undefined}
           onMarkUnread={() => setSuspended(true)}
+          onReply={canWrite ? setReplyTo : undefined}
           onFocusComposer={() => composer.current?.focus()}
         />
       )}
@@ -183,6 +186,8 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
           <Composer
             ref={composer}
             conversation={conversation}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(null)}
             autoFocus
             onEditLast={() => list.current?.editLastOwn() ?? false}
             onFocusList={() => list.current?.focusLast() ?? false}

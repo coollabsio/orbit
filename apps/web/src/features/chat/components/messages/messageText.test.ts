@@ -5,6 +5,7 @@ import {
   displayLineCount,
   extractLinkUrls,
   firstLine,
+  isJumboEmoji,
   isLongMessage,
   messagesAfter,
   quickReactions,
@@ -90,4 +91,40 @@ test('only a card URL that is a whole line is standalone', () => {
   // past the card limit a URL has no card to stand in for it
   const many = [1, 2, 3, 4].map((number) => `https://orbit.test/tasks/ENG-${number}`)
   expect(standaloneLinkUrls(many.join('\n'))).toEqual(many.slice(0, 3))
+})
+
+test('a URL in angle brackets is not a link card', () => {
+  const url = 'https://a.test/x'
+  expect(extractLinkUrls(`<${url}> and https://b.test/y`)).toEqual(['https://b.test/y'])
+  expect(standaloneLinkUrls(`<${url}>`)).toEqual([])
+  // the bare one still has its card, and the card stands in for its line
+  expect(extractLinkUrls(`<${url}> ${url}`)).toEqual([url])
+  expect(standaloneLinkUrls(`see <${url}>\n${url}`)).toEqual([url])
+  // an escaped bracket is text, so the URL after it is a bare one
+  expect(extractLinkUrls(`\\<${url}>`)).toEqual([url])
+})
+
+test('a message of 1 to 30 emoji and nothing else is jumbo', () => {
+  const custom = new Set(['parrot'])
+  expect(isJumboEmoji('👍', custom)).toBe(true)
+  expect(isJumboEmoji('👍 '.repeat(30).trim(), custom)).toBe(true)
+  expect(isJumboEmoji('👍'.repeat(31), custom)).toBe(false)
+  expect(isJumboEmoji('', custom)).toBe(false)
+  expect(isJumboEmoji(' \n ', custom)).toBe(false)
+  // a flag, a skin tone and a ZWJ family are one emoji each: 10 of each is 30
+  expect(isJumboEmoji('🇮🇳👍🏽👨‍👩‍👧‍👦'.repeat(10), custom)).toBe(true)
+  expect(isJumboEmoji('🇮🇳👍🏽👨‍👩‍👧‍👦'.repeat(10) + '👍', custom)).toBe(false)
+  expect(isJumboEmoji('😀\n🎉  ❤️', custom)).toBe(true)
+})
+
+test('a known custom emoji counts for jumbo; other text does not', () => {
+  const custom = new Set(['parrot'])
+  expect(isJumboEmoji(':parrot:', custom)).toBe(true)
+  expect(isJumboEmoji(':parrot::parrot: 👍', custom)).toBe(true)
+  expect(isJumboEmoji(':parrot:'.repeat(29) + '👍👍', custom)).toBe(false)
+  expect(isJumboEmoji(':nobody:', custom)).toBe(false)
+  expect(isJumboEmoji('\\:parrot:', custom)).toBe(false)
+  expect(isJumboEmoji('👍 nice', custom)).toBe(false)
+  expect(isJumboEmoji('@Ada 👍', custom)).toBe(false)
+  expect(isJumboEmoji('👍.', custom)).toBe(false)
 })

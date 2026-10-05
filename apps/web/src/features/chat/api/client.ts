@@ -11,6 +11,7 @@ import type {
   Message,
   MessagePage,
   NotifyLevel,
+  ReplyQuote,
   SearchPage,
   ThreadPage,
   ThreadState,
@@ -29,6 +30,8 @@ export interface MessageCursor {
 export interface SendMessageInput {
   conversationId: string
   threadRootId?: string | null
+  /** An inline reply: the quote of its target. The server gets the id; the row that waits shows the quote. */
+  replyTo?: ReplyQuote | null
   body: string
   attachments?: Attachment[]
   alsoInChannel?: boolean
@@ -83,6 +86,11 @@ export interface ChatClient {
   getPresence(): Promise<PresenceMap>
 
   sendMessage(input: SendMessageInput): Promise<Message>
+  /**
+   * Copies a message into the main list of a conversation, as a new message of the user. The same nonce again returns
+   * the first copy.
+   */
+  forwardMessage(messageId: string, conversationId: string, nonce: string): Promise<Message>
   editMessage(messageId: string, body: string): Promise<Message>
   deleteMessage(messageId: string): Promise<void>
   /** Adds (`on`) or takes back the user's reaction. Doing either twice changes nothing. */

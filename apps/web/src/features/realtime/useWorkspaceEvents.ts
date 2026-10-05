@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/api/queryKeys'
+import { reportConnection, watchReconnect } from '@/lib/connection'
 import { parseEvent } from './events'
 
 const VIEW_PREFERENCES = queryKeys.viewPreference('', '')[2]
@@ -26,6 +27,8 @@ export function useWorkspaceEvents(workspaceId: string) {
     let socket: WebSocket | undefined
     let retry: ReturnType<typeof setTimeout> | undefined
     let delay = 1000
+    /** The socket was open once: from then on a closed socket is a lost connection, not a first load. */
+    let wasOpen = false
     let cursor: string | undefined
     let pending: string | undefined
     let pendingWorkspaces = false
@@ -81,9 +84,10 @@ export function useWorkspaceEvents(workspaceId: string) {
       const url = new URL(`/api/v1/workspaces/${workspaceId}/events`, window.location.href)
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
       if (cursor !== undefined) url.searchParams.set('after', cursor)
+      retry = undefined
       socket = new WebSocket(url)
       let opened = false
-      socket.onopen = () => { opened = true; setConnected(true); delay = 1000 }
+      socket.onopen = () => { opened = true; wasOpen = true; setConnected(true); reportConnection('events', false); delay = 1000 }
       socket.onmessage = (message) => {
         const event = parseEvent(message.data)
         if (!event) { socket?.close(); return }
@@ -96,6 +100,7 @@ export function useWorkspaceEvents(workspaceId: string) {
       socket.onclose = () => {
         if (disposed) return
         setConnected(false)
+        if (wasOpen) reportConnection('events', true)
         // A failed handshake gives no evidence of revocation. Do not turn each retry
         // during an outage or rate limit into two more HTTP requests.
         if (opened) {
@@ -107,13 +112,24 @@ export function useWorkspaceEvents(workspaceId: string) {
         delay = Math.min(delay * 2, 30000)
       }
     }
-    const reconnect = () => { socket?.close() }
+    /** Back online, the tab is visible again, or the user pressed Retry: skip the rest of the backoff wait. */
+    const reconnectNow = () => {
+      if (disposed || retry === undefined) return
+      clearTimeout(retry)
+      connect()
+    }
+    // An open socket may be dead after the network changed: drop it, so the next one starts.
+    const reconnect = () => { if (retry === undefined) socket?.close() }
     window.addEventListener('online', reconnect)
+    // After `reconnect`, so a socket it just dropped starts again at once too.
+    const stopWatching = watchReconnect(reconnectNow)
     const flush = setInterval(() => { void refresh() }, 250)
     connect()
     return () => {
       disposed = true
       window.removeEventListener('online', reconnect)
+      stopWatching()
+      reportConnection('events', false)
       clearInterval(flush)
       clearTimeout(retry)
       socket?.close()

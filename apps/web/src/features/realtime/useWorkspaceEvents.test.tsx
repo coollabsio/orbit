@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
+import { connection } from '@/lib/connection'
 import { focusedDraftBlocksRefresh, REALTIME_SAFE_ATTRIBUTE, useWorkspaceEvents } from './useWorkspaceEvents'
 
 test('failed WebSocket handshakes do not repeatedly revalidate HTTP queries', () => {
@@ -247,5 +248,49 @@ test('a focused draft pauses refreshes unless it sits inside a realtime-safe sur
     form.remove()
     safe.remove()
     button.remove()
+  }
+})
+
+test('a dropped socket counts as a lost connection and reconnects at once when the browser is back online', () => {
+  const originalWebSocket = globalThis.WebSocket
+  const sockets: FakeWebSocket[] = []
+  class FakeWebSocket {
+    onopen: (() => void) | null = null
+    onclose: (() => void) | null = null
+    onmessage: ((event: MessageEvent) => void) | null = null
+    constructor(_url: URL) { sockets.push(this) }
+    close() { this.onclose?.() }
+  }
+  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+  const client = new QueryClient()
+  client.invalidateQueries = mock(async () => {}) as typeof client.invalidateQueries
+  try {
+    const view = renderHook(() => useWorkspaceEvents('workspace-1'), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    // A handshake that never worked is a first load, not a drop.
+    act(() => { sockets[0]!.onclose?.() })
+    expect(connection.getState().lostAt).toBeNull()
+    // The retry waits a second or more; `online` skips the wait.
+    act(() => { window.dispatchEvent(new Event('online')) })
+    expect(sockets.length).toBe(2)
+
+    act(() => { sockets[1]!.onopen?.() })
+    expect(view.result.current).toBe(true)
+    act(() => { sockets[1]!.onclose?.() })
+    expect(view.result.current).toBe(false)
+    expect(connection.getState().lostAt).not.toBeNull()
+
+    act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(sockets.length).toBe(3)
+    // Still connecting: a second signal does not open another socket.
+    act(() => { connection.retry() })
+    expect(sockets.length).toBe(3)
+    act(() => { sockets[2]!.onopen?.() })
+    expect(connection.getState().lostAt).toBeNull()
+    view.unmount()
+  } finally {
+    globalThis.WebSocket = originalWebSocket
+    client.clear()
   }
 })

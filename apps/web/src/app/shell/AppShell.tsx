@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
+import { ConnectionBanner } from './ConnectionBanner'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
@@ -100,14 +101,6 @@ function Shell() {
     <ProfilePopoverProvider>
     <NewTaskProvider>
     <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
-      {!live ? (
-        <div
-          className="pointer-events-none fixed right-3 bottom-16 z-50 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground duration-200 animate-in fade-in fill-mode-both delay-1000"
-          role="status"
-        >
-          Connecting to live updates…
-        </div>
-      ) : null}
       <aside
         className={cn(
           'flex shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar px-2 pb-2 text-sidebar-foreground transition-[width,padding] duration-200 ease-out max-[899px]:hidden',
@@ -145,6 +138,7 @@ function Shell() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <ConnectionBanner live={live} />
         <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Outlet />

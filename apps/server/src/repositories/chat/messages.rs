@@ -4,13 +4,13 @@ use orbit_platform::{Id, TimestampMillis};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
-use super::files::{MAX_MESSAGE_FILES, attach_files};
+use super::files::{MAX_MESSAGE_FILES, attach_files, copy_files};
 use super::{
     Access, ChatError, ChatEvent, ChatRepository, ConversationKind, Events, FollowedThreadRecord,
-    MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord, MessageKind, MessagePage, MessageRecord,
-    ThreadMember, ThreadPage, Written, current_state, finish, hydrate, id_list, load_access,
-    load_actor, load_message, load_message_access, load_thread_member, mentioned_user_ids,
-    parse_id, parse_optional_id,
+    ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord, MessageKind, MessagePage,
+    MessageRecord, ReplyToRecord, ThreadMember, ThreadPage, Written, current_state, finish,
+    hydrate, id_list, load_access, load_actor, load_message, load_message_access,
+    load_thread_member, mentioned_user_ids, parse_id, parse_optional_id,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -40,6 +40,8 @@ pub struct MessageCursor {
 pub struct SendInput {
     pub conversation_id: Id,
     pub thread_root_id: Option<Id>,
+    /// The message this one quotes: a message of the same conversation.
+    pub reply_to_id: Option<Id>,
     /// May be blank when the message has files.
     pub body: String,
     /// Files the sender uploaded for this message.
@@ -47,6 +49,15 @@ pub struct SendInput {
     /// Who is online now: `@here` notifies these members only.
     pub online: Vec<Id>,
     pub also_in_channel: bool,
+    pub nonce: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ForwardInput {
+    /// The message to copy.
+    pub message_id: Id,
+    /// Where the copy goes: the main list of this conversation.
+    pub conversation_id: Id,
     pub nonce: String,
 }
 
@@ -238,18 +249,8 @@ impl ChatRepository {
         let conversation_id = access.conversation.id;
         let mut events = Events::default();
 
-        let existing: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM chat_messages WHERE conversation_id = ? AND author_id = ? AND nonce = ?",
-        )
-        .bind(conversation_id.to_string())
-        .bind(actor_id.to_string())
-        .bind(&input.nonce)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if let Some(existing) = existing {
-            let message = load_message(&mut tx, parse_id(existing)?)
-                .await?
-                .ok_or(ChatError::NotFound)?;
+        if let Some(message) = sent_before(&mut tx, conversation_id, actor_id, &input.nonce).await?
+        {
             events.user(
                 actor_id,
                 ChatEvent::MessageCreated {
@@ -272,6 +273,21 @@ impl ChatRepository {
             ),
             None => None,
         };
+        // A quote notifies nobody and counts nothing: it is only shown above the message.
+        let reply_to = match input.reply_to_id {
+            Some(target_id) => Some(
+                load_message(&mut tx, target_id)
+                    .await?
+                    .filter(|target| {
+                        target.conversation_id == conversation_id
+                            && target.kind == MessageKind::Message
+                    })
+                    .as_ref()
+                    .and_then(ReplyToRecord::of)
+                    .ok_or(ChatError::NotFound)?,
+            ),
+            None => None,
+        };
         // `@channel` and `@here` do nothing in a thread.
         let broadcast = |token: &str| root.is_none() && body.contains(token);
         let mut message = insert_message(
@@ -286,6 +302,8 @@ impl ChatRepository {
                 mention_here: broadcast("<!here>"),
                 also_in_channel: root.is_some() && input.also_in_channel,
                 nonce: Some(&input.nonce),
+                reply_to,
+                forwarded: None,
                 now,
             },
         )
@@ -353,7 +371,94 @@ impl ChatRepository {
         finish(tx, events, message).await
     }
 
-    /// Only the author edits a message.
+    /// Copies a message the caller can read into the main list of a conversation the caller can
+    /// write to. The copy is the caller's message: it has the body and the files of the original
+    /// as they are now, and says where they came from. It mentions nobody. Tried again with the
+    /// same nonce, it returns the first copy.
+    pub async fn forward_message(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        input: ForwardInput,
+    ) -> Result<Written<MessageRecord>, ChatError> {
+        if input.nonce.is_empty() || input.nonce.len() > NONCE_MAX_BYTES {
+            return Err(ChatError::Invalid { field: "nonce" });
+        }
+        let now = TimestampMillis::now();
+        let mut tx = self.database.immediate_transaction().await?;
+        let (_, source) =
+            load_message_access(&mut tx, workspace_id, actor_id, input.message_id).await?;
+        if source.deleted || source.kind != MessageKind::Message {
+            return Err(ChatError::NotFound);
+        }
+        let access = load_access(&mut tx, workspace_id, actor_id, input.conversation_id).await?;
+        access.require_member()?;
+        access.require_open()?;
+        let conversation_id = access.conversation.id;
+        let mut events = Events::default();
+        if let Some(message) = sent_before(&mut tx, conversation_id, actor_id, &input.nonce).await?
+        {
+            events.user(
+                actor_id,
+                ChatEvent::MessageCreated {
+                    message: message.clone(),
+                },
+            );
+            return Ok(events.written(message));
+        }
+
+        let mut message = insert_message(
+            &mut tx,
+            NewMessage {
+                conversation_id,
+                thread_root_id: None,
+                kind: MessageKind::Message,
+                author_id: actor_id,
+                body: &source.body,
+                mention_channel: false,
+                mention_here: false,
+                also_in_channel: false,
+                nonce: Some(&input.nonce),
+                reply_to: None,
+                // A forward of a forward names the first original, not the copy.
+                forwarded: Some(source.forwarded.unwrap_or(ForwardedRecord {
+                    message_id: source.id,
+                    conversation_id: source.conversation_id,
+                    author_id: source.author_id,
+                    created_at: source.created_at,
+                })),
+                now,
+            },
+        )
+        .await?;
+        copy_files(&mut tx, &source, &mut message).await?;
+        events.conversation(
+            conversation_id,
+            ChatEvent::MessageCreated {
+                message: message.clone(),
+            },
+        );
+        events.counted = Some(conversation_id);
+        sqlx::query(
+            "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = ? \
+             WHERE id = ?",
+        )
+        .bind(now.as_millis())
+        .bind(conversation_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        // Sending a message reads the conversation up to it.
+        if mark_read_to(&mut tx, conversation_id, actor_id, Some(message.id)).await? {
+            events.inbox.push(actor_id);
+        }
+        if let Some(state) = current_state(&mut tx, workspace_id, conversation_id, actor_id).await?
+        {
+            events.user(actor_id, ChatEvent::StateChanged { state });
+        }
+        finish(tx, events, message).await
+    }
+
+    /// Only the author edits a message. A forward is a copy and is never edited.
     pub async fn edit_message(
         &self,
         workspace_id: Id,
@@ -371,6 +476,11 @@ impl ChatRepository {
         }
         if !access.actor.can_edit_chat_message(message.author_id) {
             return Err(ChatError::Forbidden("Only the author can edit a message."));
+        }
+        if message.forwarded.is_some() {
+            return Err(ChatError::Forbidden(
+                "A forwarded message cannot be edited.",
+            ));
         }
         access.require_member()?;
         access.require_open()?;
@@ -768,6 +878,31 @@ async fn newer(
     Ok((rows, more))
 }
 
+/// The message that `author_id` sent to the conversation with this nonce, if there is one.
+async fn sent_before(
+    conn: &mut SqliteConnection,
+    conversation_id: Id,
+    author_id: Id,
+    nonce: &str,
+) -> Result<Option<MessageRecord>, ChatError> {
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM chat_messages WHERE conversation_id = ? AND author_id = ? AND nonce = ?",
+    )
+    .bind(conversation_id.to_string())
+    .bind(author_id.to_string())
+    .bind(nonce)
+    .fetch_optional(&mut *conn)
+    .await?;
+    match existing {
+        Some(id) => Ok(Some(
+            load_message(conn, parse_id(id)?)
+                .await?
+                .ok_or(ChatError::NotFound)?,
+        )),
+        None => Ok(None),
+    }
+}
+
 struct NewMessage<'a> {
     conversation_id: Id,
     thread_root_id: Option<Id>,
@@ -778,6 +913,9 @@ struct NewMessage<'a> {
     mention_here: bool,
     also_in_channel: bool,
     nonce: Option<&'a str>,
+    reply_to: Option<ReplyToRecord>,
+    /// Set on a forward. Its body mentions nobody.
+    forwarded: Option<ForwardedRecord>,
     now: TimestampMillis,
 }
 
@@ -790,8 +928,9 @@ async fn insert_message(
     let id = Id::new_v7();
     sqlx::query(
         "INSERT INTO chat_messages (id, conversation_id, thread_root_id, kind, author_id, body, \
-         mention_channel, mention_here, also_in_channel, nonce, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         mention_channel, mention_here, also_in_channel, nonce, reply_to_id, forward_of_id, \
+         forward_conversation_id, forward_author_id, forward_created_at, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id.to_string())
     .bind(new.conversation_id.to_string())
@@ -803,6 +942,14 @@ async fn insert_message(
     .bind(new.mention_here)
     .bind(new.also_in_channel)
     .bind(new.nonce)
+    .bind(new.reply_to.as_ref().map(|target| target.id.to_string()))
+    .bind(new.forwarded.map(|origin| origin.message_id.to_string()))
+    .bind(
+        new.forwarded
+            .map(|origin| origin.conversation_id.to_string()),
+    )
+    .bind(new.forwarded.map(|origin| origin.author_id.to_string()))
+    .bind(new.forwarded.map(|origin| origin.created_at.as_millis()))
     .bind(new.now.as_millis())
     .execute(&mut *conn)
     .await?;
@@ -814,7 +961,11 @@ async fn insert_message(
         author_id: new.author_id,
         body: new.body.to_owned(),
         mentions: MentionsRecord {
-            user_ids: mentioned_user_ids(new.body),
+            user_ids: if new.forwarded.is_some() {
+                Vec::new()
+            } else {
+                mentioned_user_ids(new.body)
+            },
             channel: new.mention_channel,
             here: new.mention_here,
         },
@@ -830,6 +981,9 @@ async fn insert_message(
         last_reply_at: None,
         reply_user_ids: Vec::new(),
         last_reply: None,
+        reply_to_id: new.reply_to.as_ref().map(|target| target.id),
+        reply_to: new.reply_to,
+        forwarded: new.forwarded,
         last_reply_id: None,
     })
 }
@@ -855,6 +1009,8 @@ pub(super) async fn add_system_row(
             mention_here: false,
             also_in_channel: false,
             nonce: None,
+            reply_to: None,
+            forwarded: None,
             now,
         },
     )

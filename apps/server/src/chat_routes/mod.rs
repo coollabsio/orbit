@@ -2,6 +2,7 @@
 //! chat events it caused for the caller, so the web client updates its cache without a refetch.
 
 pub(crate) mod conversations;
+pub(crate) mod emoji;
 pub(crate) mod files;
 pub(crate) mod links;
 pub(crate) mod messages;
@@ -9,7 +10,7 @@ pub(crate) mod state;
 
 use std::sync::Arc;
 
-use axum::extract::{Extension, Request};
+use axum::extract::{DefaultBodyLimit, Extension, Request};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -198,6 +199,10 @@ fn json_router(state: ChatState) -> Router {
             put(messages::add_chat_reaction).delete(messages::remove_chat_reaction),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/forward",
+            post(messages::forward_chat_message),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/pin",
             put(messages::pin_chat_message),
         )
@@ -228,6 +233,21 @@ fn json_router(state: ChatState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/link-preview",
             get(links::get_chat_link_preview),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/emoji",
+            get(emoji::list_chat_emoji)
+                .post(emoji::create_chat_emoji)
+                // Above the image limit, so the handler answers with its own error.
+                .layer(DefaultBodyLimit::max(emoji::UPLOAD_REQUEST_BYTES)),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}",
+            delete(emoji::delete_chat_emoji),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}/image",
+            get(emoji::get_chat_emoji_image),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/state",
@@ -429,6 +449,18 @@ fn problem(
             "chat_message_too_long",
             "Message too long",
             "A message can have at most 4000 characters.",
+        ),
+        ChatError::EmojiNameTaken => (
+            StatusCode::CONFLICT,
+            "emoji_name_taken",
+            "Emoji name taken",
+            "An emoji with this name exists in this workspace.",
+        ),
+        ChatError::EmojiLimit => (
+            StatusCode::CONFLICT,
+            "emoji_limit_reached",
+            "Too many emoji",
+            "A workspace can have at most 200 custom emoji.",
         ),
         ChatError::Upload(error) => return files::upload_problem(error, instance, request_id),
         ChatError::Unavailable(_) => (

@@ -19,10 +19,12 @@ import { Spinner } from '@/components/ui/spinner'
 import { useChatContext } from '../../api/chatContext'
 import { useEditMessage, useSendMessage } from '../../api/mutations'
 import type { Message } from '../../api/types'
+import { canEdit } from '../../lib/forward'
 import { buildMessageRows, messageKey, type MessageRow } from '../../lib/grouping'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { dayChip, isSameDay } from '../../lib/time'
 import { useDelayed, useIsPhone } from './environment'
+import { ForwardDialog } from '../dialogs/ForwardDialog'
 import { MessageItem } from './MessageItem'
 import { MessageListContext, type MessageListContextValue } from './messageListContext'
 import { MessageActionSheet, MessageMenu } from './MessageMenu'
@@ -85,6 +87,8 @@ interface MessageListProps {
   /** The first unread message is older than the loaded window: load around it. */
   onJumpToFirstUnread?: () => void
   onMarkUnread?: (message: Message) => void
+  /** "Reply" on a message: it becomes the composer's reply target. Absent where the user cannot write. */
+  onReply?: (message: Message) => void
   /** Focus leaves the list for the composer (an edit that started there ends, or `↓` past the latest message). */
   onFocusComposer: () => void
 }
@@ -130,7 +134,13 @@ function estimateSize(item: ListItem): number {
     case 'root':
       return 96
     case 'message':
-      return (item.message.kind !== 'message' ? 24 : item.groupStart ? 56 : 26) + (item.day === undefined ? 0 : 44) + (item.isNew ? 24 : 0)
+      return (
+        (item.message.kind !== 'message' ? 24 : item.groupStart ? 56 : 26) +
+        (item.message.replyToId ? 20 : 0) +
+        (item.message.forwarded ? 40 : 0) +
+        (item.day === undefined ? 0 : 44) +
+        (item.isNew ? 24 : 0)
+      )
   }
 }
 
@@ -166,6 +176,7 @@ export function MessageList({
   onJumpToLatest,
   onJumpToFirstUnread,
   onMarkUnread,
+  onReply,
   onFocusComposer,
 }: MessageListProps) {
   // The virtualizer is one object that changes inside: the React Compiler must not keep what is read from it.
@@ -199,6 +210,9 @@ export function MessageList({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [overlay, setOverlay] = useState<Overlay | null>(null)
   const [overlayOpen, setOverlayOpen] = useState(false)
+  // The message in the forward dialog. It stays while the dialog closes, so its preview does not go blank.
+  const [forwarding, setForwarding] = useState<Message | null>(null)
+  const [forwardOpen, setForwardOpen] = useState(false)
 
   const allMessages = root ? [root, ...messages] : messages
   // The first unread message is older than the loaded window: a "New" line at the top of the window would be wrong.
@@ -285,8 +299,23 @@ export function MessageList({
     else if (messageId) rowElement(messageId)?.focus({ preventScroll: true })
   }
 
-  const { actionsFor, react, openThread } = useMessageActions({
+  // The composer takes focus a frame later: a menu that closes puts focus on the message row first.
+  const reply = onReply
+    ? (message: Message) => {
+        onReply(message)
+        requestAnimationFrame(onFocusComposer)
+      }
+    : undefined
+
+  function forward(message: Message) {
+    setForwarding(message)
+    setForwardOpen(true)
+  }
+
+  const { actionsFor, react, openThread, openQuoted, openOrigin } = useMessageActions({
     inThread,
+    onReply: reply,
+    onForward: forward,
     onEdit: (message) => startEdit(message),
     onMarkUnread,
     onAddReaction: (message) => {
@@ -306,6 +335,10 @@ export function MessageList({
     quickEmojis,
     react,
     openThread,
+    reply,
+    openQuoted,
+    openOrigin,
+    forward,
     openMenu: (message, anchor, align) => {
       if (actionsFor(message).length > 0) showOverlay('menu', message, anchor, align)
     },
@@ -465,9 +498,7 @@ export function MessageList({
 
   useImperativeHandle(ref, () => ({
     editLastOwn: () => {
-      const own = messages.findLast(
-        (message) => message.authorId === currentUserId && message.kind === 'message' && !message.deleted && !message.sendState,
-      )
+      const own = messages.findLast((message) => canEdit(message, currentUserId))
       if (!own) return false
       startEdit(own, true)
       return true
@@ -514,7 +545,7 @@ export function MessageList({
         break
       case 'e':
       case 'E':
-        if (!editable || message.authorId !== currentUserId) return
+        if (!message || !canEdit(message, currentUserId)) return
         startEdit(message)
         break
       case 't':
@@ -658,6 +689,7 @@ export function MessageList({
         <Popover open={overlayOpen} onOpenChange={onOverlayOpenChange} modal={false}>
           <PopoverContent anchor={overlay.anchor} side="bottom" align={overlay.align} className="w-auto gap-0 p-0">
             <EmojiPicker
+              custom
               onPick={(emoji) => {
                 if (overlayMessage) react(overlayMessage, emoji)
                 onOverlayOpenChange(false)
@@ -665,6 +697,15 @@ export function MessageList({
             />
           </PopoverContent>
         </Popover>
+      ) : null}
+      {forwarding ? (
+        <ForwardDialog
+          message={forwarding}
+          open={forwardOpen}
+          onOpenChange={setForwardOpen}
+          // Focus goes back to the message, not to the menu item or toolbar button that is gone by then.
+          finalFocus={() => rowElement(forwarding.id) ?? true}
+        />
       ) : null}
       <MessageActionSheet
         open={overlayOpen && overlay?.kind === 'sheet'}

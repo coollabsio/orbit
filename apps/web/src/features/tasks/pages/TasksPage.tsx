@@ -7,6 +7,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { UNDO_TOAST_DURATION } from '@/lib/toast'
+import { isConnectionFailure } from '@/lib/connection'
 import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { ApiProblem } from '@/api/problem'
@@ -327,7 +328,7 @@ function WorkspaceTasksPage() {
     if (savedView.error instanceof ApiProblem && savedView.error.status === 404) return <ViewNotFound />
     return <TaskBoundary title="View unavailable" description="The server could not load this view." />
   }
-  if (preference.isError) {
+  if (preference.isError && preference.data === undefined) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load the settings for this page." />
   }
   // `viewState.isLoading` too: after a page or view switch the disabled task query still shows the previous
@@ -342,13 +343,14 @@ function WorkspaceTasksPage() {
   if (pending) {
     return <TaskBoundary title="Loading tasks" description="Loading persisted workspace tasks." />
   }
-  if (detailQuery.isError) {
+  // With the task from before, a refetch that could not reach the server keeps it on screen; a 4xx (deleted, no access) does not.
+  if (detailQuery.isError && (detailQuery.data === undefined || !isConnectionFailure(detailQuery.error))) {
     return <TaskBoundary title="Task unavailable" description={taskUnavailableDescription(detailQuery.error)} />
   }
-  if (taskId && (commentsQuery.isError || activityQuery.isError || attachmentsQuery.isError || commentAttachments.isError)) {
+  if (taskId && ((commentsQuery.isError && commentsQuery.data === undefined) || (activityQuery.isError && activityQuery.data === undefined) || (attachmentsQuery.isError && attachmentsQuery.data === undefined) || commentAttachments.isError)) {
     return <TaskBoundary title="Task unavailable" description="The server could not load this task." />
   }
-  if (projectsQuery.isError || statusesQuery.isError || membersQuery.isError || labelsQuery.isError || (detailOpen && tasksQuery.error)) {
+  if ((projectsQuery.isError && projectsQuery.data === undefined) || statusesQuery.isError || (membersQuery.isError && membersQuery.data === undefined) || (labelsQuery.isError && labelsQuery.data === undefined) || (detailOpen && tasksQuery.error)) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load this workspace." />
   }
 

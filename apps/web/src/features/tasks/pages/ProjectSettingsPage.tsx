@@ -71,7 +71,7 @@ export function ProjectSettingsPage() {
   if (projectsQuery.isPending || statusQuery.isPending || tasksQuery.isPending) {
     return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Loading project" description="Loading persisted project settings." /></Pane></div>
   }
-  if (projectsQuery.isError || statusQuery.isError || tasksQuery.isError) {
+  if ((projectsQuery.isError && projectsQuery.data === undefined) || (statusQuery.isError && statusQuery.data === undefined) || (tasksQuery.isError && tasksQuery.data === undefined)) {
     return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Project unavailable" description="The server could not load this project." /></Pane></div>
   }
 

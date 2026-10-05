@@ -298,3 +298,44 @@ test('typing, presence and connection events leave the cache alone', () => {
   applyChatEvent(client, W, { type: 'connection', status: 'reconnecting' })
   expect(ids()).toEqual(['m1', 'm2'])
 })
+
+test('an edit of a message changes the quote of every reply to it, and its delete takes the quote away', () => {
+  const { client, find } = setup()
+  const quote = { id: 'm1', authorId: 'u1', body: 'text' }
+  const reply = (id: string, overrides: Partial<Message> = {}) => testMessage({ id, replyToId: 'm1', replyTo: quote, ...overrides })
+  client.setQueryData(chatKeys.messages(W, 'c1'), pages([testMessage({ id: 'm1' }), reply('m2'), testMessage({ id: 'm3' })]))
+  client.setQueryData<ThreadPages>(chatKeys.thread(W, 'm1'), {
+    pages: [{ items: [reply('m4', { threadRootId: 'm1' })], before: null, after: null, root: testMessage({ id: 'm1' }), state: null }],
+    pageParams: [{}],
+  })
+  updateOutbox(client, W, () => [reply('~001-n1', { nonce: 'n1', sendState: 'sending' })])
+  const quotes = () => [
+    find('m2')?.replyTo,
+    client.getQueryData<ThreadPages>(chatKeys.thread(W, 'm1'))!.pages[0].items[0].replyTo,
+    client.getQueryData<Message[]>(chatKeys.outbox(W))![0].replyTo,
+  ]
+
+  // The quote is the start of the new body, cut as the server cuts it.
+  const body = 'x'.repeat(250)
+  applyChatEvent(client, W, { type: 'message.updated', message: testMessage({ id: 'm1', body }) })
+  const edited = { id: 'm1', authorId: 'u1', body: 'x'.repeat(200) }
+  expect(quotes()).toEqual([edited, edited, edited])
+  expect(find('m3')?.replyTo).toBeNull()
+
+  // A reaction on the message says the same: the replies stay the same objects.
+  const before = find('m2')
+  applyChatEvent(client, W, { type: 'message.updated', message: testMessage({ id: 'm1', body, pinned: true }) })
+  expect(find('m2')).toBe(before)
+
+  applyChatEvent(client, W, { type: 'message.deleted', conversationId: 'c1', messageId: 'm1', threadRootId: null })
+  expect(find('m2')).toMatchObject({ replyToId: 'm1', replyTo: null })
+  expect(client.getQueryData<Message[]>(chatKeys.outbox(W))![0].replyTo).toBeNull()
+})
+
+test('a deleted root that stays for its replies takes the quote away too', () => {
+  const { client, find } = setup()
+  const quote = { id: 'm1', authorId: 'u1', body: 'text' }
+  client.setQueryData(chatKeys.messages(W, 'c1'), pages([testMessage({ id: 'm1', replyCount: 1 }), testMessage({ id: 'm2', replyToId: 'm1', replyTo: quote })]))
+  applyChatEvent(client, W, { type: 'message.updated', message: testMessage({ id: 'm1', body: '', deleted: true, replyCount: 1 }) })
+  expect(find('m2')).toMatchObject({ replyToId: 'm1', replyTo: null })
+})

@@ -5,6 +5,7 @@ import { queryKeys } from '@/api/queryKeys'
 import { disablePushForSignOut } from '@/features/realtime/push'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
 import { clearLocalCache, withinTime } from '@/lib/localCache'
+import { connectionRetryDelay, retryConnectionFailure } from '@/lib/connection'
 import {
   changePassword,
   login,
@@ -54,7 +55,8 @@ export function currentUserQueryOptions(client: ApiClient = apiClient) {
 }
 
 export function useCurrentUser(enabled = true) {
-  return useQuery({ ...currentUserQueryOptions(), enabled })
+  // A core query: a network or 5xx failure retries with backoff, so a blip does not end the session on screen.
+  return useQuery({ ...currentUserQueryOptions(), enabled, retry: retryConnectionFailure, retryDelay: connectionRetryDelay })
 }
 
 export function useSetupStatus() {
@@ -64,6 +66,8 @@ export function useSetupStatus() {
       const { data } = await setupStatus({ client: apiClient, throwOnError: true })
       return required(data, 'Setup status response was empty.')
     },
+    retry: retryConnectionFailure,
+    retryDelay: connectionRetryDelay,
   })
 }
 

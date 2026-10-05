@@ -11,6 +11,7 @@ import { decodeMentions } from '../../lib/mentionTokens'
 import { useChatNavigation } from '../../useChatNavigation'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { ConnectionLine, TypingLine } from '../composer/StatusLines'
+import { useReplyTarget } from '../composer/useReplyTarget'
 import { useDelayed, useWindowFocused } from '../messages/environment'
 import { restoreFocusAfterThread } from '../messages/focusReturn'
 import { MessageList, type MessageListHandle } from '../messages/MessageList'
@@ -57,6 +58,7 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
   const [atBottom, setAtBottom] = useState(false)
   // "Mark as unread" on a reply stops automatic mark-read until the thread closes.
   const [suspended, setSuspended] = useState(false)
+  const [replyTo, setReplyTo] = useReplyTarget()
 
   useEffect(() => forgetThreadScroll(rootId), [rootId])
 
@@ -104,6 +106,7 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
           if (message.threadRootId) setSuspended(true)
           else notifyMarkedUnread(conversation.id)
         }}
+        onReply={canWrite ? setReplyTo : undefined}
         onFocusComposer={() => composer.current?.focus()}
       />
       {canWrite ? (
@@ -114,6 +117,8 @@ function ThreadBody({ conversation, root, state, focusMessageId, announce, list 
             ref={composer}
             conversation={conversation}
             threadRootId={rootId}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(null)}
             autoFocus
             onEditLast={() => list.current?.editLastOwn() ?? false}
             onFocusList={() => list.current?.focusLast() ?? false}

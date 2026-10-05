@@ -1,3 +1,4 @@
+import { splitEmoji } from '@/lib/twemoji'
 import type { Message } from '../../api/types'
 
 /** A message longer than this many lines collapses behind "Show more". */
@@ -9,6 +10,15 @@ const DEFAULT_QUICK_REACTIONS = ['👍', '👀', '😂']
 /** Fenced and inline code: a URL or a mention inside it is text. */
 const CODE = /```[\s\S]*?```|`[^`\n]+`/g
 const URL = /https?:\/\/[^\s<>]+/g
+/** A URL in angle brackets (`<https://…>`) is a link without a card, as in Discord. After a backslash the bracket is text. */
+const WRAPPED_URL = /(?<!\\)<https?:\/\/[^\s<>]+>/g
+/** A message of only emoji shows them large up to this many. */
+const JUMBO_EMOJI_LIMIT = 30
+
+/** The part of a stored body whose URLs can become link cards: without code and URLs in angle brackets. */
+function cardText(body: string): string {
+  return body.replace(CODE, ' ').replace(WRAPPED_URL, ' ')
+}
 
 /**
  * Lines a message takes at the full text measure: each source line counts once for every 90 characters. An estimate
@@ -23,10 +33,13 @@ export function isLongMessage(text: string): boolean {
   return displayLineCount(text) > COLLAPSE_AFTER_LINES
 }
 
-/** URLs in a stored body that can become link cards: outside code, without trailing punctuation, each one once. */
+/**
+ * URLs in a stored body that can become link cards: outside code and angle brackets, without trailing punctuation, each
+ * one once.
+ */
 export function extractLinkUrls(body: string, limit = 3): string[] {
   const urls: string[] = []
-  for (const match of body.replace(CODE, ' ').matchAll(URL)) {
+  for (const match of cardText(body).matchAll(URL)) {
     const url = match[0].replace(/[.,!?;:)}\]'"]+$/, '')
     if (url && !urls.includes(url)) urls.push(url)
     if (urls.length === limit) break
@@ -39,9 +52,28 @@ export function extractLinkUrls(body: string, limit = 3): string[] {
  * card stands in for such a URL, so the text can leave it out; a URL inside a sentence stays where it is.
  */
 export function standaloneLinkUrls(body: string): string[] {
-  const text = body.replace(CODE, ' ')
+  const text = cardText(body)
   const lines = new Set(text.split('\n'))
   return extractLinkUrls(body).filter((url) => lines.has(url) && text.split(url).length === 2)
+}
+
+/**
+ * Whether a shown text (mentions decoded) is only emoji and white space, with 1 to 30 emoji: such a message shows them
+ * large, as in Discord. A flag, a skin tone or a ZWJ sequence is one emoji. `:name:` counts when `customNames` has the
+ * name; an unknown or escaped (`\:name:`) one is text.
+ */
+export function isJumboEmoji(text: string, customNames: Pick<ReadonlySet<string>, 'has'>): boolean {
+  let count = 0
+  const rest = text.replace(/(?<!\\):([a-z0-9_+-]+):/g, (token, name: string) => {
+    if (!customNames.has(name)) return token
+    count += 1
+    return ' '
+  })
+  for (const segment of splitEmoji(rest)) {
+    if (segment.url) count += 1
+    else if (segment.text.trim() !== '') return false
+  }
+  return count >= 1 && count <= JUMBO_EMOJI_LIMIT
 }
 
 /** The first line with text, cut to `max` characters: the thread breadcrumb and announcements. */

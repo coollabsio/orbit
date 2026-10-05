@@ -35,7 +35,7 @@ export function GithubPage() {
   }
 
   if (query.isPending) return <SettingsCard title="GitHub">Loading GitHub settings.</SettingsCard>
-  if (query.isError) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
+  if (query.isError && query.data === undefined) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
   const settings = query.data
 
   return <SettingsCard title="GitHub" description="Manage the GitHub App for this workspace. Connect repositories to projects in each project's settings.">
