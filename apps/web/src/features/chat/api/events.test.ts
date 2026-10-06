@@ -318,7 +318,7 @@ test('an edit of a message changes the quote of every reply to it, and its delet
   // The quote is the start of the new body, cut as the server cuts it.
   const body = 'x'.repeat(250)
   applyChatEvent(client, W, { type: 'message.updated', message: testMessage({ id: 'm1', body }) })
-  const edited = { id: 'm1', authorId: 'u1', body: 'x'.repeat(200) }
+  const edited = { id: 'm1', authorId: 'u1', body: 'x'.repeat(200), sticker: false }
   expect(quotes()).toEqual([edited, edited, edited])
   expect(find('m3')?.replyTo).toBeNull()
 

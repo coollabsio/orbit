@@ -6,7 +6,7 @@ import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions } from '
 import { patchMessage, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
-import type { Attachment, Category, Conversation, ConversationState, Message, NotifyLevel, ReplyQuote, ThreadState } from './types'
+import type { Attachment, Category, Conversation, ConversationState, Message, MessageSticker, NotifyLevel, ReplyQuote, ThreadState } from './types'
 
 const TYPING_INTERVAL = 8000
 /** When the typing signal was last sent, for each composer (conversation or thread). */
@@ -28,6 +28,8 @@ export interface SendInput {
   threadRootId?: string | null
   /** An inline reply: `quoteOf` the message it answers. */
   replyTo?: ReplyQuote | null
+  /** A sticker of the workspace. With one, `body` may be empty. */
+  sticker?: MessageSticker | null
   /** Stored form: run the composer text through `encodeMentions` first. */
   body: string
   attachments?: Attachment[]
@@ -46,6 +48,8 @@ function optimisticMessage(input: SendMessageInput, authorId: string): Message {
     replyToId: input.replyTo?.id ?? null,
     replyTo: input.replyTo ?? null,
     forwarded: null,
+    stickerId: input.sticker?.id ?? null,
+    sticker: input.sticker ?? null,
     kind: 'message',
     authorId,
     body: input.body,
@@ -104,8 +108,9 @@ export function useSendMessage() {
     retry: (message: Message) => {
       if (!message.nonce) return
       // A quote whose message was deleted meanwhile is `null` by now: the message then goes as a plain one.
-      const { conversationId, threadRootId, replyTo, body, attachments, alsoInChannel, nonce } = message
-      mutation.mutate({ conversationId, threadRootId, replyTo, body, attachments, alsoInChannel, nonce })
+      // A sticker that was deleted meanwhile is refused by the server: the row stays failed and can be discarded.
+      const { conversationId, threadRootId, replyTo, sticker, body, attachments, alsoInChannel, nonce } = message
+      mutation.mutate({ conversationId, threadRootId, replyTo, sticker, body, attachments, alsoInChannel, nonce })
     },
     /** Removes a failed message. */
     discard: (message: Message) => {

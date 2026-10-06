@@ -10969,6 +10969,525 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/chat/stickers": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::stickers"
+        ],
+        "summary": "The custom stickers of the workspace, by name.",
+        "operationId": "list_chat_stickers",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomStickerRecord"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::chat_routes::stickers"
+        ],
+        "summary": "Adds a custom sticker. Only workspace owners and admins. A workspace has at most 100.",
+        "operationId": "create_chat_sticker",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "2 to 30 characters, without control characters. Trimmed, and stored as typed.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatStickerUploadBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomStickerRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_multipart",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, chat_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, sticker_name_taken, sticker_limit_reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large, sticker_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed, invalid_sticker",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/chat/stickers/{sticker_id}": {
+      "delete": {
+        "tags": [
+          "crate::chat_routes::stickers"
+        ],
+        "summary": "Deletes a custom sticker. Only workspace owners and admins. Messages that were sent with\nit keep its id.",
+        "operationId": "delete_chat_sticker",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sticker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, chat_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/chat/stickers/{sticker_id}/image": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::stickers"
+        ],
+        "summary": "The image of a custom sticker. It never changes, so browsers keep it.",
+        "operationId": "get_chat_sticker_image",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sticker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "image/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatStickerImage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/chat/threads": {
       "get": {
         "tags": [
@@ -28509,6 +29028,21 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "A custom sticker was added or deleted: read the list again.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stickers.changed"
+                ]
+              }
+            }
           }
         ],
         "description": "One change, as the live socket sends it and as a write's response lists it."
@@ -28751,6 +29285,13 @@
             ],
             "description": "The message this one quotes (an inline reply): a message of the same conversation."
           },
+          "sticker_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A custom sticker of the workspace. With a sticker the body may be empty."
+          },
           "thread_root_id": {
             "type": [
               "string",
@@ -28782,6 +29323,23 @@
           }
         },
         "additionalProperties": false
+      },
+      "ChatStickerImage": {
+        "type": "string",
+        "format": "binary"
+      },
+      "ChatStickerUploadBody": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "A PNG, JPEG, WebP or GIF image of at most 512 KiB."
+          }
+        }
       },
       "ChatThreadCursorBody": {
         "type": "object",
@@ -29055,7 +29613,9 @@
               "last_reply",
               "reply_to_id",
               "reply_to",
-              "forwarded"
+              "forwarded",
+              "sticker_id",
+              "sticker"
             ],
             "properties": {
               "also_in_channel": {
@@ -29176,6 +29736,24 @@
                   "type": "string"
                 },
                 "description": "The first reply authors (at most five)."
+              },
+              "sticker": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/StickerRecord",
+                    "description": "Null when the message has no sticker, or the sticker is deleted."
+                  }
+                ]
+              },
+              "sticker_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The sticker the message was sent with; its body may be empty. The id stays when the\nsticker is deleted."
               },
               "thread_root_id": {
                 "type": [
@@ -29807,6 +30385,41 @@
           "name": {
             "type": "string",
             "description": "2 to 32 characters of `a-z 0-9 _`; written `:name:`."
+          },
+          "url": {
+            "type": "string",
+            "description": "Same-origin image path. The image of an id never changes."
+          }
+        }
+      },
+      "CustomStickerRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "animated",
+          "url",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "animated": {
+            "type": "boolean",
+            "description": "A GIF."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "2 to 30 characters, as its author typed it. Unique in the workspace whatever the case."
           },
           "url": {
             "type": "string",
@@ -30801,7 +31414,9 @@
           "last_reply",
           "reply_to_id",
           "reply_to",
-          "forwarded"
+          "forwarded",
+          "sticker_id",
+          "sticker"
         ],
         "properties": {
           "also_in_channel": {
@@ -30922,6 +31537,24 @@
               "type": "string"
             },
             "description": "The first reply authors (at most five)."
+          },
+          "sticker": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StickerRecord",
+                "description": "Null when the message has no sticker, or the sticker is deleted."
+              }
+            ]
+          },
+          "sticker_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The sticker the message was sent with; its body may be empty. The id stays when the\nsticker is deleted."
           },
           "thread_root_id": {
             "type": [
@@ -33754,6 +34387,7 @@
         "required": [
           "author_id",
           "body",
+          "sticker",
           "created_at"
         ],
         "properties": {
@@ -33766,6 +34400,10 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "sticker": {
+            "type": "boolean",
+            "description": "The reply has a sticker: a preview with no text says so."
           }
         }
       },
@@ -33775,7 +34413,8 @@
         "required": [
           "id",
           "author_id",
-          "body"
+          "body",
+          "sticker"
         ],
         "properties": {
           "author_id": {
@@ -33787,6 +34426,10 @@
           },
           "id": {
             "type": "string"
+          },
+          "sticker": {
+            "type": "boolean",
+            "description": "The quoted message has a sticker: a quote with no text says so."
           }
         }
       },
@@ -34246,6 +34889,27 @@
           }
         },
         "additionalProperties": false
+      },
+      "StickerRecord": {
+        "type": "object",
+        "description": "The sticker of a message.",
+        "required": [
+          "id",
+          "name",
+          "url"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "Same-origin image path. The image of an id never changes."
+          }
+        }
       },
       "SubIssuesDisplay": {
         "type": "string",

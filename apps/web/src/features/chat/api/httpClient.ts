@@ -279,6 +279,7 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         body: input.body,
         thread_root_id: input.threadRootId ?? null,
         reply_to_id: input.replyTo?.id ?? null,
+        sticker_id: input.sticker?.id ?? null,
         also_in_channel: input.alsoInChannel ?? false,
         file_ids: (input.attachments ?? []).map((attachment) => attachment.id),
         nonce: input.nonce,

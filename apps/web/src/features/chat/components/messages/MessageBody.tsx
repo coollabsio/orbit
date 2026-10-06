@@ -32,7 +32,7 @@ function LinkCards({ body }: { body: string }) {
 }
 
 /**
- * What a message says: its markdown with mentions shown as names, "(edited)", attachments and link cards. A long
+ * What a message says: its markdown with mentions shown as names, "(edited)", its sticker, attachments and link cards. A long
  * message collapses behind "Show more". No list or toolbar concerns, so previews (pins, search, unreads) can use it.
  * An Orbit URL the reader can see shows as a chip; one that is a whole line shows only as its card. A typed task
  * identifier (`ENG-12`) shows as the URL of its task does, and stays the typed text when the reader cannot see the task
@@ -43,6 +43,7 @@ export function MessageBody({ message }: { message: Message }) {
   const { renderLink, taskKeys } = useChatHost()
   const customEmoji = useContext(CustomEmojiContext)
   const [expanded, setExpanded] = useState(false)
+  const [stickerGone, setStickerGone] = useState(false)
 
   if (message.deleted) {
     return (
@@ -105,6 +106,24 @@ export function MessageBody({ message }: { message: Message }) {
         <Button variant="link" size="xs" className="mt-0.5 h-6 px-0" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
           {expanded ? 'Show less' : 'Show more'}
         </Button>
+      ) : null}
+      {message.sticker && !stickerGone ? (
+        <img
+          data-slot="message-sticker"
+          src={message.sticker.url}
+          alt={message.sticker.name}
+          title={message.sticker.name}
+          draggable={false}
+          loading="lazy"
+          // deleted since this message was loaded
+          onError={() => setStickerGone(true)}
+          // the box is there before the image loads, so the list does not jump
+          className="mt-1 size-40 object-contain object-left first:mt-0"
+        />
+      ) : message.stickerId ? (
+        <p data-slot="message-sticker" data-deleted="" className="text-muted-foreground italic">
+          Sticker was deleted
+        </p>
       ) : null}
       <Attachments attachments={message.attachments} hasTextContent={text !== ''} />
       <LinkCards body={linkBody} />

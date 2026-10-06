@@ -83,3 +83,15 @@ test('only the own message can be edited, and never a forward', () => {
   // A row cached before forwards existed has no such field.
   expect(canEdit({ ...testMessage({ id: 'm1' }), forwarded: undefined as never }, 'u1')).toBe(true)
 })
+
+test('a message that is only a sticker cannot be edited; one with text can, and both can be forwarded', () => {
+  const sticker = { id: 's1', name: 'Party Parrot', url: '/stickers/s1' }
+  const only = testMessage({ id: 'm1', body: '', stickerId: 's1', sticker })
+  expect(canEdit(only, 'u1')).toBe(false)
+  expect(canForward(only)).toBe(true)
+  // the sticker was deleted: still no text to edit
+  expect(canEdit({ ...only, sticker: null }, 'u1')).toBe(false)
+  expect(canEdit(testMessage({ id: 'm2', body: 'look', stickerId: 's1', sticker }), 'u1')).toBe(true)
+  // a row cached before stickers existed has no such fields
+  expect(canEdit({ ...testMessage({ id: 'm3' }), stickerId: undefined as unknown as null }, 'u1')).toBe(true)
+})

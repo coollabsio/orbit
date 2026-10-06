@@ -11,6 +11,7 @@ import type {
   Message,
   MessagePage,
   NotifyLevel,
+  MessageSticker,
   ReplyQuote,
   SearchPage,
   ThreadPage,
@@ -32,6 +33,8 @@ export interface SendMessageInput {
   threadRootId?: string | null
   /** An inline reply: the quote of its target. The server gets the id; the row that waits shows the quote. */
   replyTo?: ReplyQuote | null
+  /** A sticker of the workspace. The server gets the id; the row that waits shows the image. With one the body may be empty. */
+  sticker?: MessageSticker | null
   body: string
   attachments?: Attachment[]
   alsoInChannel?: boolean

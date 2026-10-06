@@ -9,13 +9,15 @@ import {
   type Ref,
   useId,
 } from 'react'
-import { At, Paperclip2, Send2, SmileCircle, Xmark } from 'reicon-react'
+import { At, Paperclip2, Send2, SmileCircle, Sticker, Xmark } from 'reicon-react'
+import type { CustomStickerRecord } from '@/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { MentionPopover } from '@/components/common/MentionPopover'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useCustomStickers } from '@/features/workspaces/customStickers'
 import { clipboardFiles } from '@/lib/attachmentLib'
 import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
 import { useChatContext } from '../../api/chatContext'
@@ -30,6 +32,7 @@ import { conversationTitle, useChatPeople } from '../messages/people'
 import { ComposerInput } from './ComposerInput'
 import { ComposerUploads } from './ComposerUploads'
 import { EmojiSuggestions } from './EmojiSuggestions'
+import { StickerPicker } from './StickerPicker'
 import { useAutosize } from './useAutosize'
 import { useEmojiAutocomplete } from './useEmojiAutocomplete'
 import { useUploads } from './useUploads'
@@ -83,6 +86,8 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
   const [text, setTextState] = useState(() => getDraft(workspaceId, conversationId, threadRootId))
   const [alsoInChannel, setAlsoInChannel] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [stickerOpen, setStickerOpen] = useState(false)
+  const stickers = useCustomStickers(workspaceId).data ?? []
   const input = useRef<HTMLTextAreaElement>(null)
   const filePicker = useRef<HTMLInputElement>(null)
   useAutosize(input, text)
@@ -149,6 +154,17 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
     emoji.close()
     onSent?.()
     input.current?.focus()
+  }
+
+  /**
+   * A sticker goes at once, as a message of its own: it answers the reply target if there is one, and leaves the text
+   * and the files of the composer as they are.
+   */
+  function sendSticker(sticker: CustomStickerRecord) {
+    setStickerOpen(false)
+    send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body: '', sticker: { id: sticker.id, name: sticker.name, url: sticker.url } })
+    onClearReply?.()
+    onSent?.()
   }
 
   function insertAtCursor(insertion: string) {
@@ -317,6 +333,18 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
                 />
               </PopoverContent>
             </Popover>
+            {stickers.length > 0 ? (
+              <Popover open={stickerOpen} onOpenChange={setStickerOpen} modal={false}>
+                <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Send a sticker" title="Send a sticker" />}>
+                  <Sticker className="size-5" />
+                </PopoverTrigger>
+                {stickerOpen ? (
+                  <PopoverContent side="top" align="start" finalFocus={input} className="w-auto gap-0 p-0">
+                    <StickerPicker stickers={stickers} onPick={sendSticker} />
+                  </PopoverContent>
+                ) : null}
+              </Popover>
+            ) : null}
             <Button variant="ghost" size="icon" aria-label="Mention someone" title="Mention someone" onClick={mentionSomeone}>
               <At className="size-5" />
             </Button>

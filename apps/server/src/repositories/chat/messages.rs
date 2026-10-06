@@ -5,11 +5,12 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
 use super::files::{MAX_MESSAGE_FILES, attach_files, copy_files};
+use super::stickers::load_sticker;
 use super::{
     Access, ChatError, ChatEvent, ChatRepository, ConversationKind, Events, FollowedThreadRecord,
     ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord, MessageKind, MessagePage,
-    MessageRecord, ReplyToRecord, ThreadMember, ThreadPage, Written, current_state, finish,
-    hydrate, id_list, load_access, load_actor, load_message, load_message_access,
+    MessageRecord, ReplyToRecord, StickerRecord, ThreadMember, ThreadPage, Written, current_state,
+    finish, hydrate, id_list, load_access, load_actor, load_message, load_message_access,
     load_thread_member, mentioned_user_ids, parse_id, parse_optional_id,
 };
 
@@ -42,8 +43,10 @@ pub struct SendInput {
     pub thread_root_id: Option<Id>,
     /// The message this one quotes: a message of the same conversation.
     pub reply_to_id: Option<Id>,
-    /// May be blank when the message has files.
+    /// May be blank when the message has files or a sticker.
     pub body: String,
+    /// A sticker of the workspace.
+    pub sticker_id: Option<Id>,
     /// Files the sender uploaded for this message.
     pub file_ids: Vec<Id>,
     /// Who is online now: `@here` notifies these members only.
@@ -234,7 +237,10 @@ impl ChatRepository {
         actor_id: Id,
         input: SendInput,
     ) -> Result<Written<MessageRecord>, ChatError> {
-        let body = clean_body(&input.body, !input.file_ids.is_empty())?;
+        let body = clean_body(
+            &input.body,
+            !input.file_ids.is_empty() || input.sticker_id.is_some(),
+        )?;
         if input.file_ids.len() > MAX_MESSAGE_FILES {
             return Err(ChatError::Invalid { field: "file_ids" });
         }
@@ -288,6 +294,10 @@ impl ChatRepository {
             ),
             None => None,
         };
+        let sticker = match input.sticker_id {
+            Some(sticker_id) => Some(load_sticker(&mut tx, workspace_id, sticker_id).await?),
+            None => None,
+        };
         // `@channel` and `@here` do nothing in a thread.
         let broadcast = |token: &str| root.is_none() && body.contains(token);
         let mut message = insert_message(
@@ -304,6 +314,8 @@ impl ChatRepository {
                 nonce: Some(&input.nonce),
                 reply_to,
                 forwarded: None,
+                sticker_id: sticker.as_ref().map(|sticker| sticker.id),
+                sticker,
                 now,
             },
         )
@@ -447,6 +459,9 @@ impl ChatRepository {
                 nonce: Some(&input.nonce),
                 reply_to: None,
                 forwarded: Some(origin),
+                // The id of a deleted sticker is copied too.
+                sticker_id: source.sticker_id,
+                sticker: source.sticker.clone(),
                 now,
             },
         )
@@ -478,7 +493,8 @@ impl ChatRepository {
         finish(tx, events, message).await
     }
 
-    /// Only the author edits a message. A forward is a copy and is never edited.
+    /// Only the author edits a message. A forward is a copy and is never edited. The new body is
+    /// not blank, whatever the message has besides it; its files and its sticker stay.
     pub async fn edit_message(
         &self,
         workspace_id: Id,
@@ -628,7 +644,7 @@ impl ChatRepository {
             }
             sqlx::query(
                 "UPDATE chat_messages SET body = '', deleted_at = ?, pinned_at = NULL, pinned_by = NULL, \
-                 mention_channel = 0, mention_here = 0 WHERE id = ?",
+                 mention_channel = 0, mention_here = 0, sticker_id = NULL WHERE id = ?",
             )
             .bind(now.as_millis())
             .bind(message.id.to_string())
@@ -782,13 +798,14 @@ impl ChatRepository {
     }
 }
 
-/// The stored body: at most 4000 characters, not blank (unless the message has files), and without the two control characters
-/// that the search index uses as highlight markers.
-fn clean_body(body: &str, has_files: bool) -> Result<String, ChatError> {
+/// The stored body: at most 4000 characters, not blank (unless the message has files or a
+/// sticker), and without the two control characters that the search index uses as highlight
+/// markers.
+fn clean_body(body: &str, may_be_blank: bool) -> Result<String, ChatError> {
     if body.chars().count() > MESSAGE_MAX_CHARS {
         return Err(ChatError::TooLong);
     }
-    if body.trim().is_empty() && !has_files {
+    if body.trim().is_empty() && !may_be_blank {
         return Err(ChatError::Invalid { field: "body" });
     }
     Ok(body.replace(['\u{2}', '\u{3}'], ""))
@@ -936,6 +953,9 @@ struct NewMessage<'a> {
     reply_to: Option<ReplyToRecord>,
     /// Set on a forward. Its body mentions nobody.
     forwarded: Option<ForwardedRecord>,
+    /// The id alone on a forward of a message whose sticker is deleted.
+    sticker_id: Option<Id>,
+    sticker: Option<StickerRecord>,
     now: TimestampMillis,
 }
 
@@ -949,8 +969,8 @@ async fn insert_message(
     sqlx::query(
         "INSERT INTO chat_messages (id, conversation_id, thread_root_id, kind, author_id, body, \
          mention_channel, mention_here, also_in_channel, nonce, reply_to_id, forward_of_id, \
-         forward_conversation_id, forward_author_id, forward_created_at, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         forward_conversation_id, forward_author_id, forward_created_at, sticker_id, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id.to_string())
     .bind(new.conversation_id.to_string())
@@ -970,6 +990,7 @@ async fn insert_message(
     )
     .bind(new.forwarded.map(|origin| origin.author_id.to_string()))
     .bind(new.forwarded.map(|origin| origin.created_at.as_millis()))
+    .bind(new.sticker_id.map(|id| id.to_string()))
     .bind(new.now.as_millis())
     .execute(&mut *conn)
     .await?;
@@ -1004,6 +1025,8 @@ async fn insert_message(
         reply_to_id: new.reply_to.as_ref().map(|target| target.id),
         reply_to: new.reply_to,
         forwarded: new.forwarded,
+        sticker_id: new.sticker_id,
+        sticker: new.sticker,
         last_reply_id: None,
     })
 }
@@ -1031,6 +1054,8 @@ pub(super) async fn add_system_row(
             nonce: None,
             reply_to: None,
             forwarded: None,
+            sticker_id: None,
+            sticker: None,
             now,
         },
     )

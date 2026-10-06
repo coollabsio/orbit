@@ -424,6 +424,9 @@ turns its routes, navigation and shortcuts off.
   card. A backslash keeps `\:D`, `\:name:` and `\GEN-1` as text.
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
+- Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for
+  each workspace). The sticker button of the composer sends one at once as its own message
+  (`chat_messages.sticker_id`); a deleted sticker shows "Sticker was deleted".
 - A lost connection keeps the app on screen (`lib/connection.ts`, `app/shell/ConnectionBanner.tsx`):
   a banner shows while the sockets and core queries reconnect; after a minute "Orbit is unavailable" covers
   the app (`app/ConnectionScreen.tsx`, the animated logo and Retry) until the connection is back. A page

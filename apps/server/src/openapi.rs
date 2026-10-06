@@ -225,6 +225,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::emoji::create_chat_emoji,
         crate::chat_routes::emoji::delete_chat_emoji,
         crate::chat_routes::emoji::get_chat_emoji_image,
+        crate::chat_routes::stickers::list_chat_stickers,
+        crate::chat_routes::stickers::create_chat_sticker,
+        crate::chat_routes::stickers::delete_chat_sticker,
+        crate::chat_routes::stickers::get_chat_sticker_image,
     )
 )]
 struct ApiDocument;
@@ -1012,7 +1016,10 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "422", "validation_failed");
         return;
     }
-    if matches!(operation_id, "download_chat_file" | "get_chat_emoji_image") {
+    if matches!(
+        operation_id,
+        "download_chat_file" | "get_chat_emoji_image" | "get_chat_sticker_image"
+    ) {
         return;
     }
     if operation_id == "create_chat_emoji" {
@@ -1025,7 +1032,17 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "422", "invalid_emoji");
         return;
     }
-    if operation_id == "delete_chat_emoji" {
+    if operation_id == "create_chat_sticker" {
+        add_code(responses, "400", "invalid_multipart");
+        add_code(responses, "403", "chat_forbidden");
+        add_code(responses, "409", "sticker_name_taken");
+        add_code(responses, "409", "sticker_limit_reached");
+        add_code(responses, "413", "sticker_too_large");
+        add_code(responses, "422", "validation_failed");
+        add_code(responses, "422", "invalid_sticker");
+        return;
+    }
+    if matches!(operation_id, "delete_chat_emoji" | "delete_chat_sticker") {
         add_code(responses, "403", "chat_forbidden");
         return;
     }

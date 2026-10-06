@@ -87,6 +87,8 @@ export interface Mentions {
 export interface ReplyPreview {
   authorId: string
   body: string
+  /** The reply has a sticker. Missing on a row cached before stickers existed. */
+  sticker?: boolean
   createdAt: number
 }
 
@@ -99,6 +101,8 @@ export interface ReplyQuote {
   authorId: string
   /** The start of the quoted message's stored body, with its mention tokens. */
   body: string
+  /** The quoted message has a sticker. Missing on a row cached before stickers existed. */
+  sticker?: boolean
 }
 
 /** Where a forwarded message was copied from. The original may be gone, or in a conversation the reader cannot open. */
@@ -108,6 +112,13 @@ export interface ForwardOrigin {
   authorId: string
   /** When the original message was sent. */
   createdAt: number
+}
+
+/** The sticker of a message: a custom image of the workspace, shown large. `url` is the image, served by Orbit. */
+export interface MessageSticker {
+  id: string
+  name: string
+  url: string
 }
 
 export interface Message {
@@ -124,6 +135,10 @@ export interface Message {
    * be edited and does not change with the original. A row cached before forwards existed has no such field.
    */
   forwarded: ForwardOrigin | null
+  /** Set on a message that was sent with a sticker; its body may be empty. It stays when the sticker is deleted. */
+  stickerId: string | null
+  /** The sticker of `stickerId`; `null` when it was deleted. A row cached before stickers existed has neither field. */
+  sticker: MessageSticker | null
   kind: MessageKind
   authorId: string
   /** Markdown source. Mentions are tokens: `<@userId>`, `<#conversationId>`, `<!channel>`, `<!here>`. */
@@ -238,6 +253,8 @@ export type ChatEvent =
   | { type: 'self.changed' }
   /** A custom emoji of the workspace was added or deleted: fetch the list again. */
   | { type: 'emoji.changed' }
+  /** A sticker of the workspace was added or deleted: fetch the list again. */
+  | { type: 'stickers.changed' }
   | { type: 'connection'; status: ConnectionStatus }
   /** The client missed events: refetch every chat query. */
   | { type: 'resync' }

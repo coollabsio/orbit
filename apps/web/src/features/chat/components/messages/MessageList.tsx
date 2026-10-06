@@ -16,6 +16,7 @@ import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Spinner } from '@/components/ui/spinner'
+import { wordlessPreview } from '@/lib/messagePreview'
 import { useChatContext } from '../../api/chatContext'
 import { useEditMessage, useSendMessage } from '../../api/mutations'
 import type { Message } from '../../api/types'
@@ -138,6 +139,8 @@ function estimateSize(item: ListItem): number {
         (item.message.kind !== 'message' ? 24 : item.groupStart ? 56 : 26) +
         (item.message.replyToId ? 20 : 0) +
         (item.message.forwarded ? 40 : 0) +
+        // a sticker is a 160px square in place of the line of text, or under it
+        (item.message.sticker ? (item.message.body ? 164 : 140) : 0) +
         (item.day === undefined ? 0 : 44) +
         (item.isNew ? 24 : 0)
       )
@@ -440,7 +443,7 @@ export function MessageList({
       const newest = arrived[arrived.length - 1]
       if (announce && newest) {
         const text = firstLine(decodeMentions(newest.body, people.members, people.channels), 200)
-        setAnnouncement(`${people.byId.get(newest.authorId)?.name ?? 'Someone'}: ${text || 'sent a file'}`)
+        setAnnouncement(`${people.byId.get(newest.authorId)?.name ?? 'Someone'}: ${text || wordlessPreview(Boolean(newest.stickerId)).toLowerCase()}`)
       }
     }
     state.lastKey = lastKey

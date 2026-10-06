@@ -2224,6 +2224,21 @@ async fn a_message_is_pushed_to_the_members_it_is_for() {
     assert_eq!(sent[0].0, endpoint(&bob));
     assert_eq!(sent[0].1["sound"], "message");
 
+    // A message that is a sticker alone has a text all the same.
+    let (status, sticker) = fixture.add_sticker(&fixture.owner, "wave", PNG).await;
+    assert_eq!(status, StatusCode::CREATED, "{sticker}");
+    fixture
+        .send_with(
+            &fixture.owner,
+            &general,
+            json!({ "body": "", "sticker_id": sticker["id"] }),
+        )
+        .await;
+    let sent = pushed(1).await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, endpoint(&bob));
+    assert_eq!(sent[0].1["body"], "Sticker");
+
     // A reply in a thread: its followers (the root's author), not a channel set to "all".
     let root = fixture.send(&ada, &general, "root").await;
     pushed(1).await;
@@ -2391,7 +2406,7 @@ async fn a_reply_quotes_a_message_of_its_conversation_and_keeps_the_id_of_a_dele
     assert_eq!(sent["result"]["thread_root_id"], Value::Null);
     assert_eq!(
         sent["result"]["reply_to"],
-        json!({ "id": target, "author_id": fixture.owner.id.to_string(), "body": "é".repeat(200) })
+        json!({ "id": target, "author_id": fixture.owner.id.to_string(), "body": "é".repeat(200), "sticker": false })
     );
     // The event that the other members get carries the quote too.
     assert_eq!(sent["events"][0]["type"], "message.created");
@@ -2529,11 +2544,27 @@ const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\
 impl Fixture {
     /// Uploads an emoji image; returns the status and the answer.
     async fn add_emoji(&self, member: &Member, name: &str, bytes: &[u8]) -> (StatusCode, Value) {
+        self.add_image(member, "emoji", name, bytes).await
+    }
+
+    /// Uploads a sticker image; returns the status and the answer. `name` is URL-encoded.
+    async fn add_sticker(&self, member: &Member, name: &str, bytes: &[u8]) -> (StatusCode, Value) {
+        self.add_image(member, "stickers", name, bytes).await
+    }
+
+    /// Uploads the image of an emoji or a sticker (`kind` is the path segment).
+    async fn add_image(
+        &self,
+        member: &Member,
+        kind: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> (StatusCode, Value) {
         let boundary = "orbit-test-boundary";
         let mut body = Vec::new();
         body.extend_from_slice(
             format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"emoji\"\r\n\r\n"
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image\"\r\n\r\n"
             )
             .as_bytes(),
         );
@@ -2542,7 +2573,7 @@ impl Fixture {
         let request = Request::builder()
             .method("POST")
             .uri(format!(
-                "/api/v1/workspaces/{}/chat/emoji?name={name}",
+                "/api/v1/workspaces/{}/chat/{kind}?name={name}",
                 self.workspace_id
             ))
             .header(header::COOKIE, &member.cookie)
@@ -2766,6 +2797,348 @@ async fn custom_emoji_are_added_by_managers_and_read_by_members() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, _) = fixture.add_emoji(&admin, "one_more", PNG).await;
     assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn custom_stickers_are_added_by_managers_and_read_by_members() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let admin = fixture.add_member("grace").await;
+    sqlx::query("UPDATE memberships SET role = 'admin' WHERE user_id = ?")
+        .bind(admin.id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (outsider_id, outsider_email) = fixture.add_user("mallory").await;
+    let outsider = fixture
+        .session(outsider_id, outsider_email, "mallory")
+        .await;
+
+    // A member does not add a sticker; an admin does. The name is trimmed and kept as typed.
+    let (status, problem) = fixture.add_sticker(&ada, "party", PNG).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "chat_forbidden");
+    let (status, created) = fixture
+        .add_sticker(&admin, "%20Party%20Parrot!%20", PNG)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_owned();
+    let url = format!(
+        "/api/v1/workspaces/{}/chat/stickers/{id}/image",
+        fixture.workspace_id
+    );
+    assert_eq!(created["name"], "Party Parrot!");
+    assert_eq!(created["animated"], false);
+    assert_eq!(created["url"], url);
+    assert_eq!(created["created_by"], admin.id.to_string());
+    assert!(created["created_at"].is_string());
+    let (status, animated) = fixture.add_sticker(&fixture.owner, "blink", GIF).await;
+    assert_eq!(status, StatusCode::CREATED, "{animated}");
+    assert_eq!(animated["animated"], true);
+
+    // What is refused, and with which code.
+    let too_large = [PNG, vec![0_u8; 512 * 1024].as_slice()].concat();
+    let largest = [PNG, vec![0_u8; 512 * 1024 - PNG.len()].as_slice()].concat();
+    let too_long = "a".repeat(31);
+    for (name, bytes, expected, code) in [
+        (
+            "svg",
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".as_slice(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_sticker",
+        ),
+        (
+            "big",
+            too_large.as_slice(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "sticker_too_large",
+        ),
+        (
+            "%20a%20",
+            PNG,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+        ),
+        (
+            "new%0Aline",
+            PNG,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+        ),
+        (
+            too_long.as_str(),
+            PNG,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+        ),
+        (
+            "PARTY%20parrot!",
+            PNG,
+            StatusCode::CONFLICT,
+            "sticker_name_taken",
+        ),
+    ] {
+        let (status, problem) = fixture.add_sticker(&admin, name, bytes).await;
+        assert_eq!(status, expected, "{name}: {problem}");
+        assert_eq!(problem["code"], code, "{name}: {problem}");
+    }
+    let (status, problem) = fixture.add_sticker(&admin, "largest", &largest).await;
+    assert_eq!(status, StatusCode::CREATED, "{problem}");
+    let largest_id = problem["id"].as_str().unwrap().to_owned();
+
+    // Every member reads the list (by name, whatever the case) and the images.
+    let listed = fixture.ok(&ada, "GET", "/stickers", None).await;
+    let names: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sticker| sticker["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["blink", "largest", "Party Parrot!"]);
+    assert_eq!(listed[2], created);
+    let image = |member: &Member, url: &str| {
+        let request = Request::builder()
+            .uri(url)
+            .header(header::COOKIE, &member.cookie)
+            .body(Body::empty())
+            .unwrap();
+        fixture.app.clone().oneshot(request)
+    };
+    let response = image(&ada, &url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "private, max-age=31536000, immutable"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&bytes[..], PNG);
+    let response = image(&ada, animated["url"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/gif");
+
+    // Somebody who is not in the workspace gets nothing.
+    let (status, _) = fixture.call(&outsider, "GET", "/stickers", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        image(&outsider, &url).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let (status, _) = fixture.add_sticker(&outsider, "mine", PNG).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = fixture
+        .call(&outsider, "DELETE", &format!("/stickers/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A member does not delete; an admin does, and the image goes with it.
+    let (status, problem) = fixture
+        .call(&ada, "DELETE", &format!("/stickers/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    let (status, _) = fixture
+        .call(&admin, "DELETE", &format!("/stickers/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, problem) = fixture
+        .call(&admin, "DELETE", &format!("/stickers/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "chat_not_found");
+    assert_eq!(
+        image(&ada, &url).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    // The name is free again.
+    let (status, _) = fixture.add_sticker(&admin, "party%20parrot!", PNG).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // A workspace has at most 100.
+    let now = TimestampMillis::now().as_millis();
+    for index in 0..97 {
+        sqlx::query(
+            "INSERT INTO custom_stickers (id, workspace_id, name, mime_type, bytes, created_by, created_at) \
+             VALUES (?, ?, ?, 'image/png', ?, ?, ?)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&fixture.workspace_id)
+        .bind(format!("filler {index}"))
+        .bind(PNG)
+        .bind(fixture.owner.id.to_string())
+        .bind(now)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    }
+    let (status, problem) = fixture.add_sticker(&admin, "one_more", PNG).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "sticker_limit_reached");
+    let (status, _) = fixture
+        .call(&admin, "DELETE", &format!("/stickers/{largest_id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = fixture.add_sticker(&admin, "one_more", PNG).await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn a_sticker_is_a_message_with_or_without_text_and_outlives_its_sticker() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let general = fixture.general().await;
+    let messages = format!("/conversations/{general}/messages");
+    let (status, sticker) = fixture.add_sticker(&fixture.owner, "wave", PNG).await;
+    assert_eq!(status, StatusCode::CREATED, "{sticker}");
+    let sticker_id = sticker["id"].as_str().unwrap().to_owned();
+    let record = json!({ "id": sticker_id, "name": "wave", "url": sticker["url"] });
+    let read = format!("/conversations/{general}/read");
+    fixture.ok(&ada, "POST", &read, None).await;
+    assert_eq!(fixture.counts(&ada, &general).await, (0, 0));
+
+    // A sticker alone: the body is empty, and the message is unread for the other member.
+    let sent = fixture
+        .send_with(
+            &fixture.owner,
+            &general,
+            json!({ "body": "", "sticker_id": sticker_id }),
+        )
+        .await;
+    let alone = sent["result"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(sent["result"]["body"], "");
+    assert_eq!(sent["result"]["sticker_id"], sticker_id);
+    assert_eq!(sent["result"]["sticker"], record);
+    assert_eq!(fixture.counts(&ada, &general).await, (1, 0));
+
+    // A message without a sticker has neither field set, and still needs a body.
+    let plain = fixture
+        .send_with(&ada, &general, json!({ "body": "hello" }))
+        .await;
+    assert_eq!(plain["result"]["sticker_id"], Value::Null);
+    assert_eq!(plain["result"]["sticker"], Value::Null);
+    for body in [
+        json!({ "body": "" }),
+        json!({ "body": "  ", "sticker_id": null }),
+    ] {
+        let mut body = body;
+        body["nonce"] = json!(fixture.next_nonce());
+        let (status, problem) = fixture.call(&ada, "POST", &messages, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+        assert_eq!(problem["code"], "validation_failed");
+    }
+
+    // A sticker that is not one of this workspace, or no id at all.
+    for (id, expected, code) in [
+        (
+            Id::new_v7().to_string(),
+            StatusCode::NOT_FOUND,
+            "chat_not_found",
+        ),
+        (
+            "wave".to_owned(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+        ),
+    ] {
+        let body = json!({ "body": "", "sticker_id": id, "nonce": fixture.next_nonce() });
+        let (status, problem) = fixture.call(&ada, "POST", &messages, Some(body)).await;
+        assert_eq!(status, expected, "{id}: {problem}");
+        assert_eq!(problem["code"], code, "{id}: {problem}");
+    }
+
+    // With text, as a quote and in a thread.
+    let quoting = fixture
+        .send_with(
+            &ada,
+            &general,
+            json!({ "body": "hi <!channel>", "sticker_id": sticker_id, "reply_to_id": alone }),
+        )
+        .await;
+    assert_eq!(quoting["result"]["sticker"], record);
+    assert_eq!(quoting["result"]["reply_to"]["id"], alone);
+    assert_eq!(quoting["result"]["reply_to"]["body"], "");
+    assert_eq!(quoting["result"]["reply_to"]["sticker"], true);
+    let reply = fixture
+        .send_with(
+            &ada,
+            &general,
+            json!({ "body": "", "sticker_id": sticker_id, "thread_root_id": alone }),
+        )
+        .await;
+    assert_eq!(reply["result"]["sticker"], record);
+    let root = fixture
+        .ok(&ada, "GET", &format!("/threads/{alone}"), None)
+        .await;
+    assert_eq!(root["root"]["reply_count"], 1);
+    assert_eq!(root["root"]["last_reply"]["body"], "");
+    assert_eq!(root["root"]["last_reply"]["sticker"], true);
+    assert_eq!(root["items"][0]["sticker"], record);
+
+    // An edit changes the text and never the sticker; a sticker alone gets no empty body again.
+    let edit = format!("/messages/{alone}");
+    let (status, problem) = fixture
+        .call(&fixture.owner, "PATCH", &edit, Some(json!({ "body": " " })))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    let edited = fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &edit,
+            Some(json!({ "body": "waving" })),
+        )
+        .await;
+    assert_eq!(edited["result"]["body"], "waving");
+    assert_eq!(edited["result"]["sticker"], record);
+    let page = fixture.ok(&ada, "GET", "/search?query=waving", None).await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+
+    // A forward keeps the sticker.
+    let target = fixture.channel(&ada, "target", "private", &[]).await;
+    let (status, forward) = fixture.forward(&ada, &alone, &target).await;
+    assert_eq!(status, StatusCode::OK, "{forward}");
+    let forward_id = forward["result"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(forward["result"]["sticker_id"], sticker_id);
+    assert_eq!(forward["result"]["sticker"], record);
+    assert_eq!(forward["result"]["forwarded"]["message_id"], alone);
+
+    // After the sticker is deleted, its messages keep the id and have no sticker.
+    let (status, _) = fixture
+        .call(
+            &fixture.owner,
+            "DELETE",
+            &format!("/stickers/{sticker_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let find = |page: Value, id: &str| {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["id"] == id)
+            .unwrap_or_else(|| panic!("{id} is not listed"))
+            .clone()
+    };
+    let message = find(fixture.ok(&ada, "GET", &messages, None).await, &alone);
+    assert_eq!(message["sticker_id"], sticker_id);
+    assert_eq!(message["sticker"], Value::Null);
+    let copies = format!("/conversations/{target}/messages");
+    let copy = find(fixture.ok(&ada, "GET", &copies, None).await, &forward_id);
+    assert_eq!(copy["sticker_id"], sticker_id);
+    assert_eq!(copy["sticker"], Value::Null);
+    // A forward of it now copies the id alone.
+    let (status, again) = fixture.forward(&ada, &alone, &target).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["result"]["sticker_id"], sticker_id);
+    assert_eq!(again["result"]["sticker"], Value::Null);
+    // The sticker is gone for a new message.
+    let body = json!({ "body": "", "sticker_id": sticker_id, "nonce": fixture.next_nonce() });
+    let (status, _) = fixture.call(&ada, "POST", &messages, Some(body)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    fixture.assert_counters_exact("after stickers").await;
 }
 
 impl Fixture {

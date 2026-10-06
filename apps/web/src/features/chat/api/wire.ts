@@ -90,13 +90,15 @@ export function toMessage(record: MessageRecord): Message {
     conversationId: record.conversation_id,
     threadRootId: record.thread_root_id,
     replyToId: record.reply_to_id,
-    replyTo: record.reply_to && { id: record.reply_to.id, authorId: record.reply_to.author_id, body: record.reply_to.body },
+    replyTo: record.reply_to && { id: record.reply_to.id, authorId: record.reply_to.author_id, body: record.reply_to.body, sticker: record.reply_to.sticker },
     forwarded: record.forwarded && {
       messageId: record.forwarded.message_id,
       conversationId: record.forwarded.conversation_id,
       authorId: record.forwarded.author_id,
       createdAt: millis(record.forwarded.created_at),
     },
+    stickerId: record.sticker_id,
+    sticker: record.sticker && { id: record.sticker.id, name: record.sticker.name, url: record.sticker.url },
     kind: record.kind,
     authorId: record.author_id,
     body: record.body,
@@ -115,6 +117,7 @@ export function toMessage(record: MessageRecord): Message {
     lastReply: record.last_reply && {
       authorId: record.last_reply.author_id,
       body: record.last_reply.body,
+      sticker: record.last_reply.sticker,
       createdAt: millis(record.last_reply.created_at),
     },
   }
@@ -177,6 +180,7 @@ export function toEvent(event: WireEvent, currentUserId: string): ChatEvent {
     case 'thread.changed':
       return { type: event.type, state: toThreadState(event.state) }
     case 'emoji.changed':
+    case 'stickers.changed':
       return { type: event.type }
   }
 }

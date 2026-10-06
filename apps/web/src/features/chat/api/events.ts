@@ -214,7 +214,7 @@ function messageCreated(queryClient: QueryClient, workspaceId: string, message: 
           replyCount: root.replyCount + 1,
           lastReplyAt: message.createdAt,
           replyUserIds: root.replyUserIds.includes(message.authorId) ? root.replyUserIds : [...root.replyUserIds, message.authorId],
-          lastReply: { authorId: message.authorId, body: message.body, createdAt: message.createdAt },
+          lastReply: { authorId: message.authorId, body: message.body, sticker: message.stickerId != null, createdAt: message.createdAt },
         },
   )
   queryClient.setQueryData<FollowedThread[]>(chatKeys.followedThreads(workspaceId), (threads) =>
@@ -369,10 +369,14 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
     case 'emoji.changed':
       void queryClient.invalidateQueries({ queryKey: queryKeys.customEmoji(workspaceId) })
       break
+    case 'stickers.changed':
+      void queryClient.invalidateQueries({ queryKey: queryKeys.customStickers(workspaceId) })
+      break
     case 'resync':
       void queryClient.invalidateQueries({ queryKey: chatKeys.all(workspaceId) })
-      // the custom emoji are the workspace's (outside the chat prefix), and their event may be among the missed ones
+      // the custom emoji and stickers are the workspace's (outside the chat prefix), and their events may be among the missed ones
       void queryClient.invalidateQueries({ queryKey: queryKeys.customEmoji(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.customStickers(workspaceId) })
       break
     case 'typing':
     case 'presence':

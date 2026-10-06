@@ -1,6 +1,6 @@
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { UserAvatar } from '@/components/common/UserAvatar'
-import { extractPreview } from '@/lib/messagePreview'
+import { extractPreview, wordlessPreview } from '@/lib/messagePreview'
 import { useThreadState } from '../../api/queries'
 import type { Message } from '../../api/types'
 import { decodeMentions } from '../../lib/mentionTokens'
@@ -38,7 +38,7 @@ export function ReplySummary({ message }: { message: Message }) {
             <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} tabIndex={-1} className="relative z-1 shrink-0 font-medium text-foreground/90">
               {author?.name ?? 'Unknown'}
             </ProfileTrigger>
-            <span className="truncate text-[13px]">{text || 'Sent a file'}</span>
+            <span className="truncate text-[13px]">{text || wordlessPreview(reply.sticker === true)}</span>
           </span>
         ) : null}
         <button

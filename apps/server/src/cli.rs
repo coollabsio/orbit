@@ -523,6 +523,7 @@ async fn seed_chat(
                 reply_to_id: None,
                 body,
                 file_ids: Vec::new(),
+                sticker_id: None,
                 online: Vec::new(),
                 also_in_channel: false,
                 nonce: format!("development-seed-{sent}"),

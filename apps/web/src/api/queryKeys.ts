@@ -76,6 +76,8 @@ export const queryKeys = {
    * (`emoji.changed`), so a task or page event must not fetch it again.
    */
   customEmoji: (workspaceId: string) => ['custom-emoji', workspaceId] as const,
+  /** Outside the workspace prefix for the same reason: the chat socket says when the list changed (`stickers.changed`). */
+  customStickers: (workspaceId: string) => ['custom-stickers', workspaceId] as const,
   tasks: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'tasks'] as const,
     list: (workspaceId: string, filters: TaskFilters = {}) =>

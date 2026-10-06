@@ -819,6 +819,8 @@ impl PushService {
         let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
         Ok(if line.is_empty() && !message.attachments.is_empty() {
             "Sent a file".to_owned()
+        } else if line.is_empty() && message.sticker_id.is_some() {
+            "Sticker".to_owned()
         } else {
             short(&line, BODY_CHARS)
         })

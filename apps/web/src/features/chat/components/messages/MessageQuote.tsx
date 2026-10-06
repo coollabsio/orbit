@@ -1,6 +1,6 @@
 import { EmojiText } from '@/components/common/Emoji'
 import { UserAvatar } from '@/components/common/UserAvatar'
-import { extractPreview } from '@/lib/messagePreview'
+import { extractPreview, wordlessPreview } from '@/lib/messagePreview'
 import type { Message } from '../../api/types'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { useMessageList } from './messageListContext'
@@ -32,7 +32,7 @@ export function MessageQuote({ message, active }: { message: Message; active: bo
           <UserAvatar user={author} name="?" size={16} />
           <span className="shrink-0 font-medium text-foreground/90">{author?.name ?? 'Unknown'}</span>
           <span className="truncate text-[13px]">
-            <EmojiText text={text || 'Sent a file'} />
+            <EmojiText text={text || wordlessPreview(quote.sticker === true)} />
           </span>
         </button>
       ) : (

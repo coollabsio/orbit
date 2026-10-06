@@ -30,7 +30,7 @@ export function emojiNameFromFile(fileName: string): string {
  * a name is in use already, by a custom emoji or a standard one (`:joy:`).
  */
 export function emojiProblem(file: { type: string; size: number }, name: string, taken: (name: string) => boolean): string | null {
-  if (!EMOJI_IMAGE_TYPES.includes(file.type)) return 'Choose a PNG, JPEG, WebP or GIF image.'
+  if (file.type !== '' && !EMOJI_IMAGE_TYPES.includes(file.type)) return 'Choose a PNG, JPEG, WebP or GIF image.'
   if (file.size > EMOJI_MAX_BYTES) return 'The image is too large. The limit is 256 KB.'
   if (!NAME.test(name)) return 'A name has 2 to 32 characters: lower case letters, digits and underscores.'
   if (taken(name)) return `:${name}: exists already. Choose another name.`

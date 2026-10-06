@@ -496,6 +496,7 @@ async fn a_new_or_deleted_emoji_tells_every_member_to_read_the_list_again() {
     .into_bytes();
     body.extend_from_slice(b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x3b");
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let upload = body.clone();
     let response = server
         .http
         .post(format!(
@@ -539,6 +540,30 @@ async fn a_new_or_deleted_emoji_tells_every_member_to_read_the_list_again() {
             drain(socket).await,
             [("chat".to_owned(), "emoji.changed".to_owned())]
         );
+    }
+
+    // A sticker is told the same way.
+    let response = server
+        .http
+        .post(format!(
+            "{}/api/v1/workspaces/{}/chat/stickers?name=blink",
+            server.base, server.workspace
+        ))
+        .header("origin", &server.base)
+        .header("cookie", format!("{COOKIE}={}", owner.token))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(upload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 201);
+    for socket in [&mut owner_socket, &mut ada_socket] {
+        let frame = next(socket).await.unwrap();
+        assert_eq!(frame["topic"], "chat");
+        assert_eq!(frame["event"], json!({ "type": "stickers.changed" }));
     }
     server.stop().await;
 }

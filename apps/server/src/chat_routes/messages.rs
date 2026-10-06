@@ -74,6 +74,10 @@ pub(crate) struct ChatSendBody {
     #[serde(default)]
     #[schema(required = false)]
     file_ids: Vec<String>,
+    /// A custom sticker of the workspace. With a sticker the body may be empty.
+    #[serde(default)]
+    #[schema(required = false)]
+    sticker_id: Option<String>,
     /// Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns
     /// the first message.
     nonce: String,
@@ -145,6 +149,11 @@ pub(crate) async fn send_chat_message(
             .map(|id| call.body_id(id, "reply_to_id"))
             .transpose()?,
         file_ids: call.body_ids(&body.file_ids, "file_ids")?,
+        sticker_id: body
+            .sticker_id
+            .as_deref()
+            .map(|id| call.body_id(id, "sticker_id"))
+            .transpose()?,
         online: state.hub.online(call.workspace_id),
         body: body.body,
         also_in_channel: body.also_in_channel,

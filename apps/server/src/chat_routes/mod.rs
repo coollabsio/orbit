@@ -4,9 +4,11 @@
 pub(crate) mod conversations;
 pub(crate) mod emoji;
 pub(crate) mod files;
+mod images;
 pub(crate) mod links;
 pub(crate) mod messages;
 pub(crate) mod state;
+pub(crate) mod stickers;
 
 use std::sync::Arc;
 
@@ -239,7 +241,7 @@ fn json_router(state: ChatState) -> Router {
             get(emoji::list_chat_emoji)
                 .post(emoji::create_chat_emoji)
                 // Above the image limit, so the handler answers with its own error.
-                .layer(DefaultBodyLimit::max(emoji::UPLOAD_REQUEST_BYTES)),
+                .layer(DefaultBodyLimit::max(emoji::RULES.request_bytes())),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}",
@@ -248,6 +250,21 @@ fn json_router(state: ChatState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/emoji/{emoji_id}/image",
             get(emoji::get_chat_emoji_image),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/stickers",
+            get(stickers::list_chat_stickers)
+                .post(stickers::create_chat_sticker)
+                // Above the image limit, so the handler answers with its own error.
+                .layer(DefaultBodyLimit::max(stickers::RULES.request_bytes())),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/stickers/{sticker_id}",
+            delete(stickers::delete_chat_sticker),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/stickers/{sticker_id}/image",
+            get(stickers::get_chat_sticker_image),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/state",
@@ -461,6 +478,18 @@ fn problem(
             "emoji_limit_reached",
             "Too many emoji",
             "A workspace can have at most 200 custom emoji.",
+        ),
+        ChatError::StickerNameTaken => (
+            StatusCode::CONFLICT,
+            "sticker_name_taken",
+            "Sticker name taken",
+            "A sticker with this name exists in this workspace.",
+        ),
+        ChatError::StickerLimit => (
+            StatusCode::CONFLICT,
+            "sticker_limit_reached",
+            "Too many stickers",
+            "A workspace can have at most 100 custom stickers.",
         ),
         ChatError::Upload(error) => return files::upload_problem(error, instance, request_id),
         ChatError::Unavailable(_) => (
