@@ -50,7 +50,7 @@ test('a blip shorter than the delay never shows', async () => {
   expect(store.getState().lostAt).toBeNull()
 })
 
-test('retry calls the listeners and waits again before it fails again', async () => {
+test('retry calls the listeners and the phase stays failed until a source is back', async () => {
   const store = createConnectionStore({ showAfterMs: 5, failAfterMs: 40 })
   let retries = 0
   const stop = store.onRetry(() => { retries += 1 })
@@ -59,13 +59,12 @@ test('retry calls the listeners and waits again before it fails again', async ()
   expect(store.getState().phase).toBe('failed')
   store.retry()
   expect(retries).toBe(1)
-  expect(store.getState().phase).toBe('lost')
-  await sleep(60)
   expect(store.getState().phase).toBe('failed')
   stop()
   store.retry()
   expect(retries).toBe(1)
   store.report('events', false)
+  expect(store.getState().phase).toBe('connected')
 })
 
 test('core queries retry network and 5xx failures with a bounded backoff, never a 4xx', () => {

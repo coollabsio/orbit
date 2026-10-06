@@ -1,3 +1,4 @@
+import { ConnectionScreen } from './ConnectionScreen'
 import { useEffect } from 'react'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { Toaster } from '@/components/ui/sonner'
@@ -56,6 +57,7 @@ export default function App() {
       <ConfirmationModalHost />
       <Toaster />
       <NewVersionNotice />
+      <ConnectionScreen />
       <Routes>
         <Route path="setup" element={<SetupPage />} />
         <Route path="oauth/consent" element={<OAuthConsentPage />} />

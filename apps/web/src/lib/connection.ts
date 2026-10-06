@@ -7,7 +7,7 @@ import { useSyncExternalStore } from 'react'
  */
 export type ConnectionSource = 'events' | 'chat' | 'queries' | 'browser'
 
-/** `lost`: reconnecting, please wait. `failed`: still down after a minute, the user may retry. */
+/** `lost`: reconnecting, a banner says so. `failed`: still down after a minute, "Orbit is unavailable" covers the app. */
 export type ConnectionPhase = 'connected' | 'lost' | 'failed'
 
 export interface ConnectionState {
@@ -41,14 +41,6 @@ export function createConnectionStore(options: ConnectionStoreOptions = {}) {
     for (const listener of listeners) listener()
   }
 
-  /** The minute before `failed` starts again; the drop time stays. */
-  const wait = () => {
-    clearTimeout(failTimer)
-    failTimer = setTimeout(() => {
-      if (state.lostAt !== null) set({ phase: 'failed', lostAt: state.lostAt })
-    }, failAfterMs)
-  }
-
   return {
     getState: () => state,
     subscribe(listener: () => void): () => void {
@@ -70,7 +62,9 @@ export function createConnectionStore(options: ConnectionStoreOptions = {}) {
         showTimer = setTimeout(() => {
           if (state.lostAt !== null && state.phase === 'connected') set({ phase: 'lost', lostAt: state.lostAt })
         }, showAfterMs)
-        wait()
+        failTimer = setTimeout(() => {
+          if (state.lostAt !== null) set({ phase: 'failed', lostAt: state.lostAt })
+        }, failAfterMs)
       }
     },
     /** Runs when the user asks to retry: a socket reconnects at once, the shell fetches the core queries again. */
@@ -78,13 +72,8 @@ export function createConnectionStore(options: ConnectionStoreOptions = {}) {
       retryListeners.add(listener)
       return () => retryListeners.delete(listener)
     },
-    /** The Retry button: everything tries again now, and the banner goes back to "please wait" for another minute. */
+    /** The Retry button: everything tries again now. The phase changes only when a source is back. */
     retry() {
-      if (state.lostAt !== null) {
-        clearTimeout(showTimer)
-        set({ phase: 'lost', lostAt: state.lostAt })
-        wait()
-      }
       for (const listener of [...retryListeners]) listener()
     },
   }

@@ -222,6 +222,22 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* the "Orbit is unavailable" loader: one side of the logo lights up, then rests while the other three take their turn */
+@theme {
+  --animate-orbit-chase: orbit-chase 1.6s ease-in-out infinite both;
+
+  @keyframes orbit-chase {
+    0%,
+    60%,
+    100% {
+      opacity: 0.3;
+    }
+    20% {
+      opacity: 1;
+    }
+  }
+}
+
 /* relation banner / newly added relation row: 180ms fade and a 4px drop on the strong ease-out */
 @theme {
   --animate-relation-enter: relation-enter 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
