@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { useStartGithubManifest, useGithubWorkspaceSettings } from '@/features/tasks/api/github'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { loadFailed } from '@/lib/connection'
 
 export function GithubPage() {
   const { workspace } = useWorkspace()
@@ -34,8 +35,8 @@ export function GithubPage() {
     form.submit()
   }
 
-  if (query.isPending) return <SettingsCard title="GitHub">Loading GitHub settings.</SettingsCard>
-  if (query.isError && query.data === undefined) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
+  if (loadFailed(query)) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
+  if (query.data === undefined) return <SettingsCard title="GitHub">Loading GitHub settings.</SettingsCard>
   const settings = query.data
 
   return <SettingsCard title="GitHub" description="Manage the GitHub App for this workspace. Connect repositories to projects in each project's settings.">

@@ -35,10 +35,20 @@ describe('AuthGate state', () => {
     const failed = firstLoadFailed({ ...cached, data: { complete: true } }) || firstLoadFailed(cached)
     expect(failed).toBe(false)
     expect(authGateState({ setupComplete: true, user, failed })).toBe('authenticated')
-    // Even a caller that says "failed" cannot unmount the app while the user is known.
-    expect(authGateState({ setupComplete: true, user, failed: true })).toBe('authenticated')
-    // A real 401 turns the user into `null`: that still goes to login.
-    expect(authGateState({ setupComplete: true, user: null, failed: true })).toBe('login')
+    // A 5xx is a lost connection too.
+    expect(firstLoadFailed({ ...cached, error: { status: 503 } })).toBe(false)
+    // A real 401 turns the user into `null` and is no error: that still goes to login.
+    expect(authGateState({ setupComplete: true, user: null, failed: false })).toBe('login')
+  })
+
+  test('a refetch the server refused shows the unavailable message, even with a user from before', () => {
+    const user = { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, status: { presence: 'online' as const } }
+    // An old tab after a deploy: 409 `contract_mismatch`. No banner tells the user, so the gate must.
+    const refused = { data: user, isError: true, error: { status: 409 }, failureCount: 1, failureReason: null }
+    const ok = { data: { complete: true }, isError: false, error: null, failureCount: 0, failureReason: null }
+    expect(firstLoadFailed(refused)).toBe(true)
+    expect(authGateState({ setupComplete: true, user, failed: firstLoadFailed(ok) || firstLoadFailed(refused) })).toBe('unavailable')
+    expect(authGateState({ setupComplete: true, user, failed: firstLoadFailed({ ...ok, isError: true, error: { status: 409 } }) || firstLoadFailed({ ...refused, isError: false, error: null }) })).toBe('unavailable')
   })
 
   test('a first load that fails shows the unavailable message, not the app', () => {

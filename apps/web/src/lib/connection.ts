@@ -158,9 +158,18 @@ export function queryLostConnection(query: QueryLike): boolean {
 }
 
 /**
- * A gate has nothing to render and the load does not work: failed, or failed twice while it still retries. With data
- * from before, a failed refetch is not this: the app stays on screen and the banner tells the user.
+ * A query has nothing good to show: it failed with no data, or the server refused it (a 4xx: access removed, record
+ * deleted), which data from before must not hide. A lost connection with data from before is not this.
+ */
+export function loadFailed(query: Pick<QueryLike, 'data' | 'isError' | 'error'>): boolean {
+  return query.isError && (query.data === undefined || !isConnectionFailure(query.error))
+}
+
+/**
+ * The load of a gate does not work: `loadFailed`, or nothing to render and failed twice while it still retries. With
+ * data from before, a refetch that lost the connection is not this: the app stays on screen and the banner tells the
+ * user.
  */
 export function firstLoadFailed(query: QueryLike): boolean {
-  return query.data === undefined && (query.isError || query.failureCount > 1)
+  return loadFailed(query) || (query.data === undefined && query.failureCount > 1)
 }

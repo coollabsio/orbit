@@ -29,20 +29,30 @@ interface ForwardDialogProps {
  * and an optional message of the user that is sent to each one right after the forward.
  */
 export function ForwardDialog({ message, open, onOpenChange, finalFocus }: ForwardDialogProps) {
+  const [pending, setPending] = useState(false)
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // While the forward runs the dialog stays: closing it would hide a failure.
+    <Dialog open={open} onOpenChange={(next) => { if (next || !pending) onOpenChange(next) }}>
       <DialogContent finalFocus={finalFocus} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Forward message</DialogTitle>
           <DialogDescription>Choose up to {FORWARD_LIMIT} conversations.</DialogDescription>
         </DialogHeader>
-        <ForwardForm message={message} onDone={() => onOpenChange(false)} />
+        <ForwardForm message={message} pending={pending} setPending={setPending} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   )
 }
 
-function ForwardForm({ message, onDone }: { message: Message; onDone: () => void }) {
+interface ForwardFormProps {
+  message: Message
+  /** The forward runs. The dialog holds it, because it must not close meanwhile. */
+  pending: boolean
+  setPending: (pending: boolean) => void
+  onDone: () => void
+}
+
+function ForwardForm({ message, pending, setPending, onDone }: ForwardFormProps) {
   const { currentUserId } = useChatContext()
   const people = useChatPeople()
   const conversations = useConversations().data ?? []
@@ -51,7 +61,6 @@ function ForwardForm({ message, onDone }: { message: Message; onDone: () => void
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [comment, setComment] = useState('')
-  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // One nonce for each destination: a forward that goes again after a failure gives the first copy, not a second one.
   const nonces = useRef(new Map<string, string>())
@@ -147,7 +156,7 @@ function ForwardForm({ message, onDone }: { message: Message; onDone: () => void
         <span className="text-xs text-muted-foreground sm:mr-auto">
           {selectedIds.length} of {FORWARD_LIMIT} selected
         </span>
-        <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+        <DialogClose disabled={pending} render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
         <Button type="submit" disabled={selectedIds.length === 0 || pending}>
           {pending ? 'Sending…' : 'Send'}
         </Button>

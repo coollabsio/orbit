@@ -386,18 +386,41 @@ impl ChatRepository {
         }
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
-        let (_, source) =
-            load_message_access(&mut tx, workspace_id, actor_id, input.message_id).await?;
-        if source.deleted || source.kind != MessageKind::Message {
-            return Err(ChatError::NotFound);
-        }
         let access = load_access(&mut tx, workspace_id, actor_id, input.conversation_id).await?;
         access.require_member()?;
         access.require_open()?;
         let conversation_id = access.conversation.id;
         let mut events = Events::default();
-        if let Some(message) = sent_before(&mut tx, conversation_id, actor_id, &input.nonce).await?
-        {
+        // The destination and the nonce first: a retry finds its copy after the original is gone.
+        let earlier = sent_before(&mut tx, conversation_id, actor_id, &input.nonce).await?;
+        let source =
+            match load_message_access(&mut tx, workspace_id, actor_id, input.message_id).await {
+                Ok((_, source)) if !source.deleted && source.kind == MessageKind::Message => {
+                    Some(source)
+                }
+                Ok(_) | Err(ChatError::NotFound) => None,
+                Err(error) => return Err(error),
+            };
+        // A forward of a forward names the first original, not the copy.
+        let origin = source.as_ref().map(|source| {
+            source.forwarded.unwrap_or(ForwardedRecord {
+                message_id: source.id,
+                conversation_id: source.conversation_id,
+                author_id: source.author_id,
+                created_at: source.created_at,
+            })
+        });
+        if let Some(message) = earlier {
+            // The nonce is this forward's only when the earlier message is a forward of the same
+            // original; an original that is gone cannot be compared.
+            let same = match (&message.forwarded, &origin) {
+                (Some(forwarded), Some(origin)) => forwarded.message_id == origin.message_id,
+                (Some(_), None) => true,
+                (None, _) => false,
+            };
+            if !same {
+                return Err(ChatError::Invalid { field: "nonce" });
+            }
             events.user(
                 actor_id,
                 ChatEvent::MessageCreated {
@@ -406,6 +429,9 @@ impl ChatRepository {
             );
             return Ok(events.written(message));
         }
+        let (Some(source), Some(origin)) = (source, origin) else {
+            return Err(ChatError::NotFound);
+        };
 
         let mut message = insert_message(
             &mut tx,
@@ -420,13 +446,7 @@ impl ChatRepository {
                 also_in_channel: false,
                 nonce: Some(&input.nonce),
                 reply_to: None,
-                // A forward of a forward names the first original, not the copy.
-                forwarded: Some(source.forwarded.unwrap_or(ForwardedRecord {
-                    message_id: source.id,
-                    conversation_id: source.conversation_id,
-                    author_id: source.author_id,
-                    created_at: source.created_at,
-                })),
+                forwarded: Some(origin),
                 now,
             },
         )

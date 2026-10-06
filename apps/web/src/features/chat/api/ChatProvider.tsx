@@ -11,6 +11,7 @@ import { ChatContext } from './chatContext'
 import type { ChatClient } from './client'
 import { applyChatEvent } from './events'
 import { createHttpChatClient } from './httpClient'
+import { reportConnection } from '@/lib/connection'
 import { CustomEmojiContext, NO_CUSTOM_EMOJI } from '@/lib/customEmojiContext'
 import { claimLocalCache, trimMedia, withinTime } from '@/lib/localCache'
 import { forgetConversation, persistChatCache, restoreChatCache } from './persist'
@@ -100,6 +101,8 @@ export function ChatProvider({ enabled = true, children }: { enabled?: boolean; 
     return () => {
       active = false
       unsubscribe()
+      // Logout or a workspace switch: nothing reports this socket as back, so the banner must not wait for it.
+      reportConnection('chat', false)
     }
   }, [client, currentUserId, queryClient, workspaceId])
 

@@ -29,6 +29,8 @@ export function useWorkspaceEvents(workspaceId: string) {
     let delay = 1000
     /** The socket was open once: from then on a closed socket is a lost connection, not a first load. */
     let wasOpen = false
+    /** What a lost socket leaves behind, without the retry; it also takes the handlers off that socket. */
+    let drop = () => {}
     let cursor: string | undefined
     let pending: string | undefined
     let pendingWorkspaces = false
@@ -97,8 +99,9 @@ export function useWorkspaceEvents(workspaceId: string) {
         pendingProfile ||= event.kind === 'resync_required' || event.profile_changed === true
         void refresh()
       }
-      socket.onclose = () => {
-        if (disposed) return
+      const current = socket
+      drop = () => {
+        current.onopen = current.onmessage = current.onclose = null
         setConnected(false)
         if (wasOpen) reportConnection('events', true)
         // A failed handshake gives no evidence of revocation. Do not turn each retry
@@ -108,6 +111,10 @@ export function useWorkspaceEvents(workspaceId: string) {
           void client.invalidateQueries({ queryKey: queryKeys.currentUser })
           void client.invalidateQueries({ queryKey: queryKeys.workspaces })
         }
+      }
+      socket.onclose = () => {
+        if (disposed) return
+        drop()
         retry = setTimeout(connect, delay + Math.random() * 500)
         delay = Math.min(delay * 2, 30000)
       }
@@ -118,10 +125,17 @@ export function useWorkspaceEvents(workspaceId: string) {
       clearTimeout(retry)
       connect()
     }
-    // An open socket may be dead after the network changed: drop it, so the next one starts.
-    const reconnect = () => { if (retry === undefined) socket?.close() }
+    // An open socket may be dead after the network changed: drop it and start the next one at once. Not through
+    // `onclose`: the browser reports the close only later, and then the backoff wait would follow.
+    const reconnect = () => {
+      if (disposed || retry !== undefined || !socket) return
+      const current = socket
+      drop()
+      current.close()
+      connect()
+    }
     window.addEventListener('online', reconnect)
-    // After `reconnect`, so a socket it just dropped starts again at once too.
+    // The tab is visible again or Retry: only a socket that waits for its retry starts again.
     const stopWatching = watchReconnect(reconnectNow)
     const flush = setInterval(() => { void refresh() }, 250)
     connect()

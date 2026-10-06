@@ -36,6 +36,9 @@ test('a backslash before an identifier keeps it text, with no card', () => {
     { start: 2, end: 8, escaped: true, identifier: 'ENG-1' },
     { start: 9, end: 14, escaped: false, identifier: 'ENG-3' },
   ])
+  // a backslash inside a word or a path escapes nothing, and what follows it is no identifier: all stays as typed
+  expect(findTypedTaskIds('C:\\ENG-1 D:\\work\\ENG-1 x\\ENG-1 \\\\ENG-1 a/\\ENG-1', KEYS)).toEqual([])
+  expect(findTypedTaskIds('(\\ENG-1)', KEYS)).toEqual([{ start: 1, end: 7, escaped: true, identifier: 'ENG-1' }])
   // not an identifier of the workspace: nothing to escape
   expect(findTypedTaskIds('C:\\WEB-1 \\UTF-8 \\ENG-1x', KEYS)).toEqual([])
   expect(linkTaskIds('\\ENG-1', KEYS, origin)).toBe('\\ENG-1')

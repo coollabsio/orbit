@@ -85,7 +85,8 @@ test('an ended session does not reconnect', async () => {
   sockets[0].onclose?.({ code: 4401 })
   await new Promise((resolve) => setTimeout(resolve, 20))
   expect(sockets.length).toBe(1)
-  expect(log.at(-1)).toBe('reconnecting')
+  // Not `reconnecting`: the banner in the app shell must not wait for a retry that never comes.
+  expect(log.at(-1)).toBe('ended')
   live.close()
 })
 

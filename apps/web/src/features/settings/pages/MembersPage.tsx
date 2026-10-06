@@ -24,6 +24,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { loadFailed } from '@/lib/connection'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
@@ -93,7 +94,7 @@ export function MembersPage() {
   }, [users, search, roleFilter, sortBy])
 
   if (membersQuery.isPending) return <SettingsCard title="Members"><p>Loading workspace members…</p></SettingsCard>
-  if (membersQuery.isError && membersQuery.data === undefined) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
+  if (loadFailed(membersQuery)) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage))
   const currentPage = Math.min(page, lastPage)

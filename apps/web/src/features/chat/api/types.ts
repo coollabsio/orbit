@@ -216,7 +216,8 @@ export class ChatError extends Error {
   }
 }
 
-export type ConnectionStatus = 'connected' | 'reconnecting'
+/** `ended`: the session ended or the user lost access, so nothing reconnects. */
+export type ConnectionStatus = 'connected' | 'reconnecting' | 'ended'
 
 export type ChatEvent =
   | { type: 'message.created'; message: Message }

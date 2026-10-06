@@ -27,6 +27,7 @@ import type {
 import { queryKeys } from '@/api/queryKeys'
 import type { StatusCategory, TaskStatusDef } from './models'
 import { isTaskVersionConflict } from './conflicts'
+import { loadFailed } from '@/lib/connection'
 
 function required<T>(data: T | undefined, message: string): T {
   if (data === undefined) throw new Error(message)
@@ -94,7 +95,7 @@ export function useAllStatuses(workspaceId: string, projects: ProjectRecord[]) {
     data: results.flatMap((result) => result.data ?? []),
     isPending: results.some((result) => result.isPending),
     // A failed refetch of statuses that are already here is not an error for the page.
-    isError: results.some((result) => result.isError && result.data === undefined),
+    isError: results.some(loadFailed),
     error: results.find((result) => result.error)?.error ?? null,
   }
 }

@@ -294,3 +294,55 @@ test('a dropped socket counts as a lost connection and reconnects at once when t
     client.clear()
   }
 })
+
+test('back online, an open socket is replaced at once, without waiting for its close; a visible tab and Retry leave an open socket alone', async () => {
+  const originalWebSocket = globalThis.WebSocket
+  const sockets: FakeWebSocket[] = []
+  // As in a browser: `close()` returns first and `onclose` runs later.
+  class FakeWebSocket {
+    onopen: (() => void) | null = null
+    onclose: (() => void) | null = null
+    onmessage: ((event: MessageEvent) => void) | null = null
+    closed = false
+    constructor(_url: URL) { sockets.push(this) }
+    close() {
+      this.closed = true
+      setTimeout(() => this.onclose?.(), 0)
+    }
+  }
+  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+  const client = new QueryClient()
+  const invalidate = mock(async (_options: { queryKey: readonly unknown[] }) => {})
+  client.invalidateQueries = invalidate as typeof client.invalidateQueries
+  try {
+    const view = renderHook(() => useWorkspaceEvents('workspace-1'), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    act(() => { sockets[0]!.onopen?.() })
+    expect(view.result.current).toBe(true)
+
+    act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+    act(() => { connection.retry() })
+    expect(sockets.length).toBe(1)
+    expect(sockets[0]!.closed).toBe(false)
+
+    act(() => { window.dispatchEvent(new Event('online')) })
+    expect(sockets[0]!.closed).toBe(true)
+    expect(sockets.length).toBe(2)
+    expect(view.result.current).toBe(false)
+    expect(invalidate.mock.calls.map(([options]) => options.queryKey)).toEqual([queryKeys.currentUser, queryKeys.workspaces])
+
+    // The late close of the old socket changes nothing: no retry is planned and the new socket stays.
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)))
+    act(() => { sockets[1]!.onopen?.() })
+    expect(view.result.current).toBe(true)
+    expect(connection.getState().lostAt).toBeNull()
+    act(() => { window.dispatchEvent(new Event('online')) })
+    expect(sockets.length).toBe(3)
+    expect(invalidate).toHaveBeenCalledTimes(4)
+    view.unmount()
+  } finally {
+    globalThis.WebSocket = originalWebSocket
+    client.clear()
+  }
+})

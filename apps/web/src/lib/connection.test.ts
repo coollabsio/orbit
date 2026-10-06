@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ApiProblem } from '@/api/problem'
-import { connectionRetryDelay, createConnectionStore, isConnectionFailure, queryLostConnection, retryConnectionFailure } from './connection'
+import { connectionRetryDelay, createConnectionStore, firstLoadFailed, isConnectionFailure, loadFailed, queryLostConnection, retryConnectionFailure } from './connection'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -86,4 +86,21 @@ test('a query counts as lost while it retries and after it gave up, but not for 
   expect(queryLostConnection({ ...idle, failureCount: 1, failureReason: problem(500) })).toBe(true)
   expect(queryLostConnection({ ...idle, isError: true, error: new TypeError('Failed to fetch') })).toBe(true)
   expect(queryLostConnection({ ...idle, isError: true, error: problem(403) })).toBe(false)
+})
+
+test('a load failed with no data, or when the server refused it; a lost connection with data from before did not', () => {
+  const ok = { data: 1, isError: false, error: null, failureCount: 0, failureReason: null }
+  expect(loadFailed(ok)).toBe(false)
+  expect(loadFailed({ ...ok, isError: true, error: new TypeError('Failed to fetch') })).toBe(false)
+  expect(loadFailed({ ...ok, isError: true, error: problem(503) })).toBe(false)
+  // Access removed, record deleted, an old tab after a deploy: data from before must not hide it.
+  expect(loadFailed({ ...ok, isError: true, error: problem(403) })).toBe(true)
+  expect(loadFailed({ ...ok, isError: true, error: problem(409) })).toBe(true)
+  expect(loadFailed({ ...ok, data: undefined, isError: true, error: problem(404) })).toBe(true)
+  expect(loadFailed({ ...ok, data: undefined, isError: true, error: new TypeError('Failed to fetch') })).toBe(true)
+  expect(loadFailed({ ...ok, data: undefined })).toBe(false)
+  // A gate also gives up on a first load that failed twice and still retries.
+  expect(firstLoadFailed({ ...ok, data: undefined, failureCount: 2 })).toBe(true)
+  expect(firstLoadFailed({ ...ok, failureCount: 2 })).toBe(false)
+  expect(firstLoadFailed({ ...ok, isError: true, error: problem(409) })).toBe(true)
 })

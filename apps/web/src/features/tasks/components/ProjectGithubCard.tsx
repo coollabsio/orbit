@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { useDeleteGithubProjectConnection, useGithubProjectSettings, useSaveGithubProjectConnection } from '@/features/tasks/api/github'
+import { loadFailed } from '@/lib/connection'
 
 export type PendingProjectSave = { reset: () => void; save: () => void; saving: boolean }
 
@@ -18,8 +19,8 @@ export function ProjectGithubCard({ workspaceId, projectId, onPendingChange }: {
   const save = useSaveGithubProjectConnection(workspaceId, projectId)
   const remove = useDeleteGithubProjectConnection(workspaceId, projectId)
 
-  if (query.isPending) return <SettingsCard title="GitHub">Loading GitHub settings.</SettingsCard>
-  if (query.isError && query.data === undefined) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
+  if (loadFailed(query)) return <SettingsCard title="GitHub">GitHub settings are not available.</SettingsCard>
+  if (query.data === undefined) return <SettingsCard title="GitHub">Loading GitHub settings.</SettingsCard>
 
   return <GithubCardContent
     key={`${projectId}:${query.data.repository}:${query.data.label}`}

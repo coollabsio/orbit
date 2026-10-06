@@ -5,13 +5,13 @@ import { taskPath } from '@/lib/taskLinks'
  * groups 2 and 3, with the backslash that escapes it in group 1.
  */
 const TASK_ID =
-  /```[\s\S]*?(?:```|$)|`[^`\n]+`|!?\[[^\]\n]*\]\([^)\s]*\)|https?:\/\/[^\s<>]+|(\\)?(?<![\w\-/.#@])([A-Za-z0-9_]{1,20})-([1-9][0-9]{0,14})(?![\w\-/]|\.\w)/g
+  /```[\s\S]*?(?:```|$)|`[^`\n]+`|!?\[[^\]\n]*\]\([^)\s]*\)|https?:\/\/[^\s<>]+|(?:(?<![\w\-/.#@\\:])(\\)|(?<![\w\-/.#@\\]))([A-Za-z0-9_]{1,20})-([1-9][0-9]{0,14})(?![\w\-/]|\.\w)/g
 
 export interface TaskIdMatch {
   /** `[start, end)` in the text. */
   start: number
   end: number
-  /** A backslash is right before it (`\ENG-12`), so it is text; `start` is at the backslash. */
+  /** A backslash at a word start is right before it (`\ENG-12`), so it is text; `start` is at the backslash. */
   escaped: boolean
   /** The identifier with the key as the project writes it: `eng-12` gives `ENG-12`. */
   identifier: string
@@ -23,7 +23,9 @@ export interface TaskIdMatch {
  * after a letter, a digit or one of `_ - / . # @`, and no letter, digit, `_`, `-` or `/` follows it, nor a `.` with a
  * letter or digit after it. So `abc-ENG-12`, `ENG-12-rc`, `ENG-12.txt`, `path/ENG-12` and `#eng-12` are text, and
  * `(ENG-12).` is an identifier. Code, URLs and markdown links (label and target) are left alone. This list also has
- * the identifiers that a backslash keeps as text (`escaped`), for the text that leaves the backslash out.
+ * the identifiers that a backslash keeps as text (`escaped`), for the text that leaves the backslash out. The backslash
+ * must start a word as an identifier does, and not come after a `:` or another backslash, so a path is no escape:
+ * `C:\ENG-12`, `D:\work\ENG-12` and `x\ENG-12` are neither escaped nor an identifier, and stay as typed.
  */
 export function findTypedTaskIds(text: string, keys: readonly string[]): TaskIdMatch[] {
   if (keys.length === 0) return []

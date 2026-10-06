@@ -18,6 +18,7 @@ import {
 } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { PRIVATE_SPACE, pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
+import { loadFailed } from '@/lib/connection'
 
 const plural = (count: number) => `${count} page${count === 1 ? '' : 's'}`
 
@@ -73,13 +74,7 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
   }
 
   let body
-  if (trash.isPending) {
-    body = (
-      <div className="flex flex-1 items-center justify-center">
-        <Spinner className="text-muted-foreground" />
-      </div>
-    )
-  } else if (trash.isError && trash.data === undefined) {
+  if (loadFailed(trash)) {
     body = (
       <div className="flex flex-1 flex-col p-6">
         <EmptyState
@@ -92,6 +87,12 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
             </Button>
           }
         />
+      </div>
+    )
+  } else if (trash.data === undefined) {
+    body = (
+      <div className="flex flex-1 items-center justify-center">
+        <Spinner className="text-muted-foreground" />
       </div>
     )
   } else if (trash.data.length === 0) {

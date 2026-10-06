@@ -38,6 +38,7 @@ import { useBindings, useCommand, useRunCommand } from '@/shortcuts/useCommand'
 import { ChatLinkCard, ChatLinkChip } from './ChatLinkCard'
 import { homeConversation, orbitLinkTarget, PANE_WIDTH, paneLayout, rightPaneOf, taskTitleFromMessage, type RightPane } from './chatPageLib'
 import { openedByPointer, useElementWidth, useInputModality, useIsPhone } from './useChatViewport'
+import { loadFailed } from '@/lib/connection'
 
 const PANE_LABEL: Record<RightPane['kind'], string> = { thread: 'Thread', search: 'Search', members: 'Members', pins: 'Pinned messages', files: 'Files', threads: 'Threads' }
 
@@ -233,7 +234,7 @@ export function ChatPage() {
     main = <UnreadsView />
   } else if (location.view === 'threads') {
     main = <ThreadsView />
-  } else if (conversations.isError && conversations.data === undefined) {
+  } else if (loadFailed(conversations)) {
     main = (
       <Pane>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[13px] text-muted-foreground" role="alert">

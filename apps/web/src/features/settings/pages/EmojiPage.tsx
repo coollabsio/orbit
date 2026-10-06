@@ -28,8 +28,10 @@ const SERVER_PROBLEMS: Record<string, string> = {
   emoji_limit_reached: 'The workspace has 200 custom emoji, which is the limit. Delete one first.',
 }
 
+/** The reason in words: ours for a known code, else what the server said (with the status), else that it did not answer. */
 function serverProblem(error: unknown, fallback: string): string {
-  return (error instanceof ApiProblem && SERVER_PROBLEMS[error.code]) || fallback
+  if (!(error instanceof ApiProblem)) return `${fallback} Orbit did not answer. Check your connection and try again.`
+  return SERVER_PROBLEMS[error.code] ?? `${fallback} ${error.detail} (${error.status} ${error.code})`
 }
 
 /** The custom emoji of the workspace: add one from an image, delete one. Owners and administrators only (`chat.manage`). */
@@ -44,6 +46,8 @@ export function EmojiPage() {
   const [file, setFile] = useState<File | null>(null)
   const [name, setName] = useState('')
   const [problem, setProblem] = useState<string | null>(null)
+  /** From the click to the answer: the emoji data loads before the request, and a second click must not send a second one. */
+  const [submitting, setSubmitting] = useState(false)
 
   if (!canManage) return <SettingsCard title="Emoji"><p className="m-0 text-muted-foreground">Only workspace owners and administrators can manage custom emoji.</p></SettingsCard>
 
@@ -51,21 +55,24 @@ export function EmojiPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (!file || createEmoji.isPending) return
+    if (!file || submitting) return
+    setSubmitting(true)
     // A standard emoji keeps its name (`:joy:` becomes the character as it is typed); without the data only the server's rules apply.
     const standard = await loadEmojiIndex().catch(() => [])
     const taken = (candidate: string) =>
       Boolean(emoji.data?.some((entry) => entry.name === candidate)) || Object.hasOwn(EMOJI_SHORTCODES, candidate) || emojiNamed(standard, candidate) !== null
     const refused = emojiProblem(file, name, taken)
     setProblem(refused)
-    if (refused) return
     try {
+      if (refused) return
       await createEmoji.mutateAsync({ name, file })
       setFile(null)
       setName('')
       if (fileInput.current) fileInput.current.value = ''
     } catch (error) {
       setProblem(serverProblem(error, 'The emoji could not be added.'))
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -101,7 +108,7 @@ export function EmojiPage() {
           </Field>
         </FieldGrid>
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" disabled={!file || !name || createEmoji.isPending}>Add emoji</Button>
+          <Button type="submit" disabled={!file || !name || submitting}>Add emoji</Button>
           {problem ? <p className="text-xs text-destructive" role="alert">{problem}</p> : null}
         </div>
       </form>

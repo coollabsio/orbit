@@ -913,11 +913,14 @@ fn message_from_row(row: &SqliteRow) -> Result<MessageRecord, ChatError> {
         None => None,
     };
     let reply_to_id = parse_optional_id(row.get("reply_to_id"))?;
+    // A deleted root stays empty: it quotes nothing and is no forward.
+    let deleted = row.get::<Option<i64>, _>("deleted_at").is_some();
     // No quoted author: the quoted message is deleted.
     let reply_to = match (
         reply_to_id,
         row.get::<Option<String>, _>("quoted_author_id"),
     ) {
+        _ if deleted => None,
         (Some(id), Some(author_id)) => Some(ReplyToRecord {
             id,
             author_id: parse_id(author_id)?,
@@ -931,6 +934,7 @@ fn message_from_row(row: &SqliteRow) -> Result<MessageRecord, ChatError> {
         parse_optional_id(row.get("forward_author_id"))?,
         row.get::<Option<i64>, _>("forward_created_at"),
     ) {
+        _ if deleted => None,
         (Some(message_id), Some(conversation_id), Some(author_id), Some(created_at)) => {
             Some(ForwardedRecord {
                 message_id,
@@ -962,7 +966,7 @@ fn message_from_row(row: &SqliteRow) -> Result<MessageRecord, ChatError> {
         edited_at: row
             .get::<Option<i64>, _>("edited_at")
             .map(TimestampMillis::from_millis),
-        deleted: row.get::<Option<i64>, _>("deleted_at").is_some(),
+        deleted,
         attachments: Vec::new(),
         reactions: Vec::new(),
         pinned: row.get::<Option<i64>, _>("pinned_at").is_some(),

@@ -24,6 +24,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { ColorSwatch, CustomColorSwatch } from '@/components/common/ColorSwatch'
 import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
+import { loadFailed } from '@/lib/connection'
 
 const PROJECT_COLORS = [
   '#8b5cf6', '#6366f1', '#0ea5e9', '#06b6d4', '#10b981', '#22c55e', '#84cc16', '#eab308', '#f59e0b', '#f97316', '#ef4444',
@@ -71,7 +72,7 @@ export function ProjectSettingsPage() {
   if (projectsQuery.isPending || statusQuery.isPending || tasksQuery.isPending) {
     return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Loading project" description="Loading persisted project settings." /></Pane></div>
   }
-  if ((projectsQuery.isError && projectsQuery.data === undefined) || (statusQuery.isError && statusQuery.data === undefined) || (tasksQuery.isError && tasksQuery.data === undefined)) {
+  if (loadFailed(projectsQuery) || loadFailed(statusQuery) || loadFailed(tasksQuery)) {
     return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Project unavailable" description="The server could not load this project." /></Pane></div>
   }
 

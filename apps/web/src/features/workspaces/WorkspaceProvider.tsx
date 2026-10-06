@@ -31,7 +31,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     selectWorkspace: (id: string) => navigate(switchWorkspaceHref(location.pathname, location.search, id)),
   } : null, [location.pathname, location.search, navigate, workspace, workspaces])
 
-  // With workspaces from before, a failed refetch keeps the app on screen; the banner in the shell tells the user.
+  // With workspaces from before, a refetch that lost the connection keeps the app on screen (the banner in the shell
+  // tells the user); one the server refused does not.
   if (firstLoadFailed(query)) return <WorkspaceMessage title="Orbit is unavailable" detail="Your workspaces could not be loaded." />
   if (query.data === undefined) return <LoadingScreen />
   if (!value) return <WorkspaceMessage title="No workspace access" detail="Ask an owner for an invitation to a workspace." />

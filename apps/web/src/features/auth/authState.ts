@@ -5,7 +5,7 @@ interface AuthGateInput {
   setupComplete: boolean | undefined
   /** `null` is signed out (a 401); `undefined` until the user has loaded once. */
   user: AuthUserResponse | null | undefined
-  /** A first load that does not work. A failed refetch of data the gate already has is not this. */
+  /** A load that does not work (`firstLoadFailed`). A refetch that lost the connection, with data from before, is not this. */
   failed: boolean
 }
 
@@ -23,9 +23,11 @@ export const recoveryRequestCopy = {
 }
 
 export function authGateState(input: AuthGateInput): AuthGateState {
-  // What the gate knows decides first: with a user from before, a failed refetch keeps the app on screen.
+  // A refetch the server refused (a 409 after a deploy) is `failed` even with a user from before; a lost connection is
+  // not, so then what the gate knows keeps the app on screen.
+  if (input.failed) return 'unavailable'
   if (input.setupComplete === false) return 'setup'
   if (input.setupComplete && input.user === null) return 'login'
   if (input.setupComplete && input.user) return 'authenticated'
-  return input.failed ? 'unavailable' : 'loading'
+  return 'loading'
 }

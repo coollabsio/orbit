@@ -19,6 +19,7 @@ import { FIELD_META } from './filterFields'
 import { rebaseViewSessionEdit } from './useViewState'
 import { viewPath } from './viewActions'
 import { defaultViewState, isGroup, normalizeViewState, type FilterField, type FilterGroup } from './viewState'
+import { loadFailed } from '@/lib/connection'
 
 type RowDialog = { mode: 'edit' | 'duplicate'; view: SavedView }
 type Section = { key: string; label: string; icon: IconComponent; views: SavedView[]; reorderable?: boolean }
@@ -83,7 +84,7 @@ export function ViewsPage() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {viewsQuery.isPending ? (
           <p className="p-4 text-[13px] text-muted-foreground">Loading views…</p>
-        ) : viewsQuery.isError && viewsQuery.data === undefined ? (
+        ) : loadFailed(viewsQuery) ? (
           <div className="flex h-full flex-col p-2 *:flex-1">
             <EmptyState icon={Layer} title="Views unavailable" description="The server could not load views." />
           </div>

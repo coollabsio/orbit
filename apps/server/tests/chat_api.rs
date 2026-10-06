@@ -2499,6 +2499,28 @@ async fn a_reply_quotes_a_message_of_its_conversation_and_keeps_the_id_of_a_dele
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A deleted root that was a reply quotes nothing, though the quoted message is still there.
+    let quoted = fixture.send(&fixture.owner, &general, "still here").await;
+    let answer = fixture
+        .send_with(
+            &ada,
+            &general,
+            json!({ "body": "an answer", "reply_to_id": quoted }),
+        )
+        .await["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fixture
+        .reply(&ada, &general, &answer, "in the thread")
+        .await;
+    fixture
+        .ok(&ada, "DELETE", &format!("/messages/{answer}"), None)
+        .await;
+    let message = listed(fixture.ok(&ada, "GET", &path, None).await, &answer);
+    assert_eq!(message["deleted"], true);
+    assert_eq!(message["reply_to"], Value::Null);
     fixture.assert_counters_exact("after replies").await;
 }
 
@@ -3096,5 +3118,51 @@ async fn a_forward_needs_a_readable_source_and_a_writable_destination() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    // A nonce of a plain send, or of a forward of another message, is not this forward's.
+    let plain = fixture
+        .send_with(&ada, &general, json!({ "body": "Plain", "nonce": "plain" }))
+        .await["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for (source, nonce) in [(&reply, "plain"), (&plain, "same")] {
+        let (status, problem) = fixture
+            .call(
+                &ada,
+                "POST",
+                &format!("/messages/{source}/forward"),
+                Some(json!({ "conversation_id": general, "nonce": nonce })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+        assert_eq!(problem["code"], "validation_failed");
+    }
+
+    // The original goes: the same nonce still gives the first copy.
+    fixture
+        .ok(&ada, "DELETE", &format!("/messages/{reply}"), None)
+        .await;
+    let body = json!({ "conversation_id": general, "nonce": "same" });
+    let again = fixture.ok(&ada, "POST", &path, Some(body)).await;
+    assert_eq!(first["result"]["id"], again["result"]["id"]);
+    let (status, _) = fixture.forward(&ada, &reply, &general).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A deleted forward that stays for its replies no longer says where it came from.
+    let copy = first["result"]["id"].as_str().unwrap().to_owned();
+    fixture.reply(&ada, &general, &copy, "On the copy").await;
+    fixture
+        .ok(&ada, "DELETE", &format!("/messages/{copy}"), None)
+        .await;
+    let (_, page) = fixture.main_ids(&ada, &general, "").await;
+    let kept = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == copy)
+        .expect("the root stays");
+    assert_eq!(kept["deleted"], true);
+    assert_eq!(kept["forwarded"], Value::Null);
     fixture.assert_counters_exact("after the refusals").await;
 }

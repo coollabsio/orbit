@@ -61,7 +61,8 @@ export function clearTyping(conversationId: string, threadRootId: string | null,
 export function setConnectionStatus(status: ConnectionStatus) {
   if (connection === status) return
   connection = status
-  // The banner in the app shell reads the shared status; `ConnectionLine` in the composer reads this store.
+  // The banner in the app shell reads the shared status; `ConnectionLine` in the composer reads this store. `ended` is
+  // not a lost connection: the banner would say "please wait" for a retry that never comes.
   reportConnection('chat', status === 'reconnecting')
   emit()
 }

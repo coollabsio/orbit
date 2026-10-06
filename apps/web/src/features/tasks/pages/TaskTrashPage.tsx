@@ -8,6 +8,7 @@ import { useProjectTrash, useRestoreProject } from '@/features/tasks/api/project
 import { useRestoreTask, useTaskTrash } from '@/features/tasks/api/tasks'
 import { trashedSubIssuesLabel } from '@/features/tasks/subIssuesLib'
 import { useSlowPending } from '@/lib/useDebouncedValue'
+import { loadFailed } from '@/lib/connection'
 
 export function TaskTrashPage() {
   const { workspace } = useWorkspace()
@@ -16,8 +17,8 @@ export function TaskTrashPage() {
   const projects = useProjectTrash(workspace.id)
   const restoreProject = useRestoreProject(workspace.id)
   const restoring = useSlowPending(restore.isPending || restoreProject.isPending)
-  if (trash.isPending || projects.isPending) return <EmptyState icon={Trash2} title="Loading trash" description="Loading deleted projects and tasks." />
-  if ((trash.isError && trash.data === undefined) || (projects.isError && projects.data === undefined)) return <div><EmptyState icon={Trash2} title="Trash unavailable" description="The server could not load deleted records." /><Button variant="outline" onClick={() => { void trash.refetch(); void projects.refetch() }}>Retry</Button></div>
+  if (loadFailed(trash) || loadFailed(projects)) return <div><EmptyState icon={Trash2} title="Trash unavailable" description="The server could not load deleted records." /><Button variant="outline" onClick={() => { void trash.refetch(); void projects.refetch() }}>Retry</Button></div>
+  if (trash.data === undefined || projects.data === undefined) return <EmptyState icon={Trash2} title="Loading trash" description="Loading deleted projects and tasks." />
   // deleted projects first, then deleted tasks
   const count = projects.data.length + trash.data.length
   return (

@@ -81,8 +81,9 @@ export function openLiveSocket(options: LiveSocketOptions): LiveSocket {
     socket = null
     if (closed) return
     open = false
-    options.onStatus('reconnecting')
-    if (TERMINAL_CODES.has(code)) return
+    const ended = TERMINAL_CODES.has(code)
+    options.onStatus(ended ? 'ended' : 'reconnecting')
+    if (ended) return
     // 1x, 2x, 4x … 30x the base delay, with up to half of it added at random so tabs do not reconnect together.
     const delay = Math.min(retryMs * 2 ** attempt, retryMs * 30)
     attempt += 1
