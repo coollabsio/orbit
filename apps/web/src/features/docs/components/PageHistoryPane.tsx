@@ -7,6 +7,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Emoji } from '@/components/common/Emoji'
 import { EmptyState } from '@/components/common/EmptyState'
+import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { dayLabel, timeOfDay } from '@/lib/format'
 import { usePageVersion, usePageVersions } from '@/features/docs/api/pageVersions'
@@ -258,9 +259,11 @@ export function PageHistoryPane({ workspaceId, pageId, readCurrent, resolvePage,
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
         <History className="size-4 text-muted-foreground" aria-hidden="true" />
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Version history</h2>
-        <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Close version history" onClick={onClose}>
-          <X className="size-4" />
-        </Button>
+        <Tip label="Close" side="bottom">
+          <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Close version history" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </Tip>
       </div>
       {body}
     </aside>

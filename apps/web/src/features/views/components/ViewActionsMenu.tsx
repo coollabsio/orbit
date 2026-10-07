@@ -5,6 +5,7 @@ import { cn } from 'cn'
 import { ApiProblem } from '@/api/problem'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Tip } from '@/components/common/Tip'
 import { useDeleteView, type SavedView } from '../api/views'
 import { confirmDeleteView, copyViewLink } from '../viewActions'
 
@@ -38,19 +39,21 @@ export function ViewActionsMenu({ workspaceId, view, onEdit, onDuplicate, onDele
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={named ? `${view.name} options` : 'View options'}
-            className={cn('text-muted-foreground', className)}
-          >
-            <MoreH />
-          </Button>
-        }
-      />
+      <Tip label="View options">
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={named ? `${view.name} options` : 'View options'}
+              className={cn('text-muted-foreground', className)}
+            >
+              <MoreH />
+            </Button>
+          }
+        />
+      </Tip>
       <DropdownMenuContent align={align} className="w-auto min-w-44">
         {view.can_edit ? <DropdownMenuItem onClick={onEdit}><Edit />Edit view</DropdownMenuItem> : null}
         <DropdownMenuItem onClick={onDuplicate}><Copy />Duplicate</DropdownMenuItem>

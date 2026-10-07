@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentProps, type ComponentType, type Reac
 import { cn } from 'cn'
 import { Xmark } from 'reicon-react'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
@@ -34,9 +35,11 @@ function RightPane({ title, actions, children }: RightPaneProps) {
         <PaneTitle render={<h2 />}>{title}</PaneTitle>
         <div className="ml-auto flex items-center gap-2">
           {actions}
-          <Button variant="ghost" size="icon" aria-label={`Close ${title.toLowerCase()}`} title="Close" onClick={closePane}>
-            <Xmark className="size-5" />
-          </Button>
+          <Tip label="Close" side="bottom">
+            <Button variant="ghost" size="icon" aria-label={`Close ${title.toLowerCase()}`} onClick={closePane}>
+              <Xmark className="size-5" />
+            </Button>
+          </Tip>
         </div>
       </PaneHeader>
       {children}

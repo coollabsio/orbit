@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Calendar } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { DatePicker } from '@/components/common/DatePicker'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
@@ -36,26 +37,27 @@ export function DueDatePicker({ task, status, empty = 'label', className, onOpen
   return (
     <div className={cn('flex', className)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-            <Button
-              type="button"
-              variant="link"
-              className="h-auto p-0 text-[length:inherit] font-normal"
-              aria-label={task.dueAt ? 'Due date' : 'Set due date'}
-              title={task.dueAt ? undefined : 'Set due date'}
-            >
-              {task.dueAt ? <DueDateChip task={task} status={status} className="hover:text-foreground" /> : null}
-              {!task.dueAt && empty === 'icon' ? <Calendar aria-hidden className="size-3.5 text-muted-foreground/70 hover:text-foreground" /> : null}
-              {!task.dueAt && empty === 'label' ? (
-                <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground/50 transition-colors group-hover/row:text-muted-foreground hover:text-foreground">
-                  <Calendar aria-hidden className="size-[1.1em]" />
-                  No date
-                </span>
-              ) : null}
-            </Button>
-          }
-        />
+        <Tip label={task.dueAt ? undefined : 'Set due date'}>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0 text-[length:inherit] font-normal"
+                aria-label={task.dueAt ? 'Due date' : 'Set due date'}
+              >
+                {task.dueAt ? <DueDateChip task={task} status={status} className="hover:text-foreground" /> : null}
+                {!task.dueAt && empty === 'icon' ? <Calendar aria-hidden className="size-3.5 text-muted-foreground/70 hover:text-foreground" /> : null}
+                {!task.dueAt && empty === 'label' ? (
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground/50 transition-colors group-hover/row:text-muted-foreground hover:text-foreground">
+                    <Calendar aria-hidden className="size-[1.1em]" />
+                    No date
+                  </span>
+                ) : null}
+              </Button>
+            }
+          />
+        </Tip>
         <PopoverContent align="end" className="w-auto gap-0 p-0">
           <DatePicker
             startValue={task.dueStartAt ?? null}

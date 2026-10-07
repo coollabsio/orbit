@@ -4,6 +4,7 @@ import { useState, type ComponentProps } from 'react'
 import { cn } from 'cn'
 import type { Project } from '@/features/tasks/api/models'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { NewProjectModal } from './NewProjectModal'
 
@@ -34,17 +35,18 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
               <span className="mx-[5px] size-2 shrink-0 rounded-[2px]" style={{ background: project.color }} />
               <span className="min-w-0 flex-1 truncate">{project.name}</span>
             </RailItem>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="absolute right-1.5 text-muted-foreground"
-              aria-label={`${project.name} settings`}
-              title="Project settings"
-              onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}
-            >
-              <Settings className="size-3.5" />
-            </Button>
+            <Tip label="Project settings">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-1.5 text-muted-foreground"
+                aria-label={`${project.name} settings`}
+                onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}
+              >
+                <Settings className="size-3.5" />
+              </Button>
+            </Tip>
           </div>
         ))}
         <RailItem onClick={() => setShowNewProject(true)}>

@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { PriorityIcon } from './PriorityIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
@@ -11,13 +12,15 @@ export function PriorityPicker({ task, align = 'left', className }: { task: Pick
   return (
     <div className={className} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <DropdownMenu modal={false}>
-        <DropdownMenuTrigger
-          render={
-            <Button variant="ghost" size="icon-sm" className="size-[22px] text-muted-foreground/70" aria-label={`Priority: ${PRIORITY_LABEL[task.priority]}`} title="Change priority">
-              <PriorityIcon priority={task.priority} />
-            </Button>
-          }
-        />
+        <Tip label="Change priority">
+          <DropdownMenuTrigger
+            render={
+              <Button variant="ghost" size="icon-sm" className="size-[22px] text-muted-foreground/70" aria-label={`Priority: ${PRIORITY_LABEL[task.priority]}`}>
+                <PriorityIcon priority={task.priority} />
+              </Button>
+            }
+          />
+        </Tip>
         <DropdownMenuContent align={align === 'right' ? 'end' : 'start'} className="w-auto min-w-45">
           {PRIORITY_ORDER.map((priority) => (
             <DropdownMenuItem

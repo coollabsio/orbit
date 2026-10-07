@@ -2,6 +2,7 @@ import type { RefObject } from 'react'
 import { useRef, useState } from 'react'
 import { Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import { sendReply } from '@/mock/actions'
@@ -87,16 +88,18 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
         <Button disabled={!canSend} onClick={send}>
           Send
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground/70"
-          aria-label="Attach files"
-          onClick={() => fileInput.current?.click()}
-        >
-          <Paperclip className="size-4" />
-        </Button>
+        <Tip label="Attach files">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground/70"
+            aria-label="Attach files"
+            onClick={() => fileInput.current?.click()}
+          >
+            <Paperclip className="size-4" />
+          </Button>
+        </Tip>
         <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
           <KbdGroup>
             <Kbd>⌘</Kbd>
@@ -104,20 +107,22 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
           </KbdGroup>
           to send
         </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="ml-auto text-muted-foreground/70"
-          aria-label="Close reply"
-          onClick={() => {
-            setBody('')
-            setAttachments([])
-            onClose()
-          }}
-        >
-          <X className="size-4" />
-        </Button>
+        <Tip label="Close reply">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="ml-auto text-muted-foreground/70"
+            aria-label="Close reply"
+            onClick={() => {
+              setBody('')
+              setAttachments([])
+              onClose()
+            }}
+          >
+            <X className="size-4" />
+          </Button>
+        </Tip>
       </div>
     </div>
   )

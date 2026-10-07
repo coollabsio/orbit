@@ -5,6 +5,7 @@ import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from '@tansta
 import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { DatePicker, type DueRange } from '@/components/common/DatePicker'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -297,18 +298,19 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
         <span className="font-normal text-muted-foreground/70 tabular-nums">{rowCount(group.tasks)}</span>
         <div className="flex-1" />
         {canAdd ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            // revealed on hover only where hover is real (fine pointer); touch always shows it
-            className="text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/hdr:opacity-100 focus-visible:opacity-100"
-            aria-label={`New task in ${group.label}`}
-            title="New task"
-            onClick={() => onAdd(values)}
-          >
-            <Plus />
-          </Button>
+          <Tip label="New task">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              // revealed on hover only where hover is real (fine pointer); touch always shows it
+              className="text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/hdr:opacity-100 focus-visible:opacity-100"
+              aria-label={`New task in ${group.label}`}
+              onClick={() => onAdd(values)}
+            >
+              <Plus />
+            </Button>
+          </Tip>
         ) : null}
       </div>
     )
@@ -480,16 +482,17 @@ function BulkBar({
       >
         <div className="flex h-8 shrink-0 items-center rounded-lg bg-primary/12 pl-3 text-primary dark:bg-primary/25 dark:text-primary-foreground">
           <span className="text-xs font-semibold whitespace-nowrap tabular-nums">{tasks.length} selected</span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="mx-1 text-current opacity-70 hover:bg-primary/15 hover:text-current hover:opacity-100 dark:hover:bg-white/10"
-            aria-label="Clear selection"
-            title="Clear selection (Esc)"
-            onClick={onClear}
-          >
-            <X />
-          </Button>
+          <Tip label="Clear selection (Esc)">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="mx-1 text-current opacity-70 hover:bg-primary/15 hover:text-current hover:opacity-100 dark:hover:bg-white/10"
+              aria-label="Clear selection"
+              onClick={onClear}
+            >
+              <X />
+            </Button>
+          </Tip>
         </div>
         <div className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />
         <DropdownMenu>
@@ -582,11 +585,13 @@ function DropZone({ className, ...props }: React.ComponentProps<'section'>) {
 }
 
 /** Bulk bar action: icon + label. Below 640px only the icon shows; the label stays the accessible name. */
-function BulkAction({ icon, label, className, ...props }: React.ComponentProps<typeof Button> & { icon: React.ReactNode; label: string }) {
+function BulkAction({ icon, label, title, className, ...props }: React.ComponentProps<typeof Button> & { icon: React.ReactNode; label: string }) {
   return (
-    <Button variant="ghost" className={cn('shrink-0 text-[13px] text-muted-foreground', className)} {...props}>
-      {icon}
-      <span className="max-sm:sr-only">{label}</span>
-    </Button>
+    <Tip label={title}>
+      <Button variant="ghost" className={cn('shrink-0 text-[13px] text-muted-foreground', className)} {...props}>
+        {icon}
+        <span className="max-sm:sr-only">{label}</span>
+      </Button>
+    </Tip>
   )
 }

@@ -12,6 +12,7 @@ import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSqu
 import { cn } from 'cn'
 import { ApiProblem } from '@/api/problem'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -391,7 +392,7 @@ function WorkspaceTasksPage() {
                         <ColorDot color={project.color} />
                         <span className="min-w-0 flex-1 truncate">{project.name}</span>
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="absolute right-1 size-6 justify-center p-0 text-muted-foreground" aria-label={`${project.name} settings`} title="Project settings" onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}><Settings className="size-3.5" /></DropdownMenuItem>
+                      <Tip label="Project settings" side="right"><DropdownMenuItem className="absolute right-1 size-6 justify-center p-0 text-muted-foreground" aria-label={`${project.name} settings`} onClick={() => navigate(`/tasks/projects/${project.id}/settings`)}><Settings className="size-3.5" /></DropdownMenuItem></Tip>
                     </div>)}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => setShowNewProject(true)}><Plus />New project</DropdownMenuItem>
@@ -410,7 +411,7 @@ function WorkspaceTasksPage() {
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
               onChange={viewState.setDisplay}
             />
-            <Button aria-label="New task" title={newTaskTitle} className="max-[899px]:w-8 max-[899px]:px-0" onClick={() => openNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button>
+            <Tip label={newTaskTitle} side="bottom"><Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" onClick={() => openNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button></Tip>
           </PaneHeader>
           {viewState.stateError ? <ViewStateBanner /> : null}
           <FilterBar

@@ -47,7 +47,8 @@ test('shortcuts navigate, create, and follow a rebinding after a reload', async 
 
   // the new key works after a reload, the old one does not
   await page.goto('/tasks?workspace=alpha')
-  await expect(page.getByRole('button', { name: 'New task' })).toHaveAttribute('title', 'New task (N)')
+  await page.getByRole('button', { name: 'New task' }).hover()
+  await expect(page.getByText('New task (N)')).toBeVisible()
   await page.keyboard.press('c')
   await expect(title).toBeHidden()
   await page.keyboard.press('n')

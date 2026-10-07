@@ -4,6 +4,7 @@ import { Bookmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { ApiProblem } from '@/api/problem'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import type { ViewStateController } from '../useViewState'
 import { ConflictDialog } from './ConflictDialog'
 
@@ -50,9 +51,11 @@ export function ViewChanges({ controller, onSaveAsNew }: ViewChangesProps) {
 
   return (
     <div role="group" aria-label="Unsaved view changes" className="flex shrink-0 animate-view-bar-enter items-center gap-1.5">
-      <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" title="Go back to the saved view" onClick={() => controller.discard()}>
-        Reset
-      </Button>
+      <Tip label="Go back to the saved view">
+        <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => controller.discard()}>
+          Reset
+        </Button>
+      </Tip>
       {canEdit ? (
         <>
           <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => onSaveAsNew()}>

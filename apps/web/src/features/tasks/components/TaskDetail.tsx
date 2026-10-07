@@ -6,6 +6,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
 import { DatePicker } from '@/components/common/DatePicker'
@@ -157,10 +158,12 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
         <TaskBreadcrumb project={project} ancestors={task?.ancestors ?? []} identifier={task?.identifier ?? 'Task'} onOpen={openTask} onOpenProject={onOpenProject} />
         {githubSyncPaused ? <Badge variant="secondary">GitHub sync paused</Badge> : null}
         <div className="flex-1" />
-        {task ? <Button variant="destructive" title="Move to trash" disabled={deleteTask.isPending} onClick={() => void trash()}>Delete</Button> : null}
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
-          <X className="size-4" />
-        </Button>
+        {task ? <Tip label="Move to trash" side="bottom"><Button variant="destructive" disabled={deleteTask.isPending} onClick={() => void trash()}>Delete</Button></Tip> : null}
+        <Tip label="Close task" side="bottom">
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
+            <X className="size-4" />
+          </Button>
+        </Tip>
       </PaneHeader>
       {!task ? (
         <div className="min-h-0 flex-1 overflow-y-auto">

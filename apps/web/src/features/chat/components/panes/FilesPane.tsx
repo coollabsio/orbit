@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { DocumentText, Download, Folder, Message as MessageIcon } from 'reicon-react'
 import { ImageViewer } from '@/components/common/ImageViewer'
+import { Tip } from '@/components/common/Tip'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { useChatContext } from '@/features/chat/api/chatContext'
 import { useFiles } from '@/features/chat/api/queries'
@@ -46,25 +47,27 @@ export function FilesPane({ conversationId }: { conversationId: string }) {
                 <ul className="grid grid-cols-3 gap-1 px-2">
                   {images.map(({ attachment, message }) => (
                     <li key={attachment.id} className="group relative aspect-square overflow-hidden rounded-md border">
-                      <Button
-                        variant="ghost"
-                        className="block size-full rounded-none border-0 p-0 active:not-aria-[haspopup]:translate-y-0"
-                        aria-label={`Open image ${attachment.fileName}`}
-                        title={`${attachment.fileName} · ${authorName(message)} · ${relativeAgo(message.createdAt)}`}
-                        onClick={() => setViewerImage(attachment)}
-                      >
-                        <img src={attachment.url} alt="" loading={attachment.url.startsWith('data:') ? 'eager' : 'lazy'} className="block size-full object-cover" />
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="icon-xs"
-                        className="absolute right-1 bottom-1 focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100"
-                        aria-label={`Go to the message with ${attachment.fileName}`}
-                        title="Go to message"
-                        onClick={() => jump(message)}
-                      >
-                        <MessageIcon />
-                      </Button>
+                      <Tip label={`${attachment.fileName} · ${authorName(message)} · ${relativeAgo(message.createdAt)}`}>
+                        <Button
+                          variant="ghost"
+                          className="block size-full rounded-none border-0 p-0 active:not-aria-[haspopup]:translate-y-0"
+                          aria-label={`Open image ${attachment.fileName}`}
+                          onClick={() => setViewerImage(attachment)}
+                        >
+                          <img src={attachment.url} alt="" loading={attachment.url.startsWith('data:') ? 'eager' : 'lazy'} className="block size-full object-cover" />
+                        </Button>
+                      </Tip>
+                      <Tip label="Go to message">
+                        <Button
+                          variant="secondary"
+                          size="icon-xs"
+                          className="absolute right-1 bottom-1 focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100"
+                          aria-label={`Go to the message with ${attachment.fileName}`}
+                          onClick={() => jump(message)}
+                        >
+                          <MessageIcon />
+                        </Button>
+                      </Tip>
                     </li>
                   ))}
                 </ul>
@@ -85,18 +88,21 @@ export function FilesPane({ conversationId }: { conversationId: string }) {
                           {formatSize(attachment.fileSize)} · {authorName(message)} · {relativeAgo(message.createdAt)}
                         </span>
                       </span>
-                      <Button variant="ghost" size="icon-sm" aria-label={`Go to the message with ${attachment.fileName}`} title="Go to message" onClick={() => jump(message)}>
-                        <MessageIcon />
-                      </Button>
-                      <a
-                        href={attachment.url}
-                        download={attachment.fileName}
-                        className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
-                        aria-label={`Download ${attachment.fileName}`}
-                        title="Download"
-                      >
-                        <Download />
-                      </a>
+                      <Tip label="Go to message">
+                        <Button variant="ghost" size="icon-sm" aria-label={`Go to the message with ${attachment.fileName}`} onClick={() => jump(message)}>
+                          <MessageIcon />
+                        </Button>
+                      </Tip>
+                      <Tip label="Download">
+                        <a
+                          href={attachment.url}
+                          download={attachment.fileName}
+                          className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
+                          aria-label={`Download ${attachment.fileName}`}
+                        >
+                          <Download />
+                        </a>
+                      </Tip>
                     </li>
                   ))}
                 </ul>

@@ -144,11 +144,11 @@ export function DocTreeItem({
         </span>
         <span className="min-w-0 flex-1 truncate">{pageTitle(page)}</span>
         <TreeRowActions>
-          <TreeIconButton aria-label="Add child page" onClick={() => onCreateChild(page.id)}>
+          <TreeIconButton tip="Add child page" aria-label="Add child page" onClick={() => onCreateChild(page.id)}>
             <Plus className="size-[13px]" />
           </TreeIconButton>
           <DropdownMenu>
-            <DropdownMenuTrigger render={<TreeIconButton aria-label="Page options" />}>
+            <DropdownMenuTrigger render={<TreeIconButton tip="Page options" aria-label="Page options" />}>
               <Ellipsis className="size-[13px]" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto min-w-36">

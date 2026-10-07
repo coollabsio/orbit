@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { ArrowLeft, Check, Lock, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -80,9 +81,11 @@ export function ProjectSettingsPage() {
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane className="relative">
         <PaneHeader>
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
-            <ArrowLeft className="size-4" />
-          </Button>
+          <Tip label="Back to tasks" side="bottom">
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
+              <ArrowLeft className="size-4" />
+            </Button>
+          </Tip>
           <PaneTitle>{project ? `${project.name} settings` : 'Project settings'}</PaneTitle>
         </PaneHeader>
         {!project ? (
@@ -103,16 +106,17 @@ export function ProjectSettingsPage() {
                         <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
                           <span>{CATEGORY_LABEL[category]}</span>
                           {category === 'duplicate' ? null : (
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="size-6 text-muted-foreground/70"
-                              aria-label={`Add ${CATEGORY_LABEL[category].toLowerCase()} status`}
-                              title="Add status"
-                              onClick={() => setEditor({ mode: 'new', category })}
-                            >
-                              <Plus className="size-3.5" />
-                            </Button>
+                            <Tip label="Add status">
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="size-6 text-muted-foreground/70"
+                                aria-label={`Add ${CATEGORY_LABEL[category].toLowerCase()} status`}
+                                onClick={() => setEditor({ mode: 'new', category })}
+                              >
+                                <Plus className="size-3.5" />
+                              </Button>
+                            </Tip>
                           )}
                         </div>
                         {own.map((status) =>
@@ -197,13 +201,15 @@ export function ProjectSettingsPage() {
                               </span>
                               <div className="flex-1" />
                               <DropdownMenu>
-                                <DropdownMenuTrigger
-                                  render={
-                                    <Button variant="ghost" size="icon-sm" className="size-[30px] rounded-full bg-muted transition-opacity duration-150 ease-out focus-visible:opacity-100 aria-expanded:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100" aria-label={`${status.name} actions`} title="Actions">
-                                      <MoreHorizontal className="size-4" />
-                                    </Button>
-                                  }
-                                />
+                                <Tip label="Actions">
+                                  <DropdownMenuTrigger
+                                    render={
+                                      <Button variant="ghost" size="icon-sm" className="size-[30px] rounded-full bg-muted transition-opacity duration-150 ease-out focus-visible:opacity-100 aria-expanded:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100" aria-label={`${status.name} actions`}>
+                                        <MoreHorizontal className="size-4" />
+                                      </Button>
+                                    }
+                                  />
+                                </Tip>
                                 <DropdownMenuContent align="end" className="w-auto min-w-45">
                                   <DropdownMenuItem onClick={() => setEditor({ mode: 'edit', statusId: status.id })}>
                                     <Pencil className="size-3.5" />
@@ -213,8 +219,8 @@ export function ProjectSettingsPage() {
                                   <DropdownMenuItem
                                     className="text-destructive focus:bg-destructive/10 focus:text-destructive *:[svg]:text-destructive"
                                     data-danger="true"
-                                    disabled={status.category === 'duplicate' || regularCount === 1}
                                     title={status.category === 'duplicate' ? 'System status' : undefined}
+                                    disabled={status.category === 'duplicate' || regularCount === 1}
                                     onClick={() => setDeleteTarget(status)}
                                   >
                                     <Trash2 className="size-3.5" />
@@ -476,13 +482,15 @@ function StatusEditor({
       }}
     >
       <Popover>
-        <PopoverTrigger
-          render={
-            <Button type="button" variant="secondary" size="icon-lg" className="size-10" aria-label="Status color" title="Color">
-              <TaskStatusIcon status={{ category, color }} size={16} />
-            </Button>
-          }
-        />
+        <Tip label="Color">
+          <PopoverTrigger
+            render={
+              <Button type="button" variant="secondary" size="icon-lg" className="size-10" aria-label="Status color">
+                <TaskStatusIcon status={{ category, color }} size={16} />
+              </Button>
+            }
+          />
+        </Tip>
         <PopoverContent align="start" className="w-auto flex-row items-center gap-2 p-1.5">
           {STATUS_COLORS.map((preset) => (
             <ColorSwatch

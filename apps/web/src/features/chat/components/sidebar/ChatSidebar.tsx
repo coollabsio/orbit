@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Add, Brush, ChevronDown, ChevronRight, DirectInbox, Edit, Hashtag, Layer, MoreH, Trash } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useChatContext } from '@/features/chat/api/chatContext'
@@ -138,11 +139,13 @@ function SectionHeader({
       <span className="flex shrink-0 items-center gap-0.5 hover-fine:opacity-0 hover-fine:group-focus-within/row:opacity-100 hover-fine:group-hover/row:opacity-100 hover-fine:has-[[aria-expanded=true]]:opacity-100">
         {category ? (
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground transition-none" aria-label={`Options for the category ${category.name}`} />}
-            >
-              <MoreH className="size-4" />
-            </DropdownMenuTrigger>
+            <Tip label="Options">
+              <DropdownMenuTrigger
+                render={<Button type="button" variant="ghost" size="icon-xs" className="text-muted-foreground transition-none" aria-label={`Options for the category ${category.name}`} />}
+              >
+                <MoreH className="size-4" />
+              </DropdownMenuTrigger>
+            </Tip>
             <DropdownMenuContent className="w-auto min-w-44">
               <DropdownMenuItem onClick={() => onRename(category)}>
                 <Edit />
@@ -157,16 +160,18 @@ function SectionHeader({
           </DropdownMenu>
         ) : null}
         {onAdd ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground transition-none"
-            aria-label={section.kind === 'dms' ? 'New message' : `New channel in ${section.title}`}
-            onClick={onAdd}
-          >
-            <Add className="size-4" />
-          </Button>
+          <Tip label={section.kind === 'dms' ? 'New message' : 'New channel'}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground transition-none"
+              aria-label={section.kind === 'dms' ? 'New message' : `New channel in ${section.title}`}
+              onClick={onAdd}
+            >
+              <Add className="size-4" />
+            </Button>
+          </Tip>
         ) : null}
       </span>
     </div>
@@ -263,13 +268,17 @@ export function ChatSidebar() {
         <PaneTitle render={<h1 />} className="flex-1">
           Chat
         </PaneTitle>
-        <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="Chat theme" onClick={() => show({ kind: 'theme' })}>
-          <Brush size={20} />
-        </Button>
+        <Tip label="Chat theme" side="bottom">
+          <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="Chat theme" onClick={() => show({ kind: 'theme' })}>
+            <Brush size={20} />
+          </Button>
+        </Tip>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="New" />}>
-            <Add size={20} />
-          </DropdownMenuTrigger>
+          <Tip label="New" side="bottom">
+            <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="New" />}>
+              <Add size={20} />
+            </DropdownMenuTrigger>
+          </Tip>
           <DropdownMenuContent align="end" className="w-auto min-w-44">
             <DropdownMenuItem onClick={() => show({ kind: 'message' })}>New message</DropdownMenuItem>
             <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>

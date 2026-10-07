@@ -30,6 +30,7 @@ import { Emoji } from '@/components/common/Emoji'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { Tip } from '@/components/common/Tip'
 import { confirmAction } from '@/components/common/confirmAction'
 import {
   PRIVATE_SPACE,
@@ -526,11 +527,13 @@ export function DocTree({
         <PaneTitle>Documents</PaneTitle>
         <span className="flex-1" />
         <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Documents options" />}
-          >
-            <Ellipsis className="size-4" />
-          </DropdownMenuTrigger>
+          <Tip label="Documents options" side="bottom">
+            <DropdownMenuTrigger
+              render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Documents options" />}
+            >
+              <Ellipsis className="size-4" />
+            </DropdownMenuTrigger>
+          </Tip>
           <DropdownMenuContent align="end" className="w-auto min-w-44">
             <DropdownMenuItem onClick={() => navigate('/docs/import')}>
               <Import className="size-[14px]" />
@@ -538,9 +541,11 @@ export function DocTree({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button type="button" size="icon" aria-label="New page" disabled={createPage.isPending} onClick={() => handleCreate(null)}>
-          <Plus className="size-4" />
-        </Button>
+        <Tip label="New page" side="bottom">
+          <Button type="button" size="icon" aria-label="New page" disabled={createPage.isPending} onClick={() => handleCreate(null)}>
+            <Plus className="size-4" />
+          </Button>
+        </Tip>
       </PaneHeader>
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {loading ? (
@@ -606,7 +611,7 @@ export function DocTree({
             <SectionLabel
               label="Teamspaces"
               action={
-                <TreeIconButton aria-label="New teamspace" onClick={() => setCreateOpen(true)}>
+                <TreeIconButton tip="New teamspace" aria-label="New teamspace" onClick={() => setCreateOpen(true)}>
                   <Plus className="size-[13px]" />
                 </TreeIconButton>
               }
@@ -672,7 +677,7 @@ export function DocTree({
                         onMove={(offset) => submitTeamspaceMove(teamspace, index + offset)}
                         onDelete={() => void requestDelete(teamspace)}
                       />
-                      <TreeIconButton aria-label={`Add page to ${teamspace.name}`} onClick={() => handleCreate(null, space)}>
+                      <TreeIconButton tip="Add page" aria-label={`Add page to ${teamspace.name}`} onClick={() => handleCreate(null, space)}>
                         <Plus className="size-[13px]" />
                       </TreeIconButton>
                     </TreeRowActions>
@@ -690,7 +695,7 @@ export function DocTree({
                 onToggle={() => setSpaceCollapsed(PRIVATE_SPACE, !collapsed.has(PRIVATE_SPACE))}
                 dropProps={spaceDropProps(PRIVATE_SPACE)}
                 action={
-                  <TreeIconButton aria-label="Add private page" onClick={() => handleCreate(null, PRIVATE_SPACE)}>
+                  <TreeIconButton tip="Add private page" aria-label="Add private page" onClick={() => handleCreate(null, PRIVATE_SPACE)}>
                     <Plus className="size-[13px]" />
                   </TreeIconButton>
                 }
@@ -862,7 +867,7 @@ function TeamspaceMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<TreeIconButton aria-label={`${teamspace.name} options`} />}
+        render={<TreeIconButton tip="Options" aria-label={`${teamspace.name} options`} />}
       >
         <Ellipsis className="size-[13px]" />
       </DropdownMenuTrigger>

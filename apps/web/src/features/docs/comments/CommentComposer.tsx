@@ -10,6 +10,7 @@ import { AtSign } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tip } from '@/components/common/Tip'
 import { CommentEditor } from './CommentEditor'
 
 export type AnyCommentEditor = BlockNoteEditor<any, any, any>
@@ -112,9 +113,11 @@ export function CommentComposer({
             Cancel
           </Button>
         ) : null}
-        <Button type="button" size="sm" disabled={isEmpty || busy} title={submitTitle} onClick={() => void submit()}>
-          {submitLabel}
-        </Button>
+        <Tip label={submitTitle}>
+          <Button type="button" size="sm" disabled={isEmpty || busy} onClick={() => void submit()}>
+            {submitLabel}
+          </Button>
+        </Tip>
       </div>
     </div>
   )

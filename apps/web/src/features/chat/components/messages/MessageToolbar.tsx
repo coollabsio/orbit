@@ -1,5 +1,6 @@
 import { Forward, Message as MessageIcon, MoreH, Reply, SmileCircle } from 'reicon-react'
 import { Emoji } from '@/components/common/Emoji'
+import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import type { Message } from '../../api/types'
 import { useMessageList } from './messageListContext'
@@ -24,39 +25,47 @@ export function MessageToolbar({ message }: { message: Message }) {
           <Emoji value={emoji} />
         </Button>
       ))}
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="Add reaction"
-        title="Add reaction"
-        aria-haspopup="dialog"
-        onClick={(event) => openPicker(message, event.currentTarget, 'end')}
-      >
-        <SmileCircle className="size-5" />
-      </Button>
-      {reply ? (
-        <Button variant="ghost" size="icon" aria-label="Reply" title="Reply" onClick={() => reply(message)}>
-          <Reply className="size-5" />
+      <Tip label="Add reaction">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Add reaction"
+          aria-haspopup="dialog"
+          onClick={(event) => openPicker(message, event.currentTarget, 'end')}
+        >
+          <SmileCircle className="size-5" />
         </Button>
+      </Tip>
+      {reply ? (
+        <Tip label="Reply">
+          <Button variant="ghost" size="icon" aria-label="Reply" onClick={() => reply(message)}>
+            <Reply className="size-5" />
+          </Button>
+        </Tip>
       ) : null}
       {inThread ? null : (
-        <Button variant="ghost" size="icon" aria-label="Reply in Thread" title="Reply in Thread" onClick={() => openThread(message)}>
-          <MessageIcon className="size-5" />
-        </Button>
+        <Tip label="Reply in Thread">
+          <Button variant="ghost" size="icon" aria-label="Reply in Thread" onClick={() => openThread(message)}>
+            <MessageIcon className="size-5" />
+          </Button>
+        </Tip>
       )}
-      <Button variant="ghost" size="icon" aria-label="Forward" title="Forward" aria-haspopup="dialog" onClick={() => forward(message)}>
-        <Forward className="size-5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="More actions"
-        title="More actions"
-        aria-haspopup="menu"
-        onClick={(event) => openMenu(message, event.currentTarget, 'end')}
-      >
-        <MoreH className="size-5" />
-      </Button>
+      <Tip label="Forward">
+        <Button variant="ghost" size="icon" aria-label="Forward" aria-haspopup="dialog" onClick={() => forward(message)}>
+          <Forward className="size-5" />
+        </Button>
+      </Tip>
+      <Tip label="More actions">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="More actions"
+          aria-haspopup="menu"
+          onClick={(event) => openMenu(message, event.currentTarget, 'end')}
+        >
+          <MoreH className="size-5" />
+        </Button>
+      </Tip>
     </div>
   )
 }

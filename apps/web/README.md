@@ -48,6 +48,8 @@ src/
   animations, and two blocks that cannot be Tailwind: the verbatim Tiptap base stylesheet (CSP) and print mode.
 - **Reach for the registry before writing a component**: `node_modules/.bin/shadcn search @shadcn -l 100`. `components/common/`
   is for app-specific composition over registry parts, not for reimplementing them.
+- **Tooltips**: a control gets `<Tip label="…">` (`components/common/Tip.tsx`), not a DOM `title`. Passive text (timestamps,
+  truncated names) keeps the native `title`.
 - **Inline `style={{}}` is for runtime-dynamic values only** (user colours, pointer coordinates, measured sizes).
 - **Imports**: `@/…` across directories, `./x` inside the same directory.
 - **Layering**: `app/` → `features/` → `components/`, `lib/`, `api/`. Nothing in `components/`, `lib/` or `api/` may import a

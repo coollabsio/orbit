@@ -28,6 +28,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Emoji } from '@/components/common/Emoji'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { Pane } from '@/components/common/Pane'
+import { Tip } from '@/components/common/Tip'
 import {
   conflictCurrentPage,
   conflictCurrentVersion,
@@ -661,43 +662,47 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               </Button>
             ) : null}
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={cn('gap-1 px-1.5 text-muted-foreground/70', commentsOpen && 'bg-muted text-foreground')}
-            aria-label={counts.open > 0 ? `Comments (${counts.open} open)` : 'Comments'}
-            aria-pressed={commentsOpen}
-            title="Comments"
-            data-comments-toggle=""
-            onClick={() => setCommentsOpen((open) => !open)}
-          >
-            <CommentIcon className="size-4" />
-            {counts.open > 0 ? (
-              <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
-                {counts.open}
-              </span>
-            ) : null}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
-            aria-label={favoriteLabel}
-            aria-pressed={favorite}
-            title={favoriteLabel}
-            disabled={favoritesQuery.isPending}
-            onClick={() => setFavorite(!favorite)}
-          >
-            <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Page options" />}
+          <Tip label="Comments" side="bottom">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn('gap-1 px-1.5 text-muted-foreground/70', commentsOpen && 'bg-muted text-foreground')}
+              aria-label={counts.open > 0 ? `Comments (${counts.open} open)` : 'Comments'}
+              aria-pressed={commentsOpen}
+              data-comments-toggle=""
+              onClick={() => setCommentsOpen((open) => !open)}
             >
-              <Ellipsis className="size-4" />
-            </DropdownMenuTrigger>
+              <CommentIcon className="size-4" />
+              {counts.open > 0 ? (
+                <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
+                  {counts.open}
+                </span>
+              ) : null}
+            </Button>
+          </Tip>
+          <Tip label={favoriteLabel} side="bottom">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
+              aria-label={favoriteLabel}
+              aria-pressed={favorite}
+              disabled={favoritesQuery.isPending}
+              onClick={() => setFavorite(!favorite)}
+            >
+              <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
+            </Button>
+          </Tip>
+          <DropdownMenu>
+            <Tip label="Page options" side="bottom">
+              <DropdownMenuTrigger
+                render={<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Page options" />}
+              >
+                <Ellipsis className="size-4" />
+              </DropdownMenuTrigger>
+            </Tip>
             <DropdownMenuContent align="end" className="w-auto max-w-64 min-w-44">
               {onRequestMove && teamspaces ? (
                 <>

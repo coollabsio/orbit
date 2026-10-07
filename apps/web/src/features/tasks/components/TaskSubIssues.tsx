@@ -4,6 +4,7 @@ import { Add as Plus, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import type { PageTaskRecord } from '@/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
 import { taskFromRecord, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
 import { subIssuesQuery, useCreateTask, useSubIssues } from '@/features/tasks/api/tasks'
@@ -71,19 +72,20 @@ export function SubIssuesSection({ parent, composing, onComposingChange, onAddEx
         {children.length > 0 ? <SubIssueProgress closed={closed} total={children.length} color={completedStatusColor(rest.statuses, parent.projectId)} /> : null}
         <div className="flex-1" />
         <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={onAddExisting}>Add existing</Button>
-        <Button
-          ref={addButtonRef}
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground"
-          aria-label="Add sub-issue"
-          title="Add sub-issue"
-          aria-pressed={composing}
-          // already composing: take the user back to the field instead of doing nothing
-          onClick={() => (composing ? composerInputRef.current?.focus() : onComposingChange(true))}
-        >
-          <Plus className="size-3.5" />
-        </Button>
+        <Tip label="Add sub-issue">
+          <Button
+            ref={addButtonRef}
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground"
+            aria-label="Add sub-issue"
+            aria-pressed={composing}
+            // already composing: take the user back to the field instead of doing nothing
+            onClick={() => (composing ? composerInputRef.current?.focus() : onComposingChange(true))}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </Tip>
       </div>
       <div className="-mx-2">
         {children.length > 0 ? (
@@ -168,16 +170,17 @@ function SubIssueRow({ task, depth, context }: { task: Task; depth: number; cont
         max={3}
         className={cn(task.assigneeIds.length === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/sub:opacity-100 focus-within:opacity-100 has-data-popup-open:opacity-100')}
       />
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        aria-label={`Remove ${task.identifier} from parent`}
-        title="Remove from parent"
-        className="shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/sub:opacity-100 focus-visible:opacity-100"
-        onClick={() => void parentActions.setParent([task], null)}
-      >
-        <X className="size-3" />
-      </Button>
+      <Tip label="Remove from parent">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Remove ${task.identifier} from parent`}
+          className="shrink-0 text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/sub:opacity-100 focus-visible:opacity-100"
+          onClick={() => void parentActions.setParent([task], null)}
+        >
+          <X className="size-3" />
+        </Button>
+      </Tip>
     </div>
   )
 }

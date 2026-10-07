@@ -6,6 +6,7 @@ import { Calendar, DirectInbox as Inbox, Home2 as Home, Layer, Message as Messag
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { Tip } from '@/components/common/Tip'
 import { chatEnabled, docsHidden } from './productNavigation'
 
 const WORKSPACE_LINKS = [
@@ -67,52 +68,55 @@ function SidebarNavItem({
   const isActive = active ?? match !== null
   const name = badge > 0 ? `${ariaLabel}, ${badge} unread` : unread ? `${ariaLabel}, unread` : ariaLabel
   return (
-    <Link
-      data-slot="sidebar-nav-item"
-      data-active={isActive}
-      aria-current={isActive ? 'page' : undefined}
-      aria-label={name}
-      title={collapsed ? name : undefined}
-      className={cn(sidebarNavItemVariants({ size }), className)}
-      to={to}
-      {...props}
-    >
-      <Icon />
-      <SidebarNavLabel>{label}</SidebarNavLabel>
-      {badge > 0 ? (
-        <span
-          data-slot="sidebar-nav-badge"
-          aria-hidden="true"
-          className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5"
-        >
-          {badge > 99 ? '99+' : badge}
-        </span>
-      ) : unread ? (
-        <span
-          data-slot="sidebar-nav-dot"
-          aria-hidden="true"
-          className="mr-1 size-2 shrink-0 rounded-full bg-primary group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-1 group-data-[collapsed=true]/sidebar-nav:right-1 group-data-[collapsed=true]/sidebar-nav:mr-0"
-        />
-      ) : null}
-    </Link>
+    <Tip label={collapsed ? name : undefined} side="right">
+      <Link
+        data-slot="sidebar-nav-item"
+        data-active={isActive}
+        aria-current={isActive ? 'page' : undefined}
+        aria-label={name}
+        className={cn(sidebarNavItemVariants({ size }), className)}
+        to={to}
+        {...props}
+      >
+        <Icon />
+        <SidebarNavLabel>{label}</SidebarNavLabel>
+        {badge > 0 ? (
+          <span
+            data-slot="sidebar-nav-badge"
+            aria-hidden="true"
+            className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5"
+          >
+            {badge > 99 ? '99+' : badge}
+          </span>
+        ) : unread ? (
+          <span
+            data-slot="sidebar-nav-dot"
+            aria-hidden="true"
+            className="mr-1 size-2 shrink-0 rounded-full bg-primary group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-1 group-data-[collapsed=true]/sidebar-nav:right-1 group-data-[collapsed=true]/sidebar-nav:mr-0"
+          />
+        ) : null}
+      </Link>
+    </Tip>
   )
 }
 
 /** A product area that is not built yet: shown, but disabled. */
 function SidebarNavComingSoon({ icon: Icon, label }: { icon: SidebarNavIcon; label: string }) {
+  const collapsed = useContext(SidebarNavCollapsed)
   return (
-    <Button
-      data-slot="sidebar-nav-item"
-      variant="ghost"
-      className={cn(sidebarNavItemVariants(), 'border-0 dark:hover:bg-sidebar-accent/50 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-[0.48]')}
-      disabled
-      title={`${label} — Coming soon`}
-    >
-      {/* an explicit size: Button's own svg rule outranks the item's [&_svg] one */}
-      <Icon className="size-[18px]" />
-      <SidebarNavLabel>{label}</SidebarNavLabel>
-      <span className="ml-auto text-[10px] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">Coming soon</span>
-    </Button>
+    <Tip label={collapsed ? `${label} — Coming soon` : undefined} side="right">
+      <Button
+        data-slot="sidebar-nav-item"
+        variant="ghost"
+        className={cn(sidebarNavItemVariants(), 'border-0 dark:hover:bg-sidebar-accent/50 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-[0.48]')}
+        disabled
+      >
+        {/* an explicit size: Button's own svg rule outranks the item's [&_svg] one */}
+        <Icon className="size-[18px]" />
+        <SidebarNavLabel>{label}</SidebarNavLabel>
+        <span className="ml-auto text-[10px] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">Coming soon</span>
+      </Button>
+    </Tip>
   )
 }
 
@@ -168,27 +172,28 @@ export function SidebarNav({
   return (
     <SidebarNavCollapsed.Provider value={collapsed}>
       <div data-slot="sidebar-nav" data-collapsed={collapsed} className="group/sidebar-nav flex min-h-0 flex-1 flex-col">
-        <Button
-          variant="secondary"
-          className={cn(
-            'h-8 w-full justify-start gap-2 rounded-md border-0 bg-sidebar-accent px-2 text-[13px] font-medium text-muted-foreground/70 hover:bg-sidebar-accent/70 active:not-aria-[haspopup]:translate-y-0',
-            collapsed && 'justify-center px-0',
-          )}
-          aria-label="Search"
-          title={collapsed ? 'Search' : undefined}
-          onClick={() => {
-            onNavigate?.()
-            window.dispatchEvent(new CustomEvent('open-command-palette'))
-          }}
-        >
-          <Search className="size-[15px] shrink-0" />
-          {!collapsed ? (
-            <>
-              Search{' '}
-              <Shortcut id="palette.open" className="ml-auto **:data-[slot=kbd]:rounded-md **:data-[slot=kbd]:bg-sidebar-accent **:data-[slot=kbd]:text-[11px] **:data-[slot=kbd]:text-muted-foreground/70" />
-            </>
-          ) : null}
-        </Button>
+        <Tip label={collapsed ? 'Search' : undefined} side="right">
+          <Button
+            variant="secondary"
+            className={cn(
+              'h-8 w-full justify-start gap-2 rounded-md border-0 bg-sidebar-accent px-2 text-[13px] font-medium text-muted-foreground/70 hover:bg-sidebar-accent/70 active:not-aria-[haspopup]:translate-y-0',
+              collapsed && 'justify-center px-0',
+            )}
+            aria-label="Search"
+            onClick={() => {
+              onNavigate?.()
+              window.dispatchEvent(new CustomEvent('open-command-palette'))
+            }}
+          >
+            <Search className="size-[15px] shrink-0" />
+            {!collapsed ? (
+              <>
+                Search{' '}
+                <Shortcut id="palette.open" className="ml-auto **:data-[slot=kbd]:rounded-md **:data-[slot=kbd]:bg-sidebar-accent **:data-[slot=kbd]:text-[11px] **:data-[slot=kbd]:text-muted-foreground/70" />
+              </>
+            ) : null}
+          </Button>
+        </Tip>
         <div className={cn('mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain', collapsed ? 'gap-1' : 'gap-0.5')}>
           <SidebarSection label="Workspace" collapsed={collapsed} first />
           {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (

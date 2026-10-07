@@ -10,6 +10,7 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { fullDate, relativeTime } from '@/lib/format'
 import { CommentComposer, type AnyCommentEditor } from './CommentComposer'
@@ -222,22 +223,24 @@ function CommentRow({ thread, comment }: { thread: ThreadData; comment: CommentD
           <span className="flex-1" />
           {(canEdit || canDelete) && !editing ? (
             <DropdownMenu modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    className={cn(
-                      'text-muted-foreground opacity-0 group-hover/comment:opacity-100 group-focus-within/comment:opacity-100 focus-visible:opacity-100 max-[899px]:opacity-100',
-                      menuOpen && 'opacity-100',
-                    )}
-                    aria-label="Comment actions"
-                  />
-                }
-              >
-                <MoreH className="size-4" />
-              </DropdownMenuTrigger>
+              <Tip label="Comment actions">
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className={cn(
+                        'text-muted-foreground opacity-0 group-hover/comment:opacity-100 group-focus-within/comment:opacity-100 focus-visible:opacity-100 max-[899px]:opacity-100',
+                        menuOpen && 'opacity-100',
+                      )}
+                      aria-label="Comment actions"
+                    />
+                  }
+                >
+                  <MoreH className="size-4" />
+                </DropdownMenuTrigger>
+              </Tip>
               {menuOpen ? (
                 <DropdownMenuContent align="end" className="w-36" {...{ [COMMENT_POPUP_ATTR]: '' }}>
                   {canEdit ? (

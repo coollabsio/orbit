@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Gps } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
 import type { GroupContext } from '@/features/views/grouping'
@@ -70,18 +71,19 @@ export function TimelineRowLabel({ row, statuses, users, properties, groupContex
       ) : null}
       {onReveal ? (
         // overlays the row end on hover, so it never costs the title any width
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Show ${row.task.identifier} on the timeline`}
-          title="Show on timeline"
-          // the row-hover fill plus a soft left fade, so the title it covers fades out under it
-          className={cn('absolute right-2', has('assignee') && 'right-10', 'bg-[color-mix(in_oklch,var(--foreground)_3%,var(--background))] text-muted-foreground opacity-0 shadow-[-12px_0_8px_-2px_color-mix(in_oklch,var(--foreground)_3%,var(--background))] group-hover/row:opacity-100 focus-visible:opacity-100')}
-          onClick={onReveal}
-        >
-          <Gps aria-hidden="true" />
-        </Button>
+        <Tip label="Show on timeline">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Show ${row.task.identifier} on the timeline`}
+            // the row-hover fill plus a soft left fade, so the title it covers fades out under it
+            className={cn('absolute right-2', has('assignee') && 'right-10', 'bg-[color-mix(in_oklch,var(--foreground)_3%,var(--background))] text-muted-foreground opacity-0 shadow-[-12px_0_8px_-2px_color-mix(in_oklch,var(--foreground)_3%,var(--background))] group-hover/row:opacity-100 focus-visible:opacity-100')}
+            onClick={onReveal}
+          >
+            <Gps aria-hidden="true" />
+          </Button>
+        </Tip>
       ) : null}
     </LabelCell>
   )

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Separator } from '@/components/ui/separator'
+import { Tip } from '@/components/common/Tip'
 import { useCreateWorkspace } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
@@ -18,14 +19,16 @@ export function WorkspaceSwitcher({ collapsed = false, onSelect }: { collapsed?:
 
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
-      <PopoverTrigger
-        render={
-          <Button variant="ghost" className="h-auto min-w-0 items-baseline justify-start gap-[7px] rounded-none border-0 p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent" aria-label={`Workspace: ${workspace.name}`} title={workspace.name} />
-        }
-      >
-        <span className="truncate text-[17px] font-bold tracking-[-0.02em] text-foreground">{collapsed ? workspace.name.charAt(0) : workspace.name}</span>
-        {!collapsed ? <ChevronDown className="size-[13px] shrink-0 text-muted-foreground/70" /> : null}
-      </PopoverTrigger>
+      <Tip label={collapsed ? workspace.name : undefined} side="right">
+        <PopoverTrigger
+          render={
+            <Button variant="ghost" className="h-auto min-w-0 items-baseline justify-start gap-[7px] rounded-none border-0 p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent" aria-label={`Workspace: ${workspace.name}`} />
+          }
+        >
+          <span className="truncate text-[17px] font-bold tracking-[-0.02em] text-foreground">{collapsed ? workspace.name.charAt(0) : workspace.name}</span>
+          {!collapsed ? <ChevronDown className="size-[13px] shrink-0 text-muted-foreground/70" /> : null}
+        </PopoverTrigger>
+      </Tip>
       {/* Base UI unmounts the panel after its exit, so the create form resets each time it closes. */}
       <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-[13rem] overflow-y-auto overscroll-contain p-1">
         <WorkspaceMenu createWorkspace={createWorkspace} onSelect={() => { setOpen(false); onSelect?.() }} />

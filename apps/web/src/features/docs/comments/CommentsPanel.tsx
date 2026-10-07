@@ -2,6 +2,7 @@ import { Comment as CommentIcon, X } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tip } from '@/components/common/Tip'
 
 export type CommentsFilter = 'open' | 'resolved'
 
@@ -37,9 +38,11 @@ export function CommentsPanel({
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border pr-2 pl-3">
         <span className="text-[13px] font-semibold text-foreground">Comments</span>
         <span className="flex-1" />
-        <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Close comments" onClick={onClose}>
-          <X className="size-4" />
-        </Button>
+        <Tip label="Close" side="bottom">
+          <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Close comments" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </Tip>
       </div>
       <Tabs className="shrink-0 gap-0 px-2 pt-2" value={filter} onValueChange={(value) => onFilterChange(value as CommentsFilter)}>
         <TabsList className="w-full">

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Copy, Edit as Pencil, Trash as Trash2 } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -65,28 +66,33 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
             </time>
             {!editing ? (
               <div className="ml-auto flex shrink-0 items-center gap-px opacity-0 transition-opacity group-hover/comment:opacity-100 group-focus-within/comment:opacity-100 max-[899px]:opacity-100">
-                <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70" aria-label="Copy text" title="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body).then(() => toast('Text copied'), () => toast.error('Could not copy to the clipboard.'))}>
-                  <Copy className="size-3.5" />
-                </Button>
-                {comment.canEdit ? (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="size-6 text-muted-foreground/70"
-                    aria-label="Edit comment"
-                    title="Edit comment"
-                    onClick={() => {
-                      setEditText(comment.body)
-                      setEditing(true)
-                    }}
-                  >
-                    <Pencil className="size-3.5" />
+                <Tip label="Copy text">
+                  <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70" aria-label="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body).then(() => toast('Text copied'), () => toast.error('Could not copy to the clipboard.'))}>
+                    <Copy className="size-3.5" />
                   </Button>
+                </Tip>
+                {comment.canEdit ? (
+                  <Tip label="Edit comment">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-6 text-muted-foreground/70"
+                      aria-label="Edit comment"
+                      onClick={() => {
+                        setEditText(comment.body)
+                        setEditing(true)
+                      }}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                  </Tip>
                 ) : null}
                 {comment.canDelete ? (
-                  <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive" aria-label="Delete comment" title="Delete comment" onClick={() => setConfirmDelete(true)}>
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                  <Tip label="Delete comment">
+                    <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive" aria-label="Delete comment" onClick={() => setConfirmDelete(true)}>
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </Tip>
                 ) : null}
               </div>
             ) : null}

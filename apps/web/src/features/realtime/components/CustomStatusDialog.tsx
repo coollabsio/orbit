@@ -4,6 +4,7 @@ import { Emoji } from '@/components/common/Emoji'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { Modal } from '@/components/common/Modal'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { DialogFooter } from '@/components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -72,9 +73,11 @@ export function CustomStatusDialog({ onClose }: { onClose: () => void }) {
           <FieldLabel htmlFor={textId}>Status</FieldLabel>
           <div className="flex items-center gap-2">
             <Popover open={emojiOpen} onOpenChange={setEmojiOpen} modal={false}>
-              <PopoverTrigger render={<Button type="button" variant="outline" size="icon" aria-label={emoji ? 'Change emoji' : 'Add emoji'} title={emoji ? 'Change emoji' : 'Add emoji'} />}>
-                {emoji ? <Emoji value={emoji} /> : <SmileCircle className="text-muted-foreground" />}
-              </PopoverTrigger>
+              <Tip label={emoji ? 'Change emoji' : 'Add emoji'}>
+                <PopoverTrigger render={<Button type="button" variant="outline" size="icon" aria-label={emoji ? 'Change emoji' : 'Add emoji'} />}>
+                  {emoji ? <Emoji value={emoji} /> : <SmileCircle className="text-muted-foreground" />}
+                </PopoverTrigger>
+              </Tip>
               <PopoverContent align="start" className="w-auto gap-0 p-0">
                 <EmojiPicker
                   onPick={(picked) => {

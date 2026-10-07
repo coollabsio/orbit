@@ -1,6 +1,7 @@
 import { Edit as SquarePen } from 'reicon-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PaneTitle } from '@/components/common/Pane'
 import { setThreadRead } from '@/mock/actions'
@@ -35,15 +36,17 @@ export function ThreadList({ folders, folder, threads, activeThreadId, onCompose
           <SquarePen className="size-4" />
           Compose
         </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
-          aria-label="Compose"
-          onClick={onCompose}
-        >
-          <SquarePen className="size-4" />
-        </Button>
+        <Tip label="Compose" side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
+            aria-label="Compose"
+            onClick={onCompose}
+          >
+            <SquarePen className="size-4" />
+          </Button>
+        </Tip>
       </div>
       <div className="hidden min-h-10 items-center gap-1.5 overflow-x-auto border-b px-3 py-1 [scrollbar-width:none] max-[899px]:flex">
         {folders.map((f) => (

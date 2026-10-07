@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { SearchNormal } from 'reicon-react'
 import type { CustomStickerRecord } from '@/api/generated/types.gen'
+import { Tip } from '@/components/common/Tip'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { searchStickers } from '@/lib/customSticker'
 
@@ -24,17 +25,17 @@ export function StickerPicker({ stickers, onPick }: { stickers: readonly CustomS
       {found.length > 0 ? (
         <div data-slot="sticker-grid" className="grid min-h-0 grid-cols-4 gap-1 overflow-y-auto overscroll-contain px-2 pb-2">
           {found.map((sticker) => (
-            <button
-              key={sticker.id}
-              type="button"
-              data-slot="sticker-button"
-              aria-label={sticker.name}
-              title={sticker.name}
-              className="flex aspect-square items-center justify-center rounded-md p-1.5 outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
-              onClick={() => onPick(sticker)}
-            >
-              <img src={sticker.url} alt="" draggable={false} loading="lazy" className="size-full object-contain" />
-            </button>
+            <Tip key={sticker.id} label={sticker.name}>
+              <button
+                type="button"
+                data-slot="sticker-button"
+                aria-label={sticker.name}
+                className="flex aspect-square items-center justify-center rounded-md p-1.5 outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                onClick={() => onPick(sticker)}
+              >
+                <img src={sticker.url} alt="" draggable={false} loading="lazy" className="size-full object-contain" />
+              </button>
+            </Tip>
           ))}
         </div>
       ) : (

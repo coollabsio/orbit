@@ -1,6 +1,7 @@
 import { taskRowTarget } from '@/shortcuts/taskTarget'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Checkbox } from '@/components/ui/checkbox'
 import { BlockedIndicator } from './BlockedIndicator'
 import { refIdentifier, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
@@ -122,18 +123,19 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       {!has('id') && task.blocked ? <BlockedIndicator /> : null}
       {showParent && task.parent ? (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
-          <Button
-            type="button"
-            variant="link"
-            title={`Open ${refIdentifier(task.parent)}`}
-            className="h-auto max-w-[40%] shrink justify-start p-0 text-[13px] font-normal text-muted-foreground hover:text-foreground"
-            onClick={(event) => {
-              event.stopPropagation()
-              onOpen(task.parent!.id)
-            }}
-          >
-            <span className="truncate">{task.parent.title || 'Untitled'}</span>
-          </Button>
+          <Tip label={`Open ${refIdentifier(task.parent)}`}>
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto max-w-[40%] shrink justify-start p-0 text-[13px] font-normal text-muted-foreground hover:text-foreground"
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpen(task.parent!.id)
+              }}
+            >
+              <span className="truncate">{task.parent.title || 'Untitled'}</span>
+            </Button>
+          </Tip>
           <span aria-hidden className="shrink-0 text-muted-foreground/50">›</span>
           <span className="min-w-0 flex-1 truncate font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
         </span>

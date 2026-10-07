@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Add as Plus } from 'reicon-react'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { PaneTitle } from '@/components/common/Pane'
@@ -85,17 +86,18 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
             Custom folders
           </span>
           <span className="flex-1" />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground/70"
-            aria-label="New folder"
-            title="New folder"
-            onClick={() => setAdding(true)}
-          >
-            <Plus className="size-4" />
-          </Button>
+          <Tip label="New folder">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground/70"
+              aria-label="New folder"
+              onClick={() => setAdding(true)}
+            >
+              <Plus className="size-4" />
+            </Button>
+          </Tip>
         </div>
         {custom.map(row)}
         {adding ? (

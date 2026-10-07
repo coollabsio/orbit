@@ -5,6 +5,7 @@ import { Calendar, ChevronRight, Paperclip2 as Paperclip, User as UserIcon, Xmar
 import { apiClient } from '@/api/client'
 import { uploadTaskAttachments } from '@/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
@@ -421,9 +422,11 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 />
                 Create more
               </Label>
-              <Button type="submit" disabled={!canCreate} title="Ctrl/⌘ + Enter">
-                {uploading ? 'Attaching…' : createTask.isPending ? 'Creating…' : 'Create task'}
-              </Button>
+              <Tip label="Ctrl/⌘ + Enter">
+                <Button type="submit" disabled={!canCreate}>
+                  {uploading ? 'Attaching…' : createTask.isPending ? 'Creating…' : 'Create task'}
+                </Button>
+              </Tip>
             </div>
           </DialogFooter>
         </form>

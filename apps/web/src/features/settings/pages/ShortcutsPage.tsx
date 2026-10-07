@@ -3,6 +3,7 @@ import { Danger, RotateLeft } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
 import { applyRebind, findConflict, findConflicts, isReserved, parseKeys, resolveBindings } from '@/shortcuts/bindings'
 import { COMMANDS, type Command, type Group } from '@/shortcuts/commands'
@@ -84,9 +85,11 @@ export function ShortcutsPage() {
                     <div className="flex h-8 items-center gap-2">
                       <span className="min-w-0 flex-1 truncate">{command.title}</span>
                       {command.id in overrides && !command.fixed ? (
-                        <Button type="button" variant="ghost" size="icon-xs" className="animate-in text-muted-foreground/70 duration-150 ease-out fade-in-0" aria-label={`Reset ${command.title}`} title="Reset to the default keys" onClick={() => save(applyRebind(overrides, command.id, command.keys, false))}>
-                          <RotateLeft />
-                        </Button>
+                        <Tip label="Reset to the default keys">
+                          <Button type="button" variant="ghost" size="icon-xs" className="animate-in text-muted-foreground/70 duration-150 ease-out fade-in-0" aria-label={`Reset ${command.title}`} onClick={() => save(applyRebind(overrides, command.id, command.keys, false))}>
+                            <RotateLeft />
+                          </Button>
+                        </Tip>
                       ) : null}
                       {command.fixed ? (
                         <span title="This key cannot be changed" className="flex h-7 items-center px-2 opacity-70">{keys ? <ShortcutKeys keys={keys} /> : null}</span>

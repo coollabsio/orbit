@@ -1,5 +1,6 @@
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
 import { statusPickerOptions } from '@/features/tasks/pickerLib'
@@ -34,13 +35,15 @@ export function StatusPicker({ task, statuses, size, align = 'start', className,
   return (
     <div className="flex shrink-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <DropdownMenu modal={false}>
-        <DropdownMenuTrigger
-          render={
-            <Button variant="ghost" size="icon-sm" className={cn('size-[22px]', className)} aria-label={`Status: ${status?.name ?? 'None'}`} title="Change status">
-              <TaskStatusIcon status={status} size={size} />
-            </Button>
-          }
-        />
+        <Tip label="Change status">
+          <DropdownMenuTrigger
+            render={
+              <Button variant="ghost" size="icon-sm" className={cn('size-[22px]', className)} aria-label={`Status: ${status?.name ?? 'None'}`}>
+                <TaskStatusIcon status={status} size={size} />
+              </Button>
+            }
+          />
+        </Tip>
         <DropdownMenuContent align={align} className="w-auto min-w-45">
           {options.map((option) => (
             <DropdownMenuItem

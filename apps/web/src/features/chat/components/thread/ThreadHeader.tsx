@@ -1,6 +1,7 @@
 import { ArrowLeft, Bell, BellOff, Maximize4, Minimize, MoreH, Xmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { Tip } from '@/components/common/Tip'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -12,22 +13,23 @@ function FollowButton({ rootId, following }: { rootId: string; following: boolea
   const { mutate: setFollow, isPending } = useSetThreadFollow()
   const label = following ? 'Unfollow thread' : 'Follow thread'
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={label}
-      aria-pressed={following}
-      title={following ? 'Following. You are notified of new replies.' : 'Follow to be notified of new replies'}
-      disabled={isPending}
-      onClick={() =>
-        setFollow(
-          { rootId, following: !following },
-          { onError: () => toast.error(following ? 'Could not unfollow the thread. Try again.' : 'Could not follow the thread. Try again.') },
-        )
-      }
-    >
-      {following ? <Bell className="size-5 text-primary" /> : <BellOff className="size-5" />}
-    </Button>
+    <Tip label={following ? 'Following. You are notified of new replies.' : 'Follow to be notified of new replies'} side="bottom">
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={label}
+        aria-pressed={following}
+        disabled={isPending}
+        onClick={() =>
+          setFollow(
+            { rootId, following: !following },
+            { onError: () => toast.error(following ? 'Could not unfollow the thread. Try again.' : 'Could not follow the thread. Try again.') },
+          )
+        }
+      >
+        {following ? <Bell className="size-5 text-primary" /> : <BellOff className="size-5" />}
+      </Button>
+    </Tip>
   )
 }
 
@@ -68,23 +70,26 @@ export function ThreadHeader({
           Thread
         </PaneTitle>
         {canResize ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Open thread in full view"
-            title="Open in full view"
-            onClick={() => {
-              onResize()
-              expandThread(rootId)
-            }}
-          >
-            <Maximize4 className="size-5" />
-          </Button>
+          <Tip label="Open in full view" side="bottom">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Open thread in full view"
+              onClick={() => {
+                onResize()
+                expandThread(rootId)
+              }}
+            >
+              <Maximize4 className="size-5" />
+            </Button>
+          </Tip>
         ) : null}
         <FollowButton rootId={rootId} following={following} />
-        <Button variant="ghost" size="icon" aria-label="Close thread" title="Close thread" onClick={onClose}>
-          <Xmark className="size-5" />
-        </Button>
+        <Tip label="Close thread" side="bottom">
+          <Button variant="ghost" size="icon" aria-label="Close thread" onClick={onClose}>
+            <Xmark className="size-5" />
+          </Button>
+        </Tip>
       </PaneHeader>
     )
   }
@@ -115,25 +120,28 @@ export function ThreadHeader({
         </BreadcrumbList>
       </Breadcrumb>
       {canResize ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="max-[899px]:hidden"
-          aria-label="Show thread in the side pane"
-          title="Show in the side pane"
-          onClick={() => {
-            onResize()
-            collapseThread(rootId)
-          }}
-        >
-          <Minimize className="size-5" />
-        </Button>
+        <Tip label="Show in the side pane" side="bottom">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="max-[899px]:hidden"
+            aria-label="Show thread in the side pane"
+            onClick={() => {
+              onResize()
+              collapseThread(rootId)
+            }}
+          >
+            <Minimize className="size-5" />
+          </Button>
+        </Tip>
       ) : null}
       <FollowButton rootId={rootId} following={following} />
       <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="Thread actions" title="Thread actions" />}>
-          <MoreH className="size-5" />
-        </DropdownMenuTrigger>
+        <Tip label="Thread actions" side="bottom">
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="Thread actions" />}>
+            <MoreH className="size-5" />
+          </DropdownMenuTrigger>
+        </Tip>
         <DropdownMenuContent align="end" className="w-auto min-w-44">
           <DropdownMenuItem
             onClick={() => {

@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { Layer, MoreH, Paperclip2, People, PinTack, SearchNormal, Xmark } from 'reicon-react'
 import { cn } from 'cn'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
@@ -102,32 +103,36 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
           <InputGroupInput key={query} ref={searchInput} name="q" type="search" defaultValue={query} placeholder="Search" aria-label={`Search in ${title}`} autoComplete="off" />
         </InputGroup>
       </form>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="hidden text-muted-foreground group-data-searching/header:inline-flex"
-        aria-label="Close search"
-        onClick={() => setSearching(false)}
-      >
-        <Xmark size={20} />
-      </Button>
-
-      <div className="flex shrink-0 items-center gap-2 group-data-searching/header:hidden max-[899px]:gap-0.5 @max-[620px]/header:gap-0.5">
+      <Tip label="Close search" side="bottom">
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="hidden text-muted-foreground @max-[620px]/header:inline-flex"
-          aria-label="Search"
-          onClick={() => {
-            setSearching(true)
-            // the field is displayed by this state change: focus it once it is
-            requestAnimationFrame(() => searchInput.current?.focus())
-          }}
+          className="hidden text-muted-foreground group-data-searching/header:inline-flex"
+          aria-label="Close search"
+          onClick={() => setSearching(false)}
         >
-          <SearchNormal size={20} />
+          <Xmark size={20} />
         </Button>
+      </Tip>
+
+      <div className="flex shrink-0 items-center gap-2 group-data-searching/header:hidden max-[899px]:gap-0.5 @max-[620px]/header:gap-0.5">
+        <Tip label="Search" side="bottom">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="hidden text-muted-foreground @max-[620px]/header:inline-flex"
+            aria-label="Search"
+            onClick={() => {
+              setSearching(true)
+              // the field is displayed by this state change: focus it once it is
+              requestAnimationFrame(() => searchInput.current?.focus())
+            }}
+          >
+            <SearchNormal size={20} />
+          </Button>
+        </Tip>
         <PaneToggle label="Threads" pressed={openPane === 'threads'} className="max-[899px]:hidden" onToggle={toggle('threads')}>
           <Layer size={20} />
         </PaneToggle>
@@ -141,9 +146,11 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
           <People size={20} />
         </PaneToggle>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label={`Options for ${title}`} />}>
-            <MoreH size={20} />
-          </DropdownMenuTrigger>
+          <Tip label="Options" side="bottom">
+            <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label={`Options for ${title}`} />}>
+              <MoreH size={20} />
+            </DropdownMenuTrigger>
+          </Tip>
           <DropdownMenuContent align="end" className="w-auto min-w-48">
             <DropdownMenuItem className="min-[900px]:hidden" onClick={toggle('threads')}>
               <Layer size={16} />

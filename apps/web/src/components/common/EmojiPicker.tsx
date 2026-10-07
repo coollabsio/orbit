@@ -2,6 +2,7 @@ import { EmojiPicker as Frimousse, type EmojiPickerListCategoryHeaderProps, type
 import { useContext, useState } from 'react'
 import { SearchNormal as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Spinner } from '@/components/ui/spinner'
 import { CustomEmojiContext } from '@/lib/customEmojiContext'
 import { EMOJIBASE_PATH, EMOJI_VERSION, normalizeEmoji } from '@/lib/twemoji'
@@ -112,9 +113,11 @@ export function EmojiPicker({ onPick, onRemove, custom = false }: { onPick: (emo
             const next = skinToneVariations[(index + 1) % skinToneVariations.length]
             if (!current || !next) return null
             return (
-              <Button type="button" variant="ghost" size="icon-sm" className="text-base" aria-label={`Skin tone: ${skinTone}. Change skin tone`} title="Change skin tone" onClick={() => setSkinTone(next.skinTone)}>
-                <Emoji value={current.emoji} />
-              </Button>
+              <Tip label="Change skin tone">
+                <Button type="button" variant="ghost" size="icon-sm" className="text-base" aria-label={`Skin tone: ${skinTone}. Change skin tone`} onClick={() => setSkinTone(next.skinTone)}>
+                  <Emoji value={current.emoji} />
+                </Button>
+              </Tip>
             )
           }}
         </Frimousse.SkinTone>

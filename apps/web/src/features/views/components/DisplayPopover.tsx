@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Tip } from '@/components/common/Tip'
 import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS, TIMELINE_PROPERTIES } from '../displayMeta'
 
@@ -169,17 +170,18 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
                   items={ORDER_OPTIONS.map((order) => ({ value: order, label: ORDER_LABEL[order] }))}
                   onChange={(order_by) => onChange({ order_by })}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  aria-label={ascending ? 'Ascending' : 'Descending'}
-                  disabled={manual}
-                  title={manual ? 'Manual order has no direction' : undefined}
-                  onClick={() => onChange({ order_direction: ascending ? 'desc' : 'asc' })}
-                >
-                  {ascending ? <ArrowUp /> : <ArrowDown />}
-                </Button>
+                <Tip label={manual ? 'Manual order has no direction' : ascending ? 'Ascending' : 'Descending'}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label={ascending ? 'Ascending' : 'Descending'}
+                    disabled={manual}
+                    onClick={() => onChange({ order_direction: ascending ? 'desc' : 'asc' })}
+                  >
+                    {ascending ? <ArrowUp /> : <ArrowDown />}
+                  </Button>
+                </Tip>
               </div>
             </Row>
           )}

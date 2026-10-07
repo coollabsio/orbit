@@ -1,6 +1,7 @@
 import { Star } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { useSetFavorite, type SavedView } from '../api/views'
 
 export interface FavoriteStarProps {
@@ -19,16 +20,18 @@ export function FavoriteStar({ workspaceId, view, named = false, className }: Fa
     ? named ? `Remove ${view.name} from favorites` : 'Remove from favorites'
     : named ? `Add ${view.name} to favorites` : 'Add to favorites'
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      aria-label={label}
-      aria-pressed={on}
-      className={cn('text-muted-foreground aria-pressed:text-primary', className)}
-      onClick={() => setFavorite.mutate({ viewId: view.id, favorite: !on })}
-    >
-      <Star weight={on ? 'Filled' : 'Outline'} />
-    </Button>
+    <Tip label={on ? 'Remove from favorites' : 'Add to favorites'}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        aria-pressed={on}
+        className={cn('text-muted-foreground aria-pressed:text-primary', className)}
+        onClick={() => setFavorite.mutate({ viewId: view.id, favorite: !on })}
+      >
+        <Star weight={on ? 'Filled' : 'Outline'} />
+      </Button>
+    </Tip>
   )
 }

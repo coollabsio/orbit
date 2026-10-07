@@ -1,5 +1,6 @@
 import type { ComponentProps } from 'react'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { cn } from 'cn'
 
 /**
@@ -23,15 +24,20 @@ export function TreeRowActions({ className, onClick, ...props }: ComponentProps<
   )
 }
 
-/** The small icon button of a docs tree row or section header (add, options); its hit area reaches past the 22px box. */
-export function TreeIconButton({ className, ...props }: ComponentProps<typeof Button>) {
+/**
+ * The small icon button of a docs tree row or section header (add, options); its hit area reaches past the 22px box.
+ * `tip` is its tooltip.
+ */
+export function TreeIconButton({ className, tip, ...props }: ComponentProps<typeof Button> & { tip?: string }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-sm"
-      className={cn('relative size-[22px] text-muted-foreground/70 after:absolute after:-inset-1', className)}
-      {...props}
-    />
+    <Tip label={tip}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className={cn('relative size-[22px] text-muted-foreground/70 after:absolute after:-inset-1', className)}
+        {...props}
+      />
+    </Tip>
   )
 }

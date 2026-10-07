@@ -5,6 +5,7 @@ import { Download, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import { formatSize, isImage, type Attachment } from '@/lib/attachmentLib'
 import { ImageViewer } from './ImageViewer'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { cn } from 'cn'
 
 const SINGLE_IMAGE_MAX_HEIGHT = 300
@@ -13,17 +14,18 @@ const SINGLE_IMAGE_MAX_HEIGHT = 300
     `after:` grows the 22px circle to a 30px hit area. */
 function RemoveAttachmentButton({ attachment, onRemove }: { attachment: Attachment; onRemove: (attachmentId: string) => void }) {
   return (
-    <Button
-      data-slot="attachment-remove"
-      variant="ghost"
-      size="icon-xs"
-      className="absolute top-1.5 right-1.5 z-[2] size-[22px] rounded-full bg-black/60 text-white transition-[opacity,background-color] duration-150 after:absolute after:-inset-1 hover:bg-destructive hover:text-white focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 dark:hover:bg-destructive"
-      aria-label={`Remove ${attachment.fileName}`}
-      title="Remove"
-      onClick={() => onRemove(attachment.id)}
-    >
-      <X className="size-3" />
-    </Button>
+    <Tip label="Remove">
+      <Button
+        data-slot="attachment-remove"
+        variant="ghost"
+        size="icon-xs"
+        className="absolute top-1.5 right-1.5 z-[2] size-[22px] rounded-full bg-black/60 text-white transition-[opacity,background-color] duration-150 after:absolute after:-inset-1 hover:bg-destructive hover:text-white focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 dark:hover:bg-destructive"
+        aria-label={`Remove ${attachment.fileName}`}
+        onClick={() => onRemove(attachment.id)}
+      >
+        <X className="size-3" />
+      </Button>
+    </Tip>
   )
 }
 

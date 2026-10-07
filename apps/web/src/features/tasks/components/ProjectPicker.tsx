@@ -1,5 +1,6 @@
 import { ColorDot } from '@/components/common/ColorDot'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { Project, Task } from '@/features/tasks/api/models'
 import { useMoveToProject } from '@/features/tasks/useMoveToProject'
@@ -18,13 +19,15 @@ export function ProjectPicker({ task, projects, className }: { task: Pick<Task, 
   return (
     <div className={className} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <DropdownMenu modal={false}>
-        <DropdownMenuTrigger
-          render={
-            <Button type="button" variant="link" className="h-auto min-w-0 p-0 text-[length:inherit] font-normal" aria-label={`Project: ${project?.name ?? 'none'}`} title="Move to project">
-              <ProjectChip project={project} className="hover:text-foreground" />
-            </Button>
-          }
-        />
+        <Tip label="Move to project">
+          <DropdownMenuTrigger
+            render={
+              <Button type="button" variant="link" className="h-auto min-w-0 p-0 text-[length:inherit] font-normal" aria-label={`Project: ${project?.name ?? 'none'}`}>
+                <ProjectChip project={project} className="hover:text-foreground" />
+              </Button>
+            }
+          />
+        </Tip>
         <DropdownMenuContent className="w-auto min-w-52">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Move to project</DropdownMenuLabel>

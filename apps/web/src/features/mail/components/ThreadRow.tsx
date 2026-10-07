@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Paperclip2 as Paperclip, Star } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { relativeTime } from '@/lib/format'
 import { toggleThreadStar } from '@/mock/actions'
@@ -61,16 +62,18 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
         <div className="truncate text-xs text-muted-foreground/70">{thread.snippet}</div>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-1 text-muted-foreground/70" onClick={(e) => e.stopPropagation()}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground/70"
-          aria-label={thread.starred ? 'Unstar' : 'Star'}
-          onClick={() => toggleThreadStar(thread.id)}
-        >
-          <Star className={cn('size-4', thread.starred && 'fill-[#fcd452] text-[#fcd452]')} />
-        </Button>
+        <Tip label={thread.starred ? 'Unstar' : 'Star'}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground/70"
+            aria-label={thread.starred ? 'Unstar' : 'Star'}
+            onClick={() => toggleThreadStar(thread.id)}
+          >
+            <Star className={cn('size-4', thread.starred && 'fill-[#fcd452] text-[#fcd452]')} />
+          </Button>
+        </Tip>
         {thread.hasAttachment ? <Paperclip className="size-3.5" /> : null}
       </div>
     </div>

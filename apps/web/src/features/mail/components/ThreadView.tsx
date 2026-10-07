@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { PaneTitle } from '@/components/common/Pane'
 import {
   DropdownMenu,
@@ -60,33 +61,39 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
         </Button>
         <PaneTitle className="min-w-0 shrink">{thread.subject}</PaneTitle>
         <span className="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground/70"
-          aria-label={thread.starred ? 'Unstar' : 'Star'}
-          onClick={() => toggleThreadStar(thread.id)}
-        >
-          <Star className={cn('size-4', thread.starred && 'fill-[#fcd452] text-[#fcd452]')} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground/70"
-          aria-label="Mark as unread"
-          onClick={() => {
-            setThreadRead(thread.id, false)
-            navigate(listUrl)
-          }}
-        >
-          <Mail className="size-4" />
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Move conversation" />}
+        <Tip label={thread.starred ? 'Unstar' : 'Star'} side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground/70"
+            aria-label={thread.starred ? 'Unstar' : 'Star'}
+            onClick={() => toggleThreadStar(thread.id)}
           >
-            <Folder className="size-4" />
-          </DropdownMenuTrigger>
+            <Star className={cn('size-4', thread.starred && 'fill-[#fcd452] text-[#fcd452]')} />
+          </Button>
+        </Tip>
+        <Tip label="Mark as unread" side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground/70"
+            aria-label="Mark as unread"
+            onClick={() => {
+              setThreadRead(thread.id, false)
+              navigate(listUrl)
+            }}
+          >
+            <Mail className="size-4" />
+          </Button>
+        </Tip>
+        <DropdownMenu>
+          <Tip label="Move conversation" side="bottom">
+            <DropdownMenuTrigger
+              render={<Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Move conversation" />}
+            >
+              <Folder className="size-4" />
+            </DropdownMenuTrigger>
+          </Tip>
           <DropdownMenuContent align="end" className="w-auto min-w-32">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Move to</DropdownMenuLabel>
@@ -104,28 +111,32 @@ export function ThreadView({ thread, folders, activeFolderId, currentUserEmail }
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground/70"
-          aria-label="Archive"
-          onClick={() => {
-            moveTo('f_archive')
-          }}
-        >
-          <Archive className="size-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground/70"
-          aria-label="Move to trash"
-          onClick={() => {
-            moveTo('f_trash')
-          }}
-        >
-          <Trash2 className="size-4" />
-        </Button>
+        <Tip label="Archive" side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground/70"
+            aria-label="Archive"
+            onClick={() => {
+              moveTo('f_archive')
+            }}
+          >
+            <Archive className="size-4" />
+          </Button>
+        </Tip>
+        <Tip label="Move to trash" side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground/70"
+            aria-label="Move to trash"
+            onClick={() => {
+              moveTo('f_trash')
+            }}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </Tip>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8">

@@ -1,6 +1,7 @@
 import { useState, type PointerEvent } from 'react'
 import { Edit, MoreH } from 'reicon-react'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useChatContext } from '@/features/chat/api/chatContext'
 import type { Conversation } from '@/features/chat/api/types'
@@ -83,19 +84,21 @@ export function ConversationRow({
       </ChatRowLink>
       <ChatRowEnd>
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Options for ${title}`}
-                className="text-muted-foreground transition-none hover-fine:opacity-0 hover-fine:group-focus-within/row:opacity-100 hover-fine:group-hover/row:opacity-100 hover-fine:aria-expanded:opacity-100"
-              />
-            }
-          >
-            <MoreH className="size-4" />
-          </DropdownMenuTrigger>
+          <Tip label="Options">
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Options for ${title}`}
+                  className="text-muted-foreground transition-none hover-fine:opacity-0 hover-fine:group-focus-within/row:opacity-100 hover-fine:group-hover/row:opacity-100 hover-fine:aria-expanded:opacity-100"
+                />
+              }
+            >
+              <MoreH className="size-4" />
+            </DropdownMenuTrigger>
+          </Tip>
           <DropdownMenuContent className="w-auto min-w-48">
             <ConversationMenuItems actions={actions} placement="row" onEdit={() => onEdit(conversation.id)} />
           </DropdownMenuContent>

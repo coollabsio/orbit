@@ -18,6 +18,7 @@ import { SidebarLeft as PanelLeft } from 'reicon-react'
 import { cn } from 'cn'
 import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
@@ -124,16 +125,18 @@ function Shell() {
           )}
         >
           <UserMenu collapsed={sidebarCollapsed} />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="shrink-0 text-muted-foreground/70"
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            onClick={toggleSidebar}
-          >
-            <PanelLeft className={cn('size-[17px]', sidebarCollapsed && 'rotate-180')} />
-          </Button>
+          <Tip label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} side={sidebarCollapsed ? 'right' : undefined}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 text-muted-foreground/70"
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              onClick={toggleSidebar}
+            >
+              <PanelLeft className={cn('size-[17px]', sidebarCollapsed && 'rotate-180')} />
+            </Button>
+          </Tip>
         </div>
       </aside>
 

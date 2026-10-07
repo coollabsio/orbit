@@ -10,6 +10,7 @@ import { AvatarStatusBadge } from '@/components/common/UserAvatar'
 import { presenceOf, usePresence } from '@/features/realtime/presence'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -296,26 +297,30 @@ export function MembersPage() {
                 </Select>
               </div>
               <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  aria-label="Previous page"
-                  disabled={currentPage <= 1}
-                  onClick={() => setPage(currentPage - 1)}
-                >
-                  <ArrowRight className="size-3.5 rotate-180" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  aria-label="Next page"
-                  disabled={currentPage >= lastPage}
-                  onClick={() => setPage(currentPage + 1)}
-                >
-                  <ArrowRight className="size-3.5" />
-                </Button>
+                <Tip label="Previous page">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Previous page"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage(currentPage - 1)}
+                  >
+                    <ArrowRight className="size-3.5 rotate-180" />
+                  </Button>
+                </Tip>
+                <Tip label="Next page">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Next page"
+                    disabled={currentPage >= lastPage}
+                    onClick={() => setPage(currentPage + 1)}
+                  >
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                </Tip>
               </div>
             </footer>
           </>
@@ -342,10 +347,12 @@ export function MembersPage() {
             description="Create a reusable invitation link or deliver it by email."
             actions={
               <>
-                <Button type="button" variant="outline" disabled title="Email delivery is not configured">
-                  <Bell className="size-3.5" />
-                  Send email
-                </Button>
+                <Tip label="Email delivery is not configured">
+                  <Button type="button" variant="outline" disabled>
+                    <Bell className="size-3.5" />
+                    Send email
+                  </Button>
+                </Tip>
                 <Button type="submit" disabled={createInvitation.isPending}>
                   <Plus className="size-3.5" />
                   Generate link

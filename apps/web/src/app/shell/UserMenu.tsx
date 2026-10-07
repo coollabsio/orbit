@@ -16,6 +16,7 @@ import { useTheme, type Theme } from '@/lib/themeContext'
 import { useCurrentUser, useLogout } from '@/features/auth/api'
 import { userColor } from '@/features/workspaces/api'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { Tip } from '@/components/common/Tip'
 import { CustomStatusDialog } from '@/features/realtime/components/CustomStatusDialog'
 import { CustomStatusText } from '@/features/realtime/components/CustomStatusText'
 import { StatusMenuItems } from '@/features/realtime/components/StatusMenuItems'
@@ -44,30 +45,31 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <>
       <DropdownMenu onOpenChange={(open) => { if (!open) setAppearanceOpen(false) }}>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="outline"
-              className={cn('h-auto min-h-[34px] w-full min-w-0 flex-1 justify-start gap-1.5 p-1.5 font-normal', collapsed && 'w-8 px-[5px]')}
-              title={userName}
-              aria-label={`Account menu for ${userName}`}
+        <Tip label={collapsed ? userName : undefined} side="right">
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="outline"
+                className={cn('h-auto min-h-[34px] w-full min-w-0 flex-1 justify-start gap-1.5 p-1.5 font-normal', collapsed && 'w-8 px-[5px]')}
+                aria-label={`Account menu for ${userName}`}
+              />
+            }
+          >
+            <UserAvatar
+              user={me ? { name: me.display_name || me.email, color: userColor(me.id), avatarUrl: me.avatar_url } : null}
+              name={userName}
+              size={20}
+              status={me ? status.presence : undefined}
+              className="shrink-0"
             />
-          }
-        >
-          <UserAvatar
-            user={me ? { name: me.display_name || me.email, color: userColor(me.id), avatarUrl: me.avatar_url } : null}
-            name={userName}
-            size={20}
-            status={me ? status.presence : undefined}
-            className="shrink-0"
-          />
-          {!collapsed ? (
-            <span className="flex min-w-0 flex-1 text-left">
-              <span className="min-w-0 truncate text-xs font-medium text-foreground">{userName}</span>
-            </span>
-          ) : null}
-          {!collapsed ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-aria-expanded/button:rotate-180" /> : null}
-        </DropdownMenuTrigger>
+            {!collapsed ? (
+              <span className="flex min-w-0 flex-1 text-left">
+                <span className="min-w-0 truncate text-xs font-medium text-foreground">{userName}</span>
+              </span>
+            ) : null}
+            {!collapsed ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-aria-expanded/button:rotate-180" /> : null}
+          </DropdownMenuTrigger>
+        </Tip>
         <DropdownMenuContent side="top" align="start" className="w-[220px] max-w-[calc(100vw-32px)]">
           <div className="min-w-0 px-2 py-1.5">
             <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>

@@ -4,6 +4,7 @@ import { ArrowUp, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { Textarea } from '@/components/ui/textarea'
 import type { User } from '@/features/workspaces/models'
 
@@ -89,11 +90,11 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
       <div className={cn('ml-auto flex items-center gap-1', !compact && 'p-1.5')}>
         <input ref={input} type="file" multiple hidden aria-label="Attach comment files" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
         {progress !== undefined && (pending || error) ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70 tabular-nums">Uploading {progress}%</span> : null}
-        <Button variant="ghost" size="icon-sm" type="button" className="text-muted-foreground" aria-label="Attach" title="Attach files" onClick={() => input.current?.click()}><Paperclip /></Button>
+        <Tip label="Attach files"><Button variant="ghost" size="icon-sm" type="button" className="text-muted-foreground" aria-label="Attach" onClick={() => input.current?.click()}><Paperclip /></Button></Tip>
         {error ? (
           <Button type="button" size="sm" disabled={pending} onClick={() => void send()}>Retry</Button>
         ) : (
-          <Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} title={sendTitle} disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}><ArrowUp /></Button>
+          <Tip label={sendTitle}><Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}><ArrowUp /></Button></Tip>
         )}
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Crown, People, User as UserIcon, UserAdd } from 'reicon-react'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -90,45 +91,48 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
                       key={person.id}
                       className="group flex items-center gap-1 rounded-md transition-colors duration-150 ease-out focus-within:bg-muted hover-fine:hover:bg-muted group-data-[online=false]/members:opacity-40 group-data-[online=false]/members:focus-within:opacity-100 group-data-[online=false]/members:hover-fine:hover:opacity-100"
                     >
-                      <Button
-                        variant="ghost"
-                        className="h-[42px] min-w-0 flex-1 justify-start gap-3 px-2 text-[15px] font-medium text-muted-foreground group-focus-within:text-foreground hover:bg-transparent hover-fine:group-hover:text-foreground dark:hover:bg-transparent"
-                        title={person.id === currentUserId ? 'Message yourself' : `Message ${person.name}`}
-                        onClick={() => message(person)}
-                      >
-                        <UserAvatar user={person} size={32} status={shown.status} />
-                        <span className="flex min-w-0 flex-col items-start leading-tight">
-                          <span className="flex max-w-full min-w-0 items-center gap-1.5">
-                            <span className="truncate">{person.name}</span>
-                            {person.role === 'Owner' ? (
-                              <>
-                                <Crown className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
-                                <span className="sr-only">Workspace owner</span>
-                              </>
+                      <Tip label={person.id === currentUserId ? 'Message yourself' : `Message ${person.name}`}>
+                        <Button
+                          variant="ghost"
+                          className="h-[42px] min-w-0 flex-1 justify-start gap-3 px-2 text-[15px] font-medium text-muted-foreground group-focus-within:text-foreground hover:bg-transparent hover-fine:group-hover:text-foreground dark:hover:bg-transparent"
+                          onClick={() => message(person)}
+                        >
+                          <UserAvatar user={person} size={32} status={shown.status} />
+                          <span className="flex min-w-0 flex-col items-start leading-tight">
+                            <span className="flex max-w-full min-w-0 items-center gap-1.5">
+                              <span className="truncate">{person.name}</span>
+                              {person.role === 'Owner' ? (
+                                <>
+                                  <Crown className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+                                  <span className="sr-only">Workspace owner</span>
+                                </>
+                              ) : null}
+                            </span>
+                            {shown.emoji !== null || shown.text !== null ? (
+                              <span className="max-w-full truncate text-xs font-normal text-muted-foreground">
+                                <CustomStatusText emoji={shown.emoji} text={shown.text} />
+                              </span>
                             ) : null}
                           </span>
-                          {shown.emoji !== null || shown.text !== null ? (
-                            <span className="max-w-full truncate text-xs font-normal text-muted-foreground">
-                              <CustomStatusText emoji={shown.emoji} text={shown.text} />
-                            </span>
-                          ) : null}
-                        </span>
-                      </Button>
-                      <ProfileTrigger
-                        userId={person.id}
-                        name={person.name}
-                        kind="plain"
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="mr-1 shrink-0 text-muted-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 hover-fine:group-focus-within:opacity-100"
-                            title="View profile"
-                          />
-                        }
-                      >
-                        <UserIcon aria-hidden="true" />
-                      </ProfileTrigger>
+                        </Button>
+                      </Tip>
+                      <Tip label="View profile">
+                        <ProfileTrigger
+                          userId={person.id}
+                          name={person.name}
+                          kind="plain"
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label="View profile"
+                              className="mr-1 shrink-0 text-muted-foreground focus-visible:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100 hover-fine:group-focus-within:opacity-100"
+                            />
+                          }
+                        >
+                          <UserIcon aria-hidden="true" />
+                        </ProfileTrigger>
+                      </Tip>
                       {canRemove && person.id !== currentUserId ? (
                         <Button
                           variant="ghost"
@@ -187,13 +191,15 @@ function AddPeople({ conversation, people }: { conversation: Conversation; peopl
         if (!next) setSelectedIds([])
       }}
     >
-      <PopoverTrigger
-        render={
-          <Button variant="ghost" size="icon" aria-label="Add people" title="Add people">
-            <UserAdd className="size-5" />
-          </Button>
-        }
-      />
+      <Tip label="Add people" side="bottom">
+        <PopoverTrigger
+          render={
+            <Button variant="ghost" size="icon" aria-label="Add people">
+              <UserAdd className="size-5" />
+            </Button>
+          }
+        />
+      </Tip>
       <PopoverContent align="end" className="w-80">
         <MemberPicker autoFocus label={`Add people to #${conversation.name}`} people={people} selectedIds={selectedIds} onChange={setSelectedIds} />
         <Button disabled={selectedIds.length === 0 || addMembers.isPending} onClick={submit}>

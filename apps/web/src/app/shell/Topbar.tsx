@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { Lock, Add as Plus, Menu, Moon, SearchNormal as Search, Setting2 as Settings, Sun } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { useTheme } from '@/lib/themeContext'
 import { useAppState } from '@/mock/store'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -177,16 +178,22 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
         {status}
       </nav>
       <div className="flex shrink-0 items-center gap-1.5 group-data-[root=home]/topbar:gap-0.5 group-data-[root=settings]/topbar:gap-2">
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onOpenPalette} aria-label="Search">
-          <Search className={routeRoot === 'settings' ? 'size-[15px]' : 'size-4'} />
-        </Button>
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={toggleTheme} aria-label="Toggle theme">
-          {theme === 'dark' ? <Sun className="size-[15px]" /> : <Moon className="size-[15px]" />}
-        </Button>
-        {routeRoot === 'home' ? (
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/settings')} aria-label="Settings">
-            <Settings className="size-[15px]" />
+        <Tip label="Search" side="bottom">
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onOpenPalette} aria-label="Search">
+            <Search className={routeRoot === 'settings' ? 'size-[15px]' : 'size-4'} />
           </Button>
+        </Tip>
+        <Tip label="Toggle theme" side="bottom">
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={toggleTheme} aria-label="Toggle theme">
+            {theme === 'dark' ? <Sun className="size-[15px]" /> : <Moon className="size-[15px]" />}
+          </Button>
+        </Tip>
+        {routeRoot === 'home' ? (
+          <Tip label="Settings" side="bottom">
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/settings')} aria-label="Settings">
+              <Settings className="size-[15px]" />
+            </Button>
+          </Tip>
         ) : null}
         {routeRoot !== 'home' && routeRoot !== 'settings' && routeRoot !== 'profile' ? (
           <DropdownMenu>

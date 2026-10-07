@@ -7,6 +7,7 @@ import { copyImage } from '@/lib/copyImage'
 import type { Attachment } from '@/lib/attachmentLib'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Tip } from '@/components/common/Tip'
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 4
@@ -27,15 +28,17 @@ function touchDistance(touches: TouchEvent['touches']): number {
 }
 
 /** A light-on-dark control in the viewer's top bar. */
-function ViewerBarButton({ className, size = 'icon-lg', ...props }: ComponentProps<typeof Button>) {
+function ViewerBarButton({ className, size = 'icon-lg', title, ...props }: ComponentProps<typeof Button>) {
   return (
-    <Button
-      data-slot="image-viewer-button"
-      variant="ghost"
-      size={size}
-      className={cn('bg-white/10 text-white hover:bg-white/15 hover:text-white dark:hover:bg-white/15', className)}
-      {...props}
-    />
+    <Tip label={title} side="bottom">
+      <Button
+        data-slot="image-viewer-button"
+        variant="ghost"
+        size={size}
+        className={cn('bg-white/10 text-white hover:bg-white/15 hover:text-white dark:hover:bg-white/15', className)}
+        {...props}
+      />
+    </Tip>
   )
 }
 
@@ -120,17 +123,18 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
             }}>
               <Copy className="size-4" />
             </ViewerBarButton>
-            <a
-              data-slot="image-viewer-button"
-              href={attachment.url}
-              download={attachment.fileName}
-              className={cn(buttonVariants({ variant: 'ghost', size: 'icon-lg' }), 'bg-white/10 text-white hover:bg-white/15 hover:text-white dark:hover:bg-white/15')}
-              title="Download image"
-              aria-label="Download image"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Download className="size-4" />
-            </a>
+            <Tip label="Download image" side="bottom">
+              <a
+                data-slot="image-viewer-button"
+                href={attachment.url}
+                download={attachment.fileName}
+                className={cn(buttonVariants({ variant: 'ghost', size: 'icon-lg' }), 'bg-white/10 text-white hover:bg-white/15 hover:text-white dark:hover:bg-white/15')}
+                aria-label="Download image"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Download className="size-4" />
+              </a>
+            </Tip>
             <ViewerBarButton className="text-lg font-bold" title="Zoom out" aria-label="Zoom out" onClick={() => setZoom(zoom - 0.25)}>
               −
             </ViewerBarButton>

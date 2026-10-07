@@ -14,6 +14,7 @@ import type { CustomStickerRecord } from '@/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { MentionPopover } from '@/components/common/MentionPopover'
+import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -261,18 +262,19 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
             <span className="min-w-0 flex-1 truncate">
               Replying to <span className="font-medium text-foreground">{people.byId.get(replyTo.authorId)?.name ?? 'Unknown'}</span>
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Cancel reply"
-              title="Cancel reply"
-              onClick={() => {
-                onClearReply?.()
-                input.current?.focus()
-              }}
-            >
-              <Xmark className="size-5" />
-            </Button>
+            <Tip label="Cancel reply">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Cancel reply"
+                onClick={() => {
+                  onClearReply?.()
+                  input.current?.focus()
+                }}
+              >
+                <Xmark className="size-5" />
+              </Button>
+            </Tip>
           </div>
         ) : null}
         <div
@@ -316,13 +318,17 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
                 event.target.value = ''
               }}
             />
-            <Button variant="ghost" size="icon" aria-label="Attach files" title="Attach files" onClick={() => filePicker.current?.click()}>
-              <Paperclip2 className="size-5" />
-            </Button>
+            <Tip label="Attach files">
+              <Button variant="ghost" size="icon" aria-label="Attach files" onClick={() => filePicker.current?.click()}>
+                <Paperclip2 className="size-5" />
+              </Button>
+            </Tip>
             <Popover open={emojiOpen} onOpenChange={setEmojiOpen} modal={false}>
-              <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Add emoji" title="Add emoji" />}>
-                <SmileCircle className="size-5" />
-              </PopoverTrigger>
+              <Tip label="Add emoji">
+                <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Add emoji" />}>
+                  <SmileCircle className="size-5" />
+                </PopoverTrigger>
+              </Tip>
               <PopoverContent side="top" align="start" finalFocus={input} className="w-auto gap-0 p-0">
                 <EmojiPicker
                   custom
@@ -335,9 +341,11 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
             </Popover>
             {stickers.length > 0 ? (
               <Popover open={stickerOpen} onOpenChange={setStickerOpen} modal={false}>
-                <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Send a sticker" title="Send a sticker" />}>
-                  <Sticker className="size-5" />
-                </PopoverTrigger>
+                <Tip label="Send a sticker">
+                  <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Send a sticker" />}>
+                    <Sticker className="size-5" />
+                  </PopoverTrigger>
+                </Tip>
                 {stickerOpen ? (
                   <PopoverContent side="top" align="start" finalFocus={input} className="w-auto gap-0 p-0">
                     <StickerPicker stickers={stickers} onPick={sendSticker} />
@@ -345,9 +353,11 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
                 ) : null}
               </Popover>
             ) : null}
-            <Button variant="ghost" size="icon" aria-label="Mention someone" title="Mention someone" onClick={mentionSomeone}>
-              <At className="size-5" />
-            </Button>
+            <Tip label="Mention someone">
+              <Button variant="ghost" size="icon" aria-label="Mention someone" onClick={mentionSomeone}>
+                <At className="size-5" />
+              </Button>
+            </Tip>
             <span className="flex-1" />
             {remaining <= COUNTER_FROM ? (
               <span
@@ -359,16 +369,17 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
                 {remaining}
               </span>
             ) : null}
-            <Button
-              variant={canSend ? 'default' : 'ghost'}
-              size="icon"
-              aria-label="Send message"
-              title="Send message"
-              disabled={!canSend}
-              onClick={() => void submit()}
-            >
-              <Send2 className="size-5" />
-            </Button>
+            <Tip label="Send message">
+              <Button
+                variant={canSend ? 'default' : 'ghost'}
+                size="icon"
+                aria-label="Send message"
+                disabled={!canSend}
+                onClick={() => void submit()}
+              >
+                <Send2 className="size-5" />
+              </Button>
+            </Tip>
           </div>
         </div>
       </div>

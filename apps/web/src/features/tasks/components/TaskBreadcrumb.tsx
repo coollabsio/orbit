@@ -1,6 +1,7 @@
 import { MoreH } from 'reicon-react'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
+import { Tip } from '@/components/common/Tip'
 import { ColorDot } from '@/components/common/ColorDot'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { refIdentifier, type Project, type TaskKeyRef } from '@/features/tasks/api/models'
@@ -37,13 +38,15 @@ export function TaskBreadcrumb({ project, ancestors, identifier, onOpen, onOpenP
         {project ? (
           <>
             <BreadcrumbItem className="min-w-0">
-              <BreadcrumbLink
-                render={<Button type="button" variant="link" title={`Open ${project.name}`} onClick={() => onOpenProject?.(project.id)} />}
-                className="h-auto min-w-0 gap-1.5 p-0 text-xs font-medium text-foreground"
-              >
-                <ColorDot color={project.color} />
-                <span className="max-w-48 truncate max-[899px]:max-w-28">{project.name}</span>
-              </BreadcrumbLink>
+              <Tip label={`Open ${project.name}`} side="bottom">
+                <BreadcrumbLink
+                  render={<Button type="button" variant="link" onClick={() => onOpenProject?.(project.id)} />}
+                  className="h-auto min-w-0 gap-1.5 p-0 text-xs font-medium text-foreground"
+                >
+                  <ColorDot color={project.color} />
+                  <span className="max-w-48 truncate max-[899px]:max-w-28">{project.name}</span>
+                </BreadcrumbLink>
+              </Tip>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
           </>
@@ -53,11 +56,13 @@ export function TaskBreadcrumb({ project, ancestors, identifier, onOpen, onOpenP
           <>
             <BreadcrumbItem>
               <DropdownMenu modal={false}>
-                <DropdownMenuTrigger render={
-                  <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground" aria-label={`Show ${hidden.length} more parents`}>
-                    <MoreH />
-                  </Button>
-                } />
+                <Tip label={`Show ${hidden.length} more parents`} side="bottom">
+                  <DropdownMenuTrigger render={
+                    <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground" aria-label={`Show ${hidden.length} more parents`}>
+                      <MoreH />
+                    </Button>
+                  } />
+                </Tip>
                 <DropdownMenuContent align="start" className="w-auto max-w-80 min-w-55">
                   {hidden.map((ref) => (
                     <DropdownMenuItem key={ref.id} onClick={() => onOpen(ref.id)}>

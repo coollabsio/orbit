@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ColorSwatch } from '@/components/common/ColorSwatch'
+import { Tip } from '@/components/common/Tip'
 import { useCreateView, useUpdateView, type SavedView } from '../api/views'
 import { useOpenKey } from '../useOpenKey'
 import { defaultViewState, type ViewState } from '../viewState'
@@ -121,13 +122,15 @@ function SaveViewForm({ mode, workspaceId, state, view, onSaved, onClose }: Save
         <FieldLabel htmlFor={nameId}>Name</FieldLabel>
         <div className="flex items-center gap-2">
           <Popover open={pickerOpen} onOpenChange={setPickerOpen} modal={false}>
-            <PopoverTrigger
-              render={
-                <Button type="button" variant="outline" size="icon" aria-label="Choose icon and color">
-                  <ViewIcon icon={icon} color={color} />
-                </Button>
-              }
-            />
+            <Tip label="Icon and color">
+              <PopoverTrigger
+                render={
+                  <Button type="button" variant="outline" size="icon" aria-label="Choose icon and color">
+                    <ViewIcon icon={icon} color={color} />
+                  </Button>
+                }
+              />
+            </Tip>
             {pickerOpen ? (
               <PopoverContent align="start" className="w-64 gap-3 p-3">
                 <ToggleGroup

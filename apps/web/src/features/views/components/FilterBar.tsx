@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tip } from '@/components/common/Tip'
 import {
   FIELD_META,
   FIELD_ORDER,
@@ -37,10 +38,12 @@ interface AddFilterPopoverProps {
   onOpenChange: (open: boolean) => void
   instant: boolean
   trigger: ReactElement
+  /** Tooltip of the trigger. */
+  tip?: string
 }
 
 /** Field list → value picker in one popover. A new condition joins the tree once it is complete. */
-function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onOpenChange, instant, trigger }: AddFilterPopoverProps) {
+function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onOpenChange, instant, trigger, tip }: AddFilterPopoverProps) {
   const [draft, setDraft] = useState<Condition | null>(null)
   // the tree before the draft joined it; undoing the draft restores it exactly (appendCondition may wrap the root)
   const [base, setBase] = useState<FilterGroup | null>(null)
@@ -70,7 +73,9 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
   }
   return (
     <Popover open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())} modal={false}>
-      <PopoverTrigger render={trigger} />
+      <Tip label={tip}>
+        <PopoverTrigger render={trigger} />
+      </Tip>
       <PopoverContent align="start" {...(instant && { 'data-instant': '' })} className="w-auto gap-0 p-0 data-instant:animate-none">
         {draft ? (
           <FilterValuePicker condition={draft} options={options} onChange={change} onDone={close} />
@@ -219,6 +224,7 @@ export function FilterBar({ filter, options, onChange, presetLabel = null, onOpe
         open={adding}
         instant={false}
         onOpenChange={setAdding}
+        tip={full ? undefined : 'Add filter'}
         trigger={
           <Button type="button" variant="ghost" size="icon-xs" aria-label="Add filter" disabled={full} title={full ? FULL_TITLE : undefined} className="text-muted-foreground">
             <Plus />
