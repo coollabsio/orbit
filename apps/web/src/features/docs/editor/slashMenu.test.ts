@@ -114,6 +114,19 @@ describe('getPageSlashMenuItems', () => {
     expect(e.document[0].props).toEqual({ emoji: '💡', backgroundColor: 'gray', textColor: 'default' })
   })
 
+  test('offers Mermaid diagram right after Code Block; it inserts a code block with the language mermaid', () => {
+    const e = editor()
+    const titles = getPageSlashMenuItems(e, actions, '').map((item) => item.title)
+    expect(titles.indexOf('Mermaid diagram')).toBe(titles.indexOf('Code Block') + 1)
+    expect(getPageSlashMenuItems(e, actions, 'diagram')[0].title).toBe('Mermaid diagram')
+
+    e.setTextCursorPosition(e.document[0].id)
+    getPageSlashMenuItems(e, actions, 'mermaid')[0].onItemClick()
+    expect(e.document[0].type).toBe('codeBlock')
+    expect(e.document[0].props).toEqual({ language: 'mermaid' })
+    expect(e.document[0].content).toEqual([{ type: 'text', text: 'flowchart TD\n  A[Start] --> B[End]', styles: {} }])
+  })
+
   test('a title match is selected first, before alias-only matches ("/sub" → Sub-page)', () => {
     const items = getPageSlashMenuItems(editor(), actions, 'sub')
     expect(items[0].title).toBe('Sub-page')

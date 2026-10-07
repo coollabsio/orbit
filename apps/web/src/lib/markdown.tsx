@@ -2,12 +2,14 @@
 // block parser (fenced code, headings, quotes, lists) -> inline markdown ->
 // mentionify -> linkify. Custom regex parser, zero dependencies. Shared by
 // message content and embed cards.
+import { Fragment } from 'react'
 import { appNavigate } from './navigateBridge'
 import { CodeBlock } from '@/components/common/CodeBlock'
 import { Emoji } from '@/components/common/Emoji'
 import { InternalLink } from '@/components/common/InternalLink'
 import { MarkdownText } from '@/components/common/MarkdownText'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { Spoiler } from '@/components/common/Spoiler'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from './utils'
 import { InternalLinkContext } from './internalLinkContext'
@@ -188,14 +190,21 @@ export const EMOJI_SHORTCODES: Record<string, string> = {
 }
 
 /**
+ * `chat`: the rules of Discord, where `__text__` is underline and `||text||` is a spoiler. Without it `__text__` is
+ * bold, as in standard markdown, and `||` is text (`a || b` in a task is code, not a secret).
+ */
+export type MarkdownOptions = { chat?: boolean }
+
+/**
  * Inline markdown. A backslash before an ASCII punctuation character is an escape, as in standard markdown: the
  * character shows without the backslash and starts nothing (`\*not bold\*`, `\:warning:`). Before a letter, a digit
  * or a space the backslash stays (`C:\Users`), and inline code keeps every backslash. A URL in angle brackets
  * (`<https://…>`) is the link alone, as in Discord: the brackets do not show and the host draws no chip or card for it.
+ * `||text||` is a spoiler in chat and `***text***` is bold italic. A style can hold another one (`**bold with *italic* inside**`).
  */
-export function renderMarkdownText(text: string, keyPrefix: string, mentionTokens: MentionToken[] = []): React.ReactNode[] {
+export function renderMarkdownText(text: string, keyPrefix: string, mentionTokens: MentionToken[] = [], options: MarkdownOptions = {}): React.ReactNode[] {
   const tokenRegex =
-    /(\\[!-/:-@[-`{-~]|<https?:\/\/[^\s<>]+>|<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\*\*[^*]+?\*\*|__[^_]+?__|~~[^~]+?~~|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
+    /(\\[!-/:-@[-`{-~]|<https?:\/\/[^\s<>]+>|<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\|\|.+?\|\||\*\*\*[^*]+?\*\*\*|\*\*(?!\*)(?:[^*]|\*(?!\*))+?\*\*|__(?!_)(?:[^_]|_(?!_))+?__|~~[^~]+?~~|\*[^*\s](?:[^*]|\*\*[^*]+?\*\*)*?\*(?!\*)|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let tokenIndex = 0
@@ -240,7 +249,7 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
         parts.push(
           <a key={key} href={safeHref(linkMatch[2])} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
             {/* the label is already a link: the host puts no link of its own inside it */}
-            <MarkdownTextContext value={null}>{renderMarkdownText(linkMatch[1], `${key}-link`, mentionTokens)}</MarkdownTextContext>
+            <MarkdownTextContext value={null}>{renderMarkdownText(linkMatch[1], `${key}-link`, mentionTokens, options)}</MarkdownTextContext>
           </a>,
         )
       } else {
@@ -255,12 +264,19 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
     } else if (token.startsWith(':')) {
       // a custom emoji of the workspace shows its image; any other name stays text
       parts.push(EMOJI_SHORTCODES[token.slice(1, -1)] || <Emoji key={key} value={token} />)
+    } else if (token.startsWith('||')) {
+      const inner = renderMarkdownText(token.slice(2, -2), `${key}-spoiler`, mentionTokens, options)
+      parts.push(options.chat ? <Spoiler key={key}>{inner}</Spoiler> : <Fragment key={key}>||{inner}||</Fragment>)
+    } else if (token.startsWith('***')) {
+      parts.push(<strong key={key}><em>{renderMarkdownText(token.slice(3, -3), `${key}-strong-em`, mentionTokens, options)}</em></strong>)
+    } else if (token.startsWith('__') && options.chat) {
+      parts.push(<u key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-u`, mentionTokens, options)}</u>)
     } else if (token.startsWith('**') || token.startsWith('__')) {
-      parts.push(<strong key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-strong`, mentionTokens)}</strong>)
+      parts.push(<strong key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-strong`, mentionTokens, options)}</strong>)
     } else if (token.startsWith('~~')) {
-      parts.push(<del key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-del`, mentionTokens)}</del>)
+      parts.push(<del key={key}>{renderMarkdownText(token.slice(2, -2), `${key}-del`, mentionTokens, options)}</del>)
     } else {
-      parts.push(<em key={key}>{renderMarkdownText(token.slice(1, -1), `${key}-em`, mentionTokens)}</em>)
+      parts.push(<em key={key}>{renderMarkdownText(token.slice(1, -1), `${key}-em`, mentionTokens, options)}</em>)
     }
 
     lastIndex = match.index + token.length
@@ -288,7 +304,7 @@ function skipListBlank(lines: string[], index: number, minIndent: number): numbe
   return next > index && (listItem(lines[next] || '')?.indent ?? -1) >= minIndent ? next : index
 }
 
-function renderList(lines: string[], start: number, keyPrefix: string, mentionTokens: MentionToken[]): { node: React.ReactNode; next: number } {
+function renderList(lines: string[], start: number, keyPrefix: string, mentionTokens: MentionToken[], options: MarkdownOptions): { node: React.ReactNode; next: number } {
   const first = listItem(lines[start])!
   const items: React.ReactNode[] = []
   let i = start
@@ -302,7 +318,7 @@ function renderList(lines: string[], start: number, keyPrefix: string, mentionTo
     while (i < lines.length) {
       i = skipListBlank(lines, i, first.indent + 1)
       if ((listItem(lines[i])?.indent ?? -1) <= first.indent) break
-      const child = renderList(lines, i, keyPrefix, mentionTokens)
+      const child = renderList(lines, i, keyPrefix, mentionTokens, options)
       nested.push(child.node)
       i = child.next
     }
@@ -312,9 +328,9 @@ function renderList(lines: string[], start: number, keyPrefix: string, mentionTo
         {checklist ? (
           <span className="flex items-start gap-2">
             <Checkbox checked={checklist[1].toLowerCase() === 'x'} disabled aria-label={checklist[2]} className="pointer-events-none mt-0.5" />
-            <span>{renderMarkdownText(checklist[2], `${keyPrefix}-item-${itemIndex}`, mentionTokens)}</span>
+            <span>{renderMarkdownText(checklist[2], `${keyPrefix}-item-${itemIndex}`, mentionTokens, options)}</span>
           </span>
-        ) : renderMarkdownText(item.content, `${keyPrefix}-item-${itemIndex}`, mentionTokens)}
+        ) : renderMarkdownText(item.content, `${keyPrefix}-item-${itemIndex}`, mentionTokens, options)}
         {nested}
       </li>,
     )
@@ -331,7 +347,7 @@ function tableCells(line: string): string[] | null {
   return line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, '|'))
 }
 
-export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTokens: MentionToken[] = []): React.ReactNode[] {
+export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTokens: MentionToken[] = [], options: MarkdownOptions = {}): React.ReactNode[] {
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   const blocks: React.ReactNode[] = []
   let i = 0
@@ -372,7 +388,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
           className="mt-1 text-base leading-6 font-bold text-foreground data-[level=1]:text-2xl data-[level=1]:leading-8 data-[level=2]:text-xl data-[level=2]:leading-7 data-[level=3]:text-lg"
           data-level={level}
         >
-          {renderMarkdownText(headingMatch[2], `${keyPrefix}-heading-${i}`, mentionTokens)}
+          {renderMarkdownText(headingMatch[2], `${keyPrefix}-heading-${i}`, mentionTokens, options)}
         </div>,
       )
       i += 1
@@ -403,8 +419,8 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
       blocks.push(
         <div key={`${keyPrefix}-table-${start}`} className="my-2 max-w-full overflow-x-auto">
           <table className="min-w-full border-collapse text-[13px]">
-            <thead><tr>{headers.map((cell, index) => <th key={index} data-align={align(index)} className="border-b border-border px-3 py-1.5 text-left font-semibold data-[align=center]:text-center data-[align=right]:text-right">{renderMarkdownText(cell, `${keyPrefix}-th-${start}-${index}`, mentionTokens)}</th>)}</tr></thead>
-            <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{headers.map((_, index) => <td key={index} data-align={align(index)} className="border-b border-border/50 px-3 py-1.5 text-left align-top data-[align=center]:text-center data-[align=right]:text-right">{renderMarkdownText(row[index] || '', `${keyPrefix}-td-${start}-${rowIndex}-${index}`, mentionTokens)}</td>)}</tr>)}</tbody>
+            <thead><tr>{headers.map((cell, index) => <th key={index} data-align={align(index)} className="border-b border-border px-3 py-1.5 text-left font-semibold data-[align=center]:text-center data-[align=right]:text-right">{renderMarkdownText(cell, `${keyPrefix}-th-${start}-${index}`, mentionTokens, options)}</th>)}</tr></thead>
+            <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{headers.map((_, index) => <td key={index} data-align={align(index)} className="border-b border-border/50 px-3 py-1.5 text-left align-top data-[align=center]:text-center data-[align=right]:text-right">{renderMarkdownText(row[index] || '', `${keyPrefix}-td-${start}-${rowIndex}-${index}`, mentionTokens, options)}</td>)}</tr>)}</tbody>
           </table>
         </div>,
       )
@@ -417,8 +433,14 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
       continue
     }
 
-    if (/^>\s?(.*)$/.test(line)) {
+    const restQuote = line.match(/^>>>(?: (.*))?$/)
+    if (restQuote || /^>\s?(.*)$/.test(line)) {
       const quoteLines: string[] = []
+      if (restQuote) {
+        // `>>>` quotes all that is left, as in Discord
+        quoteLines.push(...(restQuote[1] === undefined ? [] : [restQuote[1]]), ...lines.slice(i + 1))
+        i = lines.length
+      }
       while (i < lines.length) {
         const itemMatch = lines[i].match(/^>\s?(.*)$/)
         if (!itemMatch) break
@@ -429,7 +451,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
         <blockquote key={`${keyPrefix}-quote-${i}`} className="border-l-4 border-muted-foreground/40 pl-3 text-foreground/85">
           {quoteLines.map((quoteLine, index) => (
             <p key={`${keyPrefix}-quote-${i}-${index}`} className="min-h-5">
-              {renderMarkdownText(quoteLine, `${keyPrefix}-quote-${i}-${index}`, mentionTokens)}
+              {renderMarkdownText(quoteLine, `${keyPrefix}-quote-${i}-${index}`, mentionTokens, options)}
             </p>
           ))}
         </blockquote>,
@@ -437,8 +459,20 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
       continue
     }
 
+    // before the list rule: `-# small` would be the list item "# small"
+    const subtextMatch = line.match(/^-# (.+)$/)
+    if (subtextMatch) {
+      blocks.push(
+        <p key={`${keyPrefix}-subtext-${i}`} data-slot="subtext" className="text-xs text-muted-foreground">
+          {renderMarkdownText(subtextMatch[1], `${keyPrefix}-subtext-${i}`, mentionTokens, options)}
+        </p>,
+      )
+      i += 1
+      continue
+    }
+
     if (listItem(line)) {
-      const list = renderList(lines, i, keyPrefix, mentionTokens)
+      const list = renderList(lines, i, keyPrefix, mentionTokens, options)
       blocks.push(list.node)
       i = list.next
       continue
@@ -446,7 +480,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
 
     blocks.push(
       <p key={`${keyPrefix}-p-${i}`} className="min-h-5">
-        {renderMarkdownText(line, `${keyPrefix}-p-${i}`, mentionTokens)}
+        {renderMarkdownText(line, `${keyPrefix}-p-${i}`, mentionTokens, options)}
       </p>,
     )
     i += 1

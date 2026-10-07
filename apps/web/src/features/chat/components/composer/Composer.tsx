@@ -31,6 +31,7 @@ import { quoteOf } from '../../lib/quote'
 import { useCoarsePointer } from '../messages/environment'
 import { conversationTitle, useChatPeople } from '../messages/people'
 import { ComposerInput } from './ComposerInput'
+import { completeCodeFence, inOpenCodeBlock } from './composerSegments'
 import { ComposerUploads } from './ComposerUploads'
 import { EmojiSuggestions } from './EmojiSuggestions'
 import { StickerPicker } from './StickerPicker'
@@ -71,7 +72,7 @@ interface ComposerProps {
 /**
  * The message box of a conversation or a thread: markdown source, `@`, `#` and `:emoji` autocomplete (mentions and
  * emoji show in the field as the reader will get them), files, a draft kept
- * in `localStorage`, and the typing signal. `Enter` sends (a new line on a touch screen), `Shift+Enter` is a new line.
+ * in `localStorage`, and the typing signal. `Enter` sends (a new line on a touch screen, and in an open code block), `Shift+Enter` is a new line.
  */
 export function Composer({ ref, conversation, threadRootId = null, replyTo = null, onClearReply, autoFocus = false, onEditLast, onFocusList, onSent }: ComposerProps) {
   const { workspaceId, currentUserId } = useChatContext()
@@ -202,6 +203,13 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
       requestAnimationFrame(() => input.current?.setSelectionRange(emoticon.cursor, emoticon.cursor))
       return
     }
+    // ``` typed in full gets its closing fence
+    const fence = value.length === text.length + 1 ? completeCodeFence(value, selectionStart) : null
+    if (fence) {
+      setText(fence.text)
+      requestAnimationFrame(() => input.current?.setSelectionRange(fence.cursor, fence.cursor))
+      return
+    }
     setText(value)
     mention.update(value, selectionStart)
     emoji.update(value, selectionStart)
@@ -221,6 +229,8 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
       return
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !coarse) {
+      // In a code block that is still open, `Enter` is a new line of code.
+      if (inOpenCodeBlock(event.currentTarget.value, event.currentTarget.selectionStart)) return
       event.preventDefault()
       void submit()
       return

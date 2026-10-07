@@ -1,6 +1,7 @@
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, type DefaultReactSuggestionItem } from '@blocknote/react'
-import { DocumentText, LampOn, Link2 } from 'reicon-react'
+import { DocumentText, Hierarchy, LampOn, Link2 } from 'reicon-react'
+import { MERMAID_LANGUAGE } from '@/lib/codeLanguages'
 import { CALLOUT_DEFAULT_BACKGROUND } from './CalloutBlock'
 import type { PageEditorInstance } from './schema'
 
@@ -50,6 +51,24 @@ export function calloutSlashItem(editor: PageEditorInstance): DefaultReactSugges
   }
 }
 
+/** "Mermaid diagram" (Basic blocks): a code block with the language `mermaid`, which shows its diagram below the code. */
+export function mermaidSlashItem(editor: PageEditorInstance): DefaultReactSuggestionItem {
+  return {
+    title: 'Mermaid diagram',
+    subtext: 'Draw a diagram from text',
+    aliases: ['mermaid', 'diagram', 'flowchart', 'chart', 'graph', 'sequence'],
+    group: PAGE_ITEMS_GROUP,
+    icon: <Hierarchy className="size-[18px]" />,
+    onItemClick: () => {
+      insertOrUpdateBlockForSlashMenu(editor, {
+        type: 'codeBlock',
+        props: { language: MERMAID_LANGUAGE },
+        content: 'flowchart TD\n  A[Start] --> B[End]',
+      })
+    },
+  }
+}
+
 /** Inserts `item` right after the default item with `key` (e.g. Callout after Quote), else at the group start. */
 export function insertAfterKey<T extends { group?: string; key?: string }>(items: readonly T[], key: string, item: T): T[] {
   const index = items.findIndex((candidate) => candidate.key === key && candidate.group === item.group)
@@ -88,11 +107,11 @@ export function preferTitleMatches<T extends { title: string; group?: string }>(
 
 /**
  * Slash menu items for the page editor: BlockNote's defaults (already limited to block types present in the
- * schema, so video/audio are gone while Image and File stay), Callout after Quote, plus the page items,
+ * schema, so video/audio are gone while Image and File stay), Callout after Quote, Mermaid after Code Block, plus the page items,
  * filtered by the typed query.
  */
 export function getPageSlashMenuItems(editor: PageEditorInstance, actions: PageSlashActions, query: string): DefaultReactSuggestionItem[] {
   const defaults = insertAfterKey(getDefaultReactSlashMenuItems(editor), 'quote', calloutSlashItem(editor))
-  const merged = mergeSlashItems(defaults, pageSlashItems(actions))
+  const merged = mergeSlashItems(insertAfterKey(defaults, 'code_block', mermaidSlashItem(editor)), pageSlashItems(actions))
   return preferTitleMatches(filterSuggestionItems(merged, query), query)
 }

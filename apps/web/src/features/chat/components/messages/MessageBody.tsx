@@ -93,7 +93,7 @@ export function MessageBody({ message }: { message: Message }) {
           className="leading-[1.5] wrap-anywhere text-foreground/85 data-collapsed:max-h-[30em] data-collapsed:overflow-hidden data-edited:[&>p:nth-last-child(2)]:inline data-jumbo:[&_[data-slot=emoji]]:size-12 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_pre_code]:whitespace-pre [&>p:empty]:hidden"
         >
           <InternalLinkContext value={(url, plain) => renderLink(url, plain, standalone.includes(url))}>
-            <MarkdownTextContext value={textRun}>{renderMarkdownBlocks(text, message.id, people.tokens)}</MarkdownTextContext>
+            <MarkdownTextContext value={textRun}>{renderMarkdownBlocks(text, message.id, people.tokens, { chat: true })}</MarkdownTextContext>
           </InternalLinkContext>
           {message.editedAt ? (
             <span data-slot="message-edited" className="ml-1 text-xs text-muted-foreground">
