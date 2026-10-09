@@ -20,6 +20,7 @@ struct Fixture {
     _root: tempfile::TempDir,
     database: TestDatabase,
     identity: Arc<IdentityRepository>,
+    uploads: UploadService,
     app: axum::Router,
     workspace_id: String,
     owner: Member,
@@ -76,13 +77,14 @@ impl Fixture {
             UploadLimits::default(),
         );
         let app = chat_router(
-            ChatState::new(Arc::clone(&identity), uploads, CookieMode::secure())
+            ChatState::new(Arc::clone(&identity), uploads.clone(), CookieMode::secure())
                 .with_link_previews(LinkPreviewer::new(link_previews)),
         );
         Self {
             _root: root,
             database,
             identity,
+            uploads,
             app,
             workspace_id: setup.workspace_id.to_string(),
             owner: Member {
@@ -2552,6 +2554,18 @@ impl Fixture {
         self.add_image(member, "stickers", name, bytes).await
     }
 
+    /// The bytes of an image the owner reads.
+    async fn image(&self, url: &str) -> axum::body::Bytes {
+        let request = Request::builder()
+            .uri(url)
+            .header(header::COOKIE, &self.owner.cookie)
+            .body(Body::empty())
+            .unwrap();
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
     /// Uploads the image of an emoji or a sticker (`kind` is the path segment).
     async fn add_image(
         &self,
@@ -2591,6 +2605,92 @@ impl Fixture {
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
     }
+}
+
+#[tokio::test]
+async fn images_saved_in_the_database_move_to_the_blob_store() {
+    let fixture = Fixture::new().await;
+    let now = TimestampMillis::now().as_millis();
+    let (emoji, sticker) = (Id::new_v7().to_string(), Id::new_v7().to_string());
+    for (table, id) in [("custom_emoji", &emoji), ("custom_stickers", &sticker)] {
+        sqlx::query(&format!(
+            "INSERT INTO {table} (id, workspace_id, name, mime_type, bytes, created_by, created_at) \
+             VALUES (?, ?, 'old', 'image/png', ?, ?, ?)"
+        ))
+        .bind(id)
+        .bind(&fixture.workspace_id)
+        .bind(PNG)
+        .bind(fixture.owner.id.to_string())
+        .bind(now)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO user_avatars (user_id, mime_type, bytes, updated_at) VALUES (?, 'image/png', ?, ?)")
+        .bind(fixture.owner.id.to_string())
+        .bind(PNG)
+        .bind(now)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let urls = [
+        format!(
+            "/api/v1/workspaces/{}/chat/emoji/{emoji}/image",
+            fixture.workspace_id
+        ),
+        format!(
+            "/api/v1/workspaces/{}/chat/stickers/{sticker}/image",
+            fixture.workspace_id
+        ),
+    ];
+    for url in &urls {
+        assert_eq!(fixture.image(url).await, PNG);
+    }
+
+    let moved =
+        orbit_server::object_storage::move_images_to_blobs(&fixture.database, &fixture.uploads)
+            .await
+            .unwrap();
+    assert_eq!(moved, 3);
+    for table in ["user_avatars", "custom_emoji", "custom_stickers"] {
+        let in_blob: bool = sqlx::query_scalar(&format!(
+            "SELECT bytes IS NULL AND blob_id IS NOT NULL FROM {table}"
+        ))
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+        assert!(in_blob, "{table}");
+    }
+    // The same bytes in the same workspace are one blob; the avatar has its own under the user id.
+    let blobs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attachment_blobs")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(blobs, 2);
+    // Reconcile keeps referenced blobs after their quarantine.
+    fixture
+        .uploads
+        .reconcile(now + 7 * 24 * 60 * 60 * 1000)
+        .await
+        .unwrap();
+    for url in &urls {
+        assert_eq!(fixture.image(url).await, PNG);
+    }
+    let avatar = fixture
+        .identity
+        .avatar(&fixture.uploads, fixture.owner.id, fixture.owner.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(avatar.bytes, PNG);
+
+    // Nothing is left to move.
+    assert_eq!(
+        orbit_server::object_storage::move_images_to_blobs(&fixture.database, &fixture.uploads)
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[tokio::test]

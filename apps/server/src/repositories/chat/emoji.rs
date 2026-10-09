@@ -1,5 +1,6 @@
 //! Custom emoji: the small named images of a workspace, written `:name:` in a message and as a
-//! reaction. The bytes live in the database, as profile pictures do.
+//! reaction. The image is an attachment blob, so it goes to S3 with other files; emoji from before
+//! 0046 keep their bytes in the database until the background mover moves them.
 
 use orbit_domain::{Actor, Permission};
 use orbit_platform::{Id, TimestampMillis};
@@ -113,7 +114,8 @@ impl ChatRepository {
         mime_type: &'static str,
         bytes: &[u8],
     ) -> Result<Written<CustomEmojiRecord>, ChatError> {
-        let now = TimestampMillis::now();
+        let finalization = self.uploads.begin_finalization().await;
+        let now = self.database.database_now().await?;
         let mut tx = self.database.immediate_transaction().await?;
         require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
         let name = clean_name(name)?;
@@ -133,16 +135,19 @@ impl ChatRepository {
         if count >= MAX_EMOJI {
             return Err(ChatError::EmojiLimit);
         }
+        let blob = finalization
+            .finalize_bytes_in_transaction(&mut tx, workspace_id, bytes, now)
+            .await?;
         let id = Id::new_v7();
         sqlx::query(
-            "INSERT INTO custom_emoji (id, workspace_id, name, mime_type, bytes, created_by, created_at) \
+            "INSERT INTO custom_emoji (id, workspace_id, name, mime_type, blob_id, created_by, created_at) \
              VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
         .bind(&name)
         .bind(mime_type)
-        .bind(bytes)
+        .bind(blob.id.to_string())
         .bind(actor_id.to_string())
         .bind(now.as_millis())
         .execute(&mut *tx)
@@ -197,16 +202,21 @@ impl ChatRepository {
         let mut conn = self.database.pool().acquire().await?;
         load_actor(&mut conn, workspace_id, actor_id).await?;
         let row = sqlx::query(
-            "SELECT mime_type, bytes FROM custom_emoji WHERE id = ? AND workspace_id = ?",
+            "SELECT i.mime_type, i.bytes, b.storage_key FROM custom_emoji i \
+             LEFT JOIN attachment_blobs b ON b.id = i.blob_id WHERE i.id = ? AND i.workspace_id = ?",
         )
         .bind(emoji_id.to_string())
         .bind(workspace_id.to_string())
         .fetch_optional(&mut *conn)
         .await?
         .ok_or(ChatError::NotFound)?;
+        drop(conn);
         Ok(CustomEmojiImage {
             mime_type: row.get("mime_type"),
-            bytes: row.get("bytes"),
+            bytes: match row.get("bytes") {
+                Some(bytes) => bytes,
+                None => self.uploads.read_blob(row.get("storage_key")).await?,
+            },
         })
     }
 }

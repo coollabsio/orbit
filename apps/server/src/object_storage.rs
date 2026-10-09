@@ -5,9 +5,10 @@
 use std::time::Duration;
 
 use orbit_platform::{
-    BackupService, Database, ObjectStorage, ObjectStorageState, S3Bucket, S3Config,
-    TieredBlobStore, TimestampMillis,
+    BackupService, Database, Id, ObjectStorage, ObjectStorageState, S3Bucket, S3Config,
+    TieredBlobStore, TimestampMillis, UploadError, UploadService,
 };
+use sqlx::Row;
 use tokio_util::sync::CancellationToken;
 
 use crate::repositories::instance_settings::{
@@ -63,13 +64,26 @@ pub fn apply(
     Ok(())
 }
 
-/// Moves blobs to the active tier after every settings change, and every ten minutes to retry after errors.
+/// Moves blobs to the active tier after every settings change, and every ten minutes to retry after errors. Each
+/// pass first moves the images older versions kept in the database to the blob store, so they move with all other
+/// files.
 pub async fn run_mover(
+    database: Database,
+    uploads: UploadService,
     store: TieredBlobStore,
     storage: ObjectStorage,
     shutdown: CancellationToken,
 ) -> Result<(), String> {
     loop {
+        match move_images_to_blobs(&database, &uploads).await {
+            Ok(0) => {}
+            Ok(moved) => {
+                tracing::info!(moved, "moved images from the database to attachment blobs")
+            }
+            Err(error) => {
+                tracing::warn!(%error, "moving images to attachment blobs failed; retrying later")
+            }
+        }
         match store.move_blobs().await {
             Ok(0) => {}
             Ok(moved) => tracing::info!(moved, "moved attachment blobs between disk and S3"),
@@ -81,6 +95,61 @@ pub async fn run_mover(
             () = tokio::time::sleep(MOVE_INTERVAL) => {}
         }
     }
+}
+
+/// Moves the profile pictures, custom emoji and stickers that still keep their bytes in the database (saved before
+/// migration 0046) to the attachment blob store, which puts them in S3 when attachments go there. Returns how many
+/// images moved.
+pub async fn move_images_to_blobs(
+    database: &Database,
+    uploads: &UploadService,
+) -> Result<u64, UploadError> {
+    let mut moved = 0;
+    // The table, its key and the id its blobs are grouped under (a profile picture has no workspace).
+    for (table, key, scope) in [
+        ("user_avatars", "user_id", "user_id"),
+        ("custom_emoji", "id", "workspace_id"),
+        ("custom_stickers", "id", "workspace_id"),
+    ] {
+        let rows = sqlx::query(&format!(
+            "SELECT {key} AS key, {scope} AS scope FROM {table} WHERE bytes IS NOT NULL"
+        ))
+        .fetch_all(database.pool())
+        .await?;
+        for row in rows {
+            let row_key: String = row.try_get("key")?;
+            let scope: Id = row
+                .try_get::<String, _>("scope")?
+                .parse()
+                .map_err(|_| UploadError::InvalidState)?;
+            let finalization = uploads.begin_finalization().await;
+            let now = database.database_now().await?;
+            let mut transaction = database.immediate_transaction().await?;
+            // Replaced or deleted since the list was read.
+            let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>(&format!(
+                "SELECT bytes FROM {table} WHERE {key} = ? AND bytes IS NOT NULL"
+            ))
+            .bind(&row_key)
+            .fetch_optional(&mut *transaction)
+            .await?
+            else {
+                continue;
+            };
+            let blob = finalization
+                .finalize_bytes_in_transaction(&mut transaction, scope, &bytes, now)
+                .await?;
+            sqlx::query(&format!(
+                "UPDATE {table} SET bytes = NULL, blob_id = ? WHERE {key} = ?"
+            ))
+            .bind(blob.id.to_string())
+            .bind(&row_key)
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+            moved += 1;
+        }
+    }
+    Ok(moved)
 }
 
 /// Runs every hour: creates a backup when the newest one is older than the saved schedule's period.

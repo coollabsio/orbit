@@ -9,7 +9,7 @@ use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
-use super::{BlobReader, BlobStore, BlobStoreError};
+use super::{BlobReader, BlobStore, BlobStoreError, StoredObject};
 use crate::{
     AttachmentMutationCoordinator, AttachmentMutationGuard, Database, Id, TimestampMillis,
 };
@@ -17,11 +17,24 @@ use crate::{
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
 const SNIFF_BYTES: usize = 8 * 1024;
-/// References to one blob (bind its id twice): task/comment attachments, docs page files and
-/// chat files. The second parameter is used for both of the newer tables.
+/// References to one blob (bind its id twice): task/comment attachments, docs page files, chat
+/// files, profile pictures, custom emoji and stickers. The second parameter is used for all of the
+/// newer tables.
 pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?1) \
      + (SELECT COUNT(*) FROM page_files WHERE blob_id = ?2) \
-     + (SELECT COUNT(*) FROM chat_message_files WHERE blob_id = ?2)";
+     + (SELECT COUNT(*) FROM chat_message_files WHERE blob_id = ?2) \
+     + (SELECT COUNT(*) FROM user_avatars WHERE blob_id = ?2) \
+     + (SELECT COUNT(*) FROM custom_emoji WHERE blob_id = ?2) \
+     + (SELECT COUNT(*) FROM custom_stickers WHERE blob_id = ?2)";
+/// Every table that references blobs by `blob_id`.
+const BLOB_REFERENCE_TABLES: [&str; 6] = [
+    "attachment_references",
+    "page_files",
+    "chat_message_files",
+    "user_avatars",
+    "custom_emoji",
+    "custom_stickers",
+];
 /// Raster image types that are served inline; everything else downloads as an attachment.
 pub const INLINE_IMAGE_TYPES: [&str; 5] = [
     "image/jpeg",
@@ -273,41 +286,7 @@ impl UploadFinalization<'_> {
             }
             result => result?,
         };
-        let proposed_id = Id::new_v7();
-        let quarantine_until = now.as_millis().saturating_add(QUARANTINE_MILLIS);
-        sqlx::query(
-            "INSERT OR IGNORE INTO attachment_blobs (\
-                id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until\
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(proposed_id.to_string())
-        .bind(upload.workspace_id.to_string())
-        .bind(&upload.sha256)
-        .bind(size_i64)
-        .bind(&stored.storage_key)
-        .bind(now.as_millis())
-        .bind(quarantine_until)
-        .execute(&mut **transaction)
-        .await?;
-
-        let row = sqlx::query(
-            "SELECT id, storage_key, quarantine_until FROM attachment_blobs \
-             WHERE workspace_id = ? AND sha256 = ? AND byte_size = ?",
-        )
-        .bind(upload.workspace_id.to_string())
-        .bind(&upload.sha256)
-        .bind(size_i64)
-        .fetch_one(&mut **transaction)
-        .await?;
-        let id_text: String = row.try_get("id")?;
-        let blob = FinalizedBlob {
-            id: id_text.parse().map_err(|_| UploadError::InvalidState)?,
-            workspace_id: upload.workspace_id,
-            sha256: upload.sha256.clone(),
-            size_bytes: upload.size_bytes,
-            storage_key: row.try_get("storage_key")?,
-            quarantine_until: row.try_get("quarantine_until")?,
-        };
+        let blob = record_blob(transaction, upload, &stored.storage_key, now).await?;
 
         let updated = sqlx::query(
             "UPDATE pending_uploads SET state = 'complete', completed_at = ? \
@@ -328,6 +307,64 @@ impl UploadFinalization<'_> {
 
         Ok(blob)
     }
+
+    /// Stores bytes the server already checked (a profile picture, an emoji, a sticker) as a blob of `workspace_id`,
+    /// without a pending upload. As with [`Self::finalize_blob_in_transaction`], the caller inserts its reference in
+    /// the same transaction.
+    pub async fn finalize_bytes_in_transaction(
+        &self,
+        transaction: &mut Transaction<'_, Sqlite>,
+        workspace_id: Id,
+        bytes: &[u8],
+        now: TimestampMillis,
+    ) -> Result<FinalizedBlob, UploadError> {
+        let (staged, stored) = self.service.install_bytes(workspace_id, bytes).await?;
+        record_blob(transaction, &staged, &stored.storage_key, now).await
+    }
+}
+
+/// Adds the `attachment_blobs` row of an installed blob, or finds the row of the same bytes.
+async fn record_blob(
+    transaction: &mut Transaction<'_, Sqlite>,
+    upload: &StagedUpload,
+    storage_key: &str,
+    now: TimestampMillis,
+) -> Result<FinalizedBlob, UploadError> {
+    let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
+    let quarantine_until = now.as_millis().saturating_add(QUARANTINE_MILLIS);
+    sqlx::query(
+        "INSERT OR IGNORE INTO attachment_blobs (\
+            id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(upload.workspace_id.to_string())
+    .bind(&upload.sha256)
+    .bind(size_i64)
+    .bind(storage_key)
+    .bind(now.as_millis())
+    .bind(quarantine_until)
+    .execute(&mut **transaction)
+    .await?;
+
+    let row = sqlx::query(
+        "SELECT id, storage_key, quarantine_until FROM attachment_blobs \
+         WHERE workspace_id = ? AND sha256 = ? AND byte_size = ?",
+    )
+    .bind(upload.workspace_id.to_string())
+    .bind(&upload.sha256)
+    .bind(size_i64)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let id_text: String = row.try_get("id")?;
+    Ok(FinalizedBlob {
+        id: id_text.parse().map_err(|_| UploadError::InvalidState)?,
+        workspace_id: upload.workspace_id,
+        sha256: upload.sha256.clone(),
+        size_bytes: upload.size_bytes,
+        storage_key: row.try_get("storage_key")?,
+        quarantine_until: row.try_get("quarantine_until")?,
+    })
 }
 
 impl UploadService {
@@ -584,29 +621,11 @@ impl UploadService {
             return Ok(false);
         }
 
-        let temporary_path = self.store.create_temporary()?;
-        let mut temporary = TemporaryFile::new(self.store.clone(), temporary_path.clone());
-        fs::write(&temporary_path, bytes)
-            .await
-            .map_err(|source| BlobStoreError::Io {
-                path: temporary_path.clone(),
-                source,
-            })?;
-        let media_type = detect_media_type(bytes);
-        let staged = StagedUpload {
-            id: Id::new_v7(),
-            workspace_id: workspace_id
-                .parse()
-                .map_err(|_| UploadError::InvalidState)?,
-            owner_id: Id::new_v7(),
-            sha256: sha256.clone(),
-            size_bytes,
-            detected_media_type: media_type.to_owned(),
-            display_name: String::new(),
-            temporary_path,
-        };
-        let stored = self.store.install(&staged).await?;
-        temporary.disarm();
+        let workspace_id = workspace_id
+            .parse()
+            .map_err(|_| UploadError::InvalidState)?;
+        let (staged, stored) = self.install_bytes(workspace_id, bytes).await?;
+        let media_type = staged.detected_media_type.as_str();
 
         let updated = async {
             let mut transaction = self.database.immediate_transaction().await?;
@@ -642,6 +661,13 @@ impl UploadService {
                     .await?;
                 }
             }
+            for table in ["user_avatars", "custom_emoji", "custom_stickers"] {
+                sqlx::query(&format!("UPDATE {table} SET mime_type = ? WHERE blob_id = ?"))
+                    .bind(media_type)
+                    .bind(blob_id)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
             transaction.commit().await
         }
         .await;
@@ -653,21 +679,47 @@ impl UploadService {
         Ok(true)
     }
 
+    /// Writes `bytes` to the store as a blob of `workspace_id`, without a database row.
+    async fn install_bytes(
+        &self,
+        workspace_id: Id,
+        bytes: &[u8],
+    ) -> Result<(StagedUpload, StoredObject), UploadError> {
+        let size_bytes = u64::try_from(bytes.len()).map_err(|_| UploadError::SizeOverflow)?;
+        let temporary_path = self.store.create_temporary()?;
+        let mut temporary = TemporaryFile::new(self.store.clone(), temporary_path.clone());
+        fs::write(&temporary_path, bytes)
+            .await
+            .map_err(|source| BlobStoreError::Io {
+                path: temporary_path.clone(),
+                source,
+            })?;
+        let staged = StagedUpload {
+            id: Id::new_v7(),
+            workspace_id,
+            owner_id: Id::new_v7(),
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            size_bytes,
+            detected_media_type: detect_media_type(bytes).to_owned(),
+            display_name: String::new(),
+            temporary_path,
+        };
+        let stored = self.store.install(&staged).await?;
+        temporary.disarm();
+        Ok((staged, stored))
+    }
+
     pub async fn reconcile(&self, now_millis: i64) -> Result<ReconcileResult, UploadError> {
         let _operation = self.operations.lock().await;
         let _mutation = self.mutations.begin().await;
         let mut result = ReconcileResult::default();
 
         // Fail closed: without every reference table, no blob can be proven unreferenced.
-        sqlx::query("SELECT blob_id FROM attachment_references WHERE 0")
-            .fetch_all(self.database.pool())
-            .await?;
-        sqlx::query("SELECT blob_id FROM page_files WHERE 0")
-            .fetch_all(self.database.pool())
-            .await?;
-        sqlx::query("SELECT blob_id FROM chat_message_files WHERE 0")
-            .fetch_all(self.database.pool())
-            .await?;
+        for table in BLOB_REFERENCE_TABLES {
+            sqlx::query(&format!("SELECT blob_id FROM {table} WHERE 0"))
+                .fetch_all(self.database.pool())
+                .await?;
+        }
 
         let expired = sqlx::query(
             "SELECT id, temporary_path FROM pending_uploads \

@@ -277,9 +277,14 @@ impl App {
                     &config.http.public_origin,
                 ),
                 oauth: crate::oauth::router(oauth),
-                auth: match app_key {
-                    Some(app_key) => auth.with_mailer(mailer.clone()).with_app_key(app_key),
-                    None => auth.with_mailer(mailer.clone()),
+                auth: {
+                    let auth = auth
+                        .with_mailer(mailer.clone())
+                        .with_uploads(attachment_state.uploads.clone());
+                    match app_key {
+                        Some(app_key) => auth.with_app_key(app_key),
+                        None => auth,
+                    }
                 },
                 workspaces: WorkspaceState::with_repository(
                     Arc::clone(&identity),
@@ -451,6 +456,8 @@ impl App {
         let token = service_shutdown.clone();
         services.spawn(async move { push.run_inbox_service(token).await });
         let mover = crate::object_storage::run_mover(
+            self.database.clone(),
+            self.attachments.uploads.clone(),
             self.blob_store.clone(),
             self.object_storage.clone(),
             service_shutdown.clone(),

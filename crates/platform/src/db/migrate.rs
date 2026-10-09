@@ -326,6 +326,13 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0045_two_factor.sql"),
                     false,
                 ),
+                Migration::new(
+                    46,
+                    include_str!(
+                        "../../../../apps/server/migrations/0046_images_in_blob_store.sql"
+                    ),
+                    false,
+                ),
             ],
         )
     }

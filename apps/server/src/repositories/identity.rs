@@ -1,7 +1,7 @@
 use orbit_domain::WorkspaceDefaults;
 use orbit_platform::{
     AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, SessionRecord, TimestampMillis,
-    generate_opaque_token, normalize_email,
+    UploadError, UploadService, generate_opaque_token, normalize_email,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -90,6 +90,8 @@ pub enum IdentityError {
     InvalidIdentifier,
     #[error("session or token is invalid or expired")]
     InvalidCredential,
+    #[error(transparent)]
+    Upload(#[from] UploadError),
 }
 
 /// The presence a user sets for themselves. A user without a connection is offline whatever
@@ -1284,11 +1286,14 @@ impl IdentityRepository {
     /// The user's profile picture, for the user and for people who share a workspace with them.
     pub async fn avatar(
         &self,
+        uploads: &UploadService,
         viewer_id: Id,
         user_id: Id,
     ) -> Result<Option<Avatar>, IdentityError> {
         let row = sqlx::query(
-            "SELECT mime_type, bytes FROM user_avatars WHERE user_id = ?1 AND (?1 = ?2 OR EXISTS ( \
+            "SELECT a.mime_type, a.bytes, b.storage_key FROM user_avatars a \
+             LEFT JOIN attachment_blobs b ON b.id = a.blob_id \
+             WHERE a.user_id = ?1 AND (?1 = ?2 OR EXISTS ( \
              SELECT 1 FROM memberships AS theirs JOIN memberships AS mine \
              ON mine.workspace_id = theirs.workspace_id \
              WHERE theirs.user_id = ?1 AND mine.user_id = ?2))",
@@ -1297,30 +1302,42 @@ impl IdentityRepository {
         .bind(viewer_id.to_string())
         .fetch_optional(self.database.pool())
         .await?;
-        Ok(row.map(|row| Avatar {
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(Avatar {
             mime_type: row.get("mime_type"),
-            bytes: row.get("bytes"),
+            bytes: match row.get("bytes") {
+                Some(bytes) => bytes,
+                None => uploads.read_blob(row.get("storage_key")).await?,
+            },
         }))
     }
 
-    /// Replaces the user's profile picture. Callers check the format and size first.
+    /// Replaces the user's profile picture. Callers check the format and size first. The image is an attachment
+    /// blob grouped under the user id (there is no workspace); reconcile deletes the replaced one.
     pub async fn set_avatar_audited(
         &self,
+        uploads: &UploadService,
         user_id: Id,
         mime_type: &str,
         bytes: &[u8],
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), IdentityError> {
+        let finalization = uploads.begin_finalization().await;
         let mut transaction = self.database.immediate_transaction().await?;
+        let blob = finalization
+            .finalize_bytes_in_transaction(&mut transaction, user_id, bytes, now)
+            .await?;
         sqlx::query(
-            "INSERT INTO user_avatars (user_id, mime_type, bytes, updated_at) VALUES (?, ?, ?, ?) \
-             ON CONFLICT (user_id) DO UPDATE SET mime_type = excluded.mime_type, \
-             bytes = excluded.bytes, updated_at = excluded.updated_at",
+            "INSERT INTO user_avatars (user_id, mime_type, blob_id, updated_at) VALUES (?, ?, ?, ?) \
+             ON CONFLICT (user_id) DO UPDATE SET mime_type = excluded.mime_type, bytes = NULL, \
+             blob_id = excluded.blob_id, updated_at = excluded.updated_at",
         )
         .bind(user_id.to_string())
         .bind(mime_type)
-        .bind(bytes)
+        .bind(blob.id.to_string())
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;

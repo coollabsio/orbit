@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use orbit_platform::{
     AuthenticatedUser, ClientIp, Id, LoginThrottler, PasswordError, PasswordExecutor,
-    PasswordService, RequestId, ThrottleDecision, TimestampMillis,
+    PasswordService, RequestId, ThrottleDecision, TimestampMillis, UploadService,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -129,12 +129,20 @@ pub struct AuthState {
     webauthn: Option<Arc<webauthn_rs::Webauthn>>,
     /// Sign-ins waiting for a second factor and passkey ceremonies in progress.
     pending: Arc<two_factor::PendingStore>,
+    /// Stores profile pictures; without it they cannot be uploaded or read.
+    uploads: Option<UploadService>,
 }
 
 impl AuthState {
     #[must_use]
     pub fn with_mailer(mut self, mailer: Mailer) -> Self {
         self.mailer = Some(mailer);
+        self
+    }
+
+    #[must_use]
+    pub fn with_uploads(mut self, uploads: UploadService) -> Self {
+        self.uploads = Some(uploads);
         self
     }
 
@@ -176,6 +184,7 @@ impl AuthState {
             app_key: None,
             webauthn: None,
             pending: Arc::default(),
+            uploads: None,
         }
     }
 }
@@ -1141,9 +1150,14 @@ async fn upload_avatar(
             request_id.as_ref(),
         )
     })?;
+    let uploads = state
+        .uploads
+        .as_ref()
+        .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
     state
         .repository
         .set_avatar_audited(
+            uploads,
             session.user.id,
             mime_type,
             &image,
@@ -1200,9 +1214,13 @@ async fn user_avatar(
         )
     };
     let user_id = user_id.parse::<Id>().map_err(|_| not_found())?;
+    let uploads = state
+        .uploads
+        .as_ref()
+        .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
     let avatar = state
         .repository
-        .avatar(session.user.id, user_id)
+        .avatar(uploads, session.user.id, user_id)
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .ok_or_else(not_found)?;
@@ -2601,7 +2619,21 @@ mod tests {
 
     #[tokio::test]
     async fn avatar_upload_serve_and_remove() {
-        let (app, repository, database) = application(CookieMode::secure()).await;
+        let (_, repository, database) = application(CookieMode::secure()).await;
+        let attachments = tempfile::tempdir().unwrap();
+        let uploads = orbit_platform::UploadService::new(
+            (*database).clone(),
+            Arc::new(orbit_platform::LocalBlobStore::new(attachments.path())),
+            orbit_platform::AttachmentMutationCoordinator::default(),
+            orbit_platform::UploadLimits::default(),
+        );
+        let app = auth_router(
+            AuthState::new(Arc::clone(&repository), CookieMode::secure())
+                .with_uploads(uploads.clone()),
+        )
+        .layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
         let cookie = login_cookie(&app, "correct horse battery").await;
         let png = b"\x89PNG\r\n\x1a\nnot really pixels".to_vec();
 
@@ -2634,6 +2666,13 @@ mod tests {
         )
         .fetch_one(database.pool()).await.unwrap();
         assert_eq!(profile_events, 1);
+        // the picture is an attachment blob, not bytes in the database
+        let in_blob: bool =
+            sqlx::query_scalar("SELECT bytes IS NULL AND blob_id IS NOT NULL FROM user_avatars")
+                .fetch_one(database.pool())
+                .await
+                .unwrap();
+        assert!(in_blob);
 
         let me = app
             .clone()
@@ -2664,8 +2703,20 @@ mod tests {
         .execute(database.pool())
         .await
         .unwrap();
-        assert!(repository.avatar(stranger, owner).await.unwrap().is_none());
-        assert!(repository.avatar(owner, owner).await.unwrap().is_some());
+        assert!(
+            repository
+                .avatar(&uploads, stranger, owner)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            repository
+                .avatar(&uploads, owner, owner)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         let removed = app
             .clone()
