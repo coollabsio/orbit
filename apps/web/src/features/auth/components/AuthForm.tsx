@@ -1,10 +1,14 @@
+import { useId } from 'react'
 import { ApiProblem } from '@/api/problem'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 
 export function AuthInput({ label, value, onChange, type = 'text', required = true }: { label: string; value: string; onChange?: (value: string) => void; type?: string; required?: boolean }) {
-  return <Label className="grid gap-1.5"><span>{label}</span><Input type={type} required={required} readOnly={!onChange} value={value} onChange={(event) => onChange?.(event.target.value)} /></Label>
+  const id = useId()
+  const props = { id, required, readOnly: !onChange, value, onChange: (event: React.ChangeEvent<HTMLInputElement>) => onChange?.(event.target.value) }
+  return <div className="grid gap-1.5"><Label htmlFor={id}>{label}</Label>{type === 'password' ? <PasswordInput {...props} /> : <Input type={type} {...props} />}</div>
 }
 
 /** The centred card every auth screen sits in. */

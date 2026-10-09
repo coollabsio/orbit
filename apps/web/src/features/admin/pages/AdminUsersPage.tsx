@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { useAdminUsers, useCreateRecoveryLink, useSetInstanceAdmin, useSetSuspension } from '@/features/admin/api'
+import { useAdminUsers, useCreateRecoveryLink, useResetTwoFactor, useSetInstanceAdmin, useSetSuspension } from '@/features/admin/api'
 import { useCurrentUser } from '@/features/auth/api'
 import { useIsRoot } from '@/features/workspaces/permissions'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
@@ -29,6 +29,7 @@ export function AdminUsersPage() {
   const suspension = useSetSuspension()
   const recovery = useCreateRecoveryLink()
   const instanceAdmin = useSetInstanceAdmin()
+  const twoFactorReset = useResetTwoFactor()
   const viewerIsRoot = useIsRoot()
   const viewerId = useCurrentUser().data?.id
   const [link, setLink] = useState<{ user: AdminUser; link: RecoveryLink } | null>(null)
@@ -72,6 +73,20 @@ export function AdminUsersPage() {
     })
   }
 
+  async function resetTwoFactor(user: AdminUser) {
+    const confirmed = await confirmAction({
+      title: `Reset two-factor sign-in for ${user.display_name}?`,
+      description: 'Their authenticator app and recovery codes stop working, and they sign in with only their password until they set it up again. Do this only after you have confirmed who is asking.',
+      confirmLabel: 'Reset two-factor',
+      danger: true,
+    })
+    if (!confirmed) return
+    twoFactorReset.mutate(user.id, {
+      onSuccess: () => toast(`Two-factor sign-in is off for ${user.display_name}`),
+      onError: (error) => toast.error(failure(error, 'Two-factor sign-in could not be reset.')),
+    })
+  }
+
   function createLink(user: AdminUser) {
     recovery.mutate(user.id, {
       onSuccess: (created) => setLink({ user, link: created }),
@@ -100,6 +115,7 @@ export function AdminUsersPage() {
                 <span className="flex min-w-0 items-center gap-2 font-medium text-foreground">
                   <span className="truncate">{user.display_name}</span>
                   {user.root ? <Badge>Root</Badge> : user.admin ? <Badge variant="secondary">Admin</Badge> : null}
+                  {user.two_factor ? <Badge variant="outline">2FA</Badge> : null}
                   {user.suspended ? <Badge variant="destructive">Suspended</Badge> : null}
                 </span>
                 <span className="truncate text-xs text-muted-foreground">{user.email}</span>
@@ -121,6 +137,7 @@ export function AdminUsersPage() {
                       ) : (
                         <>
                           <DropdownMenuItem onClick={() => createLink(user)}>Create password recovery link</DropdownMenuItem>
+                          {user.two_factor ? <DropdownMenuItem onClick={() => void resetTwoFactor(user)}>Reset two-factor</DropdownMenuItem> : null}
                           <DropdownMenuSeparator />
                           {/* data-danger (not variant="destructive"): the menu popup forces destructive items to the accent colour */}
                           <DropdownMenuItem

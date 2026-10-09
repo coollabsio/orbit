@@ -7,6 +7,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useCurrentUser } from '@/features/auth/api'
@@ -158,7 +159,7 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-password">Password</FieldLabel>
-            <Input id="smtp-password" type="password" autoComplete="new-password" placeholder={smtp?.password_set ? 'Saved. Leave empty to keep it.' : ''} value={draft.password} onChange={set('password')} />
+            <PasswordInput id="smtp-password" autoComplete="new-password" placeholder={smtp?.password_set ? 'Saved. Leave empty to keep it.' : ''} value={draft.password} onChange={set('password')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-from-address">From address <RequiredMark /></FieldLabel>

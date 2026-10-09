@@ -24,6 +24,7 @@ import { EmojiPage } from '@/features/settings/pages/EmojiPage'
 import { LabelsPage } from '@/features/settings/pages/LabelsPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
+import { SecurityPage } from '@/features/settings/pages/SecurityPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
 import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
 import { StickersPage } from '@/features/settings/pages/StickersPage'
@@ -107,6 +108,7 @@ export default function App() {
               <Route path="profile" element={<AccountLayout />}>
                 <Route index element={<ProfilePage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
+                <Route path="security" element={<SecurityPage />} />
                 <Route path="sessions" element={<SessionsPage />} />
                 <Route path="shortcuts" element={<ShortcutsPage />} />
                 <Route path="storage" element={<StoragePage />} />

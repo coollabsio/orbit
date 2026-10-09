@@ -15,5 +15,6 @@ pub mod task_filter;
 pub mod task_relations;
 pub mod tasks;
 pub mod teamspaces;
+pub mod two_factor;
 pub mod views;
 pub mod workspaces;

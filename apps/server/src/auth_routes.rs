@@ -30,7 +30,9 @@ use crate::repositories::identity::{
 };
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 
+pub(crate) mod passkeys;
 pub(crate) mod push;
+pub(crate) mod two_factor;
 
 const SESSION_COOKIE: &str = "__Host-orbit_session";
 const DEV_SESSION_COOKIE: &str = "orbit_session_dev";
@@ -121,12 +123,32 @@ pub struct AuthState {
     dummy_hash: String,
     /// Sends registration and password reset links; `None` sends nothing.
     mailer: Option<Mailer>,
+    /// Encrypts authenticator app secrets; without it the app cannot be set up.
+    app_key: Option<[u8; 32]>,
+    /// Passkeys; `None` when the public origin is not a domain name (an IP address cannot have passkeys).
+    webauthn: Option<Arc<webauthn_rs::Webauthn>>,
+    /// Sign-ins waiting for a second factor and passkey ceremonies in progress.
+    pending: Arc<two_factor::PendingStore>,
 }
 
 impl AuthState {
     #[must_use]
     pub fn with_mailer(mut self, mailer: Mailer) -> Self {
         self.mailer = Some(mailer);
+        self
+    }
+
+    #[must_use]
+    pub fn with_app_key(mut self, app_key: [u8; 32]) -> Self {
+        self.app_key = Some(app_key);
+        self
+    }
+
+    /// Turns passkeys on for the origin people open Orbit at. The passkeys a browser saves are bound to its host
+    /// name, so they stop working when the origin's host changes.
+    #[must_use]
+    pub fn with_public_origin(mut self, public_origin: &str) -> Self {
+        self.webauthn = passkeys::relying_party(public_origin).map(Arc::new);
         self
     }
 
@@ -151,6 +173,9 @@ impl AuthState {
             cookie_mode,
             dummy_hash,
             mailer: None,
+            app_key: None,
+            webauthn: None,
+            pending: Arc::default(),
         }
     }
 }
@@ -170,7 +195,10 @@ pub async fn initialize_auth(
             issued.token
         ),
     });
-    Ok((AuthState::new(repository, cookie_mode), launch))
+    Ok((
+        AuthState::new(repository, cookie_mode).with_public_origin(&public_origin),
+        launch,
+    ))
 }
 
 pub fn auth_router(state: AuthState) -> Router {
@@ -178,6 +206,48 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/api/v1/setup/status", get(setup_status))
         .route("/api/v1/setup/complete", post(setup_complete))
         .route("/api/v1/auth/login", post(login))
+        .route(
+            "/api/v1/auth/login/two-factor",
+            post(two_factor::login_second_factor),
+        )
+        .route(
+            "/api/v1/auth/passkey/login/start",
+            post(passkeys::start_passkey_login),
+        )
+        .route(
+            "/api/v1/auth/passkey/login/finish",
+            post(passkeys::finish_passkey_login),
+        )
+        .route("/api/v1/auth/two-factor", get(two_factor::get_two_factor))
+        .route(
+            "/api/v1/auth/two-factor/totp/setup",
+            post(two_factor::setup_totp),
+        )
+        .route(
+            "/api/v1/auth/two-factor/totp/enable",
+            post(two_factor::enable_totp),
+        )
+        .route(
+            "/api/v1/auth/two-factor/disable",
+            post(two_factor::disable_two_factor),
+        )
+        .route(
+            "/api/v1/auth/two-factor/recovery-codes",
+            post(two_factor::regenerate_recovery_codes),
+        )
+        .route("/api/v1/auth/passkeys", get(passkeys::list_passkeys))
+        .route(
+            "/api/v1/auth/passkeys/register/start",
+            post(passkeys::start_passkey_registration),
+        )
+        .route(
+            "/api/v1/auth/passkeys/register/finish",
+            post(passkeys::finish_passkey_registration),
+        )
+        .route(
+            "/api/v1/auth/passkeys/{id}",
+            delete(passkeys::delete_passkey),
+        )
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/me", get(me).patch(update_me))
         .route("/api/v1/auth/status", put(put_status))
@@ -455,7 +525,7 @@ async fn user_response(
     })
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/login", request_body = LoginBody, responses((status = 200, body = LoginResponse), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/login", request_body = LoginBody, responses((status = 200, body = LoginResponse), (status = 202, description = "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.", body = two_factor::TwoFactorChallenge), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
 async fn login(
     State(state): State<AuthState>,
     client_ip: Option<Extension<ClientIp>>,
@@ -554,6 +624,26 @@ async fn login(
         email: identity.email,
         display_name: identity.display_name,
     };
+    let totp_enabled = state
+        .repository
+        .two_factor_status(user.id)
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?
+        .totp_enabled;
+    if totp_enabled {
+        state
+            .throttler
+            .lock()
+            .expect("throttler mutex poisoned")
+            .finish_success(reservation);
+        return two_factor::challenge(
+            &state,
+            user,
+            identity.password_hash,
+            replacement_hash,
+            request_id.as_ref(),
+        );
+    }
     let session = state
         .repository
         .create_session_audited(
@@ -595,8 +685,17 @@ async fn login(
             ));
         }
     };
-    // Nothing here may fail: the session exists, so the response must carry its cookie.
-    // A failed avatar read only leaves the picture out.
+    Ok(signed_in_response(&state, user, &session).await)
+}
+
+/// The answer to a sign-in that created `session`: the user and the session cookie.
+/// Nothing here may fail: the session exists, so the response must carry its cookie.
+/// A failed avatar read only leaves the picture out.
+async fn signed_in_response(
+    state: &AuthState,
+    user: AuthenticatedUser,
+    session: &orbit_platform::IssuedSession,
+) -> Response {
     let avatar_updated_at = state
         .repository
         .avatar_updated_at(user.id)
@@ -613,16 +712,21 @@ async fn login(
         .profile_fields(user.id)
         .await
         .unwrap_or_default();
+    let installation_admin = state
+        .repository
+        .is_installation_admin(user.id)
+        .await
+        .unwrap_or(false);
     let mut response = Json(LoginResponse {
         user: AuthUserResponse {
             status,
             profile,
             avatar_url: avatar_url(user.id, avatar_updated_at),
             id: user.id.to_string(),
+            installation_admin,
+            root: state.repository.is_root(user.id).await.unwrap_or(false),
             email: user.email,
             display_name: user.display_name,
-            installation_admin: identity.installation_admin,
-            root: state.repository.is_root(user.id).await.unwrap_or(false),
         },
         session_id: session.id.to_string(),
     })
@@ -636,7 +740,7 @@ async fn login(
         ))
         .expect("generated tokens are valid cookie values"),
     );
-    Ok(response)
+    response
 }
 
 #[utoipa::path(post, path = "/api/v1/auth/logout", responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
@@ -1254,6 +1358,8 @@ struct AuthOptions {
     registration_open: bool,
     /// A mail server is saved: password reset links and invitations go out by email.
     email_enabled: bool,
+    /// People can add passkeys and sign in with them (the public origin is a domain name).
+    passkeys_enabled: bool,
 }
 
 /// What the sign-in pages offer. Public.
@@ -1270,6 +1376,7 @@ async fn auth_options(
     Ok(Json(AuthOptions {
         registration_open: email_enabled && settings.registration_open,
         email_enabled,
+        passkeys_enabled: state.webauthn.is_some(),
     }))
 }
 

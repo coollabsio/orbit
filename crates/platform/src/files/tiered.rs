@@ -18,7 +18,7 @@ use super::{
 };
 use crate::AttachmentMutationCoordinator;
 
-/// Longer than backup retention (7 daily + 4 weekly snapshots).
+/// Longer than backup retention (the last day, 7 daily + 4 weekly snapshots).
 pub const S3_DELETE_DELAY_MILLIS: i64 = 40 * 24 * 60 * 60 * 1000;
 
 /// Where attachments and backups are stored. Shared by the blob store and the backup service; saving the

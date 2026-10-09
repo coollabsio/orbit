@@ -321,6 +321,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    45,
+                    include_str!("../../../../apps/server/migrations/0045_two_factor.sql"),
+                    false,
+                ),
             ],
         )
     }

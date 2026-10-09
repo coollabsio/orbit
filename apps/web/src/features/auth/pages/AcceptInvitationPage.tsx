@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router'
 import { createApiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import { Button } from '@/components/ui/button'
-import { currentUserQueryOptions, useLogin, useLogout } from '@/features/auth/api'
+import { ApiProblem } from '@/api/problem'
+import { currentUserQueryOptions, isTwoFactorChallenge, useLogin, useLoginSecondFactor, useLogout } from '@/features/auth/api'
 import { AuthForm, AuthInput } from '@/features/auth/components/AuthForm'
 import { AuthMessage } from '@/features/auth/components/AuthMessage'
 import { useConsumedToken } from '@/features/auth/useConsumedToken'
@@ -21,7 +22,11 @@ export function AcceptInvitationPage() {
   const user = useQuery({ ...currentUserQueryOptions(invitationSessionClient), enabled: !!token, retry: false })
   const accept = useAcceptInvitation()
   const login = useLogin()
+  const secondFactor = useLoginSecondFactor()
   const logout = useLogout()
+  // Set while an account with two-factor sign-in waits for its code.
+  const [twoFactorToken, setTwoFactorToken] = useState<string | null>(null)
+  const [code, setCode] = useState('')
   const [signIn, setSignIn] = useState(false)
   const [displayName, setDisplayName] = useState('')
   const [password, setPassword] = useState('')
@@ -32,11 +37,11 @@ export function AcceptInvitationPage() {
 
   const { email, workspace_name: workspaceName } = invitation.data
   const mismatch = !!user.data && user.data.email.trim().toLowerCase() !== email.trim().toLowerCase()
-  const pending = accept.isPending || login.isPending || logout.isPending
+  const pending = accept.isPending || login.isPending || secondFactor.isPending || logout.isPending
   return (
     <AuthForm
       title={`Join ${workspaceName}`}
-      error={accept.error || login.error || logout.error}
+      error={accept.error || login.error || secondFactor.error || logout.error}
       pending={pending}
       submitLabel={mismatch ? 'Switch account' : !user.data && signIn ? 'Sign in and accept invitation' : 'Accept invitation'}
       onSubmit={async () => {
@@ -47,7 +52,20 @@ export function AcceptInvitationPage() {
           setSignIn(true)
           return
         }
-        if (!user.data && signIn) await login.mutateAsync({ email, password })
+        if (!user.data && signIn && twoFactorToken) {
+          await secondFactor.mutateAsync({ two_factor_token: twoFactorToken, code }).catch((error: unknown) => {
+            // The sign-in expired: start again from the password.
+            if (error instanceof ApiProblem && error.code === 'invalid_two_factor_token') setTwoFactorToken(null)
+            throw error
+          })
+        } else if (!user.data && signIn) {
+          const response = await login.mutateAsync({ email, password })
+          if (isTwoFactorChallenge(response)) {
+            setCode('')
+            setTwoFactorToken(response.two_factor_token)
+            return
+          }
+        }
         const accepted = await accept.mutateAsync(!user.data && !signIn
           ? { token, email, display_name: displayName, password }
           : { token })
@@ -56,7 +74,9 @@ export function AcceptInvitationPage() {
       footer={!user.data ? <Button variant="outline" type="button" disabled={pending} onClick={() => {
         setSignIn((value) => !value)
         setPassword('')
+        setTwoFactorToken(null)
         login.reset()
+        secondFactor.reset()
         accept.reset()
       }}>{signIn ? 'Create an account instead' : 'Sign in instead'}</Button> : undefined}
     >
@@ -65,7 +85,8 @@ export function AcceptInvitationPage() {
         <>
           <p className="text-[13px]">{user.data ? 'Accept to join this workspace with your account.' : signIn ? 'Sign in with your existing account to join this workspace.' : 'Choose your name and password to create your account.'} To use another email, ask the inviter for a new invitation.</p>
           {!user.data && !signIn ? <AuthInput label="Your name" value={displayName} onChange={setDisplayName} /> : null}
-          {!user.data ? <AuthInput label="Password" type="password" value={password} onChange={setPassword} /> : null}
+          {!user.data && twoFactorToken ? <AuthInput label="Authentication code" value={code} onChange={setCode} /> : null}
+          {!user.data && !twoFactorToken ? <AuthInput label="Password" type="password" value={password} onChange={setPassword} /> : null}
         </>
       )}
     </AuthForm>

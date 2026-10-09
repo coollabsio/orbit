@@ -21,7 +21,11 @@ const MANIFEST_FILE: &str = "manifest.json";
 /// Snapshots fetched from S3 for verify, download or restore.
 const DOWNLOADS: &str = "downloads";
 const DOWNLOAD_CACHE_MILLIS: u128 = 60 * 60 * 1000;
-const SUPPORTED_SCHEMA_VERSION: i64 = 44;
+const SUPPORTED_SCHEMA_VERSION: i64 = 45;
+/// Retention keeps up to this many snapshots from the last day, so a manual or hourly backup does not replace an
+/// earlier one from the same day.
+const RECENT_SNAPSHOTS: usize = 24;
+const RECENT_MILLIS: i64 = 24 * 60 * 60 * 1000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -635,8 +639,12 @@ impl BackupService {
         let mut daily = HashSet::new();
         let mut weekly = HashSet::new();
         let mut keep = HashSet::new();
+        let recent_since = Utc::now().timestamp_millis() - RECENT_MILLIS;
         for snapshot in &snapshots {
             check_cancelled(&cancellation)?;
+            if keep.len() < RECENT_SNAPSHOTS && snapshot.manifest.created_at > recent_since {
+                keep.insert(snapshot.id.clone());
+            }
             let Some(created) = Utc
                 .timestamp_millis_opt(snapshot.manifest.created_at)
                 .single()

@@ -51,7 +51,7 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
-    assert_eq!(snapshot.manifest.schema_version, 44);
+    assert_eq!(snapshot.manifest.schema_version, 45);
     assert_eq!(
         snapshot.manifest.application_version,
         env!("CARGO_PKG_VERSION")
@@ -318,6 +318,25 @@ async fn pre_migration_backups_are_listed_separately() {
         fixture.service.list_pre_migration().await.unwrap(),
         vec![migration]
     );
+}
+
+#[tokio::test]
+async fn same_day_snapshots_are_all_kept() {
+    let fixture = Fixture::new().await;
+
+    let first = fixture.service.create(&fixture.database).await.unwrap();
+    let second = fixture.service.create(&fixture.database).await.unwrap();
+    let third = fixture.service.create(&fixture.database).await.unwrap();
+
+    let ids: Vec<_> = fixture
+        .service
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|snapshot| snapshot.id)
+        .collect();
+    assert_eq!(ids, vec![third.id, second.id, first.id]);
 }
 
 #[tokio::test]

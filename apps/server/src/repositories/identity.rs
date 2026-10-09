@@ -230,6 +230,8 @@ pub struct AdminUser {
     /// Can open Admin: the root user and the instance admins the root user chose.
     pub admin: bool,
     pub suspended: bool,
+    /// Sign-in asks for an authenticator app code. An admin can turn it off for a user who lost the device.
+    pub two_factor: bool,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     /// The newest session activity, `null` if the account never signed in.
@@ -837,6 +839,8 @@ impl IdentityRepository {
                1 - users.installation_admin AS admin_rank FROM users) \
              SELECT keyed.id, keyed.email, keyed.display_name, keyed.installation_admin, keyed.suspended_at, \
              keyed.created_at, 1 - keyed.root_rank AS root, \
+             EXISTS (SELECT 1 FROM user_totp WHERE user_totp.user_id = keyed.id \
+               AND user_totp.enabled_at IS NOT NULL) AS two_factor, \
              (SELECT MAX(sessions.last_activity_at) FROM sessions WHERE sessions.user_id = keyed.id) \
                AS last_active_at, \
              (SELECT COUNT(*) FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
@@ -864,6 +868,7 @@ impl IdentityRepository {
                 root: row.get::<i64, _>("root") == 1,
                 admin: row.get::<i64, _>("installation_admin") == 1,
                 suspended: row.get::<Option<i64>, _>("suspended_at").is_some(),
+                two_factor: row.get::<i64, _>("two_factor") == 1,
                 created_at: TimestampMillis::from_millis(row.get("created_at")),
                 last_active_at: row
                     .get::<Option<i64>, _>("last_active_at")
@@ -1060,7 +1065,7 @@ impl IdentityRepository {
         Ok(root)
     }
 
-    async fn is_active_admin(
+    pub(super) async fn is_active_admin(
         transaction: &mut Transaction<'_, Sqlite>,
         user_id: Id,
     ) -> Result<bool, sqlx::Error> {
@@ -1088,7 +1093,7 @@ impl IdentityRepository {
 
     /// Whether an admin may suspend or reset `target`: nobody may touch the root account, and only the root user may
     /// touch another admin. Suspending the root account would lock everyone out of Admin.
-    async fn may_manage(
+    pub(super) async fn may_manage(
         transaction: &mut Transaction<'_, Sqlite>,
         actor_id: Id,
         target_id: Id,
@@ -1877,7 +1882,7 @@ async fn insert_setup_token(
     Ok(())
 }
 
-async fn insert_session(
+pub(super) async fn insert_session(
     transaction: &mut Transaction<'_, Sqlite>,
     id: Id,
     token: &str,
@@ -1995,7 +2000,7 @@ fn decode_identity(row: sqlx::sqlite::SqliteRow) -> Result<StoredIdentity, Ident
     })
 }
 
-fn token_hash(token: &str) -> [u8; 32] {
+pub(super) fn token_hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
 }
 

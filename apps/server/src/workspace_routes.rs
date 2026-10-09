@@ -214,6 +214,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             post(create_recovery_link),
         )
         .route(
+            "/api/v1/admin/users/{user_id}/two-factor/reset",
+            post(reset_two_factor),
+        )
+        .route(
             "/api/v1/admin/users/{user_id}/admin",
             put(set_instance_admin),
         )
@@ -1357,6 +1361,29 @@ async fn create_recovery_link(
             expires_at,
         }),
     ))
+}
+
+/// Turns another account's two-factor sign-in off, for a user who lost the authenticator app and the recovery codes.
+#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/two-factor/reset", params(("user_id" = String, Path)), responses((status = 204)))]
+async fn reset_two_factor(
+    State(state): State<WorkspaceState>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/admin/users/{user_id}/two-factor/reset");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
+    state
+        .identity
+        .reset_two_factor_as_admin(
+            session.user.id,
+            user_id,
+            request_id_value(request_id.as_ref()),
+        )
+        .await
+        .map_err(|error| admin_account_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn email_not_configured(instance: &str, request_id: Option<&Extension<RequestId>>) -> ApiError {

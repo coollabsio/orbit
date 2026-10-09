@@ -1,5 +1,5 @@
 import { Navigate, NavLink, Outlet } from 'react-router'
-import { ArchiveBox, ClipboardText, CloudConnection, SecurityUser, Driver, Key, Keyboard, Link2, Notification as Bell, Tag, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sticker, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
+import { ArchiveBox, ClipboardText, CloudConnection, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Notification as Bell, Tag, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sticker, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { buttonVariants } from '@/components/ui/button'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
@@ -48,6 +48,7 @@ const ACCOUNT_SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: '/profile', label: 'Profile', icon: User, end: true },
       { to: '/profile/notifications', label: 'Notifications', icon: Bell },
+      { to: '/profile/security', label: 'Security', icon: Lock },
       { to: '/profile/sessions', label: 'Sessions', icon: ShieldCheck },
       { to: '/profile/shortcuts', label: 'Keyboard shortcuts', icon: Keyboard },
       { to: '/profile/storage', label: 'Storage', icon: Driver },

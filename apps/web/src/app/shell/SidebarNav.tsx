@@ -177,9 +177,9 @@ export function SidebarNav({
       <div data-slot="sidebar-nav" data-collapsed={collapsed} className="group/sidebar-nav flex min-h-0 flex-1 flex-col">
         <Tip label={collapsed ? 'Search' : undefined} side="right">
           <Button
-            variant="secondary"
+            variant="ghost"
             className={cn(
-              'h-8 w-full justify-start gap-2 rounded-md border-0 bg-sidebar-accent px-2 text-[13px] font-medium text-muted-foreground/70 hover:bg-sidebar-accent/70 active:not-aria-[haspopup]:translate-y-0',
+              'h-8 w-full justify-start gap-2 rounded-md border-0 bg-sidebar-accent px-2 text-[13px] font-medium text-muted-foreground/70 hover:bg-sidebar-accent/70 hover:text-muted-foreground active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-sidebar-accent/70',
               collapsed && 'justify-center px-0',
             )}
             aria-label="Search"

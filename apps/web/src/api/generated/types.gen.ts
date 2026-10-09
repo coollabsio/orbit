@@ -40,6 +40,10 @@ export type AdminUser = {
     root: boolean;
     suspended: boolean;
     /**
+     * Sign-in asks for an authenticator app code. An admin can turn it off for a user who lost the device.
+     */
+    two_factor: boolean;
+    /**
      * Workspaces the account is a member of, deleted workspaces excluded.
      */
     workspace_count: number;
@@ -121,6 +125,10 @@ export type AuthOptions = {
      * A mail server is saved: password reset links and invitations go out by email.
      */
     email_enabled: boolean;
+    /**
+     * People can add passkeys and sign in with them (the public origin is a domain name).
+     */
+    passkeys_enabled: boolean;
     /**
      * Anyone can create an account with an emailed link.
      */
@@ -953,6 +961,13 @@ export type DuplicatePageBody = {
     include_children?: boolean;
 };
 
+export type EnableTotpBody = {
+    /**
+     * A code the authenticator app shows now.
+     */
+    code: string;
+};
+
 export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues';
 
 /**
@@ -969,6 +984,30 @@ export type FilterGroup = {
 export type FilterNode = FilterGroup | Condition;
 
 export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains';
+
+export type FinishPasskeyLoginBody = {
+    challenge_token: string;
+    /**
+     * The browser's `PublicKeyCredential.toJSON()`.
+     */
+    credential: {
+        [key: string]: unknown;
+    };
+};
+
+export type FinishPasskeyRegistrationBody = {
+    challenge_token: string;
+    /**
+     * The browser's `PublicKeyCredential.toJSON()`.
+     */
+    credential: {
+        [key: string]: unknown;
+    };
+    /**
+     * What the user calls it, e.g. "MacBook" or "YubiKey".
+     */
+    name: string;
+};
 
 export type FollowedThreadRecord = {
     conversation_id: string;
@@ -1928,6 +1967,10 @@ export type PageAdminUser = {
         root: boolean;
         suspended: boolean;
         /**
+         * Sign-in asks for an authenticator app code. An admin can turn it off for a user who lost the device.
+         */
+        two_factor: boolean;
+        /**
          * Workspaces the account is a member of, deleted workspaces excluded.
          */
         workspace_count: number;
@@ -2173,6 +2216,42 @@ export type PageTaskRecord = {
 };
 
 /**
+ * The browser options of a passkey ceremony and the token to finish it with.
+ */
+export type PasskeyChallenge = {
+    /**
+     * Send it back with the browser's answer within five minutes.
+     */
+    challenge_token: string;
+    /**
+     * `{ publicKey: … }` in the WebAuthn JSON form (`PublicKeyCredential.parse…OptionsFromJSON`).
+     */
+    options: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * A passkey as the account's Security page lists it.
+ */
+export type PasskeyRecord = {
+    created_at: string;
+    id: string;
+    /**
+     * The last sign-in with it, `null` before the first.
+     */
+    last_used_at?: string | null;
+    name: string;
+};
+
+export type PasswordConfirmationBody = {
+    /**
+     * The current password: changing how the account signs in asks for it again.
+     */
+    password: string;
+};
+
+/**
  * A workspace capability that depends on the member's role. Actions open to
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
@@ -2349,6 +2428,13 @@ export type RecentPage = {
  */
 export type RecentPageList = {
     items: Array<RecentPage>;
+};
+
+export type RecoveryCodes = {
+    /**
+     * Each signs in once in place of an app code. They are shown only now.
+     */
+    recovery_codes: Array<string>;
 };
 
 export type RecoveryCompleteBody = {
@@ -2551,6 +2637,14 @@ export type SearchPage = {
     items: Array<SearchHitRecord>;
 };
 
+export type SecondFactorBody = {
+    /**
+     * The 6-digit code of the authenticator app, or a recovery code.
+     */
+    code: string;
+    two_factor_token: string;
+};
+
 export type SessionRecord = {
     absolute_expires_at: string;
     created_at: string;
@@ -2623,6 +2717,13 @@ export type SmtpView = {
 export type StartNotionImportBody = {
     destination?: NotionImportDestinationBody;
     selection: NotionImportSelectionBody;
+};
+
+export type StartPasskeyRegistrationBody = {
+    /**
+     * The current password: a new passkey is a new way into the account.
+     */
+    password: string;
 };
 
 export type StatusBody = {
@@ -2960,6 +3061,21 @@ export type ThreadStateRecord = {
     unread_replies: number;
 };
 
+export type TotpSetup = {
+    /**
+     * The `otpauth://` URL the QR code holds.
+     */
+    otpauth_url: string;
+    /**
+     * The QR code as a PNG `data:` URL.
+     */
+    qr_code: string;
+    /**
+     * The secret in base32, for apps that cannot scan the QR code.
+     */
+    secret: string;
+};
+
 export type TransferBody = {
     expected_version: number;
     membership_id: string;
@@ -2990,6 +3106,30 @@ export type TrashedPage = {
     title: string;
     updated_at: string;
     version: number;
+};
+
+/**
+ * The answer to a right password when the account has two-factor sign-in on.
+ */
+export type TwoFactorChallenge = {
+    /**
+     * Send it with the code to `/api/v1/auth/login/two-factor` within five minutes.
+     */
+    two_factor_token: string;
+};
+
+/**
+ * What the Security page shows about the account's sign-in methods.
+ */
+export type TwoFactorStatus = {
+    /**
+     * Unused recovery codes.
+     */
+    recovery_codes_left: number;
+    /**
+     * Sign-in asks for an authenticator app code after the password.
+     */
+    totp_enabled: boolean;
 };
 
 export type UpdateMeBody = {
@@ -4189,6 +4329,64 @@ export type SetAccountSuspensionResponses = {
 
 export type SetAccountSuspensionResponse = SetAccountSuspensionResponses[keyof SetAccountSuspensionResponses];
 
+export type ResetTwoFactorData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/users/{user_id}/two-factor/reset';
+};
+
+export type ResetTwoFactorErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, root_account, own_account
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ResetTwoFactorError = ResetTwoFactorErrors[keyof ResetTwoFactorErrors];
+
+export type ResetTwoFactorResponses = {
+    204: void;
+};
+
+export type ResetTwoFactorResponse = ResetTwoFactorResponses[keyof ResetTwoFactorResponses];
+
 export type RemoveAvatarData = {
     body?: never;
     headers?: {
@@ -4349,9 +4547,69 @@ export type LoginError = LoginErrors[keyof LoginErrors];
 
 export type LoginResponses = {
     200: LoginResponse;
+    /**
+     * The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.
+     */
+    202: TwoFactorChallenge;
 };
 
 export type LoginResponse2 = LoginResponses[keyof LoginResponses];
+
+export type LoginSecondFactorData = {
+    body: SecondFactorBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/login/two-factor';
+};
+
+export type LoginSecondFactorErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type LoginSecondFactorError = LoginSecondFactorErrors[keyof LoginSecondFactorErrors];
+
+export type LoginSecondFactorResponses = {
+    200: LoginResponse;
+};
+
+export type LoginSecondFactorResponse = LoginSecondFactorResponses[keyof LoginSecondFactorResponses];
 
 export type LogoutData = {
     body?: never;
@@ -4556,6 +4814,332 @@ export type AuthOptionsResponses = {
 };
 
 export type AuthOptionsResponse = AuthOptionsResponses[keyof AuthOptionsResponses];
+
+export type FinishPasskeyLoginData = {
+    body: FinishPasskeyLoginBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkey/login/finish';
+};
+
+export type FinishPasskeyLoginErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type FinishPasskeyLoginError = FinishPasskeyLoginErrors[keyof FinishPasskeyLoginErrors];
+
+export type FinishPasskeyLoginResponses = {
+    200: LoginResponse;
+};
+
+export type FinishPasskeyLoginResponse = FinishPasskeyLoginResponses[keyof FinishPasskeyLoginResponses];
+
+export type StartPasskeyLoginData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkey/login/start';
+};
+
+export type StartPasskeyLoginErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type StartPasskeyLoginError = StartPasskeyLoginErrors[keyof StartPasskeyLoginErrors];
+
+export type StartPasskeyLoginResponses = {
+    200: PasskeyChallenge;
+};
+
+export type StartPasskeyLoginResponse = StartPasskeyLoginResponses[keyof StartPasskeyLoginResponses];
+
+export type ListPasskeysData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkeys';
+};
+
+export type ListPasskeysErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type ListPasskeysError = ListPasskeysErrors[keyof ListPasskeysErrors];
+
+export type ListPasskeysResponses = {
+    200: Array<PasskeyRecord>;
+};
+
+export type ListPasskeysResponse = ListPasskeysResponses[keyof ListPasskeysResponses];
+
+export type FinishPasskeyRegistrationData = {
+    body: FinishPasskeyRegistrationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkeys/register/finish';
+};
+
+export type FinishPasskeyRegistrationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_passkey_name or passkey_not_discoverable
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type FinishPasskeyRegistrationError = FinishPasskeyRegistrationErrors[keyof FinishPasskeyRegistrationErrors];
+
+export type FinishPasskeyRegistrationResponses = {
+    201: PasskeyRecord;
+};
+
+export type FinishPasskeyRegistrationResponse = FinishPasskeyRegistrationResponses[keyof FinishPasskeyRegistrationResponses];
+
+export type StartPasskeyRegistrationData = {
+    body: StartPasskeyRegistrationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkeys/register/start';
+};
+
+export type StartPasskeyRegistrationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type StartPasskeyRegistrationError = StartPasskeyRegistrationErrors[keyof StartPasskeyRegistrationErrors];
+
+export type StartPasskeyRegistrationResponses = {
+    200: PasskeyChallenge;
+};
+
+export type StartPasskeyRegistrationResponse = StartPasskeyRegistrationResponses[keyof StartPasskeyRegistrationResponses];
+
+export type DeletePasskeyData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/auth/passkeys/{id}';
+};
+
+export type DeletePasskeyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * passkey_not_found
+     */
+    404: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type DeletePasskeyError = DeletePasskeyErrors[keyof DeletePasskeyErrors];
+
+export type DeletePasskeyResponses = {
+    204: void;
+};
+
+export type DeletePasskeyResponse = DeletePasskeyResponses[keyof DeletePasskeyResponses];
 
 export type ChangePasswordData = {
     body: ChangePasswordBody;
@@ -5082,6 +5666,278 @@ export type PutStatusResponses = {
 };
 
 export type PutStatusResponse = PutStatusResponses[keyof PutStatusResponses];
+
+export type GetTwoFactorData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/two-factor';
+};
+
+export type GetTwoFactorErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type GetTwoFactorError = GetTwoFactorErrors[keyof GetTwoFactorErrors];
+
+export type GetTwoFactorResponses = {
+    200: TwoFactorStatus;
+};
+
+export type GetTwoFactorResponse = GetTwoFactorResponses[keyof GetTwoFactorResponses];
+
+export type DisableTwoFactorData = {
+    body: PasswordConfirmationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/two-factor/disable';
+};
+
+export type DisableTwoFactorErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type DisableTwoFactorError = DisableTwoFactorErrors[keyof DisableTwoFactorErrors];
+
+export type DisableTwoFactorResponses = {
+    204: void;
+};
+
+export type DisableTwoFactorResponse = DisableTwoFactorResponses[keyof DisableTwoFactorResponses];
+
+export type RegenerateRecoveryCodesData = {
+    body: PasswordConfirmationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/two-factor/recovery-codes';
+};
+
+export type RegenerateRecoveryCodesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type RegenerateRecoveryCodesError = RegenerateRecoveryCodesErrors[keyof RegenerateRecoveryCodesErrors];
+
+export type RegenerateRecoveryCodesResponses = {
+    200: RecoveryCodes;
+};
+
+export type RegenerateRecoveryCodesResponse = RegenerateRecoveryCodesResponses[keyof RegenerateRecoveryCodesResponses];
+
+export type EnableTotpData = {
+    body: EnableTotpBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/two-factor/totp/enable';
+};
+
+export type EnableTotpErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_two_factor_code
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type EnableTotpError = EnableTotpErrors[keyof EnableTotpErrors];
+
+export type EnableTotpResponses = {
+    200: RecoveryCodes;
+};
+
+export type EnableTotpResponse = EnableTotpResponses[keyof EnableTotpResponses];
+
+export type SetupTotpData = {
+    body: PasswordConfirmationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/two-factor/totp/setup';
+};
+
+export type SetupTotpErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type SetupTotpError = SetupTotpErrors[keyof SetupTotpErrors];
+
+export type SetupTotpResponses = {
+    200: TotpSetup;
+};
+
+export type SetupTotpResponse = SetupTotpResponses[keyof SetupTotpResponses];
 
 export type CreateDiscordEventData = {
     body: DiscordEventBody;

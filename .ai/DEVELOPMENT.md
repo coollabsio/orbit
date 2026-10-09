@@ -135,7 +135,7 @@ Restore procedure:
 5. Run `orbit --config config/orbit.toml migrate status`.
 6. Start Orbit and check `/health/ready` before sending traffic.
 
-Weekly full database integrity checks use a durable schedule. Backups are created manually from Settings or the backup CLI while Orbit is stopped. Upload and retention file mutations share the in-process backup pause. Orbit retains 7 daily and 4 weekly snapshot buckets when enough manual snapshots exist. Operators must copy backups off-host and protect their permissions.
+Weekly full database integrity checks use a durable schedule. Backups are created manually from Settings or the backup CLI while Orbit is stopped. Upload and retention file mutations share the in-process backup pause. Orbit retains up to 24 snapshots from the last day, plus 7 daily and 4 weekly snapshot buckets when enough manual snapshots exist. Operators must copy backups off-host and protect their permissions.
 
 ## Invitations, recovery, and SMTP status
 

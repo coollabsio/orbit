@@ -1,11 +1,10 @@
 import { useRef, useState } from 'react'
-import { Eye, EyeSlash as EyeOff } from 'reicon-react'
 import { ApiProblem } from '@/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
 import { useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
 import { userColor } from '@/features/workspaces/api'
@@ -17,7 +16,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 
 
-function PasswordInput({
+function PasswordField({
   id,
   label,
   value,
@@ -30,32 +29,12 @@ function PasswordInput({
   onChange: (value: string) => void
   autoComplete: string
 }) {
-  const [visible, setVisible] = useState(false)
   return (
     <Field>
       <FieldLabel htmlFor={id}>
         {label} <RequiredMark />
       </FieldLabel>
-      <InputGroup>
-        <InputGroupInput
-          id={id}
-          type={visible ? 'text' : 'password'}
-          required
-          autoComplete={autoComplete}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton
-            size="icon-xs"
-            className="text-muted-foreground"
-            aria-label="Toggle password visibility"
-            onClick={() => setVisible((v) => !v)}
-          >
-            {visible ? <EyeOff /> : <Eye />}
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
+      <PasswordInput id={id} required autoComplete={autoComplete} value={value} onChange={(e) => onChange(e.target.value)} />
     </Field>
   )
 }
@@ -270,7 +249,7 @@ export function ProfilePage() {
               >
                 <FieldGrid>
                   <div className="min-[900px]:col-span-2">
-                    <PasswordInput
+                    <PasswordField
                       id="current-password"
                       label="Current password"
                       autoComplete="current-password"
@@ -278,14 +257,14 @@ export function ProfilePage() {
                       onChange={setCurrentPassword}
                     />
                   </div>
-                  <PasswordInput
+                  <PasswordField
                     id="new-password"
                     label="New password"
                     autoComplete="new-password"
                     value={newPassword}
                     onChange={setNewPassword}
                   />
-                  <PasswordInput
+                  <PasswordField
                     id="confirm-password"
                     label="Confirm new password"
                     autoComplete="new-password"

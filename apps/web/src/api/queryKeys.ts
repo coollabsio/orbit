@@ -6,6 +6,9 @@ export const queryKeys = {
   setup: ['setup-status'] as const,
   currentUser: ['current-user'] as const,
   sessions: ['sessions'] as const,
+  /** Whether the authenticator app is on and how many recovery codes are left. */
+  twoFactor: ['two-factor'] as const,
+  passkeys: ['passkeys'] as const,
   shortcuts: ['shortcuts'] as const,
   /** The browsers the user gets notifications on. */
   pushDevices: ['push-devices'] as const,

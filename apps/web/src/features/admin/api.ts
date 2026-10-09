@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSmtp, saveS3, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@/api/generated/sdk.gen'
+import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSmtp, resetTwoFactor, saveS3, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@/api/generated/sdk.gen'
 import type { InstanceSettingsView, S3Body, SmtpBody, StorageOptionsBody } from '@/api/generated/types.gen'
 
 /** Accounts on this instance in cursor pages; `search` matches part of the name or email. Admins only. */
@@ -37,6 +37,20 @@ export function useSetInstanceAdmin() {
   return useMutation({
     mutationFn: async ({ userId, admin }: { userId: string; admin: boolean }) => {
       await setInstanceAdmin({ client: apiClient, throwOnError: true, path: { user_id: userId }, body: { admin } })
+    },
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit }),
+    ]),
+  })
+}
+
+/** Turns off the authenticator app of someone who lost it and their recovery codes. */
+export function useResetTwoFactor() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      await resetTwoFactor({ client: apiClient, throwOnError: true, path: { user_id: userId } })
     },
     onSettled: () => Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers }),

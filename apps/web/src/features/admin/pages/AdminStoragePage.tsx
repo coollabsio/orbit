@@ -7,7 +7,9 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { useInstanceSettings, useRemoveS3, useSaveS3, useSaveStorageOptions, useStartImageCompression } from '@/features/admin/api'
 import { FieldGrid, RequiredMark, SettingsRow } from '@/features/settings/components/SettingsParts'
@@ -114,7 +116,7 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
           </Field>
           <Field>
             <FieldLabel htmlFor="s3-secret-key">Secret access key {s3 ? null : <RequiredMark />}</FieldLabel>
-            <Input id="s3-secret-key" type="password" autoComplete="new-password" required={!s3} placeholder={s3 ? 'Saved. Leave empty to keep it.' : ''} value={draft.secret_access_key} onChange={set('secret_access_key')} />
+            <PasswordInput id="s3-secret-key" autoComplete="new-password" required={!s3} placeholder={s3 ? 'Saved. Leave empty to keep it.' : ''} value={draft.secret_access_key} onChange={set('secret_access_key')} />
           </Field>
         </FieldGrid>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -160,7 +162,13 @@ function UsageCard({ storage }: { storage: StorageView }) {
                 ? 'On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.'
                 : 'Save a bucket above first.'}
             </span>
-            {moving ? <span role="status" className="text-xs text-muted-foreground">{moving}</span> : null}
+            {moving ? (
+              <span role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {/* The spinner stops when moving failed; Orbit only tries again later. */}
+                {storage.move_error ? null : <Spinner role="presentation" aria-hidden aria-label={undefined} className="size-3.5" />}
+                {moving}
+              </span>
+            ) : null}
             {storage.move_error ? <span role="alert" className="text-xs text-destructive">Moving files stopped: {storage.move_error} Orbit tries again every ten minutes.</span> : null}
           </div>
           <Switch

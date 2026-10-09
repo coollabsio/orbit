@@ -277,7 +277,10 @@ impl App {
                     &config.http.public_origin,
                 ),
                 oauth: crate::oauth::router(oauth),
-                auth: auth.with_mailer(mailer.clone()),
+                auth: match app_key {
+                    Some(app_key) => auth.with_mailer(mailer.clone()).with_app_key(app_key),
+                    None => auth.with_mailer(mailer.clone()),
+                },
                 workspaces: WorkspaceState::with_repository(
                     Arc::clone(&identity),
                     Arc::clone(&workspaces),

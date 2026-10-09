@@ -7,7 +7,7 @@ import { apiClient } from '@/api/client'
 import { cn } from 'cn'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -120,10 +120,9 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
           <form className="flex flex-col gap-3" onSubmit={(event) => void submit(event)} autoComplete="off">
             <div className="grid gap-1.5">
               <Label htmlFor="notion-token">Notion token</Label>
-              <Input
+              <PasswordInput
                 id="notion-token"
                 name="notion-token"
-                type="password"
                 autoComplete="off"
                 spellCheck={false}
                 autoCapitalize="off"

@@ -49,6 +49,18 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::recovery_complete,
         crate::auth_routes::list_sessions,
         crate::auth_routes::revoke_session,
+        crate::auth_routes::two_factor::login_second_factor,
+        crate::auth_routes::two_factor::get_two_factor,
+        crate::auth_routes::two_factor::setup_totp,
+        crate::auth_routes::two_factor::enable_totp,
+        crate::auth_routes::two_factor::disable_two_factor,
+        crate::auth_routes::two_factor::regenerate_recovery_codes,
+        crate::auth_routes::passkeys::list_passkeys,
+        crate::auth_routes::passkeys::start_passkey_registration,
+        crate::auth_routes::passkeys::finish_passkey_registration,
+        crate::auth_routes::passkeys::delete_passkey,
+        crate::auth_routes::passkeys::start_passkey_login,
+        crate::auth_routes::passkeys::finish_passkey_login,
         crate::workspace_routes::create_workspace,
         crate::workspace_routes::list_workspaces,
         crate::workspace_routes::get_workspace,
@@ -83,6 +95,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::start_image_compression,
         crate::workspace_routes::set_account_suspension,
         crate::workspace_routes::create_recovery_link,
+        crate::workspace_routes::reset_two_factor,
         crate::workspace_routes::set_instance_admin,
         crate::workspace_routes::list_global_audit,
         crate::workspace_routes::export_global_audit,
@@ -585,6 +598,13 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "root_account");
             add_code(&mut responses, "409", "own_account");
             add_code(&mut responses, "409", "account_suspended");
+        }
+        "reset_two_factor" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "404", "workspace_resource_not_found");
+            add_code(&mut responses, "404", "user_not_found");
+            add_code(&mut responses, "409", "root_account");
+            add_code(&mut responses, "409", "own_account");
         }
         "list_admin_users" => {
             add_code(&mut responses, "403", "installation_admin_required");

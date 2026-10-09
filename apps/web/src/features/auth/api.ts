@@ -9,7 +9,9 @@ import { connectionRetryDelay, retryConnectionFailure } from '@/lib/connection'
 import {
   authOptions,
   changePassword,
+  finishPasskeyLogin,
   login,
+  loginSecondFactor,
   logout,
   me,
   putStatus,
@@ -20,12 +22,16 @@ import {
   removeAvatar,
   setupComplete,
   setupStatus,
+  startPasskeyLogin,
   updateMe,
   uploadAvatar,
 } from '@/api/generated/sdk.gen'
 import type {
   ChangePasswordBody,
   LoginBody,
+  LoginResponse,
+  SecondFactorBody,
+  TwoFactorChallenge,
   RecoveryCompleteBody,
   RecoveryRequestBody,
   RegistrationCompleteBody,
@@ -36,6 +42,7 @@ import type {
   UserStatus,
 } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
+import { getPasskey } from '@/features/auth/passkey'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -76,17 +83,61 @@ export function useSetupStatus() {
   })
 }
 
-export function useLogin() {
+/** A finished sign-in: the user is known now and their workspaces load. */
+function useSignedIn() {
   const queryClient = useQueryClient()
+  return (response: LoginResponse) => {
+    queryClient.setQueryData(queryKeys.currentUser, response.user)
+    void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces })
+  }
+}
+
+/** The account asks for a second factor: the password was right, the code comes next. */
+export function isTwoFactorChallenge(response: LoginResponse | TwoFactorChallenge): response is TwoFactorChallenge {
+  return 'two_factor_token' in response
+}
+
+/** Email and password. Answers with the signed-in user, or a challenge when the account has two-factor sign-in on. */
+export function useLogin() {
+  const signedIn = useSignedIn()
   return useMutation({
     mutationFn: async (body: LoginBody) => {
       const { data } = await login({ client: apiClient, body, throwOnError: true })
-      return required(data, 'Login response was empty.')
+      return required<LoginResponse | TwoFactorChallenge>(data, 'Login response was empty.')
     },
     onSuccess: (response) => {
-      queryClient.setQueryData(queryKeys.currentUser, response.user)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces })
+      if (!isTwoFactorChallenge(response)) signedIn(response)
     },
+  })
+}
+
+/** The second step: an authenticator app code or a recovery code for the challenge from `useLogin`. */
+export function useLoginSecondFactor() {
+  const signedIn = useSignedIn()
+  return useMutation({
+    mutationFn: async (body: SecondFactorBody) => {
+      const { data } = await loginSecondFactor({ client: apiClient, body, throwOnError: true })
+      return required(data, 'Login response was empty.')
+    },
+    onSuccess: signedIn,
+  })
+}
+
+/** Sign-in with a passkey: the server's challenge, the browser prompt, then the server checks the answer. */
+export function usePasskeyLogin() {
+  const signedIn = useSignedIn()
+  return useMutation({
+    mutationFn: async () => {
+      const { data: challenge } = await startPasskeyLogin({ client: apiClient, throwOnError: true })
+      const credential = await getPasskey(required(challenge, 'Passkey challenge was empty.').options)
+      const { data } = await finishPasskeyLogin({
+        client: apiClient,
+        body: { challenge_token: challenge.challenge_token, credential },
+        throwOnError: true,
+      })
+      return required(data, 'Login response was empty.')
+    },
+    onSuccess: signedIn,
   })
 }
 
