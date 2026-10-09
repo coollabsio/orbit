@@ -1,21 +1,25 @@
 import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
-import { Hashtag as Hash } from 'reicon-react'
-import { useAppState } from '@/mock/store'
+import { DirectInbox as Inbox, DocumentText as FileText } from 'reicon-react'
 import { relativeTime } from '@/lib/format'
 import { cn } from 'cn'
-import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
 import { Pane } from '@/components/common/Pane'
+import { Emoji } from '@/components/common/Emoji'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
-import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
-import { PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import { useCurrentUser } from '@/features/auth/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useMembers } from '@/features/workspaces/api'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
-import { taskFromRecord } from '@/features/tasks/api/models'
+import { taskFromRecord, type Task } from '@/features/tasks/api/models'
 import { useTasks } from '@/features/tasks/api/tasks'
+import { notificationCopy, notificationTarget, useNotifications } from '@/features/inbox/api'
+import { usePageTree } from '@/features/docs/api/pages'
 import { taskPath } from '@/lib/taskLinks'
+import { docsHidden } from '@/app/shell/productNavigation'
+
+/** Most rows a card shows: Home is a short brief, the full lists live in Tasks, Inbox and Docs. */
+const CARD_LIMIT = 7
 
 /** One linked row inside a home card. */
 function CardRow({ className, ...props }: ComponentProps<typeof Link>) {
@@ -27,8 +31,8 @@ function CardEmpty({ children }: { children: React.ReactNode }) {
 }
 
 /** Quiet trailing detail of a row (identifier, time). */
-function RowMeta({ children }: { children: React.ReactNode }) {
-  return <span data-slot="row-meta" className="shrink-0 text-xs text-muted-foreground/70">{children}</span>
+function RowMeta({ className, children }: { className?: string; children: React.ReactNode }) {
+  return <span data-slot="row-meta" className={cn('shrink-0 text-xs text-muted-foreground/70', className)}>{children}</span>
 }
 
 function greetingFor(hour: number): string {
@@ -37,15 +41,17 @@ function greetingFor(hour: number): string {
   return 'Good evening'
 }
 
-function HomeCard({
-  title,
-  viewAllTo,
-  children,
-}: {
-  title: string
-  viewAllTo: string
-  children: React.ReactNode
-}) {
+/** `Overdue`, `Today`, `Tomorrow` or the weekday and date. */
+function dueLabel(dueAt: string, now: Date): string {
+  const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const days = Math.round((day(new Date(dueAt)) - day(now)) / 86_400_000)
+  if (days < 0) return 'Overdue'
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Tomorrow'
+  return new Date(dueAt).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+function HomeCard({ title, viewAllTo, children }: { title: string; viewAllTo: string; children: React.ReactNode }) {
   return (
     <section className="flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
       <header className="flex min-h-12 items-center gap-2 py-2 pr-2 pl-4 text-sm font-medium text-muted-foreground">
@@ -61,42 +67,28 @@ function HomeCard({
 }
 
 export function HomePage() {
-  const state = useAppState()
   const { workspace } = useWorkspace()
   const me = useCurrentUser()
   const projects = useProjects(workspace.id)
   const statuses = useAllStatuses(workspace.id, projects.data ?? [])
-  const tasks = useTasks(workspace.id, { assignee_id: me.data?.id, limit: 100 })
+  const members = useMembers(workspace.id)
+  const pageTree = usePageTree(workspace.id, !docsHidden)
+  const notifications = useNotifications(workspace.id, true)
+  const myId = me.data?.id
+  // the server's presets: overdue tasks need the assignee, my_week is the caller's own
+  const overdue = useTasks(workspace.id, { view: 'overdue', assignee_id: myId, sort: 'due_date', order: 'asc', limit: CARD_LIMIT })
+  const thisWeek = useTasks(workspace.id, { view: 'my_week', sort: 'due_date', order: 'asc', limit: CARD_LIMIT })
   const firstName = me.data?.display_name.split(' ')[0] ?? 'there'
+  const now = new Date()
 
-  const myOpenTasks = (tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [])
-    .filter(
-      (t) =>
-        t.assigneeIds.includes(me.data?.id ?? '') &&
-        ['unstarted', 'started'].includes(statuses.data.find((s) => s.id === t.statusId)?.category ?? ''),
-    )
-    .sort((a, b) => {
-      const p = PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority)
-      if (p !== 0) return p
-      return b.updatedAt.localeCompare(a.updatedAt)
-    })
-
-  const unreadMail = state.mailThreads.filter((t) => t.unread && t.folderId === 'f_inbox').length
-  const unreadChat = state.channels.reduce((sum, c) => sum + c.unreadCount, 0)
-  const unreadNotifications = state.notifications.filter((n) => !n.readAt).length
-
-  const sortedNotifications = [...state.notifications].sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt),
-  )
-  const unreadFirst = sortedNotifications.filter((n) => !n.readAt).slice(0, 5)
-  const inboxItems = unreadFirst.length > 0 ? unreadFirst : sortedNotifications.slice(0, 5)
-
-  const recentMail = state.mailThreads
-    .filter((t) => t.folderId === 'f_inbox')
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .slice(0, 4)
-
-  const channels = [...state.channels].sort((a, b) => b.unreadCount - a.unreadCount)
+  const toTasks = (query: typeof overdue): Task[] => query.data?.pages[0]?.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))) ?? []
+  // overdue first; a task can be in both lists when the week started before today
+  const dueTasks = [...toTasks(overdue), ...toTasks(thisWeek)]
+    // the overdue query runs once before the user loads, without the assignee
+    .filter((task, index, all) => task.assigneeIds.includes(myId ?? '') && all.findIndex((other) => other.id === task.id) === index)
+    .slice(0, CARD_LIMIT)
+  const unread = notifications.data ?? []
+  const recentDocs = [...(pageTree.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, CARD_LIMIT)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
@@ -105,107 +97,67 @@ export function HomePage() {
           <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-6 pt-12 pb-8 max-[599px]:px-4 max-[599px]:pt-8 max-[599px]:pb-6">
             <div>
               <h1 className="mb-1.5">
-                {greetingFor(new Date().getHours())}, {firstName}
+                {greetingFor(now.getHours())}, {firstName}
               </h1>
               <p className="text-[13px] text-muted-foreground [&_a]:text-muted-foreground [&_a]:no-underline [&_a:hover]:text-foreground [&_a:hover]:underline">
-                <Link to="/tasks">
-                  {myOpenTasks.length} open {myOpenTasks.length === 1 ? 'task' : 'tasks'} assigned to you
-                </Link>
-                {' · '}
-                <Link to="/mail">
-                  {unreadMail} unread {unreadMail === 1 ? 'email' : 'emails'}
-                </Link>
-                {' · '}
-                <Link to="/chat">
-                  {unreadChat} unread {unreadChat === 1 ? 'message' : 'messages'}
+                <Link to="/tasks?view=my_week">
+                  {dueTasks.length} {dueTasks.length === 1 ? 'task needs' : 'tasks need'} you this week
                 </Link>
                 {' · '}
                 <Link to="/inbox">
-                  {unreadNotifications} {unreadNotifications === 1 ? 'notification' : 'notifications'}
+                  {unread.length} unread {unread.length === 1 ? 'notification' : 'notifications'}
                 </Link>
               </p>
             </div>
             <div className="grid grid-cols-1 items-start gap-4 min-[900px]:grid-cols-2">
-              <HomeCard title="My tasks" viewAllTo="/tasks">
-                {myOpenTasks.length === 0 ? (
-                  <CardEmpty>No open tasks — enjoy the calm.</CardEmpty>
+              <HomeCard title="Due this week" viewAllTo="/tasks?view=my_week">
+                {dueTasks.length === 0 ? (
+                  <CardEmpty>Nothing due this week.</CardEmpty>
                 ) : (
-                  myOpenTasks.map((task) => (
+                  dueTasks.map((task) => (
                     <CardRow key={task.id} to={taskPath(task)}>
                       <TaskStatusIcon status={statuses.data.find((s) => s.id === task.statusId)} />
-                      <RowMeta>
-                        {task.identifier}
-                      </RowMeta>
-                      <span className="flex-1 truncate text-[13px]">
-                        {task.title}
-                      </span>
-                      <PriorityIcon priority={task.priority} />
-                      <RowMeta>
-                        {relativeTime(task.updatedAt)}
-                      </RowMeta>
-                    </CardRow>
-                  ))
-                )}
-              </HomeCard>
-
-              <HomeCard title="Inbox" viewAllTo="/inbox">
-                {inboxItems.length === 0 ? (
-                  <CardEmpty>Nothing here yet.</CardEmpty>
-                ) : (
-                  inboxItems.map((n) => (
-                    <CardRow key={n.id} to="/inbox">
-                      <span className={cn('size-2 shrink-0', !n.readAt && 'rounded-full bg-primary')} />
-                      <span className="flex-1 truncate text-[13px]">
-                        {n.title}
-                      </span>
-                      <RowMeta>
-                        {relativeTime(n.createdAt)}
-                      </RowMeta>
-                    </CardRow>
-                  ))
-                )}
-              </HomeCard>
-
-              <HomeCard title="Recent mail" viewAllTo="/mail">
-                {recentMail.length === 0 ? (
-                  <CardEmpty>No mail yet.</CardEmpty>
-                ) : (
-                  recentMail.map((thread) => (
-                    <CardRow key={thread.id} to={`/mail/${thread.id}`}>
-                      <span className={cn('max-w-[140px] shrink-0 truncate text-[13px]', thread.unread ? 'font-semibold' : 'font-normal')}>
-                        {thread.messages[0]?.from.name ?? 'Unknown'}
-                      </span>
-                      <span className="flex-1 truncate text-[13px] text-muted-foreground">
-                        {thread.subject}
-                      </span>
-                      <RowMeta>
-                        {relativeTime(thread.updatedAt)}
-                      </RowMeta>
-                    </CardRow>
-                  ))
-                )}
-              </HomeCard>
-
-              <HomeCard title="Active channels" viewAllTo="/chat">
-                {channels.length === 0 ? (
-                  <CardEmpty>No channels yet.</CardEmpty>
-                ) : (
-                  channels.map((channel) => (
-                    <CardRow key={channel.id} to={`/chat/${channel.id}`}>
-                      <Hash className="size-4 shrink-0 text-muted-foreground/70" />
-                      <span className={cn('shrink-0 text-[13px]', channel.unreadCount > 0 ? 'font-semibold' : 'font-normal')}>
-                        {channel.name}
-                      </span>
-                      {channel.unreadCount > 0 ? (
-                        <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{channel.unreadCount}</Badge>
+                      <RowMeta>{task.identifier}</RowMeta>
+                      <span className="flex-1 truncate text-[13px]">{task.title}</span>
+                      {task.dueAt ? (
+                        <RowMeta className={cn(dueLabel(task.dueAt, now) === 'Overdue' && 'text-destructive')}>{dueLabel(task.dueAt, now)}</RowMeta>
                       ) : null}
-                      <span className="flex-1 truncate text-xs text-muted-foreground/70">
-                        {channel.description}
-                      </span>
                     </CardRow>
                   ))
                 )}
               </HomeCard>
+
+              <HomeCard title="Unread in Inbox" viewAllTo="/inbox">
+                {unread.length === 0 ? (
+                  <CardEmpty>You are all caught up.</CardEmpty>
+                ) : (
+                  unread.slice(0, CARD_LIMIT).map((notification) => {
+                    const page = pageTree.data?.find((item) => item.id === notification.page_id)
+                    const actor = members.data?.find((member) => member.id === notification.actor_user_id)
+                    return (
+                      <CardRow key={notification.id} to={notificationTarget(notification) ?? '/inbox'}>
+                        <Inbox className="size-4 shrink-0 text-muted-foreground/70" />
+                        <span className="flex-1 truncate text-[13px]">{notificationCopy(notification, page?.title, actor?.name).title}</span>
+                        <RowMeta>{relativeTime(notification.created_at)}</RowMeta>
+                      </CardRow>
+                    )
+                  })
+                )}
+              </HomeCard>
+
+              {docsHidden ? null : <HomeCard title="Recently updated docs" viewAllTo="/docs">
+                {recentDocs.length === 0 ? (
+                  <CardEmpty>No docs yet.</CardEmpty>
+                ) : (
+                  recentDocs.map((page) => (
+                    <CardRow key={page.id} to={`/docs/${page.id}`}>
+                      {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-4 shrink-0 text-muted-foreground/70" />}
+                      <span className="flex-1 truncate text-[13px]">{page.title.trim() || 'Untitled'}</span>
+                      <RowMeta>{relativeTime(page.updated_at)}</RowMeta>
+                    </CardRow>
+                  ))
+                )}
+              </HomeCard>}
             </div>
           </div>
         </div>

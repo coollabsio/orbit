@@ -6,7 +6,7 @@ import { chatEnabled, docsHidden } from './productNavigation'
 
 /** Where each navigation command goes. */
 export const NAVIGATION: ReadonlyArray<{ id: CommandId; to: string }> = [
-  { id: 'nav.inbox', to: '/inbox' },
+  { id: 'nav.inbox', to: '/activity' },
   { id: 'nav.tasks', to: '/tasks' },
   { id: 'nav.mine', to: '/tasks?view=mine' },
   { id: 'nav.week', to: '/tasks?view=current_week' },

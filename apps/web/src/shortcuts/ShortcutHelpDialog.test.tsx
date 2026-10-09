@@ -16,10 +16,10 @@ function Page() {
 
 test('the search keeps the shortcuts that match the name or the key', async () => {
   const view = render(<Page />)
-  expect(view.getByText('Go to inbox')).toBeTruthy()
+  expect(view.getByText('Go to activity')).toBeTruthy()
   await userEvent.type(view.getByRole('searchbox', { name: 'Search shortcuts' }), 'status')
   expect(view.getByText('Change status')).toBeTruthy()
-  expect(view.queryByText('Go to inbox')).toBeNull()
+  expect(view.queryByText('Go to activity')).toBeNull()
   await userEvent.clear(view.getByRole('searchbox', { name: 'Search shortcuts' }))
   await userEvent.type(view.getByRole('searchbox', { name: 'Search shortcuts' }), 'zzz')
   expect(view.getByText('No shortcut matches "zzz".')).toBeTruthy()

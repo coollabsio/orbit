@@ -87,8 +87,8 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       return { crumbs: [{ label: 'Chat', to: '/chat' }] }
     case 'views':
       return { crumbs: [{ label: 'Tasks', to: '/tasks' }, { label: 'Views', to: '/views' }] }
-    case 'inbox':
-      return { crumbs: [{ label: 'Inbox' }] }
+    case 'activity':
+      return { crumbs: [{ label: 'Activity' }] }
     case 'profile':
       return { crumbs: [{ label: 'Profile' }] }
     case 'admin': {
@@ -158,7 +158,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
       className={cn(
         'group/topbar hidden h-12 shrink-0 items-center gap-2 bg-background px-2 max-[899px]:flex',
         'data-[root=settings]:h-11 data-[root=settings]:min-h-11 data-[root=settings]:gap-[7px] data-[root=settings]:border-b data-[root=settings]:border-border data-[root=settings]:px-2 data-[root=settings]:py-1.5',
-        'data-[root=tasks]:hidden data-[root=views]:hidden data-[root=mail]:hidden data-[root=docs]:hidden data-[root=chat]:hidden data-[root=inbox]:hidden',
+        'data-[root=tasks]:hidden data-[root=views]:hidden data-[root=mail]:hidden data-[root=docs]:hidden data-[root=chat]:hidden data-[root=activity]:hidden',
       )}
       data-root={routeRoot}
     >

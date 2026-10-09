@@ -532,7 +532,7 @@ async fn inbox_notifications_are_pushed_once() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].1["title"], "Owner assigned you a task");
     assert_eq!(sent[0].1["body"], "Ship the parser");
-    assert_eq!(sent[0].1["url"], "/inbox");
+    assert_eq!(sent[0].1["url"], "/activity");
     // The owner has no picture: the app's icon shows.
     assert!(sent[0].1["icon"].is_null());
     assert_eq!(fixture.push.push_inbox().await.unwrap(), 0);

@@ -25,8 +25,8 @@ test('shortcuts navigate, create, and follow a rebinding after a reload', async 
 
   // a sequence goes to a page
   await page.keyboard.press('g')
-  await page.keyboard.press('i')
-  await expect(page).toHaveURL(/\/inbox/)
+  await page.keyboard.press('a')
+  await expect(page).toHaveURL(/\/activity/)
   await page.keyboard.press('g')
   await page.keyboard.press('t')
   await expect(page).toHaveURL(/\/tasks/)

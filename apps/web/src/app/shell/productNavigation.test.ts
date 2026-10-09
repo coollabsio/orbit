@@ -16,7 +16,7 @@ test('tasks are the landing page, docs are enabled and mock product routes are d
   expect(coreSettingsPaths).toEqual(['/settings', '/settings/members', '/settings/sessions', '/settings/danger-zone', '/tasks-trash'])
 
   expect(isDisabledProductPath('/mail/thread')).toBeTrue()
-  for (const path of ['/tasks', '/tasks/one', '/tasks-trash', '/docs', '/docs/one', '/docs/trash', '/settings', '/profile', '/inbox']) {
+  for (const path of ['/tasks', '/tasks/one', '/tasks-trash', '/docs', '/docs/one', '/docs/trash', '/settings', '/profile', '/activity']) {
     expect(isDisabledProductPath(path)).toBeFalse()
   }
 })

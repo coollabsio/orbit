@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { DirectInbox as Inbox, Menu } from 'reicon-react'
+import { Menu, Notification as Bell } from 'reicon-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -53,7 +53,7 @@ export function InboxPage() {
           >
             <Menu className="size-[18px]" />
           </Button>
-          <PaneTitle>Inbox</PaneTitle>
+          <PaneTitle>Activity</PaneTitle>
           {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{unreadCount}</Badge> : null}
           <span className="flex-1" />
           <Button
@@ -81,14 +81,14 @@ export function InboxPage() {
         {allQuery.isPending || items.length === 0 ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
             {allQuery.isPending ? (
-              <EmptyState icon={Inbox} title="Loading inbox" description="Loading your notifications." />
+              <EmptyState icon={Bell} title="Loading activity" description="Loading your notifications." />
             ) : loadFailed(allQuery) ? (
               <div className="flex h-full flex-col items-center justify-center">
-                <EmptyState icon={Inbox} title="Inbox unavailable" description="Notifications could not be loaded." />
+                <EmptyState icon={Bell} title="Activity unavailable" description="Notifications could not be loaded." />
                 <Button variant="outline" type="button" onClick={() => void allQuery.refetch()}>Retry</Button>
               </div>
             ) : (
-              <EmptyState icon={Inbox} title="You're all caught up" description="Assignments and mentions appear here." />
+              <EmptyState icon={Bell} title="You're all caught up" description="Assignments and mentions appear here." />
             )}
           </div>
         ) : (

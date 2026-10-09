@@ -884,7 +884,7 @@ impl PushService {
             let notice = Notice {
                 title,
                 body,
-                url: "/inbox".to_owned(),
+                url: "/activity".to_owned(),
                 tag: format!("inbox:{id}"),
                 sound: kind.sound(),
                 icon: row
@@ -983,7 +983,7 @@ mod tests {
         let notice = Notice {
             title: "t".repeat(2000),
             body: "é".repeat(2000),
-            url: "/inbox".to_owned(),
+            url: "/activity".to_owned(),
             tag: "inbox:1".to_owned(),
             sound: "mention",
             icon: None,

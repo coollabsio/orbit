@@ -75,11 +75,16 @@ export function ViewsPage() {
           <h1 className="text-[13px] font-semibold text-foreground">Views</h1>
         </nav>
         <div className="flex-1" />
-        {views.length > 0 ? <TaskSearchBox value={search} onChange={setSearch} label="Search views" /> : null}
-        <Button type="button" className="max-[899px]:w-8 max-[899px]:px-0" aria-label="New view" onClick={newView}>
-          <Plus className="size-4" />
-          <span className="max-[899px]:hidden">New view</span>
-        </Button>
+        {/* with no views, the empty state in the center carries the only "New view" button */}
+        {views.length > 0 ? (
+          <>
+            <TaskSearchBox value={search} onChange={setSearch} label="Search views" />
+            <Button type="button" className="max-[899px]:w-8 max-[899px]:px-0" aria-label="New view" onClick={newView}>
+              <Plus className="size-4" />
+              <span className="max-[899px]:hidden">New view</span>
+            </Button>
+          </>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {viewsQuery.isPending ? (

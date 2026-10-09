@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { taskRedirect } from './taskNavigation'
 
 test('returns a local task redirect with its query string', () => {
-  const params = new URLSearchParams('redirect=%2Finbox%3Fworkspace%3Dworkspace-1')
-  expect(taskRedirect(params)).toBe('/inbox?workspace=workspace-1')
+  const params = new URLSearchParams('redirect=%2Factivity%3Fworkspace%3Dworkspace-1')
+  expect(taskRedirect(params)).toBe('/activity?workspace=workspace-1')
 })
 
 test('rejects external task redirects', () => {

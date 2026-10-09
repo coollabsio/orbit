@@ -98,7 +98,8 @@ test('the empty state points to saving a filter and starts a new view on /tasks'
   const { view } = renderWithProviders(<ViewsPage />, { views: [] })
   expect(view.getByText('Filter or rearrange any task page, then save it as a view to come back to it.')).toBeTruthy()
   expect(view.queryByRole('searchbox')).toBeNull()
-  await userEvent.click(view.getAllByRole('button', { name: 'New view' })[1] as HTMLElement)
+  // the empty state carries the only "New view" button; the header has none
+  await userEvent.click(view.getByRole('button', { name: 'New view' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?save_view=1')
 })
 

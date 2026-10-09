@@ -24,7 +24,7 @@ test('the task navigation includes a current calendar week view', () => {
   expect(view.getByRole('link', { name: 'My week' }).dataset.active).toBe('true')
 })
 
-test('task views and the inbox keep the selected project', () => {
+test('task views and Activity keep the selected project', () => {
   const view = render(
     <MemoryRouter initialEntries={['/tasks?project=project-r']}>
       <SidebarNav />
@@ -35,8 +35,8 @@ test('task views and the inbox keep the selected project', () => {
   fireEvent.click(view.getByRole('link', { name: 'My tasks' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r&view=mine')
 
-  fireEvent.click(view.getByRole('link', { name: 'Inbox' }))
-  expect(view.getByTestId('location').textContent).toBe('/inbox?project=project-r')
+  fireEvent.click(view.getByRole('link', { name: 'Activity' }))
+  expect(view.getByTestId('location').textContent).toBe('/activity?project=project-r')
 
   fireEvent.click(view.getByRole('link', { name: 'This week' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r&view=current_week')
@@ -76,22 +76,15 @@ test('task views nest under Tasks, not beside the other apps', () => {
   expect(view.getByRole('link', { name: 'Tasks' }).dataset.active).toBe('false')
 })
 
-test('the views entry shows only while the user is in Tasks', () => {
-  const view = render(
-    <MemoryRouter initialEntries={['/settings']}>
-      <SidebarNav />
-    </MemoryRouter>,
-  )
-  expect(view.queryByRole('link', { name: 'Task views' })).toBeNull()
-  view.unmount()
-  for (const path of ['/views', '/views/view-1', '/tasks/task-1', '/tasks-trash']) {
-    const inside = render(
+test('the views entry shows on every route, so the rows below never move', () => {
+  for (const path of ['/settings', '/', '/views/view-1', '/tasks/task-1']) {
+    const view = render(
       <MemoryRouter initialEntries={[path]}>
         <SidebarNav />
       </MemoryRouter>,
     )
-    expect(inside.getAllByRole('link', { name: 'Task views' })).toHaveLength(1)
-    inside.unmount()
+    expect(view.getAllByRole('link', { name: 'Task views' })).toHaveLength(1)
+    view.unmount()
   }
 })
 
@@ -159,13 +152,13 @@ test('the chat count shows on the Chat item, is in its name, stops at 99+ and hi
   expect(badgeOf(undefined)).toEqual({ name: 'Chat', badge: null })
 })
 
-test('the Inbox shows a dot while a notification is unread', () => {
+test('Activity shows a dot while a notification is unread', () => {
   const view = render(
     <MemoryRouter initialEntries={['/tasks']}>
       <SidebarNav inboxUnread />
     </MemoryRouter>,
   )
-  const inbox = view.getByRole('link', { name: 'Inbox, unread' })
+  const inbox = view.getByRole('link', { name: 'Activity, unread' })
   expect(inbox.querySelectorAll('[data-slot="sidebar-nav-dot"]').length).toBe(1)
 
   view.rerender(
@@ -173,5 +166,5 @@ test('the Inbox shows a dot while a notification is unread', () => {
       <SidebarNav />
     </MemoryRouter>,
   )
-  expect(view.getByRole('link', { name: 'Inbox' }).querySelectorAll('[data-slot="sidebar-nav-dot"]').length).toBe(0)
+  expect(view.getByRole('link', { name: 'Activity' }).querySelectorAll('[data-slot="sidebar-nav-dot"]').length).toBe(0)
 })

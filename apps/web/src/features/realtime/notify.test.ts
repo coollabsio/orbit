@@ -77,7 +77,7 @@ test('a notice is for the page a window shows when the path is the same, and for
   expect(showsPage('/chat/c1', { pathname: '/chat/c2', search: '' })).toBe(false)
   expect(showsPage('/chat/c1?thread=m1', { pathname: '/chat/c1', search: '?thread=m1' })).toBe(true)
   expect(showsPage('/chat/c1?thread=m1', { pathname: '/chat/c1', search: '' })).toBe(false)
-  expect(showsPage('/inbox', { pathname: '/tasks', search: '' })).toBe(false)
+  expect(showsPage('/activity', { pathname: '/tasks', search: '' })).toBe(false)
 })
 
 test('an unfocused tab that gets the lock shows the notification and plays the sound', async () => {

@@ -43,7 +43,7 @@ test('findConflict sees equal keys and sequence prefixes in overlapping contexts
   const bindings = resolveBindings({})
   expect(findConflict(bindings, 'task.setStatus', 'P')?.id).toBe('task.setPriority')
   expect(findConflict(bindings, 'task.setStatus', 'G')?.id).toMatch(/^nav\./)
-  expect(findConflict(bindings, 'task.setStatus', 'G I')?.id).toBe('nav.inbox')
+  expect(findConflict(bindings, 'task.setStatus', 'G A')?.id).toBe('nav.inbox')
   expect(findConflict(bindings, 'task.setStatus', 'S')).toBeNull()
   expect(findConflict(bindings, 'docs.history', 'T')).toBeNull()
   expect(findConflict(bindings, 'task.setStatus', 'Shift+/')?.id).toBe('help.open')

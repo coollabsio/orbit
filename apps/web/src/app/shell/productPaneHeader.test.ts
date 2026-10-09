@@ -21,12 +21,12 @@ test('tasks and settings share the mobile product header contract', async () => 
   expect(settings).toContain('max-[899px]:hidden')
 })
 
-test('inbox owns a mobile menu button while its shell topbar is hidden', async () => {
+test('activity owns a mobile menu button while its shell topbar is hidden', async () => {
   const [topbar, inbox] = await Promise.all([
     Bun.file(new URL('./Topbar.tsx', import.meta.url)).text(),
     Bun.file(new URL('../../features/inbox/pages/InboxPage.tsx', import.meta.url)).text(),
   ])
-  expect(topbar).toContain('data-[root=inbox]:hidden')
+  expect(topbar).toContain('data-[root=activity]:hidden')
   expect(inbox).toContain('max-[899px]:inline-flex')
   expect(inbox).toContain('aria-label="Menu"')
   expect(inbox).toContain("new CustomEvent('open-sidebar')")

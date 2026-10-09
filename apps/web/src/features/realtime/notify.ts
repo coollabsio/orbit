@@ -6,7 +6,7 @@ import { appPath, workerRegistration } from './push'
 export interface Notice {
   title: string
   body: string
-  /** An app path, such as `/chat/<id>?thread=<id>` or `/inbox`. */
+  /** An app path, such as `/chat/<id>?thread=<id>` or `/activity`. */
   url: string
   /** Notices with the same tag replace each other in the system's list. */
   tag: string

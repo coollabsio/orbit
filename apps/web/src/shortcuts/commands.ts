@@ -27,7 +27,7 @@ const REGISTRY = [
   { id: 'settings.open', title: 'Open settings', group: 'General', keys: 'Mod+,', context: 'global', inInputs: true },
   { id: 'theme.toggle', title: 'Change theme', group: 'General', keys: 'Mod+Shift+L', context: 'global', inInputs: true },
 
-  { id: 'nav.inbox', title: 'Go to inbox', group: 'Navigation', keys: 'G I', context: 'global' },
+  { id: 'nav.inbox', title: 'Go to activity', group: 'Navigation', keys: 'G A', context: 'global' },
   { id: 'nav.tasks', title: 'Go to all tasks', group: 'Navigation', keys: 'G T', context: 'global' },
   { id: 'nav.mine', title: 'Go to my tasks', group: 'Navigation', keys: 'G M', context: 'global' },
   { id: 'nav.week', title: 'Go to current week', group: 'Navigation', keys: 'G W', context: 'global' },

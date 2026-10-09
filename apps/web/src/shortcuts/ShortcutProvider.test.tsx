@@ -50,11 +50,11 @@ test('an open dialog blocks page commands but not the command menu', async () =>
 
 test('a sequence runs its command and not the single-key command of its last step', async () => {
   const user = userEvent.setup()
-  mount(<><Probe id="nav.inbox" run={record('inbox')} /><Probe id="task.assignMe" run={record('assign')} /></>)
-  await user.keyboard('gi')
+  mount(<><Probe id="nav.inbox" run={record('inbox')} /><Probe id="task.setAssignee" run={record('assignee')} /></>)
+  await user.keyboard('ga')
   expect(calls).toEqual(['inbox'])
-  await user.keyboard('i')
-  expect(calls).toEqual(['inbox', 'assign'])
+  await user.keyboard('a')
+  expect(calls).toEqual(['inbox', 'assignee'])
 })
 
 test('a sequence does not run when the second key comes too late', async () => {
@@ -62,7 +62,7 @@ test('a sequence does not run when the second key comes too late', async () => {
   mount(<Probe id="nav.inbox" run={record('inbox')} />)
   await user.keyboard('g')
   await act(() => new Promise((resolve) => setTimeout(resolve, 1100)))
-  await user.keyboard('i')
+  await user.keyboard('a')
   expect(calls).toEqual([])
 })
 
@@ -154,15 +154,15 @@ test('a command that is not available right now leaves the key alone', async () 
 })
 
 test('a held or repeated first key still makes one sequence, never a single-key command too', () => {
-  mount(<><Probe id="nav.inbox" run={record('inbox')} /><Probe id="task.assignMe" run={record('assign')} /></>)
+  mount(<><Probe id="nav.inbox" run={record('inbox')} /><Probe id="task.setAssignee" run={record('assignee')} /></>)
   const press = (code: string, key: string, repeat = false) => act(() => void document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, repeat, code, key })))
   press('KeyG', 'g')
   press('KeyG', 'g', true)
-  press('KeyI', 'i')
+  press('KeyA', 'a')
   expect(calls).toEqual(['inbox'])
   press('KeyG', 'g')
   press('KeyG', 'g')
-  press('KeyI', 'i')
+  press('KeyA', 'a')
   expect(calls).toEqual(['inbox', 'inbox'])
 })
 

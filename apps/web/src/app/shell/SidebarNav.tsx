@@ -2,7 +2,7 @@ import { Shortcut } from '@/shortcuts/Shortcut'
 import { createContext, Fragment, useContext, type ComponentType, type ReactNode } from 'react'
 import { Link, useLocation, useMatch, useResolvedPath, type LinkProps } from 'react-router'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { Calendar, SecurityUser, DirectInbox as Inbox, Home2 as Home, Layer, Message as MessageSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
+import { Calendar, CalendarTick, Danger, SecurityUser, Home2 as Home, Layer, Notification as Bell, Message as MessageSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -10,11 +10,11 @@ import { Tip } from '@/components/common/Tip'
 import { chatEnabled, docsHidden } from './productNavigation'
 
 const WORKSPACE_LINKS = [
+  { to: '/', label: 'Home', icon: Home, enabled: true },
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
-  { to: '/', label: 'Home', icon: Home, enabled: false },
   { to: '/docs', label: 'Docs', icon: FileText, enabled: true },
-  { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
+  { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
 ].filter((link) => !(docsHidden && link.to === '/docs'))
 
 const sidebarNavItemVariants = cva(
@@ -145,7 +145,7 @@ export function SidebarNav({
   collapsed?: boolean
   /** Unread count on the Chat item. */
   chatBadge?: number
-  /** The Inbox has an unread notification. */
+  /** Activity has an unread notification. */
   inboxUnread?: boolean
   /** Chat is a link instead of "Coming soon". Defaults to the build's setting. */
   chatEnabled?: boolean
@@ -164,13 +164,11 @@ export function SidebarNav({
     return `/tasks${params.size > 0 ? `?${params}` : ''}`
   }
 
-  const inboxPath = selectedProject ? `/inbox?project=${encodeURIComponent(selectedProject)}` : '/inbox'
+  const activityPath = selectedProject ? `/activity?project=${encodeURIComponent(selectedProject)}` : '/activity'
 
   // Tasks itself is active on its routes only while no task view is picked
   const tasksActive = useMatch({ path: '/tasks', end: false }) !== null && !view
   const taskViewActive = (name: string) => location.pathname === '/tasks' && view === name
-  // Views is a part of Tasks: its entry shows only while the user is somewhere in Tasks
-  const inTasks = /^\/(tasks|views)(\/|-|$)/.test(location.pathname)
 
   return (
     <SidebarNavCollapsed.Provider value={collapsed}>
@@ -204,26 +202,28 @@ export function SidebarNav({
               <SidebarNavItem
                 to={link.to === '/tasks' ? taskViewPath() : link.to}
                 active={link.to === '/tasks' ? tasksActive : undefined}
+                end={link.to === '/'}
                 icon={link.icon}
                 label={link.label}
                 badge={link.to === '/chat' ? chatBadge : undefined}
                 onClick={onNavigate}
               />
-              {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps */}
-              {link.to === '/tasks' && inTasks ? (
-                <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" className="animate-relation-enter motion-reduce:animate-none" onClick={onNavigate} />
+              {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps;
+                  always shown so the rows below never move when the route changes */}
+              {link.to === '/tasks' ? (
+                <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" onClick={onNavigate} />
               ) : null}
             </Fragment>
           ) : (
             <SidebarNavComingSoon key={link.to} icon={link.icon} label={link.label} />
           ))}
           <SidebarSection label="Personal" collapsed={collapsed} />
-          <SidebarNavItem to={inboxPath} icon={Inbox} label="Inbox" unread={inboxUnread} onClick={onNavigate} />
+          <SidebarNavItem to={activityPath} icon={Bell} label="Activity" unread={inboxUnread} onClick={onNavigate} />
           <SidebarNavItem to={taskViewPath('mine')} active={taskViewActive('mine')} icon={SquareCheck} label="My tasks" onClick={onNavigate} />
           <SidebarNavItem to={taskViewPath('current_week')} active={taskViewActive('current_week')} icon={Calendar} label="This week" onClick={onNavigate} />
-          <SidebarNavItem to={taskViewPath('my_week')} active={taskViewActive('my_week')} icon={Calendar} label="My week" onClick={onNavigate} />
-          <SidebarNavItem to={taskViewPath('overdue')} active={taskViewActive('overdue')} icon={Timer} label="Overdue" onClick={onNavigate} />
-          <SidebarNavItem to={taskViewPath('due_soon')} active={taskViewActive('due_soon')} icon={Calendar} label="Due soon" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('my_week')} active={taskViewActive('my_week')} icon={CalendarTick} label="My week" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('overdue')} active={taskViewActive('overdue')} icon={Danger} label="Overdue" onClick={onNavigate} />
+          <SidebarNavItem to={taskViewPath('due_soon')} active={taskViewActive('due_soon')} icon={Timer} label="Due soon" onClick={onNavigate} />
           <SidebarSection label="Manage" collapsed={collapsed} />
           <SidebarNavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
           {isRoot ? <SidebarNavItem to="/admin" icon={SecurityUser} label="Admin" onClick={onNavigate} /> : null}

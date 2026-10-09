@@ -10,6 +10,7 @@ import { chatEnabled } from '@/app/shell/productNavigation'
 import { ChatPage } from '@/features/chat/pages/ChatPage'
 import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
+import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
 import { DocsPage } from '@/features/docs/pages/DocsPage'
 import { AccountLayout, AdminLayout, SettingsLayout } from '@/features/settings/pages/SettingsLayout'
@@ -80,7 +81,7 @@ export default function App() {
           <Route path="onboarding" element={<OnboardingPage />} />
           <Route element={<WorkspaceProvider><Outlet /></WorkspaceProvider>}>
             <Route element={<AppShell />}>
-              <Route index element={<Navigate to="/tasks" replace />} />
+              <Route index element={<HomePage />} />
               <Route path="tasks" element={<TasksPage />} />
               <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
               <Route path="tasks/:taskId" element={<TasksPage />} />
@@ -104,7 +105,8 @@ export default function App() {
                 <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
               )}
               <Route path="dm/*" element={<Navigate to={chatEnabled ? '/chat' : '/tasks'} replace />} />
-              <Route path="inbox" element={<InboxPage />} />
+              <Route path="activity" element={<InboxPage />} />
+              <Route path="inbox" element={<MovedTo path="/activity" />} />
               <Route path="profile" element={<AccountLayout />}>
                 <Route index element={<ProfilePage />} />
                 <Route path="notifications" element={<NotificationsPage />} />

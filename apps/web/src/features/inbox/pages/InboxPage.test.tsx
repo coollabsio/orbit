@@ -15,7 +15,7 @@ function Location() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
-test('inbox lists assignment notifications and opens the linked task', async () => {
+test('activity lists assignment notifications and opens the linked task', async () => {
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.workspaces, [{ id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 }])
@@ -38,7 +38,7 @@ test('inbox lists assignment notifications and opens the linked task', async () 
 
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/inbox?workspace=workspace-1']}>
+      <MemoryRouter initialEntries={['/activity?workspace=workspace-1']}>
         <WorkspaceProvider>
           <InboxPage />
           <Location />
@@ -53,7 +53,7 @@ test('inbox lists assignment notifications and opens the linked task', async () 
   fireEvent.click(view.getByRole('button', { name: 'Menu' }))
   expect(openedSidebar).toBe(true)
   fireEvent.click(view.getByText('You were assigned a task'))
-  await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/tasks/task-9?redirect=%2Finbox%3Fworkspace%3Dworkspace-1'))
+  await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/tasks/task-9?redirect=%2Factivity%3Fworkspace%3Dworkspace-1'))
 })
 
 test('page comment mentions name the page and open it with the thread', async () => {
@@ -78,7 +78,7 @@ test('page comment mentions name the page and open it with the thread', async ()
 
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/inbox?workspace=workspace-1']}>
+      <MemoryRouter initialEntries={['/activity?workspace=workspace-1']}>
         <WorkspaceProvider>
           <InboxPage />
           <Location />
@@ -117,7 +117,7 @@ test('page body mentions name the editor and the page and open the page at the b
 
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/inbox?workspace=workspace-1']}>
+      <MemoryRouter initialEntries={['/activity?workspace=workspace-1']}>
         <WorkspaceProvider>
           <InboxPage />
           <Location />

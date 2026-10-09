@@ -203,11 +203,14 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
   // with "Show empty groups" the empty group headers stay, so a task can still be added to a group
   if (tasks.length === 0 && sections.every((section) => section.group.field === 'none')) {
     return (
-      <EmptyState
-        icon={SquareCheck}
-        title="No tasks found"
-        description="No tasks match the current filters. Try clearing a filter or create a new task."
-      />
+      // fills the list area, so the empty state sits in the center of the screen
+      <div className="flex h-full flex-col p-2 *:flex-1">
+        <EmptyState
+          icon={SquareCheck}
+          title="No tasks found"
+          description="No tasks match the current filters. Try clearing a filter or create a new task."
+        />
+      </div>
     )
   }
 
