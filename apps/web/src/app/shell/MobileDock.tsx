@@ -10,8 +10,8 @@ const DOCK_LINKS = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/tasks', label: 'Tasks', icon: SquareCheck },
   { to: '/docs', label: 'Docs', icon: FileText },
-  { to: '/mail', label: 'Mail', icon: Mail },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/mail', label: 'Mail', icon: Mail },
   { to: '/settings', label: 'Settings', icon: Settings },
 ].filter((link) => !(docsHidden && link.to === '/docs'))
 
@@ -19,7 +19,7 @@ const DOCK_LINKS = [
 function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0 }: { to: string; label: string; icon: ComponentType<{ className?: string }>; enabled: boolean; badge?: number }) {
   const count = enabled ? badge : 0
   return useRender({
-    render: enabled ? <NavLink to={to} aria-label={count > 0 ? `${label}, ${count} unread` : undefined} /> : <Button variant="ghost" disabled aria-label={label} />,
+    render: enabled ? <NavLink to={to} end={to === '/'} aria-label={count > 0 ? `${label}, ${count} unread` : undefined} /> : <Button variant="ghost" disabled aria-label={label} />,
     props: {
       'data-slot': 'mobile-dock-item',
       className: cn(
