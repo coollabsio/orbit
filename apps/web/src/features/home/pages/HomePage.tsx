@@ -51,6 +51,17 @@ function dueLabel(dueAt: string, now: Date): string {
   return new Date(dueAt).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
+function TaskRow({ task, status, now }: { task: Task; status: ComponentProps<typeof TaskStatusIcon>['status']; now: Date }) {
+  return (
+    <CardRow to={taskPath(task)}>
+      <TaskStatusIcon status={status} />
+      <RowMeta>{task.identifier}</RowMeta>
+      <span className="flex-1 truncate text-[13px]">{task.title}</span>
+      {task.dueAt ? <RowMeta className={cn(dueLabel(task.dueAt, now) === 'Overdue' && 'text-destructive')}>{dueLabel(task.dueAt, now)}</RowMeta> : null}
+    </CardRow>
+  )
+}
+
 function HomeCard({ title, viewAllTo, children }: { title: string; viewAllTo: string; children: React.ReactNode }) {
   return (
     <section className="flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
@@ -75,18 +86,18 @@ export function HomePage() {
   const pageTree = usePageTree(workspace.id, !docsHidden)
   const notifications = useNotifications(workspace.id, true)
   const myId = me.data?.id
-  // the server's presets: overdue tasks need the assignee, my_week is the caller's own
+  // each card shows the first rows of its Tasks page; the overdue page has no assignee, so the card adds it
   const overdue = useTasks(workspace.id, { view: 'overdue', assignee_id: myId, sort: 'due_date', order: 'asc', limit: CARD_LIMIT })
   const thisWeek = useTasks(workspace.id, { view: 'my_week', sort: 'due_date', order: 'asc', limit: CARD_LIMIT })
   const firstName = me.data?.display_name.split(' ')[0] ?? 'there'
   const now = new Date()
 
   const toTasks = (query: typeof overdue): Task[] => query.data?.pages[0]?.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))) ?? []
-  // overdue first; a task can be in both lists when the week started before today
-  const dueTasks = [...toTasks(overdue), ...toTasks(thisWeek)]
-    // the overdue query runs once before the user loads, without the assignee
-    .filter((task, index, all) => task.assigneeIds.includes(myId ?? '') && all.findIndex((other) => other.id === task.id) === index)
-    .slice(0, CARD_LIMIT)
+  // the overdue query runs once before the user loads, without the assignee
+  const overdueTasks = toTasks(overdue).filter((task) => task.assigneeIds.includes(myId ?? ''))
+  const weekTasks = toTasks(thisWeek)
+  // a full card with a next page means there are more tasks than the card shows
+  const weekCount = `${weekTasks.length}${thisWeek.data?.pages[0]?.next_cursor ? '+' : ''}`
   const unread = notifications.data ?? []
   const recentDocs = [...(pageTree.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, CARD_LIMIT)
 
@@ -101,7 +112,7 @@ export function HomePage() {
               </h1>
               <p className="text-[13px] text-muted-foreground [&_a]:text-muted-foreground [&_a]:no-underline [&_a:hover]:text-foreground [&_a:hover]:underline">
                 <Link to="/tasks?view=my_week">
-                  {dueTasks.length} {dueTasks.length === 1 ? 'task needs' : 'tasks need'} you this week
+                  {weekCount} {weekCount === '1' ? 'task' : 'tasks'} due this week
                 </Link>
                 {' · '}
                 <Link to="/inbox">
@@ -110,20 +121,19 @@ export function HomePage() {
               </p>
             </div>
             <div className="grid grid-cols-1 items-start gap-4 min-[900px]:grid-cols-2">
+              {overdueTasks.length === 0 ? null : (
+                <HomeCard title="Overdue" viewAllTo="/tasks?view=overdue">
+                  {overdueTasks.map((task) => (
+                    <TaskRow key={task.id} task={task} status={statuses.data.find((s) => s.id === task.statusId)} now={now} />
+                  ))}
+                </HomeCard>
+              )}
+
               <HomeCard title="Due this week" viewAllTo="/tasks?view=my_week">
-                {dueTasks.length === 0 ? (
+                {weekTasks.length === 0 ? (
                   <CardEmpty>Nothing due this week.</CardEmpty>
                 ) : (
-                  dueTasks.map((task) => (
-                    <CardRow key={task.id} to={taskPath(task)}>
-                      <TaskStatusIcon status={statuses.data.find((s) => s.id === task.statusId)} />
-                      <RowMeta>{task.identifier}</RowMeta>
-                      <span className="flex-1 truncate text-[13px]">{task.title}</span>
-                      {task.dueAt ? (
-                        <RowMeta className={cn(dueLabel(task.dueAt, now) === 'Overdue' && 'text-destructive')}>{dueLabel(task.dueAt, now)}</RowMeta>
-                      ) : null}
-                    </CardRow>
-                  ))
+                  weekTasks.map((task) => <TaskRow key={task.id} task={task} status={statuses.data.find((s) => s.id === task.statusId)} now={now} />)
                 )}
               </HomeCard>
 
