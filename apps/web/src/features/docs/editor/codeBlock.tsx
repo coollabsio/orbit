@@ -180,7 +180,8 @@ export const codeBlockSpec: typeof defaultCodeBlock = {
       const container = document.createElement('div')
       container.contentEditable = 'false'
       // The block content is a flex row (BlockNote) and `position: relative`: the controls pin to its top-right corner.
-      container.className = 'basis-full'
+      // Only the diagram of a `mermaid` block takes a line of its own; else the container must not take width from the code.
+      if (mermaid) container.className = 'basis-full'
       // The code surface is dark in both themes, so the token colors are the dark ones.
       view.contentDOM.parentElement?.classList.add('dark')
       view.dom.classList.add('group')
