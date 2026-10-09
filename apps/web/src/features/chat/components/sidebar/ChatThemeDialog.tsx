@@ -33,7 +33,7 @@ const COLOR_FIELDS: readonly { key: keyof ChatTheme; label: string; hint: string
 export function ChatThemeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Chat theme</DialogTitle>
           <DialogDescription>Colours of your chat. Only you see them, and text stays readable on every colour.</DialogDescription>

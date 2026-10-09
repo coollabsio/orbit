@@ -31,7 +31,7 @@ interface NewChannelDialogProps {
 export function NewChannelDialog({ open, onOpenChange, defaultCategoryId, defaultName }: NewChannelDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+      <DialogContent className="overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New channel</DialogTitle>
           <DialogDescription>Channels keep a conversation about one topic in one place.</DialogDescription>
