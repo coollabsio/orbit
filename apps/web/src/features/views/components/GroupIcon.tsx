@@ -1,4 +1,4 @@
-import { ChevronRight } from 'reicon-react'
+import { ChevronRight, Refresh2, Signpost } from 'reicon-react'
 import { cn } from 'cn'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { ColorDot } from '@/components/common/ColorDot'
@@ -42,6 +42,10 @@ export function GroupIcon({ group, context }: { group: Pick<TaskGroup, 'field' |
         ? <ColorDot color={color} className="size-2" />
         : <span aria-hidden className="size-2 shrink-0 rounded-full border border-dashed border-muted-foreground/60" />
     }
+    case 'milestone':
+      return <Signpost aria-hidden className="size-3.5 text-muted-foreground" />
+    case 'cycle':
+      return <Refresh2 aria-hidden className="size-3.5 text-muted-foreground" />
     default:
       return null
   }

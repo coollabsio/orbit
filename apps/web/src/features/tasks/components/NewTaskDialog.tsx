@@ -1,7 +1,7 @@
 import { useCommand } from '@/shortcuts/useCommand'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Calendar, ChevronRight, Paperclip2 as Paperclip, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Calendar, ChevronRight, Paperclip2 as Paperclip, Refresh2, Signpost, User as UserIcon, Weight, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
 import { uploadTaskAttachments } from '@/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,10 @@ import { uploadFiles } from '@/features/tasks/api/uploadQueue'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useLabels } from '@/features/tasks/api/labels'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { cycleName, estimateLabel, estimateOptions, openCycles } from '@/features/tasks/cyclesLib'
+import { useCreateTaskFromPayload, useTemplates, type Template } from '@/features/tasks/api/intake'
 import { taskIdentifier, type TaskPriority } from '@/features/tasks/api/models'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useCreateTask } from '@/features/tasks/api/tasks'
@@ -39,6 +43,7 @@ import { TaskLabels } from './TaskLabels'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { EditablePreview, taskTextVariants } from './TaskTextFields'
 
+const DAY_MS = 86_400_000
 const CREATE_MORE_KEY = 'orbit:new_task_create_more'
 
 interface NewTaskDialogProps {
@@ -61,7 +66,11 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const statuses = useAllStatuses(workspace.id, projects).data
   const members = useMembers(workspace.id).data ?? []
   const labels = useLabels(workspace.id).data ?? []
+  const allMilestones = useMilestones(workspace.id).data ?? []
   const createTask = useCreateTask(workspace.id)
+  const createFromPayload = useCreateTaskFromPayload(workspace.id)
+  // the sub-issues of the template that filled the form; they are created with the task
+  const [template, setTemplate] = useState<Template | null>(null)
   const [open, setOpen] = useState(true)
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState(initialDescription)
@@ -73,6 +82,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
     labelIds: defaults.label_ids ?? [],
     dueAt: defaults.due_at ?? null,
     dueStartAt: defaults.due_start_at ?? null,
+    milestoneId: defaults.milestone_id ?? null,
+    cycleId: defaults.cycle_id ?? null,
+    estimate: defaults.estimate ?? null,
   }))
   const [createMore, setCreateMore] = useState(() => window.localStorage.getItem(CREATE_MORE_KEY) === '1')
   const [created, setCreated] = useState<TaskRecord>()
@@ -90,15 +102,45 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   // projects and statuses can still load when the dialog opens outside Tasks, so the fallbacks are derived
   const project = projects.find((candidate) => candidate.id === draft.projectId) ?? projects[0]
   // a Duplicate status needs a canonical task, which a new task cannot have yet
-  const statusOptions = project ? projectStatuses(statuses, project.id).filter((option) => option.category !== 'duplicate') : []
+  // Triage is offered only in a project that uses it
+  const statusOptions = project
+    ? projectStatuses(statuses, project.id).filter((option) => option.category !== 'duplicate' && (option.category !== 'triage' || project.triage_enabled))
+    : []
   const status = statusOptions.find((option) => option.id === draft.statusId)
     ?? statusOptions.find((option) => option.id === (project ? resolveStatusId(statuses, project.id, null) : undefined))
     ?? statusOptions[0]
+  const milestones = allMilestones.filter((item) => item.project_id === project?.id)
+  const milestone = milestones.find((item) => item.id === draft.milestoneId)
+  const cycles = openCycles(useCycles(workspace.id, project?.id).data ?? [])
+  const cycle = cycles.find((item) => item.id === draft.cycleId)
+  const estimates = estimateOptions(project?.estimate_scale)
+  const estimate = estimates.some((option) => option.points === draft.estimate) ? draft.estimate : null
   const assignees = members.filter((member) => draft.assigneeIds.includes(member.id))
-  const busy = createTask.isPending || uploading
+  const templates = useTemplates(workspace.id, project?.id).data ?? []
+  const templateSubIssues = template && template.project_id === project?.id ? template.payload.sub_issues ?? [] : []
+  const busy = createTask.isPending || createFromPayload.isPending || uploading
   const canCreate = title.trim() !== '' && project !== undefined && status !== undefined && !busy
   const attach = (added: FileList | File[] | null) => {
     if (added && added.length > 0) setFiles((current) => [...current, ...Array.from(added)])
+  }
+
+  /** A template fills the fields; the person can change each one before the save. References that no longer exist are left out. */
+  const applyTemplate = (picked: Template) => {
+    const { payload } = picked
+    setTemplate(picked)
+    setTitle(payload.title)
+    setDescription(payload.description ?? '')
+    setDraft((current) => ({
+      ...current,
+      statusId: statusOptions.find((option) => option.id === payload.status_id)?.id ?? current.statusId,
+      priority: (payload.priority ?? 'none') as TaskPriority,
+      assigneeIds: (payload.assignee_ids ?? []).filter((id) => members.some((member) => member.id === id)),
+      labelIds: (payload.label_ids ?? []).filter((id) => labels.some((label) => label.id === id)),
+      milestoneId: milestones.find((item) => item.id === payload.milestone_id)?.id ?? null,
+      estimate: payload.estimate ?? null,
+      dueAt: payload.due_offset_days == null ? null : new Date(Date.now() + payload.due_offset_days * DAY_MS).toISOString(),
+      dueStartAt: null,
+    }))
   }
 
   const openTask = (task: TaskRecord) => {
@@ -109,7 +151,24 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const submit = async (more = createMore) => {
     if (!canCreate) return
     try {
-      const task = await createTask.mutateAsync({
+      // a template with sub-issues is created in one request, so it is never created in part
+      const task = templateSubIssues.length > 0
+        ? await createFromPayload.mutateAsync({
+          projectId: project.id,
+          payload: {
+            title: title.trim(),
+            description: description.trim(),
+            status_id: status.id,
+            priority: draft.priority,
+            assignee_ids: draft.assigneeIds,
+            label_ids: draft.labelIds,
+            milestone_id: milestone?.id ?? null,
+            estimate,
+            due_offset_days: draft.dueAt ? Math.max(0, Math.round((Date.parse(draft.dueAt) - Date.now()) / DAY_MS)) : null,
+            sub_issues: templateSubIssues,
+          },
+        })
+        : await createTask.mutateAsync({
         title: title.trim(),
         description: description.trim(),
         project_id: project.id,
@@ -119,6 +178,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
         label_ids: draft.labelIds,
         due_at: draft.dueAt,
         due_start_at: draft.dueStartAt,
+        ...(milestone ? { milestone_id: milestone.id } : {}),
+        ...(cycle ? { cycle_id: cycle.id } : {}),
+        ...(estimate != null ? { estimate } : {}),
       })
       if (files.length > 0) {
         setUploading(true)
@@ -134,6 +196,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
       if (!more) return openTask(task)
       // the properties stay for the next task of the batch
       setCreated(task)
+      setTemplate(null)
       setTitle('')
       setDescription('')
       setEditingDescription(false)
@@ -206,6 +269,24 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
             </DropdownMenu>
             <ChevronRight aria-hidden className="size-3 text-muted-foreground/70" />
             <DialogTitle className="text-xs font-normal text-muted-foreground">New task</DialogTitle>
+            {templates.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button type="button" variant="ghost" size="xs" className="ml-auto max-w-48 font-normal text-muted-foreground" aria-label={`Template: ${template?.name ?? 'none'}`}>
+                      <span className="truncate">{template ? template.name : 'Template'}</span>
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="w-auto min-w-45">
+                  {templates.map((option) => (
+                    <DropdownMenuItem key={option.id} className="data-selected:bg-accent data-selected:font-medium" data-selected={option.id === template?.id || undefined} onClick={() => applyTemplate(option)}>
+                      <span className="truncate">{option.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>
 
           <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto">
@@ -290,6 +371,11 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
             </div>
           </div>
 
+          {templateSubIssues.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              With {templateSubIssues.length} sub-issue{templateSubIssues.length === 1 ? '' : 's'} from the template: {templateSubIssues.map((item) => item.title).join(', ')}
+            </p>
+          ) : null}
           <TaskLabels workspaceId={workspace.id} labelIds={draft.labelIds} labels={labels} onChange={(labelIds) => setDraft((current) => ({ ...current, labelIds }))} />
           <div className="flex flex-wrap items-center gap-1.5">
             <DropdownMenu>
@@ -315,6 +401,72 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            {milestones.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button type="button" variant="outline" size="sm" className="max-w-48 font-normal" aria-label={`Milestone: ${milestone?.name ?? 'none'}`}>
+                      <Signpost aria-hidden />
+                      <span className="truncate">{milestone?.name ?? 'Milestone'}</span>
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className="w-auto min-w-45">
+                  {milestones.map((option) => (
+                    <DropdownMenuItem
+                      key={option.id}
+                      className="data-selected:bg-accent data-selected:font-medium"
+                      data-selected={option.id === milestone?.id || undefined}
+                      onClick={() => setDraft((current) => ({ ...current, milestoneId: option.id }))}
+                    >
+                      {option.name}
+                    </DropdownMenuItem>
+                  ))}
+                  {milestone ? <DropdownMenuItem onClick={() => setDraft((current) => ({ ...current, milestoneId: null }))}>No milestone</DropdownMenuItem> : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            {cycles.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button type="button" variant="outline" size="sm" className="max-w-40 font-normal" aria-label={`Cycle: ${cycle ? cycleName(cycle) : 'none'}`}>
+                      <Refresh2 aria-hidden />
+                      <span className="truncate">{cycle ? cycleName(cycle) : 'Cycle'}</span>
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className="w-auto min-w-45">
+                  {cycles.map((option) => (
+                    <DropdownMenuItem key={option.id} className="data-selected:bg-accent data-selected:font-medium" data-selected={option.id === cycle?.id || undefined} onClick={() => setDraft((current) => ({ ...current, cycleId: option.id }))}>
+                      <span className="flex-1 truncate">{cycleName(option)}</span>
+                      {option.state === 'current' ? <span className="text-xs text-muted-foreground">Current</span> : null}
+                    </DropdownMenuItem>
+                  ))}
+                  {cycle ? <DropdownMenuItem onClick={() => setDraft((current) => ({ ...current, cycleId: null }))}>No cycle</DropdownMenuItem> : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            {estimates.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button type="button" variant="outline" size="sm" className="font-normal" aria-label={`Estimate: ${estimate ?? 'none'}`}>
+                      <Weight aria-hidden />
+                      {estimate == null ? 'Estimate' : estimateLabel(estimate, project?.estimate_scale)}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent className="w-auto min-w-32">
+                  {estimates.map((option) => (
+                    <DropdownMenuItem key={option.points} className="data-selected:bg-accent data-selected:font-medium" data-selected={option.points === estimate || undefined} onClick={() => setDraft((current) => ({ ...current, estimate: option.points }))}>
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                  {estimate != null ? <DropdownMenuItem onClick={() => setDraft((current) => ({ ...current, estimate: null }))}>No estimate</DropdownMenuItem> : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -397,7 +549,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
 
           <DialogFooter className="items-center py-2.5 sm:justify-between">
             <div className="min-w-0 text-xs">
-              {createTask.isError ? (
+              {createTask.isError || createFromPayload.isError ? (
                 <span role="alert" className="text-destructive">The task was not created. Try again.</span>
               ) : created ? (
                 <span role="status" className="flex items-center gap-1 text-muted-foreground">

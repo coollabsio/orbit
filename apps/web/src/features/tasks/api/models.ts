@@ -2,7 +2,7 @@ import type { User } from '@/features/workspaces/models'
 import { formatTaskIdentifier } from '@/lib/taskLinks'
 import type { AttachmentRecord, AuditEvent, CommentReaction, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
 
-export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
+export type StatusCategory = 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
 
 export type Project = ProjectRecord
@@ -58,6 +58,8 @@ export type TaskChange =
   | { field: 'assignees' | 'labels'; added: string[]; removed: string[] }
   | { field: 'due'; start: string | null; end: string | null }
   | { field: 'title' | 'project'; from: string; to: string }
+  | { field: 'milestone' | 'cycle'; to: string | null }
+  | { field: 'estimate'; to: number | null }
   | { field: 'description' | 'source_url' }
 
 export interface TaskActivity {
@@ -106,6 +108,14 @@ export interface Task {
   blocked?: boolean
   /** Parent task id; null at the top level. */
   parentTaskId?: string | null
+  /** A milestone of the task's project; null when the task has none. */
+  milestoneId?: string | null
+  /** A cycle of the task's project; null when the task is in none. */
+  cycleId?: string | null
+  /** Points; the project's scale decides how they show. */
+  estimate?: number | null
+  /** The sum of the estimates of the leaf sub-issues at every level; null with none. */
+  subIssueEstimate?: number | null
   /** The parent, for the "Parent title ›" label. */
   parent?: TaskKeyRef | null
   /** Direct live sub-issues. */
@@ -219,6 +229,8 @@ function updateChanges(metadata: Record<string, unknown>, projectName: (projectI
     if (field === 'status' || field === 'priority' || field === 'title') return [{ field, from: text(value.from), to: text(value.to) }]
     if (field === 'project') return [{ field, from: projectName(text(value.from)), to: projectName(text(value.to)) }]
     if (field === 'assignees' || field === 'labels') return [{ field, added: ids(value.added), removed: ids(value.removed) }]
+    if (field === 'milestone' || field === 'cycle') return [{ field, to: text(value.to) || null }]
+    if (field === 'estimate') return [{ field, to: typeof value.to === 'number' ? value.to : null }]
     if (field === 'due') return [{ field, start: text(value.start) || null, end: text(value.end) || null }]
     return []
   })
@@ -352,6 +364,10 @@ export function taskFromRecord(
       : null,
     blocked: record.blocked ?? false,
     parentTaskId: wire.parent_task_id ?? null,
+    milestoneId: wire.milestone_id ?? null,
+    cycleId: wire.cycle_id ?? null,
+    estimate: wire.estimate ?? null,
+    subIssueEstimate: wire.sub_issue_estimate ?? null,
     parent: wire.parent ? keyRef(wire.parent) : null,
     subIssueCount: wire.sub_issue_count ?? 0,
     subIssueClosedCount: wire.sub_issue_closed_count ?? 0,

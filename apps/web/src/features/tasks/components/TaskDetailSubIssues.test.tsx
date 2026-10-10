@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 const workspace = testWorkspace()
-const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true }
+const project = { id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b', created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true, triage_enabled: false, lead_user_id: null, member_ids: [], overview_page_id: null, task_counts: {} }
 const todo: TaskStatusDef = { id: 'todo', projectId: 'project-1', name: 'Todo', description: '', color: '#888', category: 'unstarted', position: 0, version: 1 }
 const state: TaskViewState = { currentUserId: 'user-1', users: [], statuses: [todo], labels: [], tasks: [] }
 const task: Task = {

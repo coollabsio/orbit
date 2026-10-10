@@ -5,7 +5,7 @@ import { refIdentifier, taskFromRecord, taskIdentifier, toggleReaction } from '.
 const project: ProjectRecord = {
   id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'LCH', color: '#123456',
   created_at: '2026-09-04T09:00:00Z', updated_at: '2026-09-04T09:00:00Z', version: 2,
-  auto_close_parent: true, auto_close_sub_issues: true,
+  auto_close_parent: true, auto_close_sub_issues: true, triage_enabled: false, lead_user_id: null, member_ids: [], overview_page_id: null, task_counts: {}
 }
 const record: TaskRecord = {
   id: '01HZYTASK000000000000001', workspace_id: 'workspace-1', project_id: project.id, number: 12,
@@ -13,7 +13,7 @@ const record: TaskRecord = {
   assignee_ids: ['user-1'], creator_id: 'user-1', label_ids: ['label-1'],
   due_at: '2030-01-02T12:30:00.000Z',
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', duplicate_of: null, blocked: false, version: 7,
-  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,
+  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0, milestone_id: null,
 }
 const comment: CommentRecord = {
   id: 'comment-1', workspace_id: 'workspace-1', task_id: record.id, author_id: 'user-1',

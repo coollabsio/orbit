@@ -1,3 +1,4 @@
+import { isSystemCategory } from '@/features/tasks/taskMeta'
 import { toast } from 'sonner'
 import type { PrAutomationRule } from '@/api/generated/types.gen'
 import { SettingsCard } from '@/components/common/SettingsCard'
@@ -22,8 +23,8 @@ const valueOf = (rule: PrAutomationRule | undefined) => (rule?.mode === 'status'
 export function PrAutomationCard({ workspaceId, projectId, statuses }: { workspaceId: string; projectId: string; statuses: TaskStatusDef[] }) {
   const rules = usePrAutomation(workspaceId, projectId)
   const save = useSetPrAutomation(workspaceId, projectId)
-  // the Duplicate status is entered only by marking a duplicate
-  const selectable = statuses.filter((status) => status.category !== 'duplicate')
+  // Duplicate and Triage are entered by their own actions, not by a rule
+  const selectable = statuses.filter((status) => !isSystemCategory(status.category))
 
   return (
     <SettingsCard title="Pull request automation" description="The status that a task takes when a GitHub pull request that names it moves. A task that is done does not move.">

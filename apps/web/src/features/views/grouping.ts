@@ -2,6 +2,9 @@ import type { CreateTaskBody, LabelRecord, ProjectRecord, TaskUpdateBody } from 
 import type { Task, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 import { PRIORITY_LABEL, PRIORITY_ORDER, statusKeyOf } from '@/features/tasks/taskMeta'
 import { statusGroups } from '@/features/tasks/tasksLib'
+import type { Cycle } from '@/features/tasks/api/cycles'
+import type { Milestone } from '@/features/tasks/api/milestones'
+import { cycleOptions, milestoneOptions } from '@/features/views/filterFields'
 import type { User } from '@/features/workspaces/models'
 import { isGroup, resolveDateValue, type Condition, type DateValue, type FilterGroup, type GroupBy } from '@/features/views/viewState'
 
@@ -10,7 +13,7 @@ export type TaskGroup = { key: string; field: GroupBy; value: string | null; lab
  * `statuses` and `projects` should already be scoped to the page (a project page passes only its project's
  * statuses), so empty groups never list another project's workflow.
  */
-export type GroupContext = { statuses: TaskStatusDef[]; members: User[]; labels: LabelRecord[]; projects: ProjectRecord[]; currentUserId: string; showEmpty: boolean }
+export type GroupContext = { statuses: TaskStatusDef[]; members: User[]; labels: LabelRecord[]; projects: ProjectRecord[]; milestones?: Milestone[]; cycles?: Cycle[]; currentUserId: string; showEmpty: boolean }
 export type TaskCreateDefaults = Partial<CreateTaskBody>
 export type DropUpdate = { taskId: string; patch: Partial<TaskUpdateBody> } | { error: string } | null
 
@@ -33,6 +36,10 @@ function bucketsFor(groupBy: GroupBy, ctx: GroupContext): Bucket[] {
       return [...[...ctx.labels].sort(byName).map((label): Bucket => ({ value: label.id, label: label.name })), { value: null, label: 'No label' }]
     case 'project':
       return [...ctx.projects].sort(byName).map((project): Bucket => ({ value: project.id, label: project.name }))
+    case 'milestone':
+      return [...milestoneOptions(ctx.milestones ?? [], ctx.projects).map((option): Bucket => ({ value: option.value, label: option.label })), { value: null, label: 'No milestone' }]
+    case 'cycle':
+      return [...cycleOptions(ctx.cycles ?? [], ctx.projects).map((option): Bucket => ({ value: option.value, label: option.label })), { value: null, label: 'No cycle' }]
     case 'none':
       return [{ value: null, label: 'All tasks' }]
   }
@@ -57,6 +64,11 @@ function valuesOf(task: Task, groupBy: GroupBy, statusKeys: Map<string, string>,
       return present(task.labels)
     case 'project':
       return [task.projectId]
+    case 'milestone':
+      return present(task.milestoneId ? [task.milestoneId] : [])
+    // a task in a completed cycle falls into "No cycle": only open cycles are groups
+    case 'cycle':
+      return present(task.cycleId ? [task.cycleId] : [])
     case 'none':
       return [null]
   }
@@ -124,6 +136,18 @@ export function dropUpdate(task: Task, field: GroupBy, from: string | null, to: 
     case 'label': {
       const next = swapValue(task.labels, from, to)
       return next ? update({ label_ids: next }) : null
+    }
+    case 'milestone': {
+      if (to !== null && ctx.milestones?.find((milestone) => milestone.id === to)?.project_id !== task.projectId) {
+        return { error: 'This milestone belongs to a different project.' }
+      }
+      return to === (task.milestoneId ?? null) ? null : update({ milestone_id: to })
+    }
+    case 'cycle': {
+      if (to !== null && ctx.cycles?.find((cycle) => cycle.id === to)?.project_id !== task.projectId) {
+        return { error: 'This cycle belongs to a different project.' }
+      }
+      return to === (task.cycleId ?? null) ? null : update({ cycle_id: to })
     }
     // Moving between projects maps the status and renumbers the task on the server (Move to project in the menus);
     // dragging between project groups stays disabled.

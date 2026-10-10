@@ -2558,7 +2558,7 @@ mod tests {
                 .scalar::<i64>("SELECT COUNT(*) FROM task_statuses")
                 .await
                 .unwrap(),
-            6
+            7
         );
     }
 

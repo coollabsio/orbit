@@ -7,7 +7,8 @@ import { Command, CommandDialog, CommandEmpty, CommandInput, CommandItem, Comman
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
-import { assignUpdates, assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { assignUpdates, assigneeToggleUpdates, cycleUpdates, dueUpdates, estimateUpdates, labelToggleUpdates, priorityUpdates, sharedProjectCycles, sharedProjectId, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { cycleName, estimateOptions } from '@/features/tasks/cyclesLib'
 import { DueDateDialog } from '@/features/tasks/components/DueDateDialog'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { LabelPill } from '@/features/tasks/components/TaskLabels'
@@ -22,9 +23,9 @@ import { taskBranchName, taskPath } from '@/lib/taskLinks'
 import { focusTaskRow, focusedTaskId, useTaskTarget } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 
-type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate' | 'project'
+type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate' | 'project' | 'cycle' | 'estimate'
 
-const FIELD_TITLE: Record<TaskField, string> = { status: 'Change status', priority: 'Change priority', assignee: 'Change assignee', labels: 'Change labels', dueDate: 'Set due date', project: 'Move to project' }
+const FIELD_TITLE: Record<TaskField, string> = { status: 'Change status', priority: 'Change priority', assignee: 'Change assignee', labels: 'Change labels', dueDate: 'Set due date', project: 'Move to project', cycle: 'Set cycle', estimate: 'Set estimate' }
 
 interface TaskCommandsProps {
   /** The tasks in view, or the open task. */
@@ -68,6 +69,11 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.setLabels', open('labels'), { available })
   useCommand('task.setDueDate', open('dueDate'), { available })
   useCommand('task.moveToProject', open('project'), { available: () => available() && projects.length > 1 })
+  // a cycle and an estimate scale belong to one project: the targets must be in one project that has the feature on
+  const cyclesFor = (items: Task[]) => sharedProjectCycles(items, groupContext.cycles ?? [])
+  const estimatesFor = (items: Task[]) => estimateOptions(projects.find((project) => project.id === sharedProjectId(items))?.estimate_scale)
+  useCommand('task.setCycle', open('cycle'), { available: () => cyclesFor(targets()).length > 0 })
+  useCommand('task.setEstimate', open('estimate'), { available: () => estimatesFor(targets()).length > 0 })
   useCommand('task.assignMe', () => mutate(assignUpdates(targets(), currentUserId)), { available })
   useCommand('task.copyId', () => copy(targets()[0].identifier, 'Copied task ID'), { available: single })
   useCommand('task.copyLink', () => copy(`${window.location.origin}${taskPath(targets()[0])}`, 'Copied task link'), { available: single })
@@ -144,6 +150,25 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
               <LabelPill label={label} />
             </CommandItem>
           )) : null}
+          {menu.field === 'cycle' ? (
+            <>
+              {cyclesFor(menuTasks).map((cycle) => (
+                <CommandItem key={cycle.id} value={cycleName(cycle)} data-checked={menuTasks.every((task) => task.cycleId === cycle.id)} onSelect={() => choose(cycleUpdates(menuTasks, cycle.id))}>
+                  <span className="flex-1 truncate">{cycleName(cycle)}</span>
+                  {cycle.state === 'current' ? <span className="text-xs text-muted-foreground">Current</span> : null}
+                </CommandItem>
+              ))}
+              <CommandItem value="No cycle" data-checked={menuTasks.every((task) => !task.cycleId)} onSelect={() => choose(cycleUpdates(menuTasks, null))}>No cycle</CommandItem>
+            </>
+          ) : null}
+          {menu.field === 'estimate' ? (
+            <>
+              {estimatesFor(menuTasks).map((option) => (
+                <CommandItem key={option.points} value={option.label} data-checked={menuTasks.every((task) => task.estimate === option.points)} onSelect={() => choose(estimateUpdates(menuTasks, option.points))}>{option.label}</CommandItem>
+              ))}
+              <CommandItem value="No estimate" data-checked={menuTasks.every((task) => task.estimate == null)} onSelect={() => choose(estimateUpdates(menuTasks, null))}>No estimate</CommandItem>
+            </>
+          ) : null}
           {menu.field === 'project' ? projects.map((project) => (
             <CommandItem key={project.id} value={`${project.name} ${project.key}`} data-checked={menuTasks.every((task) => task.projectId === project.id)} onSelect={() => {
               moveToProject(menuTasks, project)

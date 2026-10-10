@@ -199,6 +199,10 @@ fn restore(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatusCategory {
+    /// System-managed: tasks from outside the team wait here until a member accepts them.
+    Triage,
+    /// Work that is not planned yet. An open category, apart from `Unstarted`.
+    Backlog,
     Unstarted,
     Started,
     Completed,
@@ -212,6 +216,8 @@ impl StatusCategory {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Triage => "triage",
+            Self::Backlog => "backlog",
             Self::Unstarted => "unstarted",
             Self::Started => "started",
             Self::Completed => "completed",
@@ -222,12 +228,13 @@ impl StatusCategory {
 }
 
 /// The statuses every new project starts with, in position order.
-pub const DEFAULT_STATUSES: [(&str, &str, StatusCategory); 6] = [
-    ("Backlog", "#8b8f98", StatusCategory::Unstarted),
+pub const DEFAULT_STATUSES: [(&str, &str, StatusCategory); 7] = [
+    ("Backlog", "#8b8f98", StatusCategory::Backlog),
     ("Todo", "#8b8f98", StatusCategory::Unstarted),
     ("In Progress", "#f2c94c", StatusCategory::Started),
     ("Done", "#4cb782", StatusCategory::Completed),
     ("Cancelled", "#8b8f98", StatusCategory::Cancelled),
+    ("Triage", "#f2994a", StatusCategory::Triage),
     ("Duplicate", "#8b8f98", StatusCategory::Duplicate),
 ];
 

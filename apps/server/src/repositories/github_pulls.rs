@@ -414,10 +414,11 @@ impl TaskRepository {
             }
             let status_id = match (rule.mode, rule.status_id) {
                 (PrAutomationMode::Status, Some(status_id)) => {
-                    // The Duplicate status is entered only by marking a duplicate.
+                    // The Duplicate status is entered only by marking a duplicate, and Triage is
+                    // where tasks come in, not a place a rule moves them to.
                     let valid: bool = sqlx::query_scalar(
                         "SELECT EXISTS (SELECT 1 FROM task_statuses WHERE id = ? AND workspace_id = ? \
-                         AND project_id = ? AND category <> 'duplicate')",
+                         AND project_id = ? AND category NOT IN ('duplicate', 'triage'))",
                     )
                     .bind(status_id.to_string())
                     .bind(workspace_id.to_string())
@@ -573,10 +574,11 @@ async fn apply_pull_state_in_tx(
     let Some(task) = task else {
         return Ok(());
     };
-    // A late pull request must not reopen finished work.
+    // A late pull request must not reopen finished work, and a task that waits in triage is
+    // accepted by a person, not by a pull request.
     if matches!(
         task.get::<String, _>("category").as_str(),
-        "completed" | "cancelled" | "duplicate"
+        "completed" | "cancelled" | "duplicate" | "triage"
     ) {
         return Ok(());
     }
@@ -649,6 +651,7 @@ async fn apply_pull_state_in_tx(
         github.now,
     )
     .await?;
+    let target_id = parse_id(target)?;
     task_notifications::status_changed_in_tx(
         tx,
         TaskEvent {
@@ -658,10 +661,12 @@ async fn apply_pull_state_in_tx(
             now: github.now,
         },
         parse_id(current)?,
-        parse_id(target)?,
+        target_id,
         &[],
     )
     .await?;
+    super::cycles::apply_options_in_tx(tx, task_id, parse_id(project_id)?, target_id, github.now)
+        .await?;
     let after = sub_issues::snapshot_in_tx(tx, task_id).await?;
     if let (Some(before), Some(after)) = (before, after) {
         let actor = sub_issues::AutomationActor {

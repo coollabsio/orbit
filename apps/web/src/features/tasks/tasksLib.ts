@@ -1,3 +1,4 @@
+import { pointsText } from '@/features/tasks/cyclesLib'
 import type { StatusCategory, Task, TaskActivity, TaskChange, TaskComment, TaskPriority, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
 import { relativeTime, shortDate } from '@/lib/format'
 import { defaultStatusOf, PRIORITY_LABEL, sortStatuses, statusKeyOf } from './taskMeta'
@@ -113,6 +114,12 @@ export function activityChangeText(change: TaskChange, state: Pick<TaskViewState
       return `changed title from "${change.from}" to "${change.to}"`
     case 'project':
       return `moved from ${change.from} to ${change.to}`
+    case 'milestone':
+      return change.to ? 'changed the milestone' : 'removed the milestone'
+    case 'cycle':
+      return change.to ? 'changed the cycle' : 'removed the cycle'
+    case 'estimate':
+      return change.to === null ? 'removed the estimate' : `set the estimate to ${pointsText(change.to)}`
     case 'description':
       return 'updated the description'
     case 'source_url':

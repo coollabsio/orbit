@@ -112,6 +112,39 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::integration_routes::delete_github_project_connection,
         crate::integration_routes::start_github_manifest,
         crate::task_routes::list_projects,
+        crate::task_routes::get_project,
+        crate::insight_routes::get_insight_throughput,
+        crate::insight_routes::get_insight_open,
+        crate::insight_routes::get_milestone_burnup,
+        crate::cycle_routes::list_current_cycles,
+        crate::cycle_routes::get_cycle_settings,
+        crate::cycle_routes::update_cycle_settings,
+        crate::cycle_routes::list_cycles,
+        crate::cycle_routes::list_cycle_days,
+        crate::cycle_routes::update_cycle,
+        crate::cycle_routes::start_cycle_today,
+        crate::cycle_routes::end_cycle_today,
+        crate::intake_routes::create_task_from_payload,
+        crate::intake_routes::triage_task,
+        crate::intake_routes::list_templates,
+        crate::intake_routes::create_template,
+        crate::intake_routes::update_template,
+        crate::intake_routes::delete_template,
+        crate::intake_routes::list_recurring_tasks,
+        crate::intake_routes::create_recurring_task,
+        crate::intake_routes::update_recurring_task,
+        crate::intake_routes::delete_recurring_task,
+        crate::milestone_routes::list_workspace_milestones,
+        crate::milestone_routes::list_milestones,
+        crate::milestone_routes::create_milestone,
+        crate::milestone_routes::update_milestone,
+        crate::milestone_routes::delete_milestone,
+        crate::milestone_routes::create_project_overview_page,
+        crate::milestone_routes::create_milestone_description_page,
+        crate::milestone_routes::list_milestone_updates,
+        crate::milestone_routes::create_milestone_update,
+        crate::milestone_routes::update_milestone_update,
+        crate::milestone_routes::delete_milestone_update,
         crate::task_routes::create_project,
         crate::task_routes::update_project,
         crate::task_routes::get_pr_automation,
@@ -376,6 +409,8 @@ fn problem_schema(route: &str) -> &'static str {
         "AttachmentProblem"
     } else if route.contains("/tasks")
         || route.contains("/projects")
+        || route.contains("/milestones")
+        || route.contains("/cycles")
         || route.contains("/labels")
         || route.contains("/views")
         || route.contains("/view-")
@@ -742,6 +777,25 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "delete_project"
             | "restore_project"
             | "list_project_trash"
+            | "get_insight_throughput"
+            | "get_insight_open"
+            | "get_milestone_burnup"
+            | "update_cycle_settings"
+            | "update_cycle"
+            | "create_task_from_payload"
+            | "triage_task"
+            | "create_template"
+            | "update_template"
+            | "delete_template"
+            | "create_recurring_task"
+            | "update_recurring_task"
+            | "delete_recurring_task"
+            | "create_milestone"
+            | "update_milestone"
+            | "delete_milestone"
+            | "create_milestone_update"
+            | "update_milestone_update"
+            | "delete_milestone_update"
             | "list_statuses"
             | "create_status"
             | "update_status"
@@ -860,11 +914,44 @@ fn task_operation(operation_id: &str) -> bool {
     matches!(
         operation_id,
         "list_projects"
+            | "get_project"
             | "create_project"
             | "update_project"
             | "delete_project"
             | "restore_project"
             | "list_project_trash"
+            | "get_insight_throughput"
+            | "get_insight_open"
+            | "get_milestone_burnup"
+            | "list_current_cycles"
+            | "get_cycle_settings"
+            | "update_cycle_settings"
+            | "list_cycles"
+            | "list_cycle_days"
+            | "update_cycle"
+            | "start_cycle_today"
+            | "end_cycle_today"
+            | "create_task_from_payload"
+            | "triage_task"
+            | "list_templates"
+            | "create_template"
+            | "update_template"
+            | "delete_template"
+            | "list_recurring_tasks"
+            | "create_recurring_task"
+            | "update_recurring_task"
+            | "delete_recurring_task"
+            | "list_workspace_milestones"
+            | "list_milestones"
+            | "create_milestone"
+            | "update_milestone"
+            | "delete_milestone"
+            | "create_project_overview_page"
+            | "create_milestone_description_page"
+            | "list_milestone_updates"
+            | "create_milestone_update"
+            | "update_milestone_update"
+            | "delete_milestone_update"
             | "list_statuses"
             | "create_status"
             | "update_status"
@@ -927,6 +1014,21 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "update_comment"
             | "create_task_relation"
             | "delete_task_relation"
+            | "create_milestone"
+            | "update_milestone"
+            | "create_milestone_update"
+            | "update_milestone_update"
+            | "create_task_from_payload"
+            | "triage_task"
+            | "create_template"
+            | "update_template"
+            | "create_recurring_task"
+            | "update_recurring_task"
+            | "update_cycle_settings"
+            | "update_cycle"
+            | "get_insight_throughput"
+            | "get_insight_open"
+            | "get_milestone_burnup"
     ) || operation_id == "list_tasks"
     {
         add_code(responses, "422", "validation_failed");
@@ -964,9 +1066,28 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "delete_task"
             | "update_comment"
             | "delete_comment"
+            | "update_milestone"
+            | "delete_milestone"
+            | "update_milestone_update"
+            | "delete_milestone_update"
+            | "triage_task"
+            | "update_template"
+            | "delete_template"
+            | "update_recurring_task"
+            | "delete_recurring_task"
+            | "update_cycle_settings"
+            | "update_cycle"
+            | "start_cycle_today"
+            | "end_cycle_today"
     ) {
         add_code(responses, "409", "task_conflict");
         add_code(responses, "409", "conflict");
+    }
+    if operation_id == "create_template" {
+        add_code(responses, "409", "task_conflict");
+    }
+    if operation_id == "update_project" {
+        add_code(responses, "409", "triage_not_empty");
     }
     if matches!(operation_id, "restore_project" | "restore_task") {
         add_code(responses, "409", "task_conflict");
@@ -977,7 +1098,10 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "409", "github_content_read_only");
         add_code(responses, "409", "github_linked_move");
     }
-    if matches!(operation_id, "update_comment" | "delete_comment") {
+    if matches!(
+        operation_id,
+        "update_comment" | "delete_comment" | "update_milestone_update" | "delete_milestone_update"
+    ) {
         add_code(responses, "403", "task_action_forbidden");
     }
 }

@@ -352,6 +352,25 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    50,
+                    include_str!(
+                        "../../../../apps/server/migrations/0050_project_details_milestones.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    51,
+                    include_str!(
+                        "../../../../apps/server/migrations/0051_intake_triage_templates_recurring.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    52,
+                    include_str!("../../../../apps/server/migrations/0052_cycles_estimates.sql"),
+                    false,
+                ),
             ],
         )
     }

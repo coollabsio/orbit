@@ -34,6 +34,26 @@ export const queryKeys = {
     [...workspace(workspaceId), 'projects', projectId, 'statuses', 'pr-automation'] as const,
   statuses: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,
+  /** Under `projects`, so a change of a project or of its cycles refreshes them together. */
+  cycles: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'cycles'] as const,
+  cycleDays: (workspaceId: string, projectId: string, cycleId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'cycles', cycleId, 'days'] as const,
+  cycleSettings: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'cycle-settings'] as const,
+  currentCycles: (workspaceId: string) => [...workspace(workspaceId), 'current-cycles'] as const,
+  insights: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'insights'] as const,
+  templates: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'templates'] as const,
+  recurringTasks: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'recurring-tasks'] as const,
+  project: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'detail'] as const,
+  /** Every milestone of the workspace; the lists of one project are selected from it. */
+  milestones: (workspaceId: string) => [...workspace(workspaceId), 'milestones'] as const,
+  milestoneUpdates: (workspaceId: string, milestoneId: string) =>
+    [...workspace(workspaceId), 'milestones', milestoneId, 'updates'] as const,
   comments: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments'] as const,
   taskActivity: (workspaceId: string, taskId: string) =>

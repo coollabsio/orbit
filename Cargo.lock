@@ -2210,6 +2210,7 @@ dependencies = [
  "http-body-util",
  "image",
  "include_dir",
+ "jiff",
  "lettre",
  "mime_guess",
  "orbit-domain",

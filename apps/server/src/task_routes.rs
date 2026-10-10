@@ -26,15 +26,15 @@ use crate::repositories::task_notifications::NotificationPatch;
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
     CommentRecord, CreateTask, NotificationRecord, NotificationState, Page, ProjectAutomationPatch,
-    SortOrder, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
-    TaskUpdate, normalize_project_key,
+    ProjectPeoplePatch, SortOrder, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository,
+    TaskSort, TaskUpdate, normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
 
 #[derive(Clone)]
 pub struct TaskState {
     pub(crate) identity: Arc<IdentityRepository>,
-    tasks: Arc<TaskRepository>,
+    pub(crate) tasks: Arc<TaskRepository>,
     pub(crate) views: Arc<ViewRepository>,
     pub(crate) cookie_mode: CookieMode,
 }
@@ -78,7 +78,9 @@ pub fn task_router(state: TaskState) -> Router {
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}",
-            patch(update_project).delete(delete_project),
+            get(get_project)
+                .patch(update_project)
+                .delete(delete_project),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}/pr-automation",
@@ -188,6 +190,10 @@ pub fn task_router(state: TaskState) -> Router {
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscription",
             put(put_task_subscription),
         )
+        .merge(crate::milestone_routes::routes())
+        .merge(crate::intake_routes::routes())
+        .merge(crate::cycle_routes::routes())
+        .merge(crate::insight_routes::routes())
         .with_state(state)
 }
 
@@ -294,6 +300,16 @@ struct ProjectUpdateBody {
     auto_close_parent: Option<bool>,
     /// Absent: unchanged.
     auto_close_sub_issues: Option<bool>,
+    /// Absent: unchanged. Cannot go off while tasks wait in triage (409 `triage_not_empty`).
+    triage_enabled: Option<bool>,
+    /// Absent: unchanged. `null`: no lead.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    lead_user_id: Option<Option<String>>,
+    /// Absent: unchanged. The full member list otherwise.
+    member_ids: Option<Vec<String>>,
+    /// Absent: unchanged. `fibonacci`, `linear` or `tshirt`; `null` turns estimates off.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    estimate_scale: Option<Option<String>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -351,6 +367,25 @@ async fn create_project(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::ProjectRecord)))]
+async fn get_project(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<crate::repositories::tasks::ProjectRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .project(workspace_id, project_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
 #[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = ProjectUpdateBody, responses((status = 200, body = crate::repositories::tasks::ProjectRecord)))]
 async fn update_project(
     State(state): State<TaskState>,
@@ -366,6 +401,17 @@ async fn update_project(
     let name = text(body.name, 200, 200, "name", &instance, request_id.as_ref())?;
     let key = project_key(body.key, &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
+    let people = ProjectPeoplePatch {
+        lead_user_id: body
+            .lead_user_id
+            .map(|lead| optional_id(lead, &instance, request_id.as_ref()))
+            .transpose()?,
+        member_ids: body
+            .member_ids
+            .map(|ids| parse_ids(ids, &instance, request_id.as_ref()))
+            .transpose()?,
+        estimate_scale: body.estimate_scale,
+    };
     state
         .tasks
         .update_project(
@@ -378,7 +424,9 @@ async fn update_project(
             ProjectAutomationPatch {
                 auto_close_parent: body.auto_close_parent,
                 auto_close_sub_issues: body.auto_close_sub_issues,
+                triage_enabled: body.triage_enabled,
             },
+            people,
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -943,6 +991,12 @@ struct CreateTaskBody {
     due_at: Option<TimestampMillis>,
     /// Create the task as a sub-issue of this task.
     parent_task_id: Option<String>,
+    /// A milestone of the task's project.
+    milestone_id: Option<String>,
+    /// A cycle of the task's project.
+    cycle_id: Option<String>,
+    /// Points.
+    estimate: Option<i64>,
 }
 
 #[derive(Clone, Deserialize, ToSchema)]
@@ -971,6 +1025,15 @@ struct TaskUpdateBody {
     /// Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     parent_task_id: Option<Option<String>>,
+    /// Absent: unchanged. `null`: no milestone. A move to a different project clears it.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    milestone_id: Option<Option<String>>,
+    /// Absent: unchanged. `null`: no cycle. A move to a different project clears it.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    cycle_id: Option<Option<String>>,
+    /// Absent: unchanged. `null`: no estimate.
+    #[serde(default, deserialize_with = "deserialize_estimate_patch")]
+    estimate: Option<Option<i64>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1006,6 +1069,15 @@ struct BulkItem {
     /// Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     parent_task_id: Option<Option<String>>,
+    /// Absent: unchanged. `null`: no milestone. A move to a different project clears it.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    milestone_id: Option<Option<String>>,
+    /// Absent: unchanged. `null`: no cycle. A move to a different project clears it.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    cycle_id: Option<Option<String>>,
+    /// Absent: unchanged. `null`: no estimate.
+    #[serde(default, deserialize_with = "deserialize_estimate_patch")]
+    estimate: Option<Option<i64>>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(TaskQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
@@ -1192,6 +1264,7 @@ fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOr
         OrderBy::Updated => TaskSort::UpdatedAt,
         OrderBy::Title => TaskSort::Title,
         OrderBy::DueDate => TaskSort::DueDate,
+        OrderBy::Estimate => TaskSort::Estimate,
     };
     let order = match (order_by, direction) {
         (OrderBy::Manual, _) | (_, OrderDirection::Asc) => SortOrder::Asc,
@@ -1229,8 +1302,8 @@ async fn get_task(
 #[derive(Serialize, ToSchema)]
 pub(crate) struct TaskUpdateResponse {
     #[serde(flatten)]
-    task: TaskRecord,
-    auto_closed: Vec<AutoClosed>,
+    pub(crate) task: TaskRecord,
+    pub(crate) auto_closed: Vec<AutoClosed>,
 }
 
 /// `POST /tasks/bulk`: the updated tasks (no further pages) plus the automation's changes.
@@ -1456,6 +1529,9 @@ async fn create_task(
         due_start_at: body.due_start_at,
         due_at: body.due_at,
         parent_task_id: optional_id(body.parent_task_id, &instance, request_id.as_ref())?,
+        milestone_id: optional_id(body.milestone_id, &instance, request_id.as_ref())?,
+        cycle_id: optional_id(body.cycle_id, &instance, request_id.as_ref())?,
+        estimate: body.estimate,
     };
     state
         .tasks
@@ -1543,6 +1619,9 @@ async fn bulk_tasks(
                     due_at: item.due_at,
                     duplicate_of_id: item.duplicate_of_id,
                     parent_task_id: item.parent_task_id,
+                    milestone_id: item.milestone_id,
+                    cycle_id: item.cycle_id,
+                    estimate: item.estimate,
                 },
                 &instance,
                 request_id.as_ref(),
@@ -2120,6 +2199,15 @@ fn task_update(
                 .parent_task_id
                 .map(|value| optional_id(value, instance, request_id))
                 .transpose()?,
+            milestone_id: body
+                .milestone_id
+                .map(|value| optional_id(value, instance, request_id))
+                .transpose()?,
+            cycle_id: body
+                .cycle_id
+                .map(|value| optional_id(value, instance, request_id))
+                .transpose()?,
+            estimate: body.estimate,
         },
     })
 }
@@ -2160,7 +2248,14 @@ where
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
-fn deserialize_due_patch<'de, D>(
+fn deserialize_estimate_patch<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer).map(Some)
+}
+
+pub(crate) fn deserialize_due_patch<'de, D>(
     deserializer: D,
 ) -> Result<Option<Option<TimestampMillis>>, D::Error>
 where
@@ -2276,7 +2371,7 @@ pub(crate) fn parse_id(
     })
 }
 
-fn optional_id(
+pub(crate) fn optional_id(
     value: Option<String>,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
@@ -2286,7 +2381,7 @@ fn optional_id(
         .transpose()
 }
 
-fn parse_ids(
+pub(crate) fn parse_ids(
     values: Vec<String>,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
@@ -2297,7 +2392,7 @@ fn parse_ids(
         .collect()
 }
 
-fn text(
+pub(crate) fn text(
     value: String,
     max_chars: usize,
     max_bytes: usize,
@@ -2328,7 +2423,7 @@ pub(crate) fn bounded(
     }
 }
 
-fn message(
+pub(crate) fn message(
     value: String,
     max_chars: usize,
     max_bytes: usize,
@@ -2373,7 +2468,7 @@ fn category(
 ) -> Result<String, ApiError> {
     if matches!(
         value.as_str(),
-        "unstarted" | "started" | "completed" | "cancelled" | "duplicate"
+        "triage" | "backlog" | "unstarted" | "started" | "completed" | "cancelled" | "duplicate"
     ) {
         Ok(value)
     } else {
@@ -2453,6 +2548,9 @@ pub(crate) fn task_problem(
         ),
         TaskError::RestoreConflict { field } => {
             ApiError::restore_conflict(field, instance, request_id)
+        }
+        TaskError::TriageNotEmpty { count } => {
+            ApiError::triage_not_empty(count, instance, request_id)
         }
         TaskError::InvalidCursor => ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -2549,6 +2647,9 @@ pub(crate) struct ConflictBody {
     refresh: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     field: Option<&'static str>,
+    /// `triage_not_empty`: the number of tasks in the queue.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    count: Option<i64>,
 }
 
 pub(crate) struct ApiError {
@@ -2603,6 +2704,7 @@ impl ApiError {
             current: Some(current),
             refresh: Some(refresh),
             field: None,
+            count: None,
         });
         error
     }
@@ -2625,6 +2727,30 @@ impl ApiError {
             current: None,
             refresh: None,
             field: Some(field),
+            count: None,
+        });
+        error
+    }
+
+    fn triage_not_empty(
+        count: i64,
+        instance: String,
+        request_id: Option<&Extension<RequestId>>,
+    ) -> Self {
+        let mut error = Self::new(
+            StatusCode::CONFLICT,
+            "triage_not_empty",
+            "Triage is not empty",
+            "Triage cannot be turned off while tasks wait in the queue.",
+            instance,
+            request_id,
+        );
+        error.body.conflict = Some(ConflictBody {
+            current_version: None,
+            current: None,
+            refresh: None,
+            field: None,
+            count: Some(count),
         });
         error
     }
@@ -2662,6 +2788,27 @@ fn refresh_for_current(current: &Value) -> Option<String> {
             return Some(format!("/api/v1/workspaces/{workspace}/pages/trash"));
         }
         return Some(format!("/api/v1/workspaces/{workspace}/pages/{id}"));
+    }
+    if current.get("health").is_some() {
+        return Some(format!("/api/v1/workspaces/{workspace}/milestones"));
+    }
+    if current.get("cycles_ahead").is_some() {
+        let project = current.get("project_id")?.as_str()?;
+        return Some(format!(
+            "/api/v1/workspaces/{workspace}/projects/{project}/cycle-settings"
+        ));
+    }
+    if current.get("starts_at").is_some() {
+        let project = current.get("project_id")?.as_str()?;
+        return Some(format!(
+            "/api/v1/workspaces/{workspace}/projects/{project}/cycles"
+        ));
+    }
+    if current.get("target_at").is_some() {
+        let project = current.get("project_id")?.as_str()?;
+        return Some(format!(
+            "/api/v1/workspaces/{workspace}/projects/{project}/milestones"
+        ));
     }
     if current.get("is_default").is_some() {
         return Some(format!("/api/v1/workspaces/{workspace}/teamspaces"));

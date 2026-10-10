@@ -86,7 +86,7 @@ export function useMarkAllNotificationsRead(workspaceId: string) {
   })
 }
 
-/** Where a notification leads: the task, the page with the comment thread open, the page at the mention, or the chat message. */
+/** Where a notification leads: the task, the milestone, the triage queue, the page with the comment thread open, the page at the mention, or the chat message. */
 export function notificationTarget(notification: NotificationRecord): string | null {
   if (notification.kind === 'chat_mentioned' && notification.chat_conversation_id) {
     const message = notification.chat_message_id ? `?m=${encodeURIComponent(notification.chat_message_id)}` : ''
@@ -100,6 +100,13 @@ export function notificationTarget(notification: NotificationRecord): string | n
     const thread = notification.page_thread_id ? `?thread=${encodeURIComponent(notification.page_thread_id)}` : ''
     return `/docs/${notification.page_id}${thread}`
   }
+  if (notification.kind === 'milestone_update_posted') {
+    return notification.milestone_id && notification.milestone_project_id
+      ? `/tasks/projects/${notification.milestone_project_id}/milestones/${notification.milestone_id}`
+      : null
+  }
+  // a new task in triage opens in the queue, where it is accepted or declined
+  if (notification.kind === 'task_triage_new') return '/tasks/triage'
   // the task page replaces the id with the identifier once the task loads
   return notification.task_id ? taskPath({ id: notification.task_id }) : null
 }
@@ -118,12 +125,17 @@ const TASK_EVENTS: Record<string, string> = {
   task_status_changed: 'changed the status',
   task_blocked: 'the task is now blocked',
   task_unblocked: 'the task is no longer blocked',
+  task_triage_new: 'new in triage',
 }
 
 /** The two lines of an inbox row. A task row is the task (identifier and title) and its latest event. */
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
   if (notification.task_id) {
     const title = notification.task_title?.trim() || 'Untitled'
+    // a task from an integration (GitHub, Discord) has no person as actor
+    if (notification.kind === 'task_triage_new' && !actorName && !notification.actor_user_id) {
+      return { title: notification.task_identifier ? `${notification.task_identifier} ${title}` : title, body: 'New in triage' }
+    }
     return {
       title: notification.task_identifier ? `${notification.task_identifier} ${title}` : title,
       // a kind of a newer server
@@ -131,6 +143,9 @@ export function notificationCopy(notification: NotificationRecord, pageTitle?: s
     }
   }
   const body = (text: string) => (actorName ? `${actorName} · ${text}` : text)
+  if (notification.kind === 'milestone_update_posted') {
+    return { title: notification.milestone_name?.trim() || 'Milestone', body: body('posted an update') }
+  }
   if (notification.kind === 'chat_mentioned') {
     return { title: `${actorName ?? 'Someone'} mentioned you in chat`, body: body('Open the conversation to see the message.') }
   }

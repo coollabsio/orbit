@@ -8,6 +8,9 @@ import {
   Folder,
   Hierarchy2,
   RecordCircle,
+  Refresh2,
+  Signpost,
+  Weight,
   Tag,
   TaskSquare,
   Text as TextIcon,
@@ -18,6 +21,9 @@ import {
 import type { LabelRecord, ProjectRecord } from '@/api/generated/types.gen'
 import type { TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 import { CATEGORY_LABEL, CATEGORY_ORDER, PRIORITY_LABEL, PRIORITY_ORDER, sortStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
+import type { Cycle } from '@/features/tasks/api/cycles'
+import type { Milestone } from '@/features/tasks/api/milestones'
+import { cycleName, openCycles } from '@/features/tasks/cyclesLib'
 import type { User } from '@/features/workspaces/models'
 import type { Condition, DateValue, FilterField, FilterOperator, TaskPreset } from './viewState'
 
@@ -29,6 +35,10 @@ export type FilterOptions = {
   members: User[]
   labels: LabelRecord[]
   projects: ProjectRecord[]
+  /** Milestones of the projects in `projects`. */
+  milestones?: Milestone[]
+  /** Cycles of the projects in `projects`. */
+  cycles?: Cycle[]
   currentUserId: string
   /** Parent filter values → task (null: deleted or trashed). Filled by `useFilterTaskRefs`. */
   taskRefs?: Readonly<Record<string, TaskFilterRef | null>>
@@ -58,13 +68,16 @@ export const FIELD_META: Record<FilterField, FieldMeta> = {
   project: { label: 'Project', plural: 'projects', icon: Folder, kind: 'list', operators: ['is', 'is_not'], defaultOperator: 'is' },
   parent: { label: 'Parent', plural: 'tasks', icon: Hierarchy2, kind: 'task', operators: ['is', 'is_not'], defaultOperator: 'is' },
   sub_issues: { label: 'Sub-issues', plural: 'options', icon: Hierarchy2, kind: 'list', operators: ['is'], defaultOperator: 'is' },
+  milestone: { label: 'Milestone', plural: 'milestones', icon: Signpost, kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
+  cycle: { label: 'Cycle', plural: 'cycles', icon: Refresh2, kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
+  estimate: { label: 'Estimate', plural: 'estimates', icon: Weight, kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
   due_date: { label: 'Due date', plural: 'dates', icon: Calendar, kind: 'date', operators: ['before', 'after', 'between', 'is_empty', 'is_not_empty'], defaultOperator: 'before' },
   created_at: { label: 'Created', plural: 'dates', icon: CalendarTick, kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   updated_at: { label: 'Updated', plural: 'dates', icon: Clock, kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   text: { label: 'Text', plural: 'text', icon: TextIcon, kind: 'text', operators: ['contains'], defaultOperator: 'contains' },
 }
 
-export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'parent', 'sub_issues', 'due_date', 'created_at', 'updated_at', 'text']
+export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'parent', 'sub_issues', 'milestone', 'cycle', 'estimate', 'due_date', 'created_at', 'updated_at', 'text']
 
 /** User conditions per tree: the server allows 50 on the effective tree, and a scope adds up to 3 preset conditions + 1 project condition. */
 export const MAX_FILTER_CONDITIONS = 46
@@ -105,6 +118,36 @@ export function statusOptions(statuses: TaskStatusDef[]): ValueOption[] {
   return options
 }
 
+/** One option per milestone, in project order; the project key tells equal names apart when there are several projects. */
+export function milestoneOptions(milestones: Milestone[], projects: ProjectRecord[]): ValueOption[] {
+  return [...projects].sort(byName).flatMap((project) =>
+    milestones.filter((milestone) => milestone.project_id === project.id).map((milestone): ValueOption => ({
+      value: milestone.id,
+      label: projects.length > 1 ? `${project.key} · ${milestone.name}` : milestone.name,
+      glyph: { kind: 'dot', color: project.color },
+    })))
+}
+
+/** Cycle filter values that follow the time: each means that cycle of the task's own project at this moment. */
+const RELATIVE_CYCLES: ValueOption[] = [
+  { value: 'current', label: 'Current cycle', glyph: { kind: 'icon', icon: Refresh2 } },
+  { value: 'next', label: 'Next cycle', glyph: { kind: 'icon', icon: Refresh2 } },
+  { value: 'previous', label: 'Previous cycle', glyph: { kind: 'icon', icon: Refresh2 } },
+]
+
+/** Every value of the three scales, as points. */
+const ESTIMATE_POINTS = [1, 2, 3, 4, 5, 8, 13]
+
+/** One option per open cycle, in project order; the project key tells them apart when there are several projects. */
+export function cycleOptions(cycles: Cycle[], projects: ProjectRecord[]): ValueOption[] {
+  return [...projects].sort(byName).flatMap((project) =>
+    openCycles(cycles.filter((cycle) => cycle.project_id === project.id)).map((cycle): ValueOption => ({
+      value: cycle.id,
+      label: projects.length > 1 ? `${project.key} · ${cycleName(cycle)}` : cycleName(cycle),
+      glyph: { kind: 'dot', color: project.color },
+    })))
+}
+
 export function valueOptions(field: FilterField, options: FilterOptions): ValueOption[] {
   switch (field) {
     case 'status':
@@ -131,6 +174,12 @@ export function valueOptions(field: FilterField, options: FilterOptions): ValueO
       return PRIORITY_ORDER.map((priority): ValueOption => ({ value: priority, label: PRIORITY_LABEL[priority], glyph: { kind: 'priority', priority } }))
     case 'project':
       return [...options.projects].sort(byName).map((project): ValueOption => ({ value: project.id, label: project.name, glyph: { kind: 'dot', color: project.color } }))
+    case 'milestone':
+      return milestoneOptions(options.milestones ?? [], options.projects)
+    case 'cycle':
+      return [...RELATIVE_CYCLES, ...cycleOptions(options.cycles ?? [], options.projects)]
+    case 'estimate':
+      return ESTIMATE_POINTS.map((points): ValueOption => ({ value: String(points), label: String(points), glyph: { kind: 'icon', icon: Weight } }))
     case 'sub_issues':
       return [
         { value: 'has', label: 'Has sub-issues', glyph: { kind: 'icon', icon: Hierarchy2 } },

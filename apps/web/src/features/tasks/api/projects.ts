@@ -38,7 +38,7 @@ function required<T>(data: T | undefined, message: string): T {
 }
 
 export function statusFromRecord(status: StatusRecord): TaskStatusDef {
-  const category = ['unstarted', 'started', 'completed', 'cancelled', 'duplicate'].includes(status.category)
+  const category = ['triage', 'backlog', 'unstarted', 'started', 'completed', 'cancelled', 'duplicate'].includes(status.category)
     ? status.category as StatusCategory
     : 'unstarted'
   return {

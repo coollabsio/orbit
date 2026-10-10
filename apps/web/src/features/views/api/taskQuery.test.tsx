@@ -16,7 +16,7 @@ const task = (id: string): TaskRecord => ({
   id, workspace_id: 'workspace-1', project_id: 'project-1', number: 1, status_id: 'todo', title: id,
   description: '', position: 0, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', duplicate_of: null, blocked: false, version: 1,
-  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,
+  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0, milestone_id: null,
 })
 
 function withClient(client: QueryClient) {

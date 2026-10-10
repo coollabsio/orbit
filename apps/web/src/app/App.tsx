@@ -9,6 +9,13 @@ import { AppShell } from '@/app/shell/AppShell'
 import { chatEnabled } from '@/app/shell/productNavigation'
 import { ChatPage } from '@/features/chat/pages/ChatPage'
 import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
+import { ProjectsPage } from '@/features/tasks/pages/ProjectsPage'
+import { ProjectOverviewPage } from '@/features/tasks/pages/ProjectOverviewPage'
+import { MilestonePage } from '@/features/tasks/pages/MilestonePage'
+import { RoadmapPage } from '@/features/tasks/pages/RoadmapPage'
+import { TriagePage } from '@/features/tasks/pages/TriagePage'
+import { CyclePage, CyclesPage } from '@/features/tasks/pages/CyclesPage'
+import { InsightsPage } from '@/features/tasks/pages/InsightsPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
@@ -83,7 +90,15 @@ export default function App() {
             <Route element={<AppShell />}>
               <Route index element={<HomePage />} />
               <Route path="tasks" element={<TasksPage />} />
+              <Route path="tasks/projects" element={<ProjectsPage />} />
+              <Route path="tasks/roadmap" element={<RoadmapPage />} />
+              <Route path="tasks/triage" element={<TriagePage />} />
+              <Route path="tasks/projects/:projectId" element={<ProjectOverviewPage />} />
               <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+              <Route path="tasks/projects/:projectId/milestones/:milestoneId" element={<MilestonePage />} />
+              <Route path="tasks/projects/:projectId/insights" element={<InsightsPage />} />
+              <Route path="tasks/projects/:projectId/cycles" element={<CyclesPage />} />
+              <Route path="tasks/projects/:projectId/cycles/:cycleId" element={<CyclePage />} />
               <Route path="tasks/:taskId" element={<TasksPage />} />
               <Route path="tasks-trash" element={<TaskTrashPage />} />
               <Route path="views" element={<ViewsPage />} />

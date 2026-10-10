@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, Tag, Trash, User as UserIcon, UserAdd } from 'reicon-react'
+import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, Refresh2, Signpost, Tag, Trash, User as UserIcon, UserAdd, Weight } from 'reicon-react'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -20,8 +20,11 @@ import {
 } from '@/components/ui/context-menu'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { cycleName, estimateOptions } from '@/features/tasks/cyclesLib'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
-import { assignUpdates, assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { assignUpdates, assigneeToggleUpdates, dueUpdates, labelToggleUpdates, cycleUpdates, estimateUpdates, milestoneUpdates, priorityUpdates, sharedProjectCycles, sharedProjectId, sharedProjectMilestones, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { parentPickerTitle } from '@/features/tasks/subIssuesLib'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
@@ -69,6 +72,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
   const moveToProject = useMoveToProject(workspace.id)
   // every project: a project page's group context knows only its own
   const projects = useProjects(workspace.id).data ?? []
+  const allMilestones = useMilestones(workspace.id).data ?? []
   const pickedId = useRef<string | null>(null)
   const [ids, setIds] = useState<string[]>([])
   // a dialog that follows the menu; it keeps the tasks the menu was opened on
@@ -95,6 +99,11 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
 
   // the live tasks, so that a second choice in an open submenu sends the current versions
   const targets = tasks.filter((task) => ids.includes(task.id))
+  const milestones = sharedProjectMilestones(targets, allMilestones)
+  // a cycle and an estimate scale belong to one project: offered only when the targets are in one project
+  const targetProjectId = sharedProjectId(targets)
+  const cycles = sharedProjectCycles(targets, useCycles(workspace.id, targetProjectId ?? undefined).data ?? [])
+  const estimates = estimateOptions(projects.find((project) => project.id === targetProjectId)?.estimate_scale)
   const [first] = targets
   const scope = targets.length === 1 ? first.identifier : targets.length
   const mutate = (updates: BulkItem[]) => {
@@ -227,6 +236,56 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
                     <span className="text-xs text-muted-foreground tabular-nums">{project.key}</span>
                   </ContextMenuCheckboxItem>
                 ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          {cycles.length > 0 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Refresh2 aria-hidden />
+                Cycle
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="min-w-45">
+                {cycles.map((cycle) => (
+                  <ContextMenuCheckboxItem key={cycle.id} checked={targets.every((task) => task.cycleId === cycle.id)} closeOnClick onCheckedChange={() => mutate(cycleUpdates(targets, cycle.id))}>
+                    <span className="truncate">{cycleName(cycle)}</span>
+                  </ContextMenuCheckboxItem>
+                ))}
+                {targets.some((task) => task.cycleId) ? <ContextMenuItem onClick={() => mutate(cycleUpdates(targets, null))}>No cycle</ContextMenuItem> : null}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          {estimates.length > 0 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Weight aria-hidden />
+                Estimate
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="min-w-32">
+                {estimates.map((option) => (
+                  <ContextMenuCheckboxItem key={option.points} checked={targets.every((task) => task.estimate === option.points)} closeOnClick onCheckedChange={() => mutate(estimateUpdates(targets, option.points))}>
+                    {option.label}
+                  </ContextMenuCheckboxItem>
+                ))}
+                {targets.some((task) => task.estimate != null) ? <ContextMenuItem onClick={() => mutate(estimateUpdates(targets, null))}>No estimate</ContextMenuItem> : null}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          {milestones.length > 0 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Signpost aria-hidden />
+                Milestone
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="min-w-45">
+                {milestones.map((milestone) => (
+                  <ContextMenuCheckboxItem key={milestone.id} checked={targets.every((task) => task.milestoneId === milestone.id)} closeOnClick onCheckedChange={() => mutate(milestoneUpdates(targets, milestone.id))}>
+                    <span className="truncate">{milestone.name}</span>
+                  </ContextMenuCheckboxItem>
+                ))}
+                {targets.some((task) => task.milestoneId) ? (
+                  <ContextMenuItem onClick={() => mutate(milestoneUpdates(targets, null))}>No milestone</ContextMenuItem>
+                ) : null}
               </ContextMenuSubContent>
             </ContextMenuSub>
           ) : null}

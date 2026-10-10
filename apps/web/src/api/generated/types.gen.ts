@@ -232,6 +232,10 @@ export type BulkBody = {
 
 export type BulkItem = {
     assignee_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged. `null`: no cycle. A move to a different project clears it.
+     */
+    cycle_id?: string | null;
     description?: string | null;
     due_at?: string | null;
     due_start_at?: string | null;
@@ -239,9 +243,17 @@ export type BulkItem = {
      * Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
      */
     duplicate_of_id?: string | null;
+    /**
+     * Absent: unchanged. `null`: no estimate.
+     */
+    estimate?: number | null;
     expected_version: number;
     id: string;
     label_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged. `null`: no milestone. A move to a different project clears it.
+     */
+    milestone_id?: string | null;
     /**
      * Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
      */
@@ -252,6 +264,23 @@ export type BulkItem = {
     source_url?: string | null;
     status_id?: string | null;
     title?: string | null;
+};
+
+export type BurnupWeek = {
+    /**
+     * Of these, the tasks that were completed at the end of the week.
+     */
+    done_count: number;
+    done_points: number;
+    /**
+     * Tasks of the milestone that existed at the end of the week.
+     */
+    scope_count: number;
+    scope_points: number;
+    /**
+     * The Monday of the week in the viewer's timezone, `YYYY-MM-DD`.
+     */
+    week: string;
 };
 
 export type CategoryRecord = {
@@ -883,10 +912,22 @@ export type CreatePageThreadBody = {
 
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
+    /**
+     * A cycle of the task's project.
+     */
+    cycle_id?: string | null;
     description?: string;
     due_at?: string | null;
     due_start_at?: string | null;
+    /**
+     * Points.
+     */
+    estimate?: number | null;
     label_ids?: Array<string>;
+    /**
+     * A milestone of the task's project.
+     */
+    milestone_id?: string | null;
     /**
      * Create the task as a sub-issue of this task.
      */
@@ -947,6 +988,136 @@ export type CustomStickerRecord = {
     url: string;
 };
 
+/**
+ * One day of a cycle, for the burndown.
+ */
+export type CycleDayRecord = {
+    /**
+     * The local date in the project timezone, `YYYY-MM-DD`.
+     */
+    day: string;
+    done_count: number;
+    done_points: number;
+    scope_count: number;
+    scope_points: number;
+    started_count: number;
+    started_points: number;
+};
+
+export type CycleRecord = {
+    completed_at: string | null;
+    description: string;
+    done_count: number;
+    done_points: number;
+    ends_at: string;
+    id: string;
+    /**
+     * Null: the default name "Cycle {number}".
+     */
+    name: string | null;
+    number: number;
+    project_id: string;
+    /**
+     * The scope: live tasks with no sub-issues, without cancelled and duplicate ones.
+     */
+    scope_count: number;
+    scope_points: number;
+    started_count: number;
+    started_points: number;
+    starts_at: string;
+    /**
+     * `current`, `future` or `completed`, at the time of the request.
+     */
+    state: string;
+    /**
+     * Tasks of the scope that have no estimate; they count 0 points.
+     */
+    unestimated_count: number;
+    version: number;
+    workspace_id: string;
+};
+
+export type CycleSettingsBody = {
+    /**
+     * `off`, `backlog` or `cycle`.
+     */
+    active_without_cycle: string;
+    auto_add_completed: boolean;
+    auto_add_started: boolean;
+    cooldown_weeks: number;
+    cycles_ahead: number;
+    enabled: boolean;
+    expected_version: number;
+    /**
+     * 0 = Sunday ... 6 = Saturday.
+     */
+    start_weekday: number;
+    /**
+     * IANA name, for example `Europe/Berlin`.
+     */
+    timezone: string;
+    weeks: number;
+};
+
+export type CycleSettingsRecord = {
+    /**
+     * What happens to an unstarted task with no cycle: `off`, `backlog` (it moves to the first
+     * backlog status) or `cycle` (it gets the current cycle).
+     */
+    active_without_cycle: string;
+    /**
+     * A task with no cycle that moves to a completed status gets the current cycle.
+     */
+    auto_add_completed: boolean;
+    /**
+     * A task with no cycle that moves to a started status gets the current cycle.
+     */
+    auto_add_started: boolean;
+    /**
+     * Weeks between two cycles, 0 to 4.
+     */
+    cooldown_weeks: number;
+    /**
+     * Future cycles that exist at each time, 1 to 15.
+     */
+    cycles_ahead: number;
+    enabled: boolean;
+    project_id: string;
+    /**
+     * 0 = Sunday ... 6 = Saturday.
+     */
+    start_weekday: number;
+    /**
+     * IANA name. A cycle starts and ends in this zone.
+     */
+    timezone: string;
+    version: number;
+    /**
+     * Length of a cycle, 1 to 8.
+     */
+    weeks: number;
+};
+
+/**
+ * Absent fields are unchanged.
+ */
+export type CycleUpdateBody = {
+    description?: string | null;
+    /**
+     * A future cycle only. The later future cycles move by the same amount.
+     */
+    ends_at?: string | null;
+    expected_version: number;
+    /**
+     * `null`: the default name "Cycle {number}".
+     */
+    name?: string | null;
+    /**
+     * A future cycle only.
+     */
+    starts_at?: string | null;
+};
+
 export type DeliveryBody = 'manual' | 'smtp';
 
 export type DiscordEventBody = {
@@ -990,7 +1161,7 @@ export type EnableTotpBody = {
     code: string;
 };
 
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues';
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues' | 'milestone' | 'cycle' | 'estimate';
 
 /**
  * An AND/OR group. An empty group matches every task.
@@ -1050,6 +1221,11 @@ export type ForwardedRecord = {
      */
     created_at: string;
     message_id: string;
+};
+
+export type FromPayloadBody = {
+    payload: TaskPayload;
+    project_id: string;
 };
 
 export type GithubLink = {
@@ -1112,9 +1288,81 @@ export type GithubWorkspaceSettings = {
     repositories: Array<GithubRepositoryOption>;
 };
 
-export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'none';
+export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'milestone' | 'cycle' | 'none';
 
 export type GroupOp = 'and' | 'or';
+
+export type HealthUpdateBody = {
+    /**
+     * Markdown.
+     */
+    body: string;
+    /**
+     * `on_track`, `at_risk` or `off_track`.
+     */
+    health: string;
+};
+
+export type HealthUpdatePatchBody = {
+    body: string;
+    expected_version: number;
+    health: string;
+};
+
+/**
+ * The rows of a chart, with the number of counted tasks that have no estimate (0 points).
+ */
+export type InsightBurnupWeek = {
+    items: Array<{
+        /**
+         * Of these, the tasks that were completed at the end of the week.
+         */
+        done_count: number;
+        done_points: number;
+        /**
+         * Tasks of the milestone that existed at the end of the week.
+         */
+        scope_count: number;
+        scope_points: number;
+        /**
+         * The Monday of the week in the viewer's timezone, `YYYY-MM-DD`.
+         */
+        week: string;
+    }>;
+    unestimated_count: number;
+};
+
+/**
+ * The rows of a chart, with the number of counted tasks that have no estimate (0 points).
+ */
+export type InsightOpenGroup = {
+    items: Array<{
+        count: number;
+        /**
+         * A status id, a user id, a priority or a label id; `none` for no assignee or no label.
+         */
+        key: string;
+        points: number;
+    }>;
+    unestimated_count: number;
+};
+
+/**
+ * The rows of a chart, with the number of counted tasks that have no estimate (0 points).
+ */
+export type InsightThroughputWeek = {
+    items: Array<{
+        completed_count: number;
+        completed_points: number;
+        created_count: number;
+        created_points: number;
+        /**
+         * The Monday of the week in the viewer's timezone, `YYYY-MM-DD`.
+         */
+        week: string;
+    }>;
+    unestimated_count: number;
+};
 
 export type InstanceAdminBody = {
     admin: boolean;
@@ -1366,6 +1614,84 @@ export type MessageRecord = {
     thread_root_id: string | null;
 };
 
+export type MilestoneBody = {
+    name: string;
+    start_at?: string | null;
+    /**
+     * `planned` (the default), `in_progress`, `completed` or `cancelled`.
+     */
+    status?: string | null;
+    target_at?: string | null;
+};
+
+export type MilestoneRecord = {
+    completed_at: string | null;
+    created_at: string;
+    /**
+     * The hidden Docs page that holds the description; null until someone writes one.
+     */
+    description_page_id: string | null;
+    /**
+     * The health of the most recent update: `on_track`, `at_risk` or `off_track`.
+     */
+    health: string | null;
+    id: string;
+    name: string;
+    position: number;
+    project_id: string;
+    start_at: string | null;
+    /**
+     * `planned`, `in_progress`, `completed` or `cancelled`; set by a person, never automatically.
+     */
+    status: string;
+    target_at: string | null;
+    /**
+     * Live tasks of the milestone, without cancelled and duplicate ones.
+     */
+    task_count: number;
+    /**
+     * Live tasks of the milestone in a completed status.
+     */
+    task_done_count: number;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
+export type MilestoneUpdateBody = {
+    expected_version: number;
+    name?: string | null;
+    /**
+     * Absent: unchanged. `null`: no start date.
+     */
+    start_at?: string | null;
+    status?: string | null;
+    /**
+     * Absent: unchanged. `null`: no target date.
+     */
+    target_at?: string | null;
+};
+
+export type MilestoneUpdateRecord = {
+    author_id: string;
+    body: string;
+    /**
+     * Whether the caller may delete this update.
+     */
+    can_delete: boolean;
+    /**
+     * Whether the caller may edit this update.
+     */
+    can_edit: boolean;
+    created_at: string;
+    health: string;
+    id: string;
+    milestone_id: string;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
 export type MoveFavoriteBody = {
     /**
      * Index among the caller's visible favorites; larger values move it last.
@@ -1452,10 +1778,17 @@ export type NotificationRecord = {
     /**
      * `task_assigned`, `comment_mentioned` (task comment), `task_commented`,
      * `task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,
-     * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+     * `page_mentioned` (an @mention in a page body), `chat_mentioned` (a chat message),
+     * `task_triage_new` (a task entered triage) or `milestone_update_posted`.
      * A task has one notification for each recipient: this is its latest event.
      */
     kind: string;
+    /**
+     * The milestone, its name and its project of a `milestone_update_posted` notification.
+     */
+    milestone_id?: string | null;
+    milestone_name?: string | null;
+    milestone_project_id?: string | null;
     /**
      * The block with the mention of a `page_mentioned` notification (a deep link anchor).
      */
@@ -1667,9 +2000,25 @@ export type NotionImportTree = {
     truncated: boolean;
 };
 
-export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date';
+export type OpenGroup = {
+    count: number;
+    /**
+     * A status id, a user id, a priority or a label id; `none` for no assignee or no label.
+     */
+    key: string;
+    points: number;
+};
+
+export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate';
 
 export type OrderDirection = 'asc' | 'desc';
+
+/**
+ * The id of an owned page.
+ */
+export type OwnedPageRecord = {
+    page_id: string;
+};
 
 /**
  * A page with its content.
@@ -2081,6 +2430,58 @@ export type PageCommentRecord = {
     next_cursor?: string | null;
 };
 
+export type PageCycleDayRecord = {
+    items: Array<{
+        /**
+         * The local date in the project timezone, `YYYY-MM-DD`.
+         */
+        day: string;
+        done_count: number;
+        done_points: number;
+        scope_count: number;
+        scope_points: number;
+        started_count: number;
+        started_points: number;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageCycleRecord = {
+    items: Array<{
+        completed_at: string | null;
+        description: string;
+        done_count: number;
+        done_points: number;
+        ends_at: string;
+        id: string;
+        /**
+         * Null: the default name "Cycle {number}".
+         */
+        name: string | null;
+        number: number;
+        project_id: string;
+        /**
+         * The scope: live tasks with no sub-issues, without cancelled and duplicate ones.
+         */
+        scope_count: number;
+        scope_points: number;
+        started_count: number;
+        started_points: number;
+        starts_at: string;
+        /**
+         * `current`, `future` or `completed`, at the time of the request.
+         */
+        state: string;
+        /**
+         * Tasks of the scope that have no estimate; they count 0 points.
+         */
+        unestimated_count: number;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
 export type PageInvitationRecord = {
     items: Array<{
         created_at: string;
@@ -2139,6 +2540,66 @@ export type PageMemberRecord = {
     next_cursor?: string | null;
 };
 
+export type PageMilestoneRecord = {
+    items: Array<{
+        completed_at: string | null;
+        created_at: string;
+        /**
+         * The hidden Docs page that holds the description; null until someone writes one.
+         */
+        description_page_id: string | null;
+        /**
+         * The health of the most recent update: `on_track`, `at_risk` or `off_track`.
+         */
+        health: string | null;
+        id: string;
+        name: string;
+        position: number;
+        project_id: string;
+        start_at: string | null;
+        /**
+         * `planned`, `in_progress`, `completed` or `cancelled`; set by a person, never automatically.
+         */
+        status: string;
+        target_at: string | null;
+        /**
+         * Live tasks of the milestone, without cancelled and duplicate ones.
+         */
+        task_count: number;
+        /**
+         * Live tasks of the milestone in a completed status.
+         */
+        task_done_count: number;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageMilestoneUpdateRecord = {
+    items: Array<{
+        author_id: string;
+        body: string;
+        /**
+         * Whether the caller may delete this update.
+         */
+        can_delete: boolean;
+        /**
+         * Whether the caller may edit this update.
+         */
+        can_edit: boolean;
+        created_at: string;
+        health: string;
+        id: string;
+        milestone_id: string;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
 export type PageNotificationRecord = {
     items: Array<{
         /**
@@ -2163,10 +2624,17 @@ export type PageNotificationRecord = {
         /**
          * `task_assigned`, `comment_mentioned` (task comment), `task_commented`,
          * `task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,
-         * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+         * `page_mentioned` (an @mention in a page body), `chat_mentioned` (a chat message),
+         * `task_triage_new` (a task entered triage) or `milestone_update_posted`.
          * A task has one notification for each recipient: this is its latest event.
          */
         kind: string;
+        /**
+         * The milestone, its name and its project of a `milestone_update_posted` notification.
+         */
+        milestone_id?: string | null;
+        milestone_name?: string | null;
+        milestone_project_id?: string | null;
         /**
          * The block with the mention of a `page_mentioned` notification (a deep link anchor).
          */
@@ -2211,9 +2679,62 @@ export type PageProjectRecord = {
         color: string;
         created_at: string;
         deleted_at?: string | null;
+        /**
+         * `fibonacci`, `linear` or `tshirt`; null while estimates are off.
+         */
+        estimate_scale?: string | null;
         id: string;
         key: string;
+        /**
+         * The member who owns the project; null when there is none.
+         */
+        lead_user_id: string | null;
+        member_ids: Array<string>;
         name: string;
+        /**
+         * The hidden Docs page that holds the description; null until someone writes one.
+         */
+        overview_page_id: string | null;
+        /**
+         * Live tasks by status category; a category with no task is absent.
+         */
+        task_counts: {
+            [key: string]: number;
+        };
+        /**
+         * Tasks that an integration creates wait in the Triage status until a member accepts them.
+         */
+        triage_enabled: boolean;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageRecurringTaskRecord = {
+    items: Array<{
+        anchor_at: string;
+        created_at: string;
+        every_count: number;
+        /**
+         * `day`, `week` or `month`.
+         */
+        every_unit: string;
+        id: string;
+        last_task_id: string | null;
+        /**
+         * `schedule`: at fixed times from `anchor_at`. `after_completion`: one interval after the
+         * last created task is closed.
+         */
+        mode: string;
+        /**
+         * Null while an `after_completion` routine waits for its last task.
+         */
+        next_run_at: string | null;
+        paused: boolean;
+        payload: TaskPayload;
+        project_id: string;
         updated_at: string;
         version: number;
         workspace_id: string;
@@ -2251,13 +2772,25 @@ export type PageTaskRecord = {
         creator_id?: string | null;
         creator_service_account_id?: string | null;
         creator_service_account_name?: string | null;
+        /**
+         * The cycle of the task's project that the task is planned in.
+         */
+        cycle_id?: string | null;
         deleted_at?: string | null;
         description: string;
         due_at?: string | null;
         due_start_at?: string | null;
         duplicate_of: null | TaskRef;
+        /**
+         * Points. The project's estimate scale decides how they show.
+         */
+        estimate?: number | null;
         id: string;
         label_ids: Array<string>;
+        /**
+         * The milestone of the task's project that the task belongs to; null when it has none.
+         */
+        milestone_id: string | null;
         /**
          * Per-project sequence number: the task's identifier is `{project key}-{number}`, e.g.
          * `ENG-12`. Reassigned when the task moves to another project; never reused.
@@ -2281,11 +2814,31 @@ export type PageTaskRecord = {
          * Direct live children (sub-issues).
          */
         sub_issue_count: number;
+        /**
+         * The sum of the estimates of the task's sub-issues at every level that have no sub-issues
+         * of their own; null for a task with no sub-issues or no estimated ones.
+         */
+        sub_issue_estimate?: number | null;
         title: string;
         /**
          * Task trash only: descendants trashed together with this task (restored with it).
          */
         trashed_descendant_count?: number | null;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageTemplateRecord = {
+    items: Array<{
+        created_at: string;
+        id: string;
+        name: string;
+        payload: TaskPayload;
+        position: number;
+        project_id: string;
         updated_at: string;
         version: number;
         workspace_id: string;
@@ -2417,9 +2970,32 @@ export type ProjectRecord = {
     color: string;
     created_at: string;
     deleted_at?: string | null;
+    /**
+     * `fibonacci`, `linear` or `tshirt`; null while estimates are off.
+     */
+    estimate_scale?: string | null;
     id: string;
     key: string;
+    /**
+     * The member who owns the project; null when there is none.
+     */
+    lead_user_id: string | null;
+    member_ids: Array<string>;
     name: string;
+    /**
+     * The hidden Docs page that holds the description; null until someone writes one.
+     */
+    overview_page_id: string | null;
+    /**
+     * Live tasks by status category; a category with no task is absent.
+     */
+    task_counts: {
+        [key: string]: number;
+    };
+    /**
+     * Tasks that an integration creates wait in the Triage status until a member accepts them.
+     */
+    triage_enabled: boolean;
     updated_at: string;
     version: number;
     workspace_id: string;
@@ -2435,9 +3011,25 @@ export type ProjectUpdateBody = {
      */
     auto_close_sub_issues?: boolean | null;
     color: string;
+    /**
+     * Absent: unchanged. `fibonacci`, `linear` or `tshirt`; `null` turns estimates off.
+     */
+    estimate_scale?: string | null;
     expected_version: number;
     key: string;
+    /**
+     * Absent: unchanged. `null`: no lead.
+     */
+    lead_user_id?: string | null;
+    /**
+     * Absent: unchanged. The full member list otherwise.
+     */
+    member_ids?: Array<string> | null;
     name: string;
+    /**
+     * Absent: unchanged. Cannot go off while tasks wait in triage (409 `triage_not_empty`).
+     */
+    triage_enabled?: boolean | null;
 };
 
 export type PushKey = {
@@ -2548,6 +3140,63 @@ export type RecoveryRequestBody = {
 
 export type RecoveryRequestResponse = {
     detail: string;
+};
+
+export type RecurringTaskBody = {
+    every_count: number;
+    /**
+     * `day`, `week` or `month`.
+     */
+    every_unit: string;
+    /**
+     * `schedule` or `after_completion`.
+     */
+    mode: string;
+    payload: TaskPayload;
+    /**
+     * The first run; now when absent.
+     */
+    starts_at?: string | null;
+};
+
+export type RecurringTaskRecord = {
+    anchor_at: string;
+    created_at: string;
+    every_count: number;
+    /**
+     * `day`, `week` or `month`.
+     */
+    every_unit: string;
+    id: string;
+    last_task_id: string | null;
+    /**
+     * `schedule`: at fixed times from `anchor_at`. `after_completion`: one interval after the
+     * last created task is closed.
+     */
+    mode: string;
+    /**
+     * Null while an `after_completion` routine waits for its last task.
+     */
+    next_run_at: string | null;
+    paused: boolean;
+    payload: TaskPayload;
+    project_id: string;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
+/**
+ * Absent fields are unchanged.
+ */
+export type RecurringTaskUpdateBody = {
+    every_count?: number | null;
+    every_unit?: string | null;
+    expected_version: number;
+    mode?: string | null;
+    paused?: boolean | null;
+    payload?: null | TaskPayload;
+    starts_at?: string | null;
 };
 
 export type RegistrationBody = {
@@ -2916,10 +3565,44 @@ export type TaskBulkResponse = {
 };
 
 export type TaskConflict = {
+    /**
+     * `triage_not_empty`: the number of tasks in the queue.
+     */
+    count?: number | null;
     current?: unknown;
     current_version?: number | null;
     field?: string | null;
     refresh?: string | null;
+};
+
+/**
+ * The fields of a task as a template or a recurring task stores them. References are ids as
+ * text: each one is checked again when the payload is used, and one that no longer exists is
+ * dropped (a missing status becomes the default status of the project).
+ */
+export type TaskPayload = {
+    assignee_ids?: Array<string>;
+    description?: string;
+    /**
+     * The due date, in days after the day the task is created.
+     */
+    due_offset_days?: number | null;
+    /**
+     * Points. A payload holds no cycle: the "tasks with no cycle" options of the project decide.
+     */
+    estimate?: number | null;
+    label_ids?: Array<string>;
+    milestone_id?: string | null;
+    /**
+     * `none` (the default), `low`, `medium`, `high` or `urgent`.
+     */
+    priority?: string;
+    status_id?: string | null;
+    /**
+     * Sub-issues, one level deep: a sub-issue has no `sub_issues` of its own.
+     */
+    sub_issues?: Array<TaskPayload>;
+    title: string;
 };
 
 export type TaskProblem = {
@@ -2938,7 +3621,7 @@ export type TaskProblem = {
     type: string;
 };
 
-export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress';
+export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress' | 'milestone' | 'cycle' | 'estimate';
 
 export type TaskQueryBody = {
     cursor?: string | null;
@@ -2980,13 +3663,25 @@ export type TaskRecord = {
     creator_id?: string | null;
     creator_service_account_id?: string | null;
     creator_service_account_name?: string | null;
+    /**
+     * The cycle of the task's project that the task is planned in.
+     */
+    cycle_id?: string | null;
     deleted_at?: string | null;
     description: string;
     due_at?: string | null;
     due_start_at?: string | null;
     duplicate_of: null | TaskRef;
+    /**
+     * Points. The project's estimate scale decides how they show.
+     */
+    estimate?: number | null;
     id: string;
     label_ids: Array<string>;
+    /**
+     * The milestone of the task's project that the task belongs to; null when it has none.
+     */
+    milestone_id: string | null;
     /**
      * Per-project sequence number: the task's identifier is `{project key}-{number}`, e.g.
      * `ENG-12`. Reassigned when the task moves to another project; never reused.
@@ -3010,6 +3705,11 @@ export type TaskRecord = {
      * Direct live children (sub-issues).
      */
     sub_issue_count: number;
+    /**
+     * The sum of the estimates of the task's sub-issues at every level that have no sub-issues
+     * of their own; null for a task with no sub-issues or no estimated ones.
+     */
+    sub_issue_estimate?: number | null;
     title: string;
     /**
      * Task trash only: descendants trashed together with this task (restored with it).
@@ -3071,6 +3771,10 @@ export type TaskSubscriptionBody = {
 
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged. `null`: no cycle. A move to a different project clears it.
+     */
+    cycle_id?: string | null;
     description?: string | null;
     due_at?: string | null;
     due_start_at?: string | null;
@@ -3078,8 +3782,16 @@ export type TaskUpdateBody = {
      * Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
      */
     duplicate_of_id?: string | null;
+    /**
+     * Absent: unchanged. `null`: no estimate.
+     */
+    estimate?: number | null;
     expected_version: number;
     label_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged. `null`: no milestone. A move to a different project clears it.
+     */
+    milestone_id?: string | null;
     /**
      * Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
      */
@@ -3131,6 +3843,29 @@ export type TeamspaceUpdateBody = {
     name?: string | null;
 };
 
+export type TemplateBody = {
+    name: string;
+    payload: TaskPayload;
+};
+
+export type TemplateRecord = {
+    created_at: string;
+    id: string;
+    name: string;
+    payload: TaskPayload;
+    position: number;
+    project_id: string;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
+export type TemplateUpdateBody = {
+    expected_version: number;
+    name: string;
+    payload: TaskPayload;
+};
+
 export type TestPushResult = {
     /**
      * How many of the user's browsers took the push.
@@ -3165,6 +3900,17 @@ export type ThreadStateRecord = {
     mention_count: number;
     root_id: string;
     unread_replies: number;
+};
+
+export type ThroughputWeek = {
+    completed_count: number;
+    completed_points: number;
+    created_count: number;
+    created_points: number;
+    /**
+     * The Monday of the week in the viewer's timezone, `YYYY-MM-DD`.
+     */
+    week: string;
 };
 
 export type TotpSetup = {
@@ -3212,6 +3958,23 @@ export type TrashedPage = {
     title: string;
     updated_at: string;
     version: number;
+};
+
+export type TriageBody = {
+    /**
+     * `accept` or `decline`.
+     */
+    action: string;
+    /**
+     * `decline` only: a comment that says why.
+     */
+    comment?: string | null;
+    expected_version: number;
+    /**
+     * `accept` only: the status the task moves to. Absent: the first backlog status, else the
+     * first unstarted one.
+     */
+    status_id?: string | null;
 };
 
 /**
@@ -10393,6 +11156,60 @@ export type ReadChatThreadResponses = {
 
 export type ReadChatThreadResponse = ReadChatThreadResponses[keyof ReadChatThreadResponses];
 
+export type ListCurrentCyclesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/cycles/current';
+};
+
+export type ListCurrentCyclesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListCurrentCyclesError = ListCurrentCyclesErrors[keyof ListCurrentCyclesErrors];
+
+export type ListCurrentCyclesResponses = {
+    200: PageCycleRecord;
+};
+
+export type ListCurrentCyclesResponse = ListCurrentCyclesResponses[keyof ListCurrentCyclesResponses];
+
 export type GithubWorkspaceSettingsData = {
     body?: never;
     headers?: {
@@ -11424,6 +12241,60 @@ export type ChangeMemberRoleResponses = {
 };
 
 export type ChangeMemberRoleResponse = ChangeMemberRoleResponses[keyof ChangeMemberRoleResponses];
+
+export type ListWorkspaceMilestonesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/milestones';
+};
+
+export type ListWorkspaceMilestonesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListWorkspaceMilestonesError = ListWorkspaceMilestonesErrors[keyof ListWorkspaceMilestonesErrors];
+
+export type ListWorkspaceMilestonesResponses = {
+    200: PageMilestoneRecord;
+};
+
+export type ListWorkspaceMilestonesResponse = ListWorkspaceMilestonesResponses[keyof ListWorkspaceMilestonesResponses];
 
 export type ListNotificationsData = {
     body?: never;
@@ -14000,6 +14871,61 @@ export type DeleteProjectResponses = {
 
 export type DeleteProjectResponse = DeleteProjectResponses[keyof DeleteProjectResponses];
 
+export type GetProjectData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}';
+};
+
+export type GetProjectErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetProjectError = GetProjectErrors[keyof GetProjectErrors];
+
+export type GetProjectResponses = {
+    200: ProjectRecord;
+};
+
+export type GetProjectResponse = GetProjectResponses[keyof GetProjectResponses];
+
 export type UpdateProjectData = {
     body: ProjectUpdateBody;
     headers?: {
@@ -14017,6 +14943,124 @@ export type UpdateProjectData = {
 };
 
 export type UpdateProjectErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict, triage_not_empty
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateProjectError = UpdateProjectErrors[keyof UpdateProjectErrors];
+
+export type UpdateProjectResponses = {
+    200: ProjectRecord;
+};
+
+export type UpdateProjectResponse = UpdateProjectResponses[keyof UpdateProjectResponses];
+
+export type GetCycleSettingsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycle-settings';
+};
+
+export type GetCycleSettingsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetCycleSettingsError = GetCycleSettingsErrors[keyof GetCycleSettingsErrors];
+
+export type GetCycleSettingsResponses = {
+    200: CycleSettingsRecord;
+};
+
+export type GetCycleSettingsResponse = GetCycleSettingsResponses[keyof GetCycleSettingsResponses];
+
+export type UpdateCycleSettingsData = {
+    body: CycleSettingsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycle-settings';
+};
+
+export type UpdateCycleSettingsErrors = {
     /**
      * invalid_proxy_headers, invalid_request
      */
@@ -14055,13 +15099,308 @@ export type UpdateProjectErrors = {
     default: TaskProblem;
 };
 
-export type UpdateProjectError = UpdateProjectErrors[keyof UpdateProjectErrors];
+export type UpdateCycleSettingsError = UpdateCycleSettingsErrors[keyof UpdateCycleSettingsErrors];
 
-export type UpdateProjectResponses = {
-    200: ProjectRecord;
+export type UpdateCycleSettingsResponses = {
+    200: CycleSettingsRecord;
 };
 
-export type UpdateProjectResponse = UpdateProjectResponses[keyof UpdateProjectResponses];
+export type UpdateCycleSettingsResponse = UpdateCycleSettingsResponses[keyof UpdateCycleSettingsResponses];
+
+export type ListCyclesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles';
+};
+
+export type ListCyclesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListCyclesError = ListCyclesErrors[keyof ListCyclesErrors];
+
+export type ListCyclesResponses = {
+    200: PageCycleRecord;
+};
+
+export type ListCyclesResponse = ListCyclesResponses[keyof ListCyclesResponses];
+
+export type UpdateCycleData = {
+    body: CycleUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}';
+};
+
+export type UpdateCycleErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateCycleError = UpdateCycleErrors[keyof UpdateCycleErrors];
+
+export type UpdateCycleResponses = {
+    200: CycleRecord;
+};
+
+export type UpdateCycleResponse = UpdateCycleResponses[keyof UpdateCycleResponses];
+
+export type ListCycleDaysData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/burndown';
+};
+
+export type ListCycleDaysErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListCycleDaysError = ListCycleDaysErrors[keyof ListCycleDaysErrors];
+
+export type ListCycleDaysResponses = {
+    200: PageCycleDayRecord;
+};
+
+export type ListCycleDaysResponse = ListCycleDaysResponses[keyof ListCycleDaysResponses];
+
+export type EndCycleTodayData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/end-today';
+};
+
+export type EndCycleTodayErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type EndCycleTodayError = EndCycleTodayErrors[keyof EndCycleTodayErrors];
+
+export type EndCycleTodayResponses = {
+    200: CycleRecord;
+};
+
+export type EndCycleTodayResponse = EndCycleTodayResponses[keyof EndCycleTodayResponses];
+
+export type StartCycleTodayData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/start-today';
+};
+
+export type StartCycleTodayErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartCycleTodayError = StartCycleTodayErrors[keyof StartCycleTodayErrors];
+
+export type StartCycleTodayResponses = {
+    200: CycleRecord;
+};
+
+export type StartCycleTodayResponse = StartCycleTodayResponses[keyof StartCycleTodayResponses];
 
 export type DeleteGithubProjectConnectionData = {
     body?: never;
@@ -14248,6 +15587,814 @@ export type SaveGithubProjectConnectionResponses = {
 
 export type SaveGithubProjectConnectionResponse = SaveGithubProjectConnectionResponses[keyof SaveGithubProjectConnectionResponses];
 
+export type GetInsightOpenData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query: {
+        /**
+         * `status`, `assignee`, `priority` or `label`.
+         */
+        by: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/insights/open';
+};
+
+export type GetInsightOpenErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetInsightOpenError = GetInsightOpenErrors[keyof GetInsightOpenErrors];
+
+export type GetInsightOpenResponses = {
+    200: InsightOpenGroup;
+};
+
+export type GetInsightOpenResponse = GetInsightOpenResponses[keyof GetInsightOpenResponses];
+
+export type GetInsightThroughputData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: {
+        /**
+         * The IANA timezone of the viewer; a week starts on Monday in it. Default `UTC`.
+         */
+        tz?: string;
+        /**
+         * 1 to 104 (default 12).
+         */
+        weeks?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/insights/throughput';
+};
+
+export type GetInsightThroughputErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetInsightThroughputError = GetInsightThroughputErrors[keyof GetInsightThroughputErrors];
+
+export type GetInsightThroughputResponses = {
+    200: InsightThroughputWeek;
+};
+
+export type GetInsightThroughputResponse = GetInsightThroughputResponses[keyof GetInsightThroughputResponses];
+
+export type ListMilestonesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones';
+};
+
+export type ListMilestonesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListMilestonesError = ListMilestonesErrors[keyof ListMilestonesErrors];
+
+export type ListMilestonesResponses = {
+    200: PageMilestoneRecord;
+};
+
+export type ListMilestonesResponse = ListMilestonesResponses[keyof ListMilestonesResponses];
+
+export type CreateMilestoneData = {
+    body: MilestoneBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones';
+};
+
+export type CreateMilestoneErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateMilestoneError = CreateMilestoneErrors[keyof CreateMilestoneErrors];
+
+export type CreateMilestoneResponses = {
+    201: MilestoneRecord;
+};
+
+export type CreateMilestoneResponse = CreateMilestoneResponses[keyof CreateMilestoneResponses];
+
+export type DeleteMilestoneData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}';
+};
+
+export type DeleteMilestoneErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteMilestoneError = DeleteMilestoneErrors[keyof DeleteMilestoneErrors];
+
+export type DeleteMilestoneResponses = {
+    204: void;
+};
+
+export type DeleteMilestoneResponse = DeleteMilestoneResponses[keyof DeleteMilestoneResponses];
+
+export type UpdateMilestoneData = {
+    body: MilestoneUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}';
+};
+
+export type UpdateMilestoneErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateMilestoneError = UpdateMilestoneErrors[keyof UpdateMilestoneErrors];
+
+export type UpdateMilestoneResponses = {
+    200: MilestoneRecord;
+};
+
+export type UpdateMilestoneResponse = UpdateMilestoneResponses[keyof UpdateMilestoneResponses];
+
+export type GetMilestoneBurnupData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query?: {
+        /**
+         * The IANA timezone of the viewer; a week starts on Monday in it. Default `UTC`.
+         */
+        tz?: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}/burnup';
+};
+
+export type GetMilestoneBurnupErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMilestoneBurnupError = GetMilestoneBurnupErrors[keyof GetMilestoneBurnupErrors];
+
+export type GetMilestoneBurnupResponses = {
+    200: InsightBurnupWeek;
+};
+
+export type GetMilestoneBurnupResponse = GetMilestoneBurnupResponses[keyof GetMilestoneBurnupResponses];
+
+export type CreateMilestoneDescriptionPageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}/description-page';
+};
+
+export type CreateMilestoneDescriptionPageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateMilestoneDescriptionPageError = CreateMilestoneDescriptionPageErrors[keyof CreateMilestoneDescriptionPageErrors];
+
+export type CreateMilestoneDescriptionPageResponses = {
+    200: OwnedPageRecord;
+};
+
+export type CreateMilestoneDescriptionPageResponse = CreateMilestoneDescriptionPageResponses[keyof CreateMilestoneDescriptionPageResponses];
+
+export type ListMilestoneUpdatesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}/updates';
+};
+
+export type ListMilestoneUpdatesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListMilestoneUpdatesError = ListMilestoneUpdatesErrors[keyof ListMilestoneUpdatesErrors];
+
+export type ListMilestoneUpdatesResponses = {
+    200: PageMilestoneUpdateRecord;
+};
+
+export type ListMilestoneUpdatesResponse = ListMilestoneUpdatesResponses[keyof ListMilestoneUpdatesResponses];
+
+export type CreateMilestoneUpdateData = {
+    body: HealthUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}/updates';
+};
+
+export type CreateMilestoneUpdateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateMilestoneUpdateError = CreateMilestoneUpdateErrors[keyof CreateMilestoneUpdateErrors];
+
+export type CreateMilestoneUpdateResponses = {
+    201: MilestoneUpdateRecord;
+};
+
+export type CreateMilestoneUpdateResponse = CreateMilestoneUpdateResponses[keyof CreateMilestoneUpdateResponses];
+
+export type DeleteMilestoneUpdateData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+        update_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}/updates/{update_id}';
+};
+
+export type DeleteMilestoneUpdateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteMilestoneUpdateError = DeleteMilestoneUpdateErrors[keyof DeleteMilestoneUpdateErrors];
+
+export type DeleteMilestoneUpdateResponses = {
+    204: void;
+};
+
+export type DeleteMilestoneUpdateResponse = DeleteMilestoneUpdateResponses[keyof DeleteMilestoneUpdateResponses];
+
+export type UpdateMilestoneUpdateData = {
+    body: HealthUpdatePatchBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+        update_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}/updates/{update_id}';
+};
+
+export type UpdateMilestoneUpdateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateMilestoneUpdateError = UpdateMilestoneUpdateErrors[keyof UpdateMilestoneUpdateErrors];
+
+export type UpdateMilestoneUpdateResponses = {
+    200: MilestoneUpdateRecord;
+};
+
+export type UpdateMilestoneUpdateResponse = UpdateMilestoneUpdateResponses[keyof UpdateMilestoneUpdateResponses];
+
+export type CreateProjectOverviewPageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/overview-page';
+};
+
+export type CreateProjectOverviewPageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateProjectOverviewPageError = CreateProjectOverviewPageErrors[keyof CreateProjectOverviewPageErrors];
+
+export type CreateProjectOverviewPageResponses = {
+    200: OwnedPageRecord;
+};
+
+export type CreateProjectOverviewPageResponse = CreateProjectOverviewPageResponses[keyof CreateProjectOverviewPageResponses];
+
 export type GetPrAutomationData = {
     body?: never;
     headers?: {
@@ -14353,6 +16500,250 @@ export type PutPrAutomationResponses = {
 };
 
 export type PutPrAutomationResponse = PutPrAutomationResponses[keyof PutPrAutomationResponses];
+
+export type ListRecurringTasksData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/recurring-tasks';
+};
+
+export type ListRecurringTasksErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListRecurringTasksError = ListRecurringTasksErrors[keyof ListRecurringTasksErrors];
+
+export type ListRecurringTasksResponses = {
+    200: PageRecurringTaskRecord;
+};
+
+export type ListRecurringTasksResponse = ListRecurringTasksResponses[keyof ListRecurringTasksResponses];
+
+export type CreateRecurringTaskData = {
+    body: RecurringTaskBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/recurring-tasks';
+};
+
+export type CreateRecurringTaskErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateRecurringTaskError = CreateRecurringTaskErrors[keyof CreateRecurringTaskErrors];
+
+export type CreateRecurringTaskResponses = {
+    201: RecurringTaskRecord;
+};
+
+export type CreateRecurringTaskResponse = CreateRecurringTaskResponses[keyof CreateRecurringTaskResponses];
+
+export type DeleteRecurringTaskData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        recurring_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/recurring-tasks/{recurring_id}';
+};
+
+export type DeleteRecurringTaskErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteRecurringTaskError = DeleteRecurringTaskErrors[keyof DeleteRecurringTaskErrors];
+
+export type DeleteRecurringTaskResponses = {
+    204: void;
+};
+
+export type DeleteRecurringTaskResponse = DeleteRecurringTaskResponses[keyof DeleteRecurringTaskResponses];
+
+export type UpdateRecurringTaskData = {
+    body: RecurringTaskUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        recurring_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/recurring-tasks/{recurring_id}';
+};
+
+export type UpdateRecurringTaskErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateRecurringTaskError = UpdateRecurringTaskErrors[keyof UpdateRecurringTaskErrors];
+
+export type UpdateRecurringTaskResponses = {
+    200: RecurringTaskRecord;
+};
+
+export type UpdateRecurringTaskResponse = UpdateRecurringTaskResponses[keyof UpdateRecurringTaskResponses];
 
 export type RestoreProjectData = {
     body: RestoreBody;
@@ -14727,6 +17118,250 @@ export type UpdateStatusResponses = {
 
 export type UpdateStatusResponse = UpdateStatusResponses[keyof UpdateStatusResponses];
 
+export type ListTemplatesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/templates';
+};
+
+export type ListTemplatesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTemplatesError = ListTemplatesErrors[keyof ListTemplatesErrors];
+
+export type ListTemplatesResponses = {
+    200: PageTemplateRecord;
+};
+
+export type ListTemplatesResponse = ListTemplatesResponses[keyof ListTemplatesResponses];
+
+export type CreateTemplateData = {
+    body: TemplateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/templates';
+};
+
+export type CreateTemplateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateTemplateError = CreateTemplateErrors[keyof CreateTemplateErrors];
+
+export type CreateTemplateResponses = {
+    201: TemplateRecord;
+};
+
+export type CreateTemplateResponse = CreateTemplateResponses[keyof CreateTemplateResponses];
+
+export type DeleteTemplateData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        template_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/templates/{template_id}';
+};
+
+export type DeleteTemplateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteTemplateError = DeleteTemplateErrors[keyof DeleteTemplateErrors];
+
+export type DeleteTemplateResponses = {
+    204: void;
+};
+
+export type DeleteTemplateResponse = DeleteTemplateResponses[keyof DeleteTemplateResponses];
+
+export type UpdateTemplateData = {
+    body: TemplateUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        template_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/templates/{template_id}';
+};
+
+export type UpdateTemplateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateTemplateError = UpdateTemplateErrors[keyof UpdateTemplateErrors];
+
+export type UpdateTemplateResponses = {
+    200: TemplateRecord;
+};
+
+export type UpdateTemplateResponse = UpdateTemplateResponses[keyof UpdateTemplateResponses];
+
 export type RestoreWorkspaceData = {
     body: RestoreBody;
     headers?: {
@@ -14980,6 +17615,68 @@ export type BulkTasksResponses = {
 };
 
 export type BulkTasksResponse = BulkTasksResponses[keyof BulkTasksResponses];
+
+export type CreateTaskFromPayloadData = {
+    body: FromPayloadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/from-payload';
+};
+
+export type CreateTaskFromPayloadErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateTaskFromPayloadError = CreateTaskFromPayloadErrors[keyof CreateTaskFromPayloadErrors];
+
+export type CreateTaskFromPayloadResponses = {
+    201: TaskUpdateResponse;
+};
+
+export type CreateTaskFromPayloadResponse = CreateTaskFromPayloadResponses[keyof CreateTaskFromPayloadResponses];
 
 export type QueryTasksData = {
     body: TaskQueryBody;
@@ -16697,6 +19394,69 @@ export type PutTaskSubscriptionResponses = {
 };
 
 export type PutTaskSubscriptionResponse = PutTaskSubscriptionResponses[keyof PutTaskSubscriptionResponses];
+
+export type TriageTaskData = {
+    body: TriageBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/triage';
+};
+
+export type TriageTaskErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type TriageTaskError = TriageTaskErrors[keyof TriageTaskErrors];
+
+export type TriageTaskResponses = {
+    200: TaskUpdateResponse;
+};
+
+export type TriageTaskResponse = TriageTaskResponses[keyof TriageTaskResponses];
 
 export type ListTeamspacesData = {
     body?: never;

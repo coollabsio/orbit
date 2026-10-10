@@ -23,11 +23,12 @@ fn workspace_defaults_create_owner_project_and_workflow() {
             .map(|status| (status.name.as_str(), status.category))
             .collect::<Vec<_>>(),
         vec![
-            ("Backlog", StatusCategory::Unstarted),
+            ("Backlog", StatusCategory::Backlog),
             ("Todo", StatusCategory::Unstarted),
             ("In Progress", StatusCategory::Started),
             ("Done", StatusCategory::Completed),
             ("Cancelled", StatusCategory::Cancelled),
+            ("Triage", StatusCategory::Triage),
             ("Duplicate", StatusCategory::Duplicate),
         ]
     );
@@ -46,11 +47,12 @@ fn workspace_defaults_create_owner_project_and_workflow() {
             .map(|status| status.category.as_str())
             .collect::<Vec<_>>(),
         [
-            "unstarted",
+            "backlog",
             "unstarted",
             "started",
             "completed",
             "cancelled",
+            "triage",
             "duplicate"
         ]
     );

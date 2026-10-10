@@ -12,7 +12,7 @@ import { PriorityPicker } from './PriorityPicker'
 import { StatusPicker } from './StatusPicker'
 import { AssigneePicker } from './AssigneePicker'
 import { LinkifiedText } from './LinkifiedText'
-import { DateStamp, ProjectChip } from './TaskPropertyChips'
+import { CycleChip, DateStamp, EstimateChip, MilestoneChip, ProjectChip } from './TaskPropertyChips'
 import { DueDatePicker } from './DueDatePicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { TreeGutter } from './TreeGutter'
@@ -158,6 +158,9 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
         </span>
       ) : null}
       {has('project') ? <span className="flex w-[4.5rem] shrink-0 max-[1099px]:hidden"><ProjectChip project={project} className="max-w-full text-xs" /></span> : null}
+      {has('estimate') ? <span className="flex w-8 shrink-0 justify-end max-[899px]:hidden"><EstimateChip task={task} project={project} className="text-[11px]" /></span> : null}
+      {has('cycle') ? <span className="flex w-20 shrink-0 max-[1099px]:hidden"><CycleChip task={task} className="max-w-full text-xs" /></span> : null}
+      {has('milestone') ? <span className="flex w-24 shrink-0 max-[1099px]:hidden"><MilestoneChip task={task} className="max-w-full text-xs" /></span> : null}
       {has('due_date') ? <DueDatePicker task={task} status={status} className="w-[4.25rem] shrink-0 text-xs max-[640px]:hidden" /> : null}
       {/* at most two circles (28px) so the slot stays narrow */}
       {has('assignee') ? <AssigneePicker task={task} users={users} max={assignees.length > 2 ? 1 : 2} className="w-7 justify-end" /> : null}

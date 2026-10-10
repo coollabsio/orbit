@@ -4,7 +4,7 @@ import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowLeft, Calendar, Hierarchy2, Link2, Notification, Paperclip2 as Paperclip, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { ArrowLeft, Calendar, Hierarchy2, Link2, Notification, Paperclip2 as Paperclip, Refresh2, Signpost, TaskSquare as SquareCheck, Weight, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -26,15 +26,19 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader } from '@/components/common/Pane'
 import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
-import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
+import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
 import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
 import { useProjects } from '@/features/tasks/api/projects'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { cycleName, estimateLabel, estimateOptions, openCycles } from '@/features/tasks/cyclesLib'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
   subIssuesQuery, useSetTaskSubscription, useSubIssues, useTaskGithubLinks, useTaskRelations, useTaskSubscribers, useUpdateTask, useUploadTaskImage,
   useUploadTaskAttachments,
 } from '@/features/tasks/api/tasks'
+import { statusPickerOptions } from '@/features/tasks/pickerLib'
 import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { useParentActions } from '@/features/tasks/useParentActions'
@@ -93,6 +97,13 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
   const saveDueDate = useTaskPickerUpdate(task, 'Due date update failed.')
   const [sourceOpen, setSourceOpen] = useState(false)
   const projects = useProjects(workspace.id).data ?? []
+  const milestones = (useMilestones(workspace.id).data ?? []).filter((item) => item.project_id === task?.projectId)
+  const milestone = milestones.find((item) => item.id === task?.milestoneId)
+  const cycles = useCycles(workspace.id, task?.projectId).data ?? []
+  const cycle = cycles.find((item) => item.id === task?.cycleId)
+  // a completed cycle is not a place to put a task; it shows only while the task is still in it
+  const cycleChoices = openCycles(cycles)
+  const estimates = estimateOptions(project?.estimate_scale)
   const relations = useTaskRelations(workspace.id, task?.id).data ?? []
   const addRelation = useAddTaskRelation(workspace.id, task?.id ?? '')
   const removeRelation = useRemoveTaskRelation(workspace.id, task?.id ?? '')
@@ -135,7 +146,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
     if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
   const status = state.statuses.find((s) => s.id === task?.statusId)
-  const statusOptions = task ? projectStatuses(state.statuses, task.projectId) : []
+  const statusOptions = task ? statusPickerOptions(state.statuses, task.projectId, true, task.statusId) : []
   const assignees = users.filter((u) => task?.assigneeIds.includes(u.id))
   const deleteAndClose = async (input: { taskId: string; version: number }) => {
     try {
@@ -443,6 +454,108 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
                 </DropdownMenu>
               )}
             </PropertyGroup>
+
+            {milestones.length > 0 ? (
+              <PropertyGroup title="Milestone">
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <PropertyButton className={cn('max-w-full', !milestone && 'text-muted-foreground')}>
+                        <Signpost className="size-3.5" aria-hidden="true" />
+                        <span className="truncate">{milestone?.name ?? 'Set milestone'}</span>
+                      </PropertyButton>
+                    }
+                  />
+                  <DropdownMenuContent className="w-auto min-w-45">
+                    {milestones.map((item) => (
+                      <DropdownMenuItem
+                        key={item.id}
+                        className="data-selected:bg-accent data-selected:font-medium"
+                        data-selected={item.id === task.milestoneId || undefined}
+                        onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, milestone_id: item.id } })}
+                      >
+                        {item.name}
+                      </DropdownMenuItem>
+                    ))}
+                    {milestone ? (
+                      <DropdownMenuItem onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, milestone_id: null } })}>
+                        No milestone
+                      </DropdownMenuItem>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </PropertyGroup>
+            ) : null}
+
+            {cycleChoices.length > 0 || cycle ? (
+              <PropertyGroup title="Cycle">
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <PropertyButton className={cn('max-w-full', !cycle && 'text-muted-foreground')}>
+                        <Refresh2 className="size-3.5" aria-hidden="true" />
+                        <span className="truncate">{cycle ? cycleName(cycle) : 'Set cycle'}</span>
+                      </PropertyButton>
+                    }
+                  />
+                  <DropdownMenuContent className="w-auto min-w-45">
+                    {cycleChoices.map((item) => (
+                      <DropdownMenuItem
+                        key={item.id}
+                        className="data-selected:bg-accent data-selected:font-medium"
+                        data-selected={item.id === task.cycleId || undefined}
+                        onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, cycle_id: item.id } })}
+                      >
+                        <span className="flex-1 truncate">{cycleName(item)}</span>
+                        {item.state === 'current' ? <span className="text-xs text-muted-foreground">Current</span> : null}
+                      </DropdownMenuItem>
+                    ))}
+                    {cycle ? (
+                      <DropdownMenuItem onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, cycle_id: null } })}>
+                        No cycle
+                      </DropdownMenuItem>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </PropertyGroup>
+            ) : null}
+
+            {estimates.length > 0 ? (
+              <PropertyGroup title="Estimate">
+                {(task.subIssueCount ?? 0) > 0 ? (
+                  // a parent shows the sum of its sub-issues; its own value is kept for when it has none again
+                  <span className="text-[13px] text-muted-foreground">{task.subIssueEstimate ?? 0} from the sub-issues</span>
+                ) : (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <PropertyButton className={cn(task.estimate == null && 'text-muted-foreground')}>
+                          <Weight className="size-3.5" aria-hidden="true" />
+                          {task.estimate == null ? 'Set estimate' : estimateLabel(task.estimate, project?.estimate_scale)}
+                        </PropertyButton>
+                      }
+                    />
+                    <DropdownMenuContent className="w-auto min-w-32">
+                      {estimates.map((option) => (
+                        <DropdownMenuItem
+                          key={option.points}
+                          className="data-selected:bg-accent data-selected:font-medium"
+                          data-selected={option.points === task.estimate || undefined}
+                          onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, estimate: option.points } })}
+                        >
+                          {option.label}
+                        </DropdownMenuItem>
+                      ))}
+                      {task.estimate != null ? (
+                        <DropdownMenuItem onClick={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, estimate: null } })}>
+                          No estimate
+                        </DropdownMenuItem>
+                      ) : null}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </PropertyGroup>
+            ) : null}
 
             <PropertyGroup title="Source">
               {task.sourceUrl ? (

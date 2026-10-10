@@ -2,7 +2,7 @@ import { useTaskTarget, useVirtualTaskRows } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
-import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
+import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, Refresh2, Signpost, TaskSquare as SquareCheck, Tag, Weight, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -22,7 +22,9 @@ import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
-import { assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { assigneeToggleUpdates, dueUpdates, labelToggleUpdates, cycleUpdates, estimateUpdates, milestoneUpdates, priorityUpdates, sharedProjectCycles, sharedProjectId, sharedProjectMilestones, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { cycleName, estimateOptions } from '@/features/tasks/cyclesLib'
+import { GroupPoints } from './TaskPropertyChips'
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
@@ -299,6 +301,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
         <GroupIcon group={group} context={groupContext} />
         <span className="truncate">{group.label}</span>
         <span className="font-normal text-muted-foreground/70 tabular-nums">{rowCount(group.tasks)}</span>
+        <GroupPoints tasks={group.tasks} projects={projects} />
         <div className="flex-1" />
         {canAdd ? (
           <Tip label="New task">
@@ -457,6 +460,10 @@ function BulkBar({
   const bulkPriority = (priority: Task['priority']) => mutate(priorityUpdates(tasks, priority))
   const bulkAssign = (userId: string) => mutate(assigneeToggleUpdates(tasks, userId))
   const bulkLabel = (labelId: string) => mutate(labelToggleUpdates(tasks, labelId))
+  // a milestone belongs to one project: offered only when the selection is in one project
+  const milestones = sharedProjectMilestones(tasks, groupContext.milestones ?? [])
+  const cycles = sharedProjectCycles(tasks, groupContext.cycles ?? [])
+  const estimates = estimateOptions(groupContext.projects.find((project) => project.id === sharedProjectId(tasks))?.estimate_scale)
 
   // the picker starts from the shared due range, or empty when the selection disagrees
   const [first] = tasks
@@ -548,6 +555,43 @@ function BulkBar({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
+        {cycles.length > 0 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<BulkAction icon={<Refresh2 aria-hidden />} label="Cycle" />} />
+            <DropdownMenuContent side="top" align="end" className="w-auto min-w-45">
+              {cycles.map((cycle) => (
+                <DropdownMenuItem key={cycle.id} onClick={() => mutate(cycleUpdates(tasks, cycle.id))}>
+                  <span className="truncate">{cycleName(cycle)}</span>
+                </DropdownMenuItem>
+              ))}
+              {tasks.some((task) => task.cycleId) ? <DropdownMenuItem onClick={() => mutate(cycleUpdates(tasks, null))}>No cycle</DropdownMenuItem> : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        {estimates.length > 0 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<BulkAction icon={<Weight aria-hidden />} label="Estimate" />} />
+            <DropdownMenuContent side="top" align="end" className="w-auto min-w-32">
+              {estimates.map((option) => (
+                <DropdownMenuItem key={option.points} onClick={() => mutate(estimateUpdates(tasks, option.points))}>{option.label}</DropdownMenuItem>
+              ))}
+              {tasks.some((task) => task.estimate != null) ? <DropdownMenuItem onClick={() => mutate(estimateUpdates(tasks, null))}>No estimate</DropdownMenuItem> : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        {milestones.length > 0 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<BulkAction icon={<Signpost aria-hidden />} label="Milestone" />} />
+            <DropdownMenuContent side="top" align="end" className="w-auto min-w-45">
+              {milestones.map((milestone) => (
+                <DropdownMenuItem key={milestone.id} onClick={() => mutate(milestoneUpdates(tasks, milestone.id))}>
+                  <span className="truncate">{milestone.name}</span>
+                </DropdownMenuItem>
+              ))}
+              {tasks.some((task) => task.milestoneId) ? <DropdownMenuItem onClick={() => mutate(milestoneUpdates(tasks, null))}>No milestone</DropdownMenuItem> : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         <Popover open={dueOpen} onOpenChange={toggleDue}>
           <PopoverTrigger render={<BulkAction icon={<Calendar aria-hidden />} label="Due date" />} />
           <PopoverContent side="top" align="end" className="w-auto gap-0 p-0">

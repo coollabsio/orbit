@@ -288,7 +288,8 @@ async fn check_access(
                 WHERE memberships.user_id = ?2 AND memberships.workspace_id = ?3 \
                 AND workspaces.deleted_at IS NULL) AS member, \
          (SELECT CASE WHEN deleted_at IS NOT NULL THEN 2 \
-                      WHEN teamspace_id IS NULL AND owner_id IS NOT ?2 THEN 1 ELSE 0 END \
+                      WHEN teamspace_id IS NULL AND owner_id IS NOT ?2 AND owner_kind IS NULL THEN 1 \
+                      ELSE 0 END \
           FROM pages WHERE id = ?4 AND workspace_id = ?3) AS page_state",
     )
     .bind(session_id.to_string())

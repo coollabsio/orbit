@@ -50,6 +50,11 @@ const SUMMARY_COLUMNS: &str = "pages.id AS id, pages.parent_id AS parent_id, pag
      pages.updated_at AS updated_at";
 /// Teamspace pages plus the caller's private pages; binds the caller's user id.
 pub(super) const VISIBLE: &str = "(pages.teamspace_id IS NOT NULL OR pages.owner_id = ?)";
+/// `VISIBLE` plus the pages a project or a milestone owns (its description). An owned page has no
+/// space, so `VISIBLE` hides it from every Docs list; a person opens it by id from its owner, with
+/// the access of the project (all workspace members). Binds the caller's user id.
+pub(super) const ACCESSIBLE: &str =
+    "(pages.teamspace_id IS NOT NULL OR pages.owner_id = ? OR pages.owner_kind IS NOT NULL)";
 
 /// Where a page lives. `Private` holds the owner's user id.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -423,7 +428,7 @@ impl PageRepository {
         }
         let row = sqlx::query(&format!(
             "SELECT {PAGE_COLUMNS} FROM pages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL \
-             AND {VISIBLE}"
+             AND {ACCESSIBLE}"
         ))
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())

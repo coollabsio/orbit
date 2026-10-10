@@ -26,6 +26,8 @@ import { useCurrentUser } from '@/features/auth/api'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { useAllCycles } from '@/features/tasks/api/cycles'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import { taskPath, taskSlug } from '@/lib/taskLinks'
@@ -117,6 +119,8 @@ function WorkspaceTasksPage() {
   const statusesQuery = useAllStatuses(workspace.id, projects)
   const membersQuery = useMembers(workspace.id)
   const labelsQuery = useLabels(workspace.id)
+  const allMilestones = useMilestones(workspace.id).data
+  const allCycles = useAllCycles(workspace.id, projects)
   const currentUser = useCurrentUser()
   const queryClient = useQueryClient()
   const [showNewProject, setShowNewProject] = useState(false)
@@ -197,11 +201,16 @@ function WorkspaceTasksPage() {
     ? taskFromRecord(detailQuery.data, projects.find((project) => project.id === detailQuery.data?.project_id), commentsQuery.data, [...(attachmentsQuery.data ?? []), ...commentAttachments.data], activityQuery.data, projects, knownNumbers)
     : undefined
   const users = membersQuery.data ?? []
+  // the page's own milestones: a project page offers only its project's
+  const milestones = (allMilestones ?? []).filter((milestone) => !projectFilter || milestone.project_id === projectFilter)
+  const cycles = allCycles.filter((cycle) => !projectFilter || cycle.project_id === projectFilter)
   const filterOptions: FilterOptions = {
     statuses: statusesQuery.data,
     members: users,
     labels: labelsQuery.data ?? [],
     projects,
+    milestones,
+    cycles,
     currentUserId: currentUser.data?.id ?? '',
     taskRefs,
   }
@@ -214,11 +223,16 @@ function WorkspaceTasksPage() {
     tasks,
   }
   // Grouping and new-task defaults see only the page's own workflow: a project page knows only its project and its statuses.
+  // Tasks in triage are not on a normal page (the server leaves them out), so the Triage status makes no group or
+  // board column there; a filter that names triage brings both back.
+  const namesTriage = JSON.stringify(viewState.effective).includes('"triage')
   const groupContext: GroupContext = {
-    statuses: projectFilter ? statusesQuery.data.filter((status) => status.projectId === projectFilter) : statusesQuery.data,
+    statuses: statusesQuery.data.filter((status) => (!projectFilter || status.projectId === projectFilter) && (namesTriage || status.category !== 'triage')),
     members: users,
     labels: labelsQuery.data ?? [],
     projects: projectFilter ? projects.filter((project) => project.id === projectFilter) : projects,
+    milestones,
+    cycles,
     currentUserId: state.currentUserId,
     showEmpty: display.show_empty_groups,
   }
@@ -327,8 +341,10 @@ function WorkspaceTasksPage() {
       ...groupContext,
       targetProjectId: fromGroup.projectId ?? projectFilter ?? projects[0]?.id ?? null,
     })
-    // a project group wins; otherwise the filter's single project, then the page or first project
-    const projectId = fromGroup.projectId ?? fromFilter.project_id
+    // a milestone group fixes the project; then a project group, the filter's single project, the page or first project
+    const milestoneProjectId = milestones.find((milestone) => milestone.id === fromGroup.body.milestone_id)?.project_id
+    const cycleProjectId = cycles.find((cycle) => cycle.id === fromGroup.body.cycle_id)?.project_id
+    const projectId = milestoneProjectId ?? cycleProjectId ?? fromGroup.projectId ?? fromFilter.project_id
     // the filter's status was resolved in the filter's project; only reuse it for that project
     const filterStatusId = fromFilter.project_id === projectId ? fromFilter.status_id : undefined
     const statusId = !projectId ? undefined : fromGroup.statusKey

@@ -23,7 +23,7 @@ import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { LabelPill } from './TaskLabels'
 import { NestChip } from './NestChip'
 import { TaskPickerDialog } from './TaskPickerDialog'
-import { DateStamp, ProjectChip } from './TaskPropertyChips'
+import { CycleChip, DateStamp, EstimateChip, GroupPoints, MilestoneChip, ProjectChip } from './TaskPropertyChips'
 import { DueDatePicker } from './DueDatePicker'
 import { StatusPicker } from './StatusPicker'
 
@@ -95,7 +95,9 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const showDue = has('due_date') && Boolean(task.dueAt) && !setDue
     const showTop = has('status') || has('id') || Boolean(task.blocked) || has('assignee') || setDue || has('priority')
     const showProgress = has('sub_issue_progress') && (task.subIssueCount ?? 0) > 0
-    const showMeta = showProgress || has('project') || showDue || has('created') || has('updated')
+    const showMilestone = has('milestone') && Boolean(task.milestoneId)
+    const showCycle = has('cycle') && Boolean(task.cycleId)
+    const showMeta = showProgress || has('project') || showMilestone || showCycle || has('estimate') || showDue || has('created') || has('updated')
     return (
       <article
         data-board-card
@@ -178,6 +180,9 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/70">
             {showProgress ? <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} /> : null}
             {has('project') ? <ProjectChip project={projectById.get(task.projectId)} /> : null}
+            {has('estimate') ? <EstimateChip task={task} project={projectById.get(task.projectId)} /> : null}
+            {showCycle ? <CycleChip task={task} /> : null}
+            {showMilestone ? <MilestoneChip task={task} /> : null}
             {showDue ? <DueDatePicker task={task} status={status} /> : null}
             {has('created') ? <DateStamp property="created" iso={task.createdAt} /> : null}
             {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} /> : null}
@@ -219,6 +224,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
       <GroupIcon group={column} context={groupContext} />
       <span className="truncate">{column.label}</span>
       <span className="ml-auto font-normal text-muted-foreground/70 tabular-nums">{column.tasks.length}</span>
+      <GroupPoints tasks={column.tasks} projects={projects} />
     </header>
   )
 
