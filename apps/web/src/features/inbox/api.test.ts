@@ -61,3 +61,14 @@ test('snooze presets are an hour ahead, tomorrow morning and next Monday morning
   const late = new Date(2026, 9, 31, 23, 59)
   expect(snoozePresets(late).every((preset) => preset.until > late)).toBe(true)
 })
+
+test('a milestone update opens the milestone page, and a new triage task opens the queue', () => {
+  const update = { ...base, kind: 'milestone_update_posted', milestone_id: 'm1', milestone_name: 'v4.4', milestone_project_id: 'p1' }
+  expect(notificationTarget(update)).toBe('/tasks/projects/p1/milestones/m1')
+  expect(notificationCopy(update, undefined, 'Ada')).toEqual({ title: 'v4.4', body: 'Ada · posted an update' })
+  // a deleted milestone takes its rows with it; a row with no milestone leads nowhere
+  expect(notificationTarget({ ...base, kind: 'milestone_update_posted' })).toBeNull()
+  const triage = { ...base, kind: 'task_triage_new', actor_user_id: null, task_id: 't1', task_identifier: 'ORB-7', task_title: 'Crash' }
+  expect(notificationTarget(triage)).toBe('/tasks/triage')
+  expect(notificationCopy(triage)).toEqual({ title: 'ORB-7 Crash', body: 'GitHub · new in triage' })
+})

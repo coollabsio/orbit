@@ -26,7 +26,9 @@ pub const MAX_OFFSET_DAYS: i64 = 3_650;
 
 const MAX_STATUS_NAME_CHARS: usize = 200;
 const DAY_MS: i64 = 86_400_000;
-const STATUS_CATEGORIES: [&str; 5] = [
+const STATUS_CATEGORIES: [&str; 7] = [
+    "triage",
+    "backlog",
     "unstarted",
     "started",
     "completed",
@@ -107,6 +109,9 @@ pub enum FilterField {
     Text,
     Parent,
     SubIssues,
+    Milestone,
+    Cycle,
+    Estimate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -182,6 +187,8 @@ pub enum GroupBy {
     Priority,
     Project,
     Label,
+    Milestone,
+    Cycle,
     None,
 }
 
@@ -194,6 +201,7 @@ pub enum OrderBy {
     Updated,
     Title,
     DueDate,
+    Estimate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -216,6 +224,9 @@ pub enum TaskProperty {
     Created,
     Updated,
     SubIssueProgress,
+    Milestone,
+    Cycle,
+    Estimate,
 }
 
 /// Which tasks in a done category (completed, cancelled, duplicate) stay visible.
@@ -493,7 +504,10 @@ fn allowed_operators(field: FilterField) -> &'static [FilterOperator] {
         | FilterField::Priority
         | FilterField::Project
         | FilterField::Parent => &[O::Is, O::IsNot],
-        FilterField::Assignee => &[O::Is, O::IsNot, O::IsEmpty, O::IsNotEmpty],
+        FilterField::Assignee
+        | FilterField::Milestone
+        | FilterField::Cycle
+        | FilterField::Estimate => &[O::Is, O::IsNot, O::IsEmpty, O::IsNotEmpty],
         FilterField::Label => &[
             O::IncludesAny,
             O::IncludesAll,
@@ -571,12 +585,20 @@ fn validate_values(field: FilterField, value: &Value, path: &str) -> Result<(), 
             FilterField::StatusCategory => STATUS_CATEGORIES.contains(&text),
             FilterField::Priority => PRIORITIES.contains(&text),
             FilterField::Assignee | FilterField::Creator => text == "me" || is_id(text),
-            FilterField::Label | FilterField::Project => is_id(text),
+            FilterField::Label | FilterField::Project | FilterField::Milestone => is_id(text),
             FilterField::DueDate
             | FilterField::CreatedAt
             | FilterField::UpdatedAt
             | FilterField::Text => false,
             FilterField::Parent => text == "none" || is_id(text),
+            FilterField::Cycle => {
+                matches!(text, "current" | "next" | "previous" | "none") || is_id(text)
+            }
+            FilterField::Estimate => {
+                !text.is_empty()
+                    && text.len() <= 5
+                    && text.bytes().all(|byte| byte.is_ascii_digit())
+            }
             FilterField::SubIssues => matches!(text, "has" | "none"),
         };
         if !valid {
@@ -845,10 +867,40 @@ const LIVE_CHILD: &str = "SELECT 1 FROM tasks AS child \
 
 /// Appends ` AND (<compiled tree>)` to `query`. Every value is bound. The tree must already be
 /// validated; an unexpected node fails closed (`0 = 1`).
+///
+/// Tasks in triage are not part of the team's work yet: they match only when the filter names the
+/// triage category (`status type is triage`, or a status key of it). This one rule makes lists,
+/// boards, the timeline and saved views agree.
 pub fn push_filter(query: &mut QueryBuilder<'_, Sqlite>, group: &FilterGroup, ctx: &FilterContext) {
     query.push(" AND (");
     push_group(query, group, ctx);
     query.push(")");
+    if !names_triage(group) {
+        query.push(
+            " AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status \
+             WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')",
+        );
+    }
+}
+
+fn names_triage(group: &FilterGroup) -> bool {
+    group.children.iter().any(|child| match child {
+        FilterNode::Group(inner) => names_triage(inner),
+        FilterNode::Condition(condition) if condition.operator == FilterOperator::Is => {
+            let values = condition
+                .value
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let mut texts = values.iter().filter_map(Value::as_str);
+            match condition.field {
+                FilterField::StatusCategory => texts.any(|text| text == "triage"),
+                FilterField::Status => texts.any(|text| text.starts_with("triage:")),
+                _ => false,
+            }
+        }
+        FilterNode::Condition(_) => false,
+    })
 }
 
 /// Appends the `show_completed` restriction; `All` adds nothing.
@@ -954,6 +1006,43 @@ fn push_condition(
                 negated,
                 values(value, ctx, false),
             );
+        }
+        (F::Milestone, O::Is | O::IsNot) => {
+            push_column_in(
+                query,
+                "tasks.milestone_id",
+                negated,
+                values(value, ctx, false),
+            );
+        }
+        (F::Cycle, O::Is | O::IsNot) => {
+            push_cycle(query, values(value, ctx, false), negated, ctx);
+        }
+        (F::Cycle, O::IsEmpty) => {
+            query.push("tasks.cycle_id IS NULL");
+        }
+        (F::Cycle, O::IsNotEmpty) => {
+            query.push("tasks.cycle_id IS NOT NULL");
+        }
+        (F::Estimate, O::Is | O::IsNot) => {
+            push_column_in(
+                query,
+                "CAST(tasks.estimate AS TEXT)",
+                negated,
+                values(value, ctx, false),
+            );
+        }
+        (F::Estimate, O::IsEmpty) => {
+            query.push("tasks.estimate IS NULL");
+        }
+        (F::Estimate, O::IsNotEmpty) => {
+            query.push("tasks.estimate IS NOT NULL");
+        }
+        (F::Milestone, O::IsEmpty) => {
+            query.push("tasks.milestone_id IS NULL");
+        }
+        (F::Milestone, O::IsNotEmpty) => {
+            query.push("tasks.milestone_id IS NOT NULL");
         }
         (F::DueDate, O::IsEmpty) => {
             query.push("tasks.due_at IS NULL");
@@ -1076,6 +1165,59 @@ fn push_parent(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>, negate
             .push(" AND tasks.parent_task_id IN ");
         push_list(query, ids);
         query.push(")");
+    }
+    query.push(")");
+}
+
+/// `cycle is [current|next|previous|none|<id>]`. The three names mean the cycle of the task's own
+/// project at this moment; during a cooldown a project has no current cycle.
+fn push_cycle(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    values: Vec<String>,
+    negated: bool,
+    ctx: &FilterContext,
+) {
+    if values.is_empty() {
+        query.push(if negated { "1 = 1" } else { "0 = 1" });
+        return;
+    }
+    let now = ctx.now.as_millis();
+    query.push(if negated { "NOT (" } else { "(" });
+    for (index, value) in values.into_iter().enumerate() {
+        if index > 0 {
+            query.push(" OR ");
+        }
+        match value.as_str() {
+            "none" => {
+                query.push("tasks.cycle_id IS NULL");
+            }
+            "current" => {
+                query
+                    .push("COALESCE(tasks.cycle_id = (SELECT id FROM cycles WHERE cycles.project_id = tasks.project_id AND cycles.completed_at IS NULL AND cycles.starts_at <= ")
+                    .push_bind(now)
+                    .push(" AND cycles.ends_at > ")
+                    .push_bind(now)
+                    .push(" ORDER BY cycles.starts_at LIMIT 1), 0)");
+            }
+            "next" => {
+                query
+                    .push("COALESCE(tasks.cycle_id = (SELECT id FROM cycles WHERE cycles.project_id = tasks.project_id AND cycles.starts_at > ")
+                    .push_bind(now)
+                    .push(" ORDER BY cycles.starts_at LIMIT 1), 0)");
+            }
+            "previous" => {
+                query
+                    .push("COALESCE(tasks.cycle_id = (SELECT id FROM cycles WHERE cycles.project_id = tasks.project_id AND cycles.ends_at <= ")
+                    .push_bind(now)
+                    .push(" ORDER BY cycles.ends_at DESC LIMIT 1), 0)");
+            }
+            _ => {
+                query
+                    .push("COALESCE(tasks.cycle_id = ")
+                    .push_bind(value)
+                    .push(", 0)");
+            }
+        }
     }
     query.push(")");
 }
@@ -1306,7 +1448,7 @@ mod tests {
         for bad in [
             json!({ "op": "and", "children": [], "field": "priority" }),
             json!({ "field": "priority", "operator": "is", "value": ["high"], "extra": 1 }),
-            json!({ "field": "estimate", "operator": "is", "value": ["1"] }),
+            json!({ "field": "story_points", "operator": "is", "value": ["1"] }),
         ] {
             assert!(
                 serde_json::from_value::<FilterNode>(bad.clone()).is_err(),
@@ -1331,7 +1473,7 @@ mod tests {
             "filter.children[0].value"
         );
         assert_eq!(
-            path_of(tree(vec![condition("estimate", "is", json!(["1"]))])),
+            path_of(tree(vec![condition("story_points", "is", json!(["1"]))])),
             "filter.children[0].field"
         );
         assert_eq!(
@@ -1885,14 +2027,15 @@ mod sql_tests {
     fn empty_groups_match_everything_and_children_are_parenthesised() {
         assert_eq!(
             compile(json!({ "op": "and", "children": [] })),
-            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND (1 = 1)"
+            // a filter that does not name triage leaves the triage queue out
+            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND (1 = 1) AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')"
         );
         assert_eq!(
             compile(json!({ "op": "or", "children": [
                 { "field": "priority", "operator": "is", "value": ["high"] },
                 { "op": "and", "children": [] }
             ] })),
-            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND ((tasks.priority IN (?)) OR (1 = 1))"
+            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND ((tasks.priority IN (?)) OR (1 = 1)) AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')"
         );
     }
 

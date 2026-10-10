@@ -62,6 +62,7 @@ impl Fixture {
         .fetch_one(database.pool())
         .await
         .unwrap();
+        legacy_backlog(&database).await;
         let app = task_router(TaskState::new(Arc::clone(&identity), CookieMode::secure()));
         Self {
             database,
@@ -438,9 +439,10 @@ async fn project_creation_is_atomic_and_statuses_are_project_scoped() {
         .unwrap();
     assert_eq!(statuses.status(), StatusCode::OK);
     let statuses = response_json(statuses).await;
-    assert_eq!(statuses["items"].as_array().unwrap().len(), 6);
-    assert_eq!(statuses["items"][5]["name"], "Duplicate");
-    assert_eq!(statuses["items"][5]["category"], "duplicate");
+    assert_eq!(statuses["items"].as_array().unwrap().len(), 7);
+    assert_eq!(statuses["items"][5]["category"], "triage");
+    assert_eq!(statuses["items"][6]["name"], "Duplicate");
+    assert_eq!(statuses["items"][6]["category"], "duplicate");
     assert_eq!(statuses["items"][0]["name"], "Backlog");
     assert!(
         statuses["items"]
@@ -646,7 +648,7 @@ async fn members_can_crud_all_task_area_resources_and_unknown_fields_are_rejecte
         .as_array()
         .unwrap()
         .iter()
-        .rfind(|status| status["category"] != "duplicate")
+        .rfind(|status| status["category"] != "duplicate" && status["category"] != "triage")
         .unwrap();
     let deleted_status = fixture
         .app
@@ -3867,7 +3869,18 @@ async fn create_project(fixture: &Fixture, key: &str) -> String {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+    legacy_backlog(&fixture.database).await;
     id_of(&project).to_owned()
+}
+
+/// These tests were written when "Backlog" was an `unstarted` status. Projects made before
+/// migration 0046 keep that shape, so the fixture gives its projects the same shape. The
+/// `backlog` category itself is tested in `intake_api.rs`.
+async fn legacy_backlog(database: &TestDatabase) {
+    sqlx::query("UPDATE task_statuses SET category = 'unstarted' WHERE category = 'backlog'")
+        .execute(database.pool())
+        .await
+        .unwrap();
 }
 
 fn relations_uri(fixture: &Fixture, task_id: &str) -> String {
@@ -4148,6 +4161,9 @@ fn filter_task(project: Id, status: Id, title: &str) -> CreateTask {
         due_start_at: None,
         due_at: None,
         parent_task_id: None,
+        milestone_id: None,
+        cycle_id: None,
+        estimate: None,
     }
 }
 
@@ -4867,7 +4883,7 @@ async fn task_query_rejects_invalid_filters_with_a_json_path() {
             "filter.children[0].operator",
         ),
         (
-            json!({"op": "and", "children": [{"field": "estimate", "operator": "is", "value": ["1"]}]}),
+            json!({"op": "and", "children": [{"field": "story_points", "operator": "is", "value": ["1"]}]}),
             "filter.children[0].field",
         ),
         (

@@ -3,7 +3,7 @@ import type { TaskStatusDef } from '@/features/tasks/api/models'
 import { CATEGORY_LABEL, CATEGORY_ORDER, isClosedCategory, sortStatuses, statusKeyOf } from './taskMeta'
 
 test('duplicate is the last workflow category and counts as closed', () => {
-  expect(CATEGORY_ORDER).toEqual(['unstarted', 'started', 'completed', 'cancelled', 'duplicate'])
+  expect(CATEGORY_ORDER).toEqual(['triage', 'backlog', 'unstarted', 'started', 'completed', 'cancelled', 'duplicate'])
   expect(CATEGORY_LABEL.duplicate).toBe('Duplicate')
   expect(isClosedCategory('duplicate')).toBe(true)
   expect(isClosedCategory('cancelled')).toBe(true)

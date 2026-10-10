@@ -14,6 +14,8 @@ export const GROUP_LABEL: Record<GroupBy, string> = {
   priority: 'Priority',
   project: 'Project',
   label: 'Label',
+  milestone: 'Milestone',
+  cycle: 'Cycle',
   none: 'No grouping',
 }
 

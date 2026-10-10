@@ -4,6 +4,9 @@ import { SequenceHint } from '@/shortcuts/SequenceHint'
 import { ShortcutHelpDialog } from '@/shortcuts/ShortcutHelpDialog'
 import { NavigationCommands, useGlobalCommands } from './globalCommands'
 import { NewTaskProvider } from '@/features/tasks/newTask'
+import { useTriageQueue } from '@/features/tasks/api/intake'
+import { useCurrentCycles } from '@/features/tasks/api/cycles'
+import { useProjects } from '@/features/tasks/api/projects'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
@@ -48,6 +51,11 @@ function Shell() {
   const chatBadge = useChatBadgeCount()
   // The tab icon gets a dot while chat or the Inbox has something unread.
   const inboxUnread = useHasUnreadNotifications(workspace.id).data === true
+  // the Triage item shows only while a project uses triage; its queue is loaded only then
+  const triageOn = (useProjects(workspace.id).data ?? []).some((project) => project.triage_enabled)
+  const triageQueue = useTriageQueue(workspace.id, triageOn)
+  const triageCount = triageOn ? triageQueue.data?.items.length ?? 0 : undefined
+  const currentCyclePaths = Object.fromEntries((useCurrentCycles(workspace.id).data ?? []).map((cycle) => [cycle.project_id, `/tasks/projects/${cycle.project_id}/cycles/${cycle.id}`]))
   const isRoot = useIsInstallationAdmin()
   useUnreadFavicon(chatBadge + (inboxUnread ? 1 : 0))
   // Signed in: the worker that shows notifications may run. This asks for no permission.
@@ -119,7 +127,7 @@ function Shell() {
         >
           <WorkspaceSwitcher collapsed={sidebarCollapsed} />
         </div>
-        <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} inboxUnread={inboxUnread} isRoot={isRoot} />
+        <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} inboxUnread={inboxUnread} triageCount={triageCount} currentCyclePaths={currentCyclePaths} isRoot={isRoot} />
         <div
           className={cn(
             'flex shrink-0 items-center gap-2 border-t border-border pt-2',
@@ -160,7 +168,7 @@ function Shell() {
           <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
             <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
           </div>
-          <SidebarNav onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} inboxUnread={inboxUnread} isRoot={isRoot} />
+          <SidebarNav onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} inboxUnread={inboxUnread} triageCount={triageCount} currentCyclePaths={currentCyclePaths} isRoot={isRoot} />
           <div className="flex shrink-0 items-center gap-2 border-t border-border pt-2">
             <UserMenu />
           </div>

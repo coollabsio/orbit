@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        49
+        52
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 49
+            binary_version: 52
         }
     ));
 }
@@ -527,7 +527,9 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
     .fetch_all(database.pool())
     .await
     .unwrap();
-    assert_eq!(statuses.len(), 3);
+    // The third is the Duplicate status of 0021; the fourth is the Triage status of 0046.
+    assert_eq!(statuses.len(), 4);
+    assert_eq!(statuses[3].1, "triage");
     assert_eq!(
         statuses[..2],
         [
@@ -2039,6 +2041,230 @@ async fn task_numbers_migration_backfills_allocates_and_never_reuses() {
         db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
         "ok"
     );
+}
+
+/// id, project, name, description, color, category, position, version, created_at, updated_at.
+type StatusRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    i64,
+    i64,
+    i64,
+);
+
+#[tokio::test]
+async fn intake_migration_rebuilds_statuses_and_keeps_every_referring_row() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 50)
+        .run(&database)
+        .await
+        .unwrap();
+
+    let [user, workspace, membership, live_project, trashed_project]: [Id; 5] =
+        std::array::from_fn(|_| Id::new_v7());
+    let [todo, done, duplicate, trashed_todo]: [Id; 4] = std::array::from_fn(|_| Id::new_v7());
+    let [first_task, second_task, duplicate_task, relation]: [Id; 4] =
+        std::array::from_fn(|_| Id::new_v7());
+    let seed = format!(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'Orbit', 0, '{membership}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{membership}', '{workspace}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at)
+         VALUES ('{live_project}', '{workspace}', 'Live', 'LIVE', '#000000', 0, NULL, 1, 1),
+                ('{trashed_project}', '{workspace}', 'Trashed', 'TRASH', '#000000', 0, 5, 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at)
+         VALUES ('{todo}', '{workspace}', '{live_project}', 'Todo', 'Next up', '#ffffff', 'unstarted', 0, 3, 1, 2),
+                ('{done}', '{workspace}', '{live_project}', 'Done', '', '#00ff00', 'completed', 7, 0, 1, 1),
+                ('{duplicate}', '{workspace}', '{live_project}', 'Duplicate', '', '#8b8f98', 'duplicate', 8, 1, 1, 1),
+                ('{trashed_todo}', '{workspace}', '{trashed_project}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at)
+         VALUES ('{first_task}', '{workspace}', '{live_project}', '{todo}', 'First', '{user}', 1, 1),
+                ('{second_task}', '{workspace}', '{live_project}', '{done}', 'Second', '{user}', 1, 1),
+                ('{duplicate_task}', '{workspace}', '{live_project}', '{duplicate}', 'Copy', '{user}', 1, 1);
+         INSERT INTO task_relations (id, workspace_id, task_id, related_task_id, type, previous_status_id, created_by, created_at)
+         VALUES ('{relation}', '{workspace}', '{duplicate_task}', '{first_task}', 'duplicate', '{todo}', '{user}', 1);
+         INSERT INTO project_pr_automation (project_id, event, status_id)
+         VALUES ('{live_project}', 'open', '{todo}'), ('{live_project}', 'merged', '{done}'),
+                ('{live_project}', 'draft', NULL);"
+    );
+    let mut transaction = database.transaction().await.unwrap();
+    sqlx::raw_sql(&seed)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+    let before: Vec<StatusRow> = sqlx::query_as(
+        "SELECT id, project_id, name, description, color, category, position, version, created_at, updated_at \
+         FROM task_statuses ORDER BY id",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(before.len(), 4);
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        database
+            .scalar::<String>("PRAGMA integrity_check")
+            .await
+            .unwrap(),
+        "ok"
+    );
+
+    // Every status row is the same row as before.
+    let after: Vec<StatusRow> = sqlx::query_as(
+        "SELECT id, project_id, name, description, color, category, position, version, created_at, updated_at \
+         FROM task_statuses WHERE category <> 'triage' ORDER BY id",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(after, before);
+
+    // Every task keeps its status.
+    let tasks: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, status_id FROM tasks ORDER BY title")
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        tasks,
+        [
+            (duplicate_task.to_string(), duplicate.to_string()),
+            (first_task.to_string(), todo.to_string()),
+            (second_task.to_string(), done.to_string()),
+        ]
+    );
+
+    // The DROP of the rebuild runs ON DELETE SET NULL on task_relations.previous_status_id; the
+    // migration writes the value back.
+    let previous: Option<String> =
+        sqlx::query_scalar("SELECT previous_status_id FROM task_relations WHERE id = ?")
+            .bind(relation.to_string())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(previous, Some(todo.to_string()));
+
+    // The DROP also runs ON DELETE CASCADE on project_pr_automation.status_id; the migration puts
+    // the rows back, and a rule with no status is not touched.
+    let automation: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT event, status_id FROM project_pr_automation WHERE project_id = ? ORDER BY event",
+    )
+    .bind(live_project.to_string())
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        automation,
+        [
+            ("draft".to_owned(), None),
+            ("merged".to_owned(), Some(done.to_string())),
+            ("open".to_owned(), Some(todo.to_string())),
+        ]
+    );
+
+    // Each project, also a trashed one, has one Triage status after its last position.
+    let triage: Vec<(String, String, String, i64)> = sqlx::query_as(
+        "SELECT id, project_id, name, position FROM task_statuses WHERE category = 'triage' ORDER BY position",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(triage.len(), 2);
+    assert_eq!(
+        (triage[0].1.as_str(), triage[0].2.as_str(), triage[0].3),
+        (trashed_project.to_string().as_str(), "Triage", 1)
+    );
+    assert_eq!(
+        (triage[1].1.as_str(), triage[1].3),
+        (live_project.to_string().as_str(), 9)
+    );
+    assert!(triage.iter().all(|row| row.0.parse::<Id>().is_ok()));
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM projects WHERE triage_enabled <> 0")
+            .await
+            .unwrap(),
+        0
+    );
+
+    // The rebuilt table keeps its triggers, FK enforcement and the new invariants.
+    for (sql, message) in [
+        (
+            format!(
+                "UPDATE task_statuses SET project_id = '{trashed_project}' WHERE id = '{todo}'"
+            ),
+            "task status scope is immutable",
+        ),
+        (
+            format!("UPDATE task_statuses SET category = 'duplicate' WHERE id = '{todo}'"),
+            "the duplicate status category is immutable",
+        ),
+        (
+            format!("UPDATE task_statuses SET category = 'triage' WHERE id = '{todo}'"),
+            "the triage status category is immutable",
+        ),
+        (
+            format!(
+                "UPDATE task_statuses SET category = 'backlog' WHERE id = '{}'",
+                triage[1].0
+            ),
+            "the triage status category is immutable",
+        ),
+        (
+            format!(
+                "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) \
+                 VALUES ('{}', '{workspace}', '{live_project}', 'Again', '', '#ffffff', 'triage', 20, 0, 1, 1)",
+                Id::new_v7()
+            ),
+            "UNIQUE constraint failed",
+        ),
+        (
+            format!(
+                "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) \
+                 VALUES ('{}', '{workspace}', '{live_project}', 'Bad', '', '#ffffff', 'someday', 21, 0, 1, 1)",
+                Id::new_v7()
+            ),
+            "CHECK constraint failed",
+        ),
+        (
+            format!("DELETE FROM task_statuses WHERE id = '{todo}'"),
+            "FOREIGN KEY constraint failed",
+        ),
+    ] {
+        let error = database.execute(&sql).await.unwrap_err().to_string();
+        assert!(error.contains(message), "{sql}: {error}");
+    }
+    // The new category is accepted.
+    database
+        .execute(&format!(
+            "UPDATE task_statuses SET category = 'backlog' WHERE id = '{todo}'"
+        ))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

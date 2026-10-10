@@ -414,10 +414,11 @@ impl TaskRepository {
             }
             let status_id = match (rule.mode, rule.status_id) {
                 (PrAutomationMode::Status, Some(status_id)) => {
-                    // The Duplicate status is entered only by marking a duplicate.
+                    // The Duplicate status is entered only by marking a duplicate, and Triage is
+                    // where tasks come in, not a place a rule moves them to.
                     let valid: bool = sqlx::query_scalar(
                         "SELECT EXISTS (SELECT 1 FROM task_statuses WHERE id = ? AND workspace_id = ? \
-                         AND project_id = ? AND category <> 'duplicate')",
+                         AND project_id = ? AND category NOT IN ('duplicate', 'triage'))",
                     )
                     .bind(status_id.to_string())
                     .bind(workspace_id.to_string())

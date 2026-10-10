@@ -15,7 +15,7 @@ const record = (id: string, version: number, duplicateOf: string | null): TaskRe
   description: '', position: 0, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-23T10:00:00Z', updated_at: '2026-09-23T10:00:00Z', version,
   duplicate_of: duplicateOf ? { id: duplicateOf, project_id: 'project-1', project_key: 'ORB', number: 2, title: 'Canonical' } : null, blocked: false,
-  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,
+  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0, milestone_id: null,
 })
 
 type Call = { method: string; path: string; body: Record<string, unknown> }

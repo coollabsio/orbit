@@ -72,10 +72,12 @@ pub enum PushKind {
     TaskStatus,
     TaskBlocked,
     TaskUnblocked,
+    MilestoneUpdates,
+    Triage,
 }
 
 impl PushKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::DirectMessages,
         Self::ChatMentions,
         Self::ThreadReplies,
@@ -86,6 +88,8 @@ impl PushKind {
         Self::TaskStatus,
         Self::TaskBlocked,
         Self::TaskUnblocked,
+        Self::MilestoneUpdates,
+        Self::Triage,
     ];
 
     #[must_use]
@@ -101,6 +105,8 @@ impl PushKind {
             Self::TaskStatus => "task_status",
             Self::TaskBlocked => "task_blocked",
             Self::TaskUnblocked => "task_unblocked",
+            Self::MilestoneUpdates => "milestone_updates",
+            Self::Triage => "triage",
         }
     }
 
@@ -118,6 +124,8 @@ impl PushKind {
             Self::TaskStatus => "Status changes of tasks I follow",
             Self::TaskBlocked => "A task I follow becomes blocked",
             Self::TaskUnblocked => "A task I follow is no longer blocked",
+            Self::MilestoneUpdates => "Updates on milestones of my projects",
+            Self::Triage => "New tasks in the triage of my projects",
         }
     }
 
@@ -137,7 +145,9 @@ impl PushKind {
             | Self::TaskComments
             | Self::TaskStatus
             | Self::TaskBlocked
-            | Self::TaskUnblocked => "message",
+            | Self::TaskUnblocked
+            | Self::MilestoneUpdates
+            | Self::Triage => "message",
         }
     }
 }
@@ -157,10 +167,16 @@ pub enum NotificationKind {
     TaskUnblocked,
     /// A mention in a task description.
     TaskMentioned,
+    /// A health update of a milestone, to the project lead and members.
+    MilestoneUpdatePosted,
+    /// A task entered the triage queue, to the project lead and members.
+    TaskTriageNew,
 }
 
 impl NotificationKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
+        Self::MilestoneUpdatePosted,
+        Self::TaskTriageNew,
         Self::TaskAssigned,
         Self::CommentMentioned,
         Self::PageCommentMentioned,
@@ -186,6 +202,8 @@ impl NotificationKind {
             Self::TaskBlocked => "task_blocked",
             Self::TaskUnblocked => "task_unblocked",
             Self::TaskMentioned => "task_mentioned",
+            Self::MilestoneUpdatePosted => "milestone_update_posted",
+            Self::TaskTriageNew => "task_triage_new",
         }
     }
 
@@ -208,6 +226,8 @@ impl NotificationKind {
             Self::TaskStatusChanged => PushKind::TaskStatus,
             Self::TaskBlocked => PushKind::TaskBlocked,
             Self::TaskUnblocked => PushKind::TaskUnblocked,
+            Self::MilestoneUpdatePosted => PushKind::MilestoneUpdates,
+            Self::TaskTriageNew => PushKind::Triage,
         }
     }
 
@@ -221,19 +241,27 @@ impl NotificationKind {
         )
     }
 
-    /// The title of the push, and whether its body is the task's title (else the page's).
+    /// The title of the push, and the column of `push_inbox` that holds its body (the title of
+    /// the task or the page, or the name of the milestone).
     /// `None`: the inbox service does not push the kind (chat pushes its own messages).
-    fn push_title(self, actor: &str) -> Option<(String, bool)> {
+    fn push_title(self, actor: &str) -> Option<(String, &'static str)> {
+        const TASK: &str = "task_title";
+        const PAGE: &str = "page_title";
         Some(match self {
-            Self::TaskAssigned => (format!("{actor} assigned you a task"), true),
-            Self::CommentMentioned => (format!("{actor} mentioned you in a comment"), true),
-            Self::PageCommentMentioned => (format!("{actor} mentioned you in a comment"), false),
-            Self::PageMentioned => (format!("{actor} mentioned you in a page"), false),
-            Self::TaskCommented => (format!("{actor} commented on a task"), true),
-            Self::TaskStatusChanged => (format!("{actor} changed the status of a task"), true),
-            Self::TaskBlocked => ("A task is now blocked".to_owned(), true),
-            Self::TaskUnblocked => ("A task is no longer blocked".to_owned(), true),
-            Self::TaskMentioned => (format!("{actor} mentioned you in a task"), true),
+            Self::TaskAssigned => (format!("{actor} assigned you a task"), TASK),
+            Self::CommentMentioned => (format!("{actor} mentioned you in a comment"), TASK),
+            Self::PageCommentMentioned => (format!("{actor} mentioned you in a comment"), PAGE),
+            Self::PageMentioned => (format!("{actor} mentioned you in a page"), PAGE),
+            Self::TaskCommented => (format!("{actor} commented on a task"), TASK),
+            Self::TaskStatusChanged => (format!("{actor} changed the status of a task"), TASK),
+            Self::TaskBlocked => ("A task is now blocked".to_owned(), TASK),
+            Self::TaskUnblocked => ("A task is no longer blocked".to_owned(), TASK),
+            Self::TaskMentioned => (format!("{actor} mentioned you in a task"), TASK),
+            Self::MilestoneUpdatePosted => (
+                format!("{actor} posted an update on a milestone"),
+                "milestone_name",
+            ),
+            Self::TaskTriageNew => ("A new task is in triage".to_owned(), TASK),
             Self::ChatMentioned => return None,
         })
     }
@@ -969,8 +997,10 @@ impl PushService {
         let rows = sqlx::query(
             "SELECT notifications.id, notifications.recipient_user_id, notifications.kind, \
              notifications.actor_user_id, user_avatars.updated_at AS avatar_updated_at, \
-             users.display_name AS actor, tasks.title AS task_title, pages.title AS page_title \
+             users.display_name AS actor, tasks.title AS task_title, pages.title AS page_title, \
+             milestones.name AS milestone_name \
              FROM notifications LEFT JOIN users ON users.id = notifications.actor_user_id \
+             LEFT JOIN milestones ON milestones.id = notifications.milestone_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = users.id \
              LEFT JOIN tasks ON tasks.id = notifications.task_id \
              LEFT JOIN pages ON pages.id = notifications.page_id \
@@ -994,12 +1024,12 @@ impl PushService {
             let Some(notification) = NotificationKind::parse(&row.get::<String, _>("kind")) else {
                 continue;
             };
-            let Some((title, of_task)) = notification.push_title(&actor) else {
+            let Some((title, body_column)) = notification.push_title(&actor) else {
                 continue;
             };
             let kind = notification.category();
             let body = row
-                .get::<Option<String>, _>(if of_task { "task_title" } else { "page_title" })
+                .get::<Option<String>, _>(body_column)
                 .filter(|title| !title.is_empty())
                 .unwrap_or_else(|| "Untitled".to_owned());
             let Ok(user_id) = row.get::<String, _>("recipient_user_id").parse::<Id>() else {

@@ -93,7 +93,7 @@ pub(super) async fn default_status_id_in_tx(
     project_id: Id,
 ) -> Result<Option<Id>, TaskError> {
     sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category <> 'duplicate' \
+        "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category NOT IN ('duplicate', 'triage') \
          ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
     )
     .bind(workspace_id.to_string())

@@ -16,7 +16,7 @@ const member = (id: string, name: string): User => ({
 const label = (id: string, name: string): LabelRecord => ({ id, name, color: '#888888', version: 1, workspace_id: 'workspace-1' })
 const project = (id: string, name: string): ProjectRecord => ({
   id, name, key: name.slice(0, 3).toUpperCase(), color: '#888888', created_at: '', updated_at: '', version: 1, workspace_id: 'workspace-1',
-  auto_close_parent: true, auto_close_sub_issues: true,
+  auto_close_parent: true, auto_close_sub_issues: true, triage_enabled: false, lead_user_id: null, member_ids: [], overview_page_id: null, task_counts: {}
 })
 function task(id: string, overrides: Partial<Task> = {}): Task {
   return {
@@ -181,4 +181,26 @@ test('multi-value, negative, nested, OR-rooted and unknown conditions give no de
   expect(createDefaultsFromFilter(ignored, target('p1'), tuesdayEvening)).toEqual({ project_id: 'p1' })
   expect(createDefaultsFromFilter({ op: 'or', children: [{ field: 'priority', operator: 'is', value: ['urgent'] }] }, target('p1'), tuesdayEvening)).toEqual({ project_id: 'p1' })
   expect(createDefaultsFromFilter(effectiveFilter(emptyFilter(), { preset: 'mine' }), { ...target('p1'), currentUserId: '' }, tuesdayEvening)).toEqual({ project_id: 'p1' })
+})
+
+const milestoneOf = (id: string, projectId: string, name: string) => ({
+  id, workspace_id: 'workspace-1', project_id: projectId, name, status: 'planned', start_at: null, target_at: null,
+  description_page_id: null, position: 0, completed_at: null, task_count: 0, task_done_count: 0, health: null,
+  version: 0, created_at: '', updated_at: '',
+})
+const milestoneCtx: GroupContext = { ...ctx, milestones: [milestoneOf('m1', 'p1', 'v1'), milestoneOf('m2', 'p2', 'v2')] }
+
+test('milestone groups follow the projects, name the project key and end with the tasks that have none', () => {
+  const tasks = [task('a', { milestoneId: 'm1' }), task('b', { projectId: 'p2', milestoneId: 'm2' }), task('c'), task('d', { milestoneId: 'deleted' })]
+  expect(summary(groupTasks(tasks, 'milestone', milestoneCtx))).toEqual([
+    ['milestone:m2', 'ALP · v2', ['b']],
+    ['milestone:m1', 'LAU · v1', ['a']],
+    ['milestone:none', 'No milestone', ['c', 'd']],
+  ])
+})
+
+test('a drop on a milestone group sets or clears the milestone, and never one of a different project', () => {
+  expect(dropUpdate(task('a'), 'milestone', null, 'm1', milestoneCtx)).toEqual({ taskId: 'a', patch: { expected_version: 2, milestone_id: 'm1' } })
+  expect(dropUpdate(task('a', { milestoneId: 'm1' }), 'milestone', 'm1', null, milestoneCtx)).toEqual({ taskId: 'a', patch: { expected_version: 2, milestone_id: null } })
+  expect(dropUpdate(task('a'), 'milestone', null, 'm2', milestoneCtx)).toEqual({ error: 'This milestone belongs to a different project.' })
 })

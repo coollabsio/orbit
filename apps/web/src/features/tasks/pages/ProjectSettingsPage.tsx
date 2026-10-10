@@ -15,7 +15,7 @@ import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { InfoTip } from '@/components/common/InfoTip'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
-import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
+import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, isSystemCategory, projectStatuses } from '@/features/tasks/taskMeta'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { Project, StatusCategory, TaskStatusDef } from '@/features/tasks/api/models'
 import { useCreateStatus, useDeleteProject, useDeleteStatus, useProjectStatuses, useProjects, useReorderStatuses, useUpdateProject, useUpdateStatus } from '@/features/tasks/api/projects'
@@ -25,6 +25,8 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { ColorSwatch, CustomColorSwatch } from '@/components/common/ColorSwatch'
 import { PrAutomationCard } from '@/features/tasks/components/PrAutomationCard'
 import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
+import { RecurringTasksCard, TemplatesCard, TriageCard } from '@/features/tasks/components/IntakeCards'
+import { CyclesCard, EstimatesCard } from '@/features/tasks/components/CycleCards'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { loadFailed } from '@/lib/connection'
 
@@ -60,7 +62,7 @@ export function ProjectSettingsPage() {
   const defaultStatus = project ? defaultStatusOf(statusQuery.data ?? [], project.id) : undefined
   const countFor = (statusId: string) => tasks.filter((t) => t.status_id === statusId).length
   // the Duplicate status is system-managed: one per project, renamable/recolorable, never deleted or added
-  const regularCount = statuses.filter((s) => s.category !== 'duplicate').length
+  const regularCount = statuses.filter((s) => !isSystemCategory(s.category)).length
 
   const endDrag = () => {
     setDragId(null)
@@ -102,7 +104,7 @@ export function ProjectSettingsPage() {
                       <div key={category}>
                         <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
                           <span>{CATEGORY_LABEL[category]}</span>
-                          {category === 'duplicate' ? null : (
+                          {isSystemCategory(category) ? null : (
                             <Tip label="Add status">
                               <Button
                                 variant="ghost"
@@ -179,7 +181,7 @@ export function ProjectSettingsPage() {
                                 <span className="text-sm font-medium text-foreground">
                                   {status.name}
                                   {status.id === defaultStatus?.id ? <span className="font-normal text-muted-foreground"> · Default</span> : null}
-                                  {status.category === 'duplicate' ? (
+                                  {isSystemCategory(status.category) ? (
                                     <Tooltip>
                                       <TooltipTrigger render={<span role="img" aria-label="System status" tabIndex={0} className="ml-1.5 inline-flex align-[-1px] text-muted-foreground/70" />}>
                                         <Lock size={12} aria-hidden="true" />
@@ -216,8 +218,8 @@ export function ProjectSettingsPage() {
                                   <DropdownMenuItem
                                     className="text-destructive focus:bg-destructive/10 focus:text-destructive *:[svg]:text-destructive"
                                     data-danger="true"
-                                    title={status.category === 'duplicate' ? 'System status' : undefined}
-                                    disabled={status.category === 'duplicate' || regularCount === 1}
+                                    title={isSystemCategory(status.category) ? 'System status' : undefined}
+                                    disabled={isSystemCategory(status.category) || regularCount === 1}
                                     onClick={() => setDeleteTarget(status)}
                                   >
                                     <Trash2 className="size-3.5" />
@@ -254,6 +256,16 @@ export function ProjectSettingsPage() {
               <PrAutomationCard workspaceId={workspace.id} projectId={project.id} statuses={statuses} />
 
               <SubIssueSettingsCard project={project} />
+
+              <EstimatesCard project={project} />
+
+              <CyclesCard project={project} statuses={statuses} />
+
+              <TriageCard project={project} />
+
+              <TemplatesCard project={project} statuses={statuses} />
+
+              <RecurringTasksCard project={project} statuses={statuses} />
 
               <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
                 <Button variant="destructive" onClick={() => setConfirmDelete(true)}>

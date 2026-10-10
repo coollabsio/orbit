@@ -46,6 +46,8 @@ use crate::workspace_routes::WorkspaceState;
 const BACKGROUND_DRAIN: Duration = Duration::from_secs(30);
 /// Hourly: deletes tokens of Notion scans not started within 24 hours.
 const NOTION_CLEANUP: &str = "notion.cleanup";
+const RECURRING_TASKS: &str = "tasks.recurring";
+const CYCLES: &str = "cycles.advance";
 /// Hourly: creates a backup when the saved schedule (Admin → Storage) says one is due.
 const SCHEDULED_BACKUP: &str = "backup.scheduled";
 
@@ -729,6 +731,32 @@ async fn initialize_production_services(
                 }
             })
         })
+        .and_then(|worker| {
+            let tasks = TaskRepository::new(database.clone());
+            worker.with_handler(maintenance_kind(RECURRING_TASKS), move |_| {
+                let tasks = tasks.clone();
+                async move {
+                    tasks
+                        .run_recurring_tasks(TimestampMillis::now())
+                        .await
+                        .map(|_| ())
+                        .map_err(|_| JobError::Retryable("recurring tasks failed".to_owned()))
+                }
+            })
+        })
+        .and_then(|worker| {
+            let tasks = TaskRepository::new(database.clone());
+            worker.with_handler(maintenance_kind(CYCLES), move |_| {
+                let tasks = tasks.clone();
+                async move {
+                    tasks
+                        .run_cycles(TimestampMillis::now())
+                        .await
+                        .map(|_| ())
+                        .map_err(|_| JobError::Retryable("cycle job failed".to_owned()))
+                }
+            })
+        })
         .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
         .map_err(|error| AppError::ProductionServices(error.to_string()))?;
 
@@ -773,6 +801,22 @@ async fn initialize_production_services(
         &scheduler,
         NOTION_CLEANUP,
         Duration::from_secs(60 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        database,
+        &scheduler,
+        CYCLES,
+        Duration::from_secs(5 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        database,
+        &scheduler,
+        RECURRING_TASKS,
+        Duration::from_secs(60),
         now,
     )
     .await?;

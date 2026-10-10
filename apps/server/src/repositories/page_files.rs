@@ -14,7 +14,7 @@ use sqlx::{Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use super::pages::VISIBLE;
+use super::pages::ACCESSIBLE;
 use crate::audit::{self, AuditOutcome};
 
 /// A file attached to a page.
@@ -252,7 +252,7 @@ async fn require_live_page(
          JOIN workspaces ON workspaces.id = pages.workspace_id \
          JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = ? \
          WHERE pages.id = ? AND pages.workspace_id = ? AND pages.deleted_at IS NULL \
-         AND workspaces.deleted_at IS NULL AND {VISIBLE})"
+         AND workspaces.deleted_at IS NULL AND {ACCESSIBLE})"
     ))
     .bind(actor_id.to_string())
     .bind(page_id.to_string())
@@ -283,7 +283,7 @@ async fn authorized_file(
          JOIN workspaces ON workspaces.id = page_files.workspace_id \
          JOIN memberships ON memberships.workspace_id = page_files.workspace_id AND memberships.user_id = ? \
          WHERE page_files.id = ? AND page_files.page_id = ? AND page_files.workspace_id = ? \
-         AND pages.deleted_at IS NULL AND workspaces.deleted_at IS NULL AND {VISIBLE}"
+         AND pages.deleted_at IS NULL AND workspaces.deleted_at IS NULL AND {ACCESSIBLE}"
     ))
     .bind(actor_id.to_string())
     .bind(file_id.to_string())

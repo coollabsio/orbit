@@ -49,7 +49,7 @@ test('sub-grouping skips the current grouping and hides on timeline', async () =
   const trigger = view.getByRole('button', { name: 'Display options' })
   fireEvent.click(await view.findByRole('combobox', { name: 'Sub-grouping' }))
   const options = await view.findAllByRole('option')
-  expect(options.map((option) => option.textContent)).toEqual(['Assignee', 'Priority', 'Project', 'Label', 'No sub-grouping'])
+  expect(options.map((option) => option.textContent)).toEqual(['Assignee', 'Priority', 'Project', 'Label', 'Milestone', 'Cycle', 'No sub-grouping'])
   await userEvent.click(view.getByRole('option', { name: 'Priority' }))
   expect(read(view).sub_group_by).toBe('priority')
   expect(trigger.getAttribute('aria-expanded')).toBe('true')

@@ -11,7 +11,7 @@ const identifierOf = (id: string) => `ORB-${id}`
 const record = (id: string, parentId: string | null = null) => ({
   id, workspace_id: 'ws', project_id: 'project-1', number: Number(id.slice(-4)), status_id: 'todo', title: id, description: '', position: 0, priority: 'none',
   assignee_ids: [], creator_id: 'user-1', label_ids: [], created_at: '', updated_at: '', version: 1, duplicate_of: null, blocked: false,
-  parent_task_id: parentId, parent: null, sub_issue_count: 0, sub_issue_closed_count: 0,
+  parent_task_id: parentId, parent: null, sub_issue_count: 0, sub_issue_closed_count: 0, milestone_id: null,
 }) as TaskRecord
 
 test('auto-closed items come from the response; anything else is none', () => {

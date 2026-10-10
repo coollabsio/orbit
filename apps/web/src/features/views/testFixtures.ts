@@ -37,7 +37,7 @@ const LAUNCH: ProjectRecord = {
   created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-01T00:00:00Z',
   auto_close_parent: true,
-  auto_close_sub_issues: true,
+  auto_close_sub_issues: true, triage_enabled: false, lead_user_id: null, member_ids: [], overview_page_id: null, task_counts: {}
 }
 
 export const FILTER_OPTIONS: FilterOptions = {

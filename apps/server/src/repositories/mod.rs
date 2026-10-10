@@ -1,10 +1,14 @@
 pub mod api_tokens;
 pub mod attachments;
 pub mod chat;
+pub mod cycles;
 pub mod github_pulls;
 pub mod identity;
+pub mod insights;
 pub mod instance_settings;
+pub mod intake;
 pub(crate) mod membership;
+pub mod milestones;
 pub mod page_comments;
 pub mod page_export;
 pub mod page_files;

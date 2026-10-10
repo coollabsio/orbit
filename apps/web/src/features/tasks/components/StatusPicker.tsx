@@ -31,7 +31,7 @@ export function StatusPicker({ task, statuses, size, align = 'start', className,
 }) {
   const save = useTaskPickerUpdate(task, 'Status update failed.')
   const status = statuses.find((item) => item.id === task.statusId)
-  const options = statusPickerOptions(statuses, task.projectId, Boolean(onRequestDuplicate))
+  const options = statusPickerOptions(statuses, task.projectId, Boolean(onRequestDuplicate), task.statusId)
   return (
     <div className="flex shrink-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <DropdownMenu modal={false}>

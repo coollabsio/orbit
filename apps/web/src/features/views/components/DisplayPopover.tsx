@@ -17,7 +17,7 @@ export interface DisplayPopoverProps {
   onChange: (patch: Partial<DisplayOptions>) => void
 }
 
-const GROUP_ORDER: GroupBy[] = ['status', 'assignee', 'priority', 'project', 'label', 'none']
+const GROUP_ORDER: GroupBy[] = ['status', 'assignee', 'priority', 'project', 'label', 'milestone', 'cycle', 'none']
 
 const ORDER_LABEL: Record<OrderBy, string> = {
   manual: 'Manual',
@@ -26,8 +26,9 @@ const ORDER_LABEL: Record<OrderBy, string> = {
   updated: 'Updated',
   title: 'Title',
   due_date: 'Due date',
+  estimate: 'Estimate',
 }
-const ORDER_OPTIONS: OrderBy[] = ['manual', 'priority', 'created', 'updated', 'title', 'due_date']
+const ORDER_OPTIONS: OrderBy[] = ['manual', 'priority', 'created', 'updated', 'title', 'due_date', 'estimate']
 
 const COMPLETED_LABEL: Record<ShowCompleted, string> = { all: 'All', past_week: 'Past week', past_month: 'Past month', none: 'None' }
 const COMPLETED_OPTIONS: ShowCompleted[] = ['all', 'past_week', 'past_month', 'none']
@@ -43,8 +44,11 @@ const PROPERTY_LABEL: Record<TaskProperty, string> = {
   created: 'Created',
   updated: 'Updated',
   sub_issue_progress: 'Sub-issue progress',
+  milestone: 'Milestone',
+  cycle: 'Cycle',
+  estimate: 'Estimate',
 }
-const PROPERTY_ORDER: TaskProperty[] = ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels', 'created', 'updated', 'sub_issue_progress']
+const PROPERTY_ORDER: TaskProperty[] = ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels', 'created', 'updated', 'sub_issue_progress', 'milestone', 'cycle', 'estimate']
 
 const SUB_ISSUE_LABEL: Record<SubIssuesMode, string> = { nested: 'Nested', flat: 'Flat', hidden: 'Hidden' }
 const SUB_ISSUE_OPTIONS: SubIssuesMode[] = ['nested', 'flat', 'hidden']

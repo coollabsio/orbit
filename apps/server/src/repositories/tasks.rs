@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use orbit_domain::{Actor, DEFAULT_STATUSES, StatusCategory};
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
@@ -7,7 +9,10 @@ use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::cycles;
+use super::intake;
 use super::membership;
+use super::milestones;
 use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_mentions;
@@ -32,6 +37,20 @@ pub struct ProjectRecord {
     pub auto_close_parent: bool,
     /// Close open sub-issues when their parent closes (rule B).
     pub auto_close_sub_issues: bool,
+    /// Tasks that an integration creates wait in the Triage status until a member accepts them.
+    pub triage_enabled: bool,
+    /// `fibonacci`, `linear` or `tshirt`; null while estimates are off.
+    pub estimate_scale: Option<String>,
+    /// The member who owns the project; null when there is none.
+    #[schema(value_type = Option<String>, required = true)]
+    pub lead_user_id: Option<Id>,
+    #[schema(value_type = Vec<String>)]
+    pub member_ids: Vec<Id>,
+    /// The hidden Docs page that holds the description; null until someone writes one.
+    #[schema(value_type = Option<String>, required = true)]
+    pub overview_page_id: Option<Id>,
+    /// Live tasks by status category; a category with no task is absent.
+    pub task_counts: BTreeMap<String, u64>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
@@ -117,6 +136,17 @@ pub struct TaskRecord {
     /// The parent while it is visible (live, in a live project); null otherwise.
     #[schema(required = true)]
     pub parent: Option<TaskRef>,
+    /// The milestone of the task's project that the task belongs to; null when it has none.
+    #[schema(value_type = Option<String>, required = true)]
+    pub milestone_id: Option<Id>,
+    /// The cycle of the task's project that the task is planned in.
+    #[schema(value_type = Option<String>)]
+    pub cycle_id: Option<Id>,
+    /// Points. The project's estimate scale decides how they show.
+    pub estimate: Option<i64>,
+    /// The sum of the estimates of the task's sub-issues at every level that have no sub-issues
+    /// of their own; null for a task with no sub-issues or no estimated ones.
+    pub sub_issue_estimate: Option<i64>,
     /// Direct live children (sub-issues).
     pub sub_issue_count: i64,
     /// Direct live children in a completed, cancelled or duplicate status.
@@ -185,7 +215,8 @@ pub struct NotificationRecord {
     pub actor_user_id: Option<Id>,
     /// `task_assigned`, `comment_mentioned` (task comment), `task_commented`,
     /// `task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,
-    /// `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+    /// `page_mentioned` (an @mention in a page body), `chat_mentioned` (a chat message),
+    /// `task_triage_new` (a task entered triage) or `milestone_update_posted`.
     /// A task has one notification for each recipient: this is its latest event.
     pub kind: String,
     /// Set for task notifications.
@@ -212,6 +243,12 @@ pub struct NotificationRecord {
     pub chat_conversation_id: Option<Id>,
     #[schema(value_type = Option<String>)]
     pub chat_message_id: Option<Id>,
+    /// The milestone, its name and its project of a `milestone_update_posted` notification.
+    #[schema(value_type = Option<String>)]
+    pub milestone_id: Option<Id>,
+    pub milestone_name: Option<String>,
+    #[schema(value_type = Option<String>)]
+    pub milestone_project_id: Option<Id>,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub read_at: Option<TimestampMillis>,
     /// Hidden from the inbox until this time.
@@ -263,14 +300,29 @@ const NOTIFICATION_COLUMNS: &str = "id, workspace_id, recipient_user_id, actor_u
       JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = notifications.task_id) AS task_identifier, \
      (SELECT title FROM tasks WHERE tasks.id = notifications.task_id) AS task_title, \
      comment_id, page_id, page_thread_id, page_comment_id, page_block_id, chat_conversation_id, \
-     chat_message_id, read_at, snoozed_until, archived_at, created_at";
+     chat_message_id, milestone_id, \
+     (SELECT name FROM milestones WHERE milestones.id = notifications.milestone_id) AS milestone_name, \
+     (SELECT project_id FROM milestones WHERE milestones.id = notifications.milestone_id) AS milestone_project_id, \
+     read_at, snoozed_until, archived_at, created_at";
 
 /// Project PATCH switches; `None` keeps the stored value.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProjectAutomationPatch {
     pub auto_close_parent: Option<bool>,
     pub auto_close_sub_issues: Option<bool>,
+    pub triage_enabled: Option<bool>,
 }
+
+/// Project PATCH lead and members; `None` keeps the stored value.
+#[derive(Clone, Debug, Default)]
+pub struct ProjectPeoplePatch {
+    pub lead_user_id: Option<Option<Id>>,
+    pub member_ids: Option<Vec<Id>>,
+    /// `Some(None)` turns estimates off. A change of scale changes no task.
+    pub estimate_scale: Option<Option<String>>,
+}
+
+pub const ESTIMATE_SCALES: [&str; 3] = ["fibonacci", "linear", "tshirt"];
 
 #[derive(Clone, Debug)]
 pub struct CreateTask {
@@ -286,6 +338,9 @@ pub struct CreateTask {
     pub due_start_at: Option<TimestampMillis>,
     pub due_at: Option<TimestampMillis>,
     pub parent_task_id: Option<Id>,
+    pub milestone_id: Option<Id>,
+    pub cycle_id: Option<Id>,
+    pub estimate: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -327,6 +382,12 @@ pub struct TaskChanges {
     pub duplicate_of_id: Option<Option<Id>>,
     /// `Some(Some(id))` makes the task a sub-issue of `id`; `Some(None)` detaches it.
     pub parent_task_id: Option<Option<Id>>,
+    /// `Some(Some(id))` sets the milestone; `Some(None)` clears it. A project move clears it.
+    pub milestone_id: Option<Option<Id>>,
+    /// As `milestone_id`: a cycle belongs to one project.
+    pub cycle_id: Option<Option<Id>>,
+    /// `Some(None)` removes the estimate. A project move keeps it.
+    pub estimate: Option<Option<i64>>,
 }
 
 #[derive(Clone, Debug)]
@@ -360,6 +421,8 @@ pub enum TaskSort {
     UpdatedAt,
     /// Undated tasks sort last in both directions.
     DueDate,
+    /// Tasks with no estimate sort last in both directions.
+    Estimate,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -416,6 +479,8 @@ pub enum TaskError {
     ParentCycle,
     #[error("the parent task is not available")]
     ParentInvalid,
+    #[error("{count} tasks wait in triage")]
+    TriageNotEmpty { count: i64 },
     #[error("task repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
 }
@@ -516,9 +581,10 @@ impl TaskRepository {
         if project_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NULL AND workspace_id = ",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {} FROM projects WHERE deleted_at IS NULL AND workspace_id = ",
+            project_columns("project_key")
+        ));
         query
             .push_bind(workspace_id.to_string())
             .push(" AND id IN (");
@@ -546,10 +612,10 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let fingerprint = format!("projects:{workspace_id}");
         let after = cursor_pair(cursor, &fingerprint)?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
-             FROM projects WHERE workspace_id = ",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {} FROM projects WHERE workspace_id = ",
+            project_columns("project_key")
+        ));
         query
             .push_bind(workspace_id.to_string())
             .push(" AND deleted_at IS NULL");
@@ -631,6 +697,12 @@ impl TaskRepository {
             color,
             auto_close_parent: true,
             auto_close_sub_issues: true,
+            triage_enabled: false,
+            estimate_scale: None,
+            lead_user_id: None,
+            member_ids: Vec::new(),
+            overview_page_id: None,
+            task_counts: BTreeMap::new(),
             version: 0,
             deleted_at: None,
             created_at: now,
@@ -648,6 +720,7 @@ impl TaskRepository {
         key: String,
         color: String,
         automation: ProjectAutomationPatch,
+        people: ProjectPeoplePatch,
         expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
@@ -656,10 +729,25 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = project_in_tx(&mut tx, workspace_id, project_id, false).await?;
         check_version(expected_version, current.version, &current)?;
+        if current.triage_enabled && automation.triage_enabled == Some(false) {
+            // The queue must be empty first: its tasks would stay in a status nobody looks at.
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM tasks JOIN task_statuses ON task_statuses.id = tasks.status_id \
+                 WHERE tasks.project_id = ? AND tasks.deleted_at IS NULL \
+                 AND task_statuses.category = 'triage'",
+            )
+            .bind(project_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if count > 0 {
+                return Err(TaskError::TriageNotEmpty { count });
+            }
+        }
         let updated = sqlx::query(
             "UPDATE projects SET name = ?, project_key = ?, color = ?, \
              auto_close_parent = COALESCE(?, auto_close_parent), \
              auto_close_sub_issues = COALESCE(?, auto_close_sub_issues), \
+             triage_enabled = COALESCE(?, triage_enabled), \
              version = version + 1, updated_at = ? \
              WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
         )
@@ -668,6 +756,7 @@ impl TaskRepository {
         .bind(&color)
         .bind(automation.auto_close_parent)
         .bind(automation.auto_close_sub_issues)
+        .bind(automation.triage_enabled)
         .bind(now.as_millis())
         .bind(project_id.to_string())
         .bind(workspace_id.to_string())
@@ -680,32 +769,91 @@ impl TaskRepository {
         if updated?.rows_affected() != 1 {
             return Err(TaskError::Conflict);
         }
-        record_mutation(
+        if let Some(scale) = &people.estimate_scale {
+            if scale
+                .as_deref()
+                .is_some_and(|scale| !ESTIMATE_SCALES.contains(&scale))
+            {
+                return Err(TaskError::Invalid {
+                    field: "estimate_scale",
+                });
+            }
+            sqlx::query("UPDATE projects SET estimate_scale = ? WHERE id = ?")
+                .bind(scale)
+                .bind(project_id.to_string())
+                .execute(&mut *tx)
+                .await?;
+        }
+        let mut changes = serde_json::Map::new();
+        if let Some(lead) = people
+            .lead_user_id
+            .filter(|lead| *lead != current.lead_user_id)
+        {
+            if let Some(lead) = lead {
+                validate_members(&mut tx, workspace_id, &[lead], "lead_user_id").await?;
+            }
+            sqlx::query("UPDATE projects SET lead_user_id = ? WHERE id = ?")
+                .bind(lead.map(|id| id.to_string()))
+                .bind(project_id.to_string())
+                .execute(&mut *tx)
+                .await?;
+            changes.insert(
+                "lead".to_owned(),
+                json!({ "from": current.lead_user_id, "to": lead }),
+            );
+        }
+        if let Some(mut member_ids) = people.member_ids {
+            validate_members(&mut tx, workspace_id, &member_ids, "member_ids").await?;
+            member_ids.sort_unstable();
+            if member_ids != current.member_ids {
+                replace_project_members(&mut tx, workspace_id, project_id, &member_ids).await?;
+                let added = member_ids
+                    .iter()
+                    .filter(|id| !current.member_ids.contains(id))
+                    .collect::<Vec<_>>();
+                let removed = current
+                    .member_ids
+                    .iter()
+                    .filter(|id| !member_ids.contains(id))
+                    .collect::<Vec<_>>();
+                changes.insert(
+                    "members".to_owned(),
+                    json!({ "added": added, "removed": removed }),
+                );
+            }
+        }
+        let metadata = if changes.is_empty() {
+            json!({})
+        } else {
+            json!({ "changes": changes })
+        };
+        audit::record(
             &mut tx,
             workspace_id,
-            actor_id,
+            Some(actor_id),
             "project.updated",
+            AuditOutcome::Success,
             "project",
-            project_id,
+            Some(project_id),
             request_id,
+            metadata,
             now,
         )
         .await?;
+        let record = project_in_tx(&mut tx, workspace_id, project_id, false).await?;
         tx.commit().await?;
-        Ok(ProjectRecord {
-            name,
-            key,
-            color,
-            auto_close_parent: automation
-                .auto_close_parent
-                .unwrap_or(current.auto_close_parent),
-            auto_close_sub_issues: automation
-                .auto_close_sub_issues
-                .unwrap_or(current.auto_close_sub_issues),
-            version: current.version + 1,
-            updated_at: now,
-            ..current
-        })
+        Ok(record)
+    }
+
+    pub async fn project(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+    ) -> Result<ProjectRecord, TaskError> {
+        let mut tx = self.database.transaction().await?;
+        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        project_in_tx(&mut tx, workspace_id, project_id, false).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -830,10 +978,10 @@ impl TaskRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let fingerprint = format!("project-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
-             FROM projects WHERE workspace_id = ",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {} FROM projects WHERE workspace_id = ",
+            project_columns(RESTORE_KEY)
+        ));
         query
             .push_bind(workspace_id.to_string())
             .push(" AND deleted_at > ")
@@ -929,7 +1077,7 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<StatusRecord, TaskError> {
-        if category == StatusCategory::Duplicate.as_str() {
+        if is_system_category(&category) {
             return Err(TaskError::Invalid { field: "category" });
         }
         let id = Id::new_v7();
@@ -983,8 +1131,10 @@ impl TaskRepository {
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
-        let duplicate = StatusCategory::Duplicate.as_str();
-        if (current.category == duplicate) != (category == duplicate) {
+        // A system status keeps its category, and no other status can take one.
+        if current.category != category
+            && (is_system_category(&current.category) || is_system_category(&category))
+        {
             return Err(TaskError::Invalid { field: "category" });
         }
         let description = description.unwrap_or_else(|| current.description.clone());
@@ -1041,7 +1191,7 @@ impl TaskRepository {
         require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
-        if current.category == StatusCategory::Duplicate.as_str() {
+        if is_system_category(&current.category) {
             return Err(TaskError::Invalid { field: "status_id" });
         }
         let tasks: i64 = sqlx::query_scalar(
@@ -1409,117 +1559,20 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<TaskUpdateOutcome, TaskError> {
-        let id = Id::new_v7();
-        if input
-            .due_start_at
-            .is_some_and(|start| input.due_at.is_none_or(|end| start > end))
-        {
-            return Err(TaskError::Invalid {
-                field: "due_start_at",
-            });
-        }
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
-        if task_relations::status_category_in_tx(&mut tx, workspace_id, input.status_id).await?
-            == task_relations::DUPLICATE
-        {
-            return Err(TaskError::Invalid { field: "status_id" });
-        }
-        validate_assignees(&mut tx, workspace_id, &input.assignee_ids).await?;
-        validate_labels(&mut tx, workspace_id, &input.label_ids).await?;
-        if let Some(parent_id) = input.parent_task_id {
-            sub_issues::validate_parent_in_tx(&mut tx, workspace_id, None, parent_id).await?;
-        }
-        let position = match input.position {
-            Some(position) => position,
-            None => sqlx::query_scalar::<_, i64>(
-                "SELECT COALESCE(MAX(position) + 1, 0) FROM tasks WHERE workspace_id = ? AND project_id = ? AND status_id = ? AND deleted_at IS NULL",
-            )
-            .bind(workspace_id.to_string())
-            .bind(input.project_id.to_string())
-            .bind(input.status_id.to_string())
-            .fetch_one(&mut *tx)
-            .await?,
-        };
-        sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
-        )
-        .bind(id.to_string())
-        .bind(workspace_id.to_string())
-        .bind(input.project_id.to_string())
-        .bind(input.status_id.to_string())
-        .bind(&input.title)
-        .bind(&input.description)
-        .bind(&input.source_url)
-        .bind(&input.priority)
-        .bind(position)
-        .bind(actor_id.to_string())
-        .bind(input.due_start_at.map(TimestampMillis::as_millis))
-        .bind(input.due_at.map(TimestampMillis::as_millis))
-        .bind(input.parent_task_id.map(|id| id.to_string()))
-        .bind(now.as_millis())
-        .bind(now.as_millis())
-        .execute(&mut *tx)
-        .await?;
-        replace_assignees(&mut tx, id, &input.assignee_ids).await?;
-        replace_labels(&mut tx, id, &input.label_ids).await?;
-        task_notifications::subscribe_in_tx(&mut tx, id, &[actor_id], false, now).await?;
-        notify_users(
+        let mut auto_closed = Vec::new();
+        let id = create_task_in_tx(
             &mut tx,
             workspace_id,
             actor_id,
-            NotificationRequest {
-                kind: NotificationKind::TaskAssigned,
-                task_id: id,
-                comment_id: None,
-                recipients: &input.assignee_ids,
-            },
-            now,
-        )
-        .await?;
-        let mentioned: Vec<Id> =
-            task_mentions::mentioned_in_tx(&mut tx, workspace_id, &input.description)
-                .await?
-                .into_iter()
-                .filter(|user| !input.assignee_ids.contains(user))
-                .collect();
-        notify_mentioned(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            NotificationKind::TaskMentioned,
-            id,
             None,
-            &mentioned,
-            now,
-        )
-        .await?;
-        record_mutation(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            "task.created",
-            "task",
-            id,
+            &input,
             request_id,
             now,
+            &mut auto_closed,
         )
         .await?;
-        // Rule A: a sub-issue created closed can complete its parent (an open one never does).
-        let mut auto_closed = Vec::new();
-        if let Some(parent_id) = input.parent_task_id {
-            let actor = sub_issues::AutomationActor {
-                workspace_id,
-                actor_id,
-                service_account: None,
-                request_id,
-                now,
-            };
-            sub_issues::close_ancestors_in_tx(&mut tx, actor, parent_id, id, &mut auto_closed)
-                .await?;
-        }
         let task = task_in_tx(&mut tx, workspace_id, id, false).await?;
         tx.commit().await?;
         Ok(TaskUpdateOutcome { task, auto_closed })
@@ -1720,10 +1773,16 @@ impl TaskRepository {
             return Ok(task_id);
         }
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category <> 'duplicate' ORDER BY CASE WHEN category = ? THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
+            "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category NOT IN ('duplicate', 'triage') ORDER BY CASE WHEN category = ? THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
         ).bind(workspace_id.to_string()).bind(issue.project_id.to_string())
             .bind(status_category)
             .fetch_optional(&mut *tx).await?.ok_or(TaskError::NotFound)?;
+        // Open work from outside the team waits in triage; an item that arrives closed does not.
+        let triage = intake_status_id_in_tx(&mut tx, issue.project_id)
+            .await?
+            .filter(|_| status_category == "unstarted");
+        let in_triage = triage.is_some();
+        let status_id = triage.unwrap_or(status_id);
         let label_id = if let Some(id) = sqlx::query_scalar::<_, String>(
             "SELECT id FROM labels WHERE workspace_id = ? AND lower(name) = 'github' ORDER BY id LIMIT 1",
         ).bind(workspace_id.to_string()).fetch_optional(&mut *tx).await? {
@@ -1754,6 +1813,17 @@ impl TaskRepository {
         sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind, pull_state) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(workspace_id.to_string()).bind(&issue.repository).bind(issue.number)
             .bind(task_id.to_string()).bind(issue.kind).bind(issue.state).execute(&mut *tx).await?;
+        if in_triage {
+            intake::notify_triage_in_tx(
+                &mut tx,
+                workspace_id,
+                issue.project_id,
+                task_id,
+                None,
+                now,
+            )
+            .await?;
+        }
         record_principal_mutation(
             &mut tx,
             workspace_id,
@@ -1829,6 +1899,12 @@ impl TaskRepository {
             task_relations::default_status_id_in_tx(&mut tx, workspace_id, input.project_id)
                 .await?
                 .ok_or(TaskError::NotFound)?;
+        let triage = intake_status_id_in_tx(&mut tx, input.project_id).await?;
+        let in_triage = triage.is_some();
+        let status_id = match triage {
+            Some(triage) => parse_id(triage)?,
+            None => status_id,
+        };
 
         let existing_label = sqlx::query_scalar::<_, String>(
             "SELECT id FROM labels WHERE workspace_id = ? AND lower(name) = 'discord' ORDER BY id LIMIT 1",
@@ -1877,6 +1953,20 @@ impl TaskRepository {
         sqlx::query("INSERT INTO integration_events (workspace_id, provider, external_event_id, payload_hash, task_id, created_at) VALUES (?, 'discord', ?, ?, ?, ?)")
             .bind(workspace_id.to_string()).bind(&input.event_id).bind(input.payload_hash.to_vec()).bind(task_id.to_string()).bind(now.as_millis())
             .execute(&mut *tx).await?;
+        if in_triage {
+            // A Discord task made with a member's token names that member; one made with a
+            // service account has no user.
+            let actor = service_account_id.is_none().then_some(actor_id);
+            intake::notify_triage_in_tx(
+                &mut tx,
+                workspace_id,
+                input.project_id,
+                task_id,
+                actor,
+                now,
+            )
+            .await?;
+        }
         record_principal_mutation(
             &mut tx,
             workspace_id,
@@ -2751,6 +2841,28 @@ pub(super) async fn update_task_in_tx(
         Some(requested) => requested,
         None => current.parent_task_id,
     };
+    let milestone_id = match update.changes.milestone_id {
+        Some(Some(milestone_id)) => {
+            milestones::validate_in_tx(tx, project_id, milestone_id).await?;
+            Some(milestone_id)
+        }
+        Some(None) => None,
+        // A milestone belongs to one project.
+        None if moves_project => None,
+        None => current.milestone_id,
+    };
+    let cycle_id = match update.changes.cycle_id {
+        Some(Some(cycle_id)) => {
+            cycles::validate_in_tx(tx, project_id, cycle_id).await?;
+            Some(cycle_id)
+        }
+        Some(None) => None,
+        // A cycle belongs to one project.
+        None if moves_project => None,
+        None => current.cycle_id,
+    };
+    let estimate = update.changes.estimate.unwrap_or(current.estimate);
+    validate_estimate(estimate)?;
     let title = update
         .changes
         .title
@@ -2803,8 +2915,8 @@ pub(super) async fn update_task_in_tx(
     // A project move clears `number`; the `tasks_number_project_change` trigger assigns the
     // target project's next one (clearing it here keeps the old number from colliding there)
     // and keeps the old identifier in `task_number_aliases`.
-    sqlx::query("UPDATE tasks SET project_id = ?, number = CASE WHEN project_id = ? THEN number ELSE NULL END, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, parent_task_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
-        .bind(project_id.to_string()).bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_task_id.map(|id| id.to_string())).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    sqlx::query("UPDATE tasks SET project_id = ?, number = CASE WHEN project_id = ? THEN number ELSE NULL END, status_id = ?, title = ?, description = ?, source_url = ?, priority = ?, position = ?, due_start_at = ?, due_at = ?, parent_task_id = ?, milestone_id = ?, cycle_id = ?, estimate = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?")
+        .bind(project_id.to_string()).bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_task_id.map(|id| id.to_string())).bind(milestone_id.map(|id| id.to_string())).bind(cycle_id.map(|id| id.to_string())).bind(estimate).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
     if parent_task_id != current.parent_task_id {
         // Project ids let the activity feed build cross-project identifiers (ORB-91C0). A hidden
         // old parent (trashed, or in a trashed project) has no `current.parent`, so read its
@@ -2947,7 +3059,19 @@ pub(super) async fn update_task_in_tx(
     if let Some(labels) = &update.changes.label_ids {
         replace_labels(tx, update.id, labels).await?;
     }
+    if status_id != current.status_id {
+        cycles::apply_options_in_tx(tx, update.id, project_id, status_id, now).await?;
+    }
     Ok(())
+}
+
+fn validate_estimate(estimate: Option<i64>) -> Result<(), TaskError> {
+    match estimate {
+        Some(points) if !(0..=10_000).contains(&points) => {
+            Err(TaskError::Invalid { field: "estimate" })
+        }
+        _ => Ok(()),
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -3074,6 +3198,10 @@ fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
             .due_at
             .map_or(due_date_sentinel(&filter.order), TimestampMillis::as_millis)
             .to_string(),
+        TaskSort::Estimate => task
+            .estimate
+            .unwrap_or(due_date_sentinel(&filter.order))
+            .to_string(),
     };
     vec![primary, task.id.to_string()]
 }
@@ -3091,6 +3219,8 @@ fn task_sort_column(sort: &TaskSort, order: &SortOrder) -> &'static str {
         // The literals are due_date_sentinel's values.
         (TaskSort::DueDate, SortOrder::Asc) => "COALESCE(tasks.due_at, 9223372036854775807)",
         (TaskSort::DueDate, SortOrder::Desc) => "COALESCE(tasks.due_at, -9223372036854775807)",
+        (TaskSort::Estimate, SortOrder::Asc) => "COALESCE(tasks.estimate, 9223372036854775807)",
+        (TaskSort::Estimate, SortOrder::Desc) => "COALESCE(tasks.estimate, -9223372036854775807)",
     }
 }
 
@@ -3107,7 +3237,8 @@ fn push_cursor_value<'a>(
         | TaskSort::Priority
         | TaskSort::CreatedAt
         | TaskSort::UpdatedAt
-        | TaskSort::DueDate => {
+        | TaskSort::DueDate
+        | TaskSort::Estimate => {
             query.push_bind(value.parse::<i64>().map_err(|_| TaskError::InvalidCursor)?);
         }
     }
@@ -3122,6 +3253,146 @@ fn priority_rank(priority: &str) -> i64 {
         "low" => 3,
         _ => 4,
     }
+}
+
+/// Creates one task inside the caller's transaction and returns its id: validation, the row, the
+/// assignees and labels, the assignee notifications, the audit event, and rule A for a sub-issue
+/// that is created closed. `service_account` is the creator of a task that no member made (the
+/// recurring job); `actor_id` is then the member the task is attributed to.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn create_task_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    actor_id: Id,
+    service_account: Option<(Id, &str)>,
+    input: &CreateTask,
+    request_id: &str,
+    now: TimestampMillis,
+    auto_closed: &mut Vec<AutoClosed>,
+) -> Result<Id, TaskError> {
+    let id = Id::new_v7();
+    if input
+        .due_start_at
+        .is_some_and(|start| input.due_at.is_none_or(|end| start > end))
+    {
+        return Err(TaskError::Invalid {
+            field: "due_start_at",
+        });
+    }
+    validate_project_status(tx, workspace_id, input.project_id, input.status_id).await?;
+    if task_relations::status_category_in_tx(tx, workspace_id, input.status_id).await?
+        == task_relations::DUPLICATE
+    {
+        return Err(TaskError::Invalid { field: "status_id" });
+    }
+    validate_assignees(tx, workspace_id, &input.assignee_ids).await?;
+    validate_labels(tx, workspace_id, &input.label_ids).await?;
+    if let Some(parent_id) = input.parent_task_id {
+        sub_issues::validate_parent_in_tx(tx, workspace_id, None, parent_id).await?;
+    }
+    if let Some(milestone_id) = input.milestone_id {
+        milestones::validate_in_tx(tx, input.project_id, milestone_id).await?;
+    }
+    if let Some(cycle_id) = input.cycle_id {
+        cycles::validate_in_tx(tx, input.project_id, cycle_id).await?;
+    }
+    validate_estimate(input.estimate)?;
+    let position = match input.position {
+        Some(position) => position,
+        None => sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM tasks WHERE workspace_id = ? AND project_id = ? AND status_id = ? AND deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .bind(input.project_id.to_string())
+        .bind(input.status_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?,
+    };
+    sqlx::query(
+        "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, creator_service_account_id, due_start_at, due_at, parent_task_id, milestone_id, cycle_id, estimate, version, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+    )
+    .bind(id.to_string())
+    .bind(workspace_id.to_string())
+    .bind(input.project_id.to_string())
+    .bind(input.status_id.to_string())
+    .bind(&input.title)
+    .bind(&input.description)
+    .bind(&input.source_url)
+    .bind(&input.priority)
+    .bind(position)
+    .bind(actor_id.to_string())
+    .bind(service_account.map(|(id, _)| id.to_string()))
+    .bind(input.due_start_at.map(TimestampMillis::as_millis))
+    .bind(input.due_at.map(TimestampMillis::as_millis))
+    .bind(input.parent_task_id.map(|id| id.to_string()))
+    .bind(input.milestone_id.map(|id| id.to_string()))
+    .bind(input.cycle_id.map(|id| id.to_string()))
+    .bind(input.estimate)
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(&mut **tx)
+    .await?;
+    replace_assignees(tx, id, &input.assignee_ids).await?;
+    replace_labels(tx, id, &input.label_ids).await?;
+    task_notifications::subscribe_in_tx(tx, id, &[actor_id], false, now).await?;
+    notify_users(
+        tx,
+        workspace_id,
+        actor_id,
+        NotificationRequest {
+            kind: NotificationKind::TaskAssigned,
+            task_id: id,
+            comment_id: None,
+            recipients: &input.assignee_ids,
+        },
+        now,
+    )
+    .await?;
+    let mentioned: Vec<Id> = task_mentions::mentioned_in_tx(tx, workspace_id, &input.description)
+        .await?
+        .into_iter()
+        .filter(|user| !input.assignee_ids.contains(user))
+        .collect();
+    notify_mentioned(
+        tx,
+        workspace_id,
+        actor_id,
+        NotificationKind::TaskMentioned,
+        id,
+        None,
+        &mentioned,
+        now,
+    )
+    .await?;
+    record_principal_mutation(
+        tx,
+        workspace_id,
+        actor_id,
+        service_account,
+        "task.created",
+        "task",
+        id,
+        request_id,
+        now,
+    )
+    .await?;
+    if task_relations::status_category_in_tx(tx, workspace_id, input.status_id).await? == "triage" {
+        intake::notify_triage_in_tx(tx, workspace_id, input.project_id, id, Some(actor_id), now)
+            .await?;
+    }
+    // Rule A: a sub-issue created closed can complete its parent (an open one never does).
+    if let Some(parent_id) = input.parent_task_id {
+        let actor = sub_issues::AutomationActor {
+            workspace_id,
+            actor_id,
+            service_account: None,
+            request_id,
+            now,
+        };
+        sub_issues::close_ancestors_in_tx(tx, actor, parent_id, id, auto_closed).await?;
+    }
+    Ok(id)
 }
 
 /// The acting member; outsiders and trashed workspaces are `NotFound`.
@@ -3145,7 +3416,7 @@ pub(super) async fn require_access_tx(
         .ok_or(TaskError::NotFound)
 }
 
-async fn require_project(
+pub(super) async fn require_project(
     pool: &sqlx::SqlitePool,
     workspace_id: Id,
     project_id: Id,
@@ -3219,6 +3490,7 @@ async fn matching_status_in_tx(
          WHERE target.workspace_id = ? AND target.project_id = ? AND target.category <> 'duplicate' \
          ORDER BY (target.category = source.category AND LOWER(target.name) = LOWER(source.name)) DESC, \
          (target.category = source.category) DESC, (target.category = 'unstarted') DESC, \
+         (target.category <> 'triage') DESC, \
          target.position, target.id LIMIT 1",
     )
     .bind(status_id.to_string())
@@ -3254,22 +3526,52 @@ async fn validate_assignees(
     workspace_id: Id,
     ids: &[Id],
 ) -> Result<(), TaskError> {
+    validate_members(tx, workspace_id, ids, "assignee_ids").await
+}
+
+/// Every id is a distinct, active member of the workspace; `field` names the input in the error.
+async fn validate_members(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    ids: &[Id],
+    field: &'static str,
+) -> Result<(), TaskError> {
     let mut unique = ids.to_vec();
     unique.sort_unstable();
     unique.dedup();
     if unique.len() != ids.len() {
-        return Err(TaskError::Invalid {
-            field: "assignee_ids",
-        });
+        return Err(TaskError::Invalid { field });
     }
     for id in ids {
         let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND users.suspended_at IS NULL")
             .bind(workspace_id.to_string()).bind(id.to_string()).fetch_one(&mut **tx).await?;
         if exists != 1 {
-            return Err(TaskError::Invalid {
-                field: "assignee_ids",
-            });
+            return Err(TaskError::Invalid { field });
         }
+    }
+    Ok(())
+}
+
+async fn replace_project_members(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    project_id: Id,
+    ids: &[Id],
+) -> Result<(), TaskError> {
+    sqlx::query("DELETE FROM project_members WHERE project_id = ?")
+        .bind(project_id.to_string())
+        .execute(&mut **tx)
+        .await?;
+    for id in ids {
+        sqlx::query(
+            "INSERT INTO project_members (project_id, membership_id, user_id) \
+             SELECT ?, id, user_id FROM memberships WHERE workspace_id = ? AND user_id = ?",
+        )
+        .bind(project_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(id.to_string())
+        .execute(&mut **tx)
+        .await?;
     }
     Ok(())
 }
@@ -3461,6 +3763,24 @@ fn updated_fields(update: &TaskUpdate, before: &TaskRecord, after: &TaskRecord) 
             json!({ "from": before.status_id, "to": after.status_id }),
         );
     }
+    if before.cycle_id != after.cycle_id {
+        changes.insert(
+            "cycle".into(),
+            json!({ "from": before.cycle_id, "to": after.cycle_id }),
+        );
+    }
+    if before.estimate != after.estimate {
+        changes.insert(
+            "estimate".into(),
+            json!({ "from": before.estimate, "to": after.estimate }),
+        );
+    }
+    if before.milestone_id != after.milestone_id {
+        changes.insert(
+            "milestone".into(),
+            json!({ "from": before.milestone_id, "to": after.milestone_id }),
+        );
+    }
     if before.priority != after.priority {
         changes.insert(
             "priority".into(),
@@ -3587,11 +3907,17 @@ async fn record_principal_mutation(
     }
 }
 
-fn is_unique_violation(result: &Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error>) -> bool {
+pub(super) fn is_unique_violation(
+    result: &Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error>,
+) -> bool {
     matches!(result, Err(sqlx::Error::Database(error)) if error.is_unique_violation())
 }
 
-fn check_version<T: Serialize>(expected: u64, current: u64, record: &T) -> Result<(), TaskError> {
+pub(super) fn check_version<T: Serialize>(
+    expected: u64,
+    current: u64,
+    record: &T,
+) -> Result<(), TaskError> {
     if expected == current {
         Ok(())
     } else {
@@ -3601,16 +3927,17 @@ fn check_version<T: Serialize>(expected: u64, current: u64, record: &T) -> Resul
     }
 }
 
-async fn project_in_tx(
+pub(super) async fn project_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     project_id: Id,
     deleted: bool,
 ) -> Result<ProjectRecord, TaskError> {
-    let row = sqlx::query(
-        "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
+    let row = sqlx::query(&format!(
+        "SELECT {} \
          FROM projects WHERE id = ? AND workspace_id = ? AND ((? = 1 AND deleted_at IS NOT NULL) OR (? = 0 AND deleted_at IS NULL))",
-    )
+        project_columns(RESTORE_KEY)
+    ))
     .bind(project_id.to_string()).bind(workspace_id.to_string()).bind(i64::from(deleted)).bind(i64::from(deleted))
     .fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     project_from_row(row)
@@ -3672,8 +3999,60 @@ pub(super) async fn comment_in_tx(
     comment_from_row(row, actor)
 }
 
+/// Duplicate and Triage: one status for each project, made by the system, with a fixed category.
+fn is_system_category(category: &str) -> bool {
+    category == StatusCategory::Duplicate.as_str() || category == StatusCategory::Triage.as_str()
+}
+
+/// The status a task from an integration starts in: the Triage status while the project has
+/// triage on, else `None` (the caller's normal choice).
+async fn intake_status_id_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    project_id: Id,
+) -> Result<Option<String>, TaskError> {
+    Ok(sqlx::query_scalar(
+        "SELECT task_statuses.id FROM task_statuses JOIN projects ON projects.id = task_statuses.project_id \
+         WHERE task_statuses.project_id = ? AND task_statuses.category = 'triage' \
+         AND projects.triage_enabled = 1",
+    )
+    .bind(project_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
+/// The key a trashed project had before the trash replaced it with a tombstone.
+const RESTORE_KEY: &str = "COALESCE(restore_project_key, project_key)";
+
+/// The `ProjectRecord` columns of a `FROM projects` query. `key_sql` is `project_key`, or
+/// `RESTORE_KEY` where a trashed project can be read.
+fn project_columns(key_sql: &str) -> String {
+    format!(
+        "id, workspace_id, name, {key_sql} AS project_key, color, auto_close_parent, \
+         auto_close_sub_issues, triage_enabled, estimate_scale, lead_user_id, overview_page_id, version, deleted_at, created_at, \
+         updated_at, \
+         (SELECT json_group_array(user_id) FROM (SELECT user_id FROM project_members \
+          WHERE project_members.project_id = projects.id ORDER BY user_id)) AS member_ids, \
+         (SELECT json_group_object(category, total) FROM ( \
+              SELECT task_statuses.category AS category, COUNT(*) AS total \
+              FROM tasks JOIN task_statuses ON task_statuses.id = tasks.status_id \
+              WHERE tasks.project_id = projects.id AND tasks.deleted_at IS NULL \
+              GROUP BY task_statuses.category)) AS task_counts"
+    )
+}
+
 fn project_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ProjectRecord, TaskError> {
+    let member_ids = serde_json::from_str::<Vec<String>>(row.get("member_ids"))
+        .map_err(|_| TaskError::Conflict)?
+        .into_iter()
+        .map(parse_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    let task_counts = serde_json::from_str::<BTreeMap<String, u64>>(row.get("task_counts"))
+        .map_err(|_| TaskError::Conflict)?;
     Ok(ProjectRecord {
+        lead_user_id: optional_id(row.get("lead_user_id"))?,
+        member_ids,
+        overview_page_id: optional_id(row.get("overview_page_id"))?,
+        task_counts,
         id: parse_id(row.get("id"))?,
         workspace_id: parse_id(row.get("workspace_id"))?,
         name: row.get("name"),
@@ -3681,6 +4060,8 @@ fn project_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ProjectRecord, TaskE
         color: row.get("color"),
         auto_close_parent: row.get("auto_close_parent"),
         auto_close_sub_issues: row.get("auto_close_sub_issues"),
+        triage_enabled: row.get("triage_enabled"),
+        estimate_scale: row.get("estimate_scale"),
         version: parse_version(row.get("version"))?,
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")
@@ -3807,7 +4188,17 @@ fn task_columns() -> String {
                  WHERE blocker_relation.related_task_id = tasks.id AND blocker_relation.type = 'blocks' \
                  AND blocker.deleted_at IS NULL AND blocker_project.deleted_at IS NULL \
                  AND blocker_status.category NOT IN ('completed', 'cancelled', 'duplicate')) AS blocked, \
-         tasks.parent_task_id, {} AS parent_json, \
+         tasks.parent_task_id, {} AS parent_json, tasks.milestone_id, tasks.cycle_id, tasks.estimate, \
+         (WITH RECURSIVE descendants(id) AS ( \
+              SELECT child.id FROM tasks AS child \
+              WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
+              UNION \
+              SELECT child.id FROM tasks AS child JOIN descendants ON child.parent_task_id = descendants.id \
+              WHERE child.deleted_at IS NULL) \
+          SELECT SUM(leaf.estimate) FROM descendants JOIN tasks AS leaf ON leaf.id = descendants.id \
+          WHERE NOT EXISTS (SELECT 1 FROM tasks AS grandchild \
+                            WHERE grandchild.parent_task_id = leaf.id AND grandchild.deleted_at IS NULL)) \
+         AS sub_issue_estimate, \
          (SELECT COUNT(*) FROM tasks AS child \
           JOIN projects AS child_project ON child_project.id = child.project_id \
           WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
@@ -3901,6 +4292,10 @@ fn task_record_from_row(
         duplicate_of: parse_task_ref(row.get("duplicate_of_json"))?,
         blocked: row.get::<bool, _>("blocked"),
         parent_task_id: optional_id(row.get("parent_task_id"))?,
+        milestone_id: optional_id(row.get("milestone_id"))?,
+        cycle_id: optional_id(row.get("cycle_id"))?,
+        estimate: row.get("estimate"),
+        sub_issue_estimate: row.get("sub_issue_estimate"),
         parent: parse_task_ref(row.get("parent_json"))?,
         sub_issue_count: row.get("sub_issue_count"),
         sub_issue_closed_count: row.get("sub_issue_closed_count"),
@@ -3909,7 +4304,7 @@ fn task_record_from_row(
     })
 }
 
-fn optional_id(value: Option<String>) -> Result<Option<Id>, TaskError> {
+pub(super) fn optional_id(value: Option<String>) -> Result<Option<Id>, TaskError> {
     value.map(parse_id).transpose()
 }
 
@@ -3930,6 +4325,9 @@ fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRec
         page_block_id: row.get("page_block_id"),
         chat_conversation_id: optional_id(row.get("chat_conversation_id"))?,
         chat_message_id: optional_id(row.get("chat_message_id"))?,
+        milestone_id: optional_id(row.get("milestone_id"))?,
+        milestone_name: row.get("milestone_name"),
+        milestone_project_id: optional_id(row.get("milestone_project_id"))?,
         read_at: row
             .get::<Option<i64>, _>("read_at")
             .map(TimestampMillis::from_millis),
@@ -3970,6 +4368,6 @@ fn comment_from_row(
 pub(super) fn parse_id(value: String) -> Result<Id, TaskError> {
     value.parse().map_err(|_| TaskError::Conflict)
 }
-fn parse_version(value: i64) -> Result<u64, TaskError> {
+pub(super) fn parse_version(value: i64) -> Result<u64, TaskError> {
     u64::try_from(value).map_err(|_| TaskError::Conflict)
 }

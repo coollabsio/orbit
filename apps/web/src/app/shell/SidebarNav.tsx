@@ -2,7 +2,7 @@ import { Shortcut } from '@/shortcuts/Shortcut'
 import { createContext, Fragment, useContext, type ComponentType, type ReactNode } from 'react'
 import { Link, useLocation, useMatch, useResolvedPath, type LinkProps } from 'react-router'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { Calendar, CalendarTick, Danger, SecurityUser, Home2 as Home, Layer, Notification as Bell, Message as MessageSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
+import { Calendar, CalendarTick, Folder, InboxIn, Refresh2, Roadmap, Danger, SecurityUser, Home2 as Home, Layer, Notification as Bell, Message as MessageSquare, DocumentText as FileText, SearchNormal as Search, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck, Timer } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -138,6 +138,8 @@ export function SidebarNav({
   collapsed = false,
   chatBadge,
   inboxUnread,
+  triageCount,
+  currentCyclePaths,
   chatEnabled: chat = chatEnabled,
   isRoot = false,
 }: {
@@ -147,6 +149,10 @@ export function SidebarNav({
   chatBadge?: number
   /** Activity has an unread notification. */
   inboxUnread?: boolean
+  /** Tasks in the triage queue. Absent while no project has triage on: the Triage item is then not shown. */
+  triageCount?: number
+  /** Project id → the page of its current cycle, for each project that has one. */
+  currentCyclePaths?: Readonly<Record<string, string>>
   /** Chat is a link instead of "Coming soon". Defaults to the build's setting. */
   chatEnabled?: boolean
   /** The root user (installation administrator) also gets the Admin link. */
@@ -167,7 +173,11 @@ export function SidebarNav({
   const activityPath = selectedProject ? `/activity?project=${encodeURIComponent(selectedProject)}` : '/activity'
 
   // Tasks itself is active on its routes only while no task view is picked
-  const tasksActive = useMatch({ path: '/tasks', end: false }) !== null && !view
+  const inProjects = /^\/tasks\/(projects|roadmap|triage)(\/|$)/.test(location.pathname)
+  // the current cycle of the selected project; with no project selected, of the only project that has one
+  const cyclePaths = Object.values(currentCyclePaths ?? {})
+  const currentCyclePath = selectedProject ? currentCyclePaths?.[selectedProject] : cyclePaths.length === 1 ? cyclePaths[0] : undefined
+  const tasksActive = useMatch({ path: '/tasks', end: false }) !== null && !view && !inProjects
   const taskViewActive = (name: string) => location.pathname === '/tasks' && view === name
 
   return (
@@ -208,10 +218,16 @@ export function SidebarNav({
                 badge={link.to === '/chat' ? chatBadge : undefined}
                 onClick={onNavigate}
               />
-              {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps;
-                  always shown so the rows below never move when the route changes */}
+              {/* saved views, projects and the other task pages belong to Tasks, so they nest under it instead of
+                  sitting beside the other apps; always shown so the rows below never move when the route changes */}
               {link.to === '/tasks' ? (
-                <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" onClick={onNavigate} />
+                <>
+                  <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" onClick={onNavigate} />
+                  <SidebarNavItem to="/tasks/projects" size="sub" icon={Folder} label="Projects" onClick={onNavigate} />
+                  <SidebarNavItem to="/tasks/roadmap" end size="sub" icon={Roadmap} label="Roadmap" onClick={onNavigate} />
+                  {currentCyclePath ? <SidebarNavItem to={currentCyclePath} end size="sub" icon={Refresh2} label="Current cycle" onClick={onNavigate} /> : null}
+                  {triageCount !== undefined ? <SidebarNavItem to="/tasks/triage" end size="sub" icon={InboxIn} label="Triage" badge={triageCount} onClick={onNavigate} /> : null}
+                </>
               ) : null}
             </Fragment>
           ) : (

@@ -1,9 +1,11 @@
 import type { StatusCategory, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 
 /** Status categories (workflow stages). Every status belongs to one; the glyph shape comes from it. */
-export const CATEGORY_ORDER: StatusCategory[] = ['unstarted', 'started', 'completed', 'cancelled', 'duplicate']
+export const CATEGORY_ORDER: StatusCategory[] = ['triage', 'backlog', 'unstarted', 'started', 'completed', 'cancelled', 'duplicate']
 
 export const CATEGORY_LABEL: Record<StatusCategory, string> = {
+  triage: 'Triage',
+  backlog: 'Backlog',
   unstarted: 'Unstarted',
   started: 'Started',
   completed: 'Completed',
@@ -14,6 +16,11 @@ export const CATEGORY_LABEL: Record<StatusCategory, string> = {
 /** Closed work: never overdue, dimmed on the timeline, left out of open totals. */
 export function isClosedCategory(category: StatusCategory | undefined): boolean {
   return category === 'completed' || category === 'cancelled' || category === 'duplicate'
+}
+
+/** Triage and Duplicate: one status for each project, made by the server. It cannot be added, deleted or re-categorised. */
+export function isSystemCategory(category: StatusCategory): boolean {
+  return category === 'triage' || category === 'duplicate'
 }
 
 /** Default statuses every new project starts with. */
@@ -44,10 +51,10 @@ export function projectStatuses(statuses: TaskStatusDef[], projectId: string): T
   return sortStatuses(statuses.filter((s) => s.projectId === projectId))
 }
 
-/** Where new tasks land: the first unstarted status, else the first status of the project. */
+/** Where new tasks land: the first unstarted status, else the first status of the project that is not a system status. */
 export function defaultStatusOf(statuses: TaskStatusDef[], projectId: string): TaskStatusDef | undefined {
   const own = projectStatuses(statuses, projectId)
-  return own.find((s) => s.category === 'unstarted') ?? own[0]
+  return own.find((s) => s.category === 'unstarted') ?? own.find((s) => !isSystemCategory(s.category)) ?? own[0]
 }
 
 /**

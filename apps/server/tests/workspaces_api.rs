@@ -895,6 +895,7 @@ async fn ordinary_workspace_creation_installs_the_default_project_and_workflow()
             "In Progress",
             "Done",
             "Cancelled",
+            "Triage",
             "Duplicate"
         ]
     );

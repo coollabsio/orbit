@@ -160,7 +160,7 @@ export type GroupCreateFields = {
   projectId: string | null
   /** Status key (`category:name`), resolved against the target project by the caller. */
   statusKey: string | null
-  body: Pick<CreateTaskBody, 'priority' | 'assignee_ids' | 'label_ids'>
+  body: Pick<CreateTaskBody, 'priority' | 'assignee_ids' | 'label_ids' | 'milestone_id' | 'cycle_id'>
 }
 
 /** Fields for a task created from a group header; each wins over the filter default for its field. */
@@ -172,6 +172,8 @@ export function groupCreateFields(values: GroupValues): GroupCreateFields {
     else if (field === 'priority') result.body.priority = value ?? 'none'
     else if (field === 'assignee') result.body.assignee_ids = value ? [value] : []
     else if (field === 'label') result.body.label_ids = value ? [value] : []
+    else if (field === 'milestone') result.body.milestone_id = value
+    else if (field === 'cycle') result.body.cycle_id = value
   }
   return result
 }

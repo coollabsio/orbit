@@ -1,7 +1,7 @@
 import type { StatusCategory, TaskStatusDef } from '@/features/tasks/api/models'
 
 /**
- * Compact Linear-style status glyph. The shape follows the category (○ ◐ ✓ ⊘ =), the color the status.
+ * Compact Linear-style status glyph. The shape follows the category (⊙ ◌ ○ ◐ ✓ ⊘ =), the color the status.
  * `status` may be a full definition or just `{ category, color }` (e.g. while editing).
  */
 export function TaskStatusIcon({
@@ -28,6 +28,19 @@ export function TaskStatusIcon({
   const color = status.color
   const category: StatusCategory = status.category
   switch (category) {
+    case 'triage':
+      return (
+        <svg {...common} aria-label="Triage">
+          <circle cx="7" cy="7" r="5.5" stroke={color} strokeWidth="1.5" />
+          <circle cx="7" cy="7" r="2" fill={color} />
+        </svg>
+      )
+    case 'backlog':
+      return (
+        <svg {...common} aria-label="Backlog">
+          <circle cx="7" cy="7" r="5.5" stroke={color} strokeWidth="1.5" strokeDasharray="1.6 2" strokeLinecap="round" />
+        </svg>
+      )
     case 'unstarted':
       return (
         <svg {...common} aria-label="Unstarted">
