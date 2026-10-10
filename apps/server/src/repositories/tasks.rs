@@ -2928,8 +2928,8 @@ pub(super) async fn update_task_in_tx(
         newly_assigned.extend(mentioned);
     }
     // A project move maps the status to the one that matches in the target project: the
-    // person did not change it.
-    if !moves_project {
+    // person did not change it, unless the same update names a status.
+    if !moves_project || update.changes.status_id.is_some() {
         task_notifications::status_changed_in_tx(
             tx,
             TaskEvent {

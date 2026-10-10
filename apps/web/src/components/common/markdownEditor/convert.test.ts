@@ -71,6 +71,8 @@ test('other spellings of the same markdown are equal after normalisation', () =>
   // a code block is not touched, except the "text" language that BlockNote adds
   expect(normalizeMarkdown('```text\n* not a bullet  \n***\n```')).toBe('```\n* not a bullet  \n***\n```')
   expect(normalizeMarkdown('```python\n| a   | b |\n```')).toBe('```python\n| a   | b |\n```')
+  // blank lines are content in a code block, and one blank line at most outside it
+  expect(normalizeMarkdown('one\n\n\n\n```\na\n\n\n\nb\n```\n\n\n\ntwo')).toBe('one\n\n```\na\n\n\n\nb\n```\n\ntwo')
   const instance = editor()
   for (const source of ['* one\n* two', 'above\n\n***\n\nbelow', 'Line one  \nline two', '| a   | b   |\n| --- | --- |\n| 1   | 2   |']) {
     expect([source, roundTrips(instance, source)]).toEqual([source, true])

@@ -1968,6 +1968,24 @@ async fn a_trusted_pull_request_moves_its_tasks_by_the_rules_of_their_project() 
     assert_eq!(pulls.links(task).await, "5:closed:1:1 6:merged:0:1");
     assert_eq!(pulls.category(task).await, "started");
 
+    // The other closing pull request closes without a merge: the merged one is the last now.
+    let (task, identifier) = pulls.task().await;
+    pulls.deliver("opened", 70, title(&identifier)).await;
+    pulls.deliver("opened", 71, title(&identifier)).await;
+    pulls
+        .deliver("closed", 70, with(&identifier, merged.clone()))
+        .await;
+    assert_eq!(pulls.category(task).await, "started");
+    pulls
+        .deliver(
+            "closed",
+            71,
+            with(&identifier, json!({ "state": "closed" })),
+        )
+        .await;
+    assert_eq!(pulls.links(task).await, "70:merged:1:1 71:closed:1:1");
+    assert_eq!(pulls.category(task).await, "completed");
+
     // The rules of the project: "no change", and a selected status.
     let rule = |event: &str, mode, status_id| PrAutomationRule {
         event: event.to_owned(),

@@ -43,7 +43,7 @@ export function TaskPeek({ taskId, projects, state, onClose, onOpenTask, onOpenP
   return (
     <aside data-slot="task-peek" aria-label="Task peek" className="flex w-[480px] shrink-0 border-l max-[899px]:hidden">
       {task
-        ? <TaskDetail key={taskId} task={task} project={project} state={state} onBack={onClose} onOpenTask={onOpenTask} onOpenProject={onOpenProject} />
+        ? <TaskDetail key={taskId} peek task={task} project={project} state={state} onBack={onClose} onOpenTask={onOpenTask} onOpenProject={onOpenProject} />
         // a task that is gone (deleted, or a stale link) leaves an empty panel; Esc closes it
         : null}
     </aside>

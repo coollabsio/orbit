@@ -917,7 +917,13 @@ async fn github_webhook_from_database(
         )
         && let Some(pull) = github_pull(&payload, repository)
     {
-        link_github_pull(state, &workspace, installation_id, &pull, id).await?;
+        // A failure here must not stop the sync of the pull request's own task below.
+        if link_github_pull(state, &workspace, installation_id, &pull, id)
+            .await
+            .is_err()
+        {
+            tracing::warn!("GitHub pull request links were not updated");
+        }
     }
     let connections = sqlx::query("SELECT project_id, label FROM github_project_connections WHERE workspace_id = ? AND repository = ? AND installation_id = ?")
         .bind(&workspace).bind(repository).bind(installation_id).fetch_all(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
@@ -1146,13 +1152,16 @@ async fn link_github_pull(
     if !installed || !valid_repository(&pull.repository) {
         return Ok(());
     }
-    let actor: String = sqlx::query_scalar(
+    let actor: Option<String> = sqlx::query_scalar(
         "SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner' LIMIT 1",
     )
     .bind(workspace)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
     .map_err(|_| ApiError::internal(id))?;
+    let Some(actor) = actor else {
+        return Ok(());
+    };
     let workspace_id: Id = workspace.parse().map_err(|_| ApiError::internal(id))?;
     let actor_id: Id = actor.parse().map_err(|_| ApiError::internal(id))?;
     state

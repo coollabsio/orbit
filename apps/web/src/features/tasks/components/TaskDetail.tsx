@@ -61,10 +61,12 @@ interface TaskDetailProps {
   onOpenTask?: (taskId: string) => void
   /** Opens a project's task list (the breadcrumb's project crumb). */
   onOpenProject?: (projectId: string) => void
+  /** Shown beside a list (the peek panel): the list keeps the task shortcuts, so they act on its selection. */
+  peek?: boolean
 }
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
-export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenProject }: TaskDetailProps) {
+export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenProject, peek = false }: TaskDetailProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const uploadAttachments = useUploadTaskAttachments(workspace.id, task?.id ?? '')
@@ -151,10 +153,10 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
     if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: trashConfirmDescription(below), confirmLabel: 'Move to trash', danger: true })) return
     void deleteAndClose({ taskId: task.id, version: task.version })
   }
-  useCommand('task.trash', task ? () => void trash() : null)
-  useCommand('task.addSubIssue', task ? () => setComposingSubIssue(true) : null)
+  useCommand('task.trash', task && !peek ? () => void trash() : null)
+  useCommand('task.addSubIssue', task && !peek ? () => setComposingSubIssue(true) : null)
   const [relationMenuOpen, setRelationMenuOpen] = useState(false)
-  useCommand('task.addRelation', task ? () => setRelationMenuOpen(true) : null)
+  useCommand('task.addRelation', task && !peek ? () => setRelationMenuOpen(true) : null)
 
   return (
     // A container: the layout follows the width of this view, not of the window, so the peek panel beside a list

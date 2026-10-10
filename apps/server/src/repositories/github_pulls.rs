@@ -58,6 +58,11 @@ pub struct TaskReference {
     pub closes: bool,
 }
 
+/// The longest run before the `-` that is read as a project key (with `_` prefixes).
+const MAX_KEY_RUN: usize = 64;
+/// The references of one pull request that are resolved; the rest are ignored.
+const MAX_REFERENCES: usize = 100;
+
 const fn is_word(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte >= 0x80
 }
@@ -76,10 +81,15 @@ fn identifiers(text: &str) -> Vec<(usize, usize, Vec<String>)> {
             continue;
         }
         let mut start = dash;
-        while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+        // A project key has 20 characters at most; a longer run cannot be one, and a bound keeps
+        // the work linear for a long run of `_`.
+        while start > 0
+            && dash - start < MAX_KEY_RUN
+            && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_')
+        {
             start -= 1;
         }
-        if start > 0 && bytes[start - 1] >= 0x80 {
+        if start > 0 && (bytes[start - 1] >= 0x80 || dash - start >= MAX_KEY_RUN) {
             continue;
         }
         let run = &text[start..dash];
@@ -192,7 +202,10 @@ impl TaskRepository {
     ) -> Result<(), TaskError> {
         // The tasks, in the order they are named; a closing reference wins.
         let mut targets: Vec<(Id, bool)> = Vec::new();
-        for reference in scan_task_references(&pull.branch, &pull.title, &pull.body) {
+        for reference in scan_task_references(&pull.branch, &pull.title, &pull.body)
+            .into_iter()
+            .take(MAX_REFERENCES)
+        {
             for candidate in &reference.candidates {
                 match self.resolve_task_id(workspace_id, candidate).await {
                     Ok(task_id) => {
@@ -230,6 +243,12 @@ impl TaskRepository {
         .bind(pull.number)
         .fetch_optional(&mut *tx)
         .await?;
+        // A named task that is in the trash keeps its link: a restore must find it there.
+        let named: Vec<Id> = targets
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| own.as_deref() != Some(id.to_string().as_str()))
+            .collect();
         let mut live = Vec::with_capacity(targets.len());
         for (task_id, closes) in targets {
             let is_live: bool = sqlx::query_scalar(
@@ -255,10 +274,16 @@ impl TaskRepository {
             request_id,
             now,
         };
+        // Tasks for which this pull request was an open closing one and is not now: a different
+        // pull request that merged before can be the last one now.
+        let mut unblocked: Vec<Id> = Vec::new();
         for row in &existing {
             let task_id = parse_id(row.get("task_id"))?;
-            if live.iter().any(|(id, _)| *id == task_id) {
+            if live.iter().any(|(id, _)| *id == task_id) || named.contains(&task_id) {
                 continue;
+            }
+            if blocks_completion(row) {
+                unblocked.push(task_id);
             }
             sqlx::query(
                 "DELETE FROM github_pull_links WHERE workspace_id = ? AND repository = ? \
@@ -306,17 +331,52 @@ impl TaskRepository {
             }
             // Only a change of the link moves the task: a later delivery with the same state
             // (a push to the branch) leaves a status that a person set since.
+            // A new closing keyword alone matters only for a merged pull request: for the other
+            // states it must not put back a status that a person changed.
             let changed = before.is_none_or(|row| {
                 row.get::<String, _>("state") != pull.state
-                    || row.get::<bool, _>("closes") != *closes
                     || row.get::<bool, _>("trusted") != pull.trusted
+                    || (row.get::<bool, _>("closes") != *closes && pull.state == "merged")
             });
             if changed && pull.trusted {
                 moved.push((*task_id, *closes));
             }
+            let blocks_now =
+                pull.trusted && *closes && matches!(pull.state, "draft" | "open" | "in_review");
+            if before.is_some_and(blocks_completion) && !blocks_now && pull.state != "merged" {
+                unblocked.push(*task_id);
+            }
         }
         for (task_id, closes) in moved {
-            apply_pull_state_in_tx(&mut tx, github, task_id, closes, pull).await?;
+            apply_pull_state_in_tx(
+                &mut tx,
+                github,
+                task_id,
+                closes,
+                (pull.state, &pull.repository, pull.number),
+            )
+            .await?;
+        }
+        for task_id in unblocked {
+            let merged = sqlx::query(
+                "SELECT repository, pull_number FROM github_pull_links WHERE task_id = ? \
+                 AND closes = 1 AND trusted = 1 AND state = 'merged' \
+                 ORDER BY updated_at DESC, repository, pull_number LIMIT 1",
+            )
+            .bind(task_id.to_string())
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some(merged) = merged {
+                let repository: String = merged.get("repository");
+                apply_pull_state_in_tx(
+                    &mut tx,
+                    github,
+                    task_id,
+                    true,
+                    ("merged", &repository, merged.get("pull_number")),
+                )
+                .await?;
+            }
         }
         tx.commit().await?;
         Ok(())
@@ -476,15 +536,25 @@ async fn record_link_audit(
     Ok(())
 }
 
+/// A trusted closing link of a pull request that is not merged or closed: it holds the task open.
+fn blocks_completion(row: &sqlx::sqlite::SqliteRow) -> bool {
+    row.get::<bool, _>("trusted")
+        && row.get::<bool, _>("closes")
+        && matches!(
+            row.get::<String, _>("state").as_str(),
+            "draft" | "open" | "in_review"
+        )
+}
+
 /// Moves the task to the status that its project sets for the state of the pull request.
 async fn apply_pull_state_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     github: GithubActor<'_>,
     task_id: Id,
     closes: bool,
-    pull: &GithubPull,
+    (state, repository, number): (&str, &str, i64),
 ) -> Result<(), TaskError> {
-    let (event, default_category) = match pull.state {
+    let (event, default_category) = match state {
         "draft" => PR_EVENTS[0],
         "open" => PR_EVENTS[1],
         "in_review" => PR_EVENTS[2],
@@ -494,11 +564,15 @@ async fn apply_pull_state_in_tx(
     };
     let task = sqlx::query(
         "SELECT tasks.status_id, tasks.project_id, task_statuses.category FROM tasks \
-         JOIN task_statuses ON task_statuses.id = tasks.status_id WHERE tasks.id = ?",
+         JOIN task_statuses ON task_statuses.id = tasks.status_id \
+         WHERE tasks.id = ? AND tasks.deleted_at IS NULL",
     )
     .bind(task_id.to_string())
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await?;
+    let Some(task) = task else {
+        return Ok(());
+    };
     // A late pull request must not reopen finished work.
     if matches!(
         task.get::<String, _>("category").as_str(),
@@ -514,8 +588,8 @@ async fn apply_pull_state_in_tx(
              AND NOT (repository = ? AND pull_number = ?))",
         )
         .bind(task_id.to_string())
-        .bind(&pull.repository)
-        .bind(pull.number)
+        .bind(repository)
+        .bind(number)
         .fetch_one(&mut **tx)
         .await?;
         if !closes || other_open {

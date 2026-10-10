@@ -57,9 +57,13 @@ export function normalizeMarkdown(markdown: string, origin = window.location.ori
       })
       .join('\n')
       // BlockNote writes the absolute URL of an attachment image; the stored text has the path
-      .split(`](${origin}/api/v1/workspaces/`).join('](/api/v1/workspaces/'),
+      .split(`](${origin}/api/v1/workspaces/`).join('](/api/v1/workspaces/')
+      // one blank line at most, but only outside code: the blank lines of a code block are content
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/^\n{2,}/, '\n')
+      .replace(/\n{2,}$/, '\n'),
   )
-  return text.replace(/\n{3,}/g, '\n\n').trim()
+  return text.trim()
 }
 
 type Node = Record<string, unknown>
