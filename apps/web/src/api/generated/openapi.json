@@ -15650,6 +15650,544 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/favorites": {
+      "get": {
+        "tags": [
+          "crate::view_routes"
+        ],
+        "summary": "The caller's favorite tasks, views, projects and milestones, in sidebar order.",
+        "operationId": "list_favorites",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoriteList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/favorites/order": {
+      "put": {
+        "tags": [
+          "crate::view_routes"
+        ],
+        "operationId": "reorder_favorites",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoritesOrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/favorites/{kind}/{target_id}": {
+      "put": {
+        "tags": [
+          "crate::view_routes"
+        ],
+        "operationId": "add_favorite",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "`task`, `view`, `project` or `milestone`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "crate::view_routes"
+        ],
+        "operationId": "remove_favorite",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "`task`, `view`, `project` or `milestone`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/github": {
       "get": {
         "tags": [
@@ -17036,6 +17574,548 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/label-groups": {
+      "get": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "list_label_groups",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelGroupList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "create_label_group",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelGroupBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelGroupRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/label-groups/{group_id}": {
+      "delete": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Deletes the group. Its labels stay, with no group.",
+        "operationId": "delete_label_group",
+        "parameters": [
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "update_label_group",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelGroupUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelGroupRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/labels": {
       "get": {
         "tags": [
@@ -17537,7 +18617,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, task_conflict, conflict",
+            "description": "contract_mismatch, task_conflict, conflict, label_group_conflict",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -30368,6 +31448,151 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/tasks/archive": {
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Archives closed tasks with their trees (the top-level task and all its sub-issues). Each\ntask of a tree must be closed; if one is open, nothing is archived (409 `archive_open_tree`).",
+        "operationId": "archive_tasks",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskIdsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, archive_open_tree",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/tasks/bulk": {
       "post": {
         "tags": [
@@ -30944,6 +32169,149 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/tasks/search": {
+      "get": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Ranked full-text search over the title, description and comments of tasks.",
+        "operationId": "search_tasks",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "The search text, at most 200 characters.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSearchResults"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/tasks/trash": {
       "get": {
         "tags": [
@@ -31039,6 +32407,151 @@
           },
           "413": {
             "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/tasks/unarchive": {
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Restores archived tasks with their trees. A task that is not archived stays as it is.",
+        "operationId": "unarchive_tasks",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskIdsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -35747,143 +37260,6 @@
         ]
       }
     },
-    "/api/v1/workspaces/{workspace_id}/view-favorites/order": {
-      "put": {
-        "tags": [
-          "crate::view_routes"
-        ],
-        "operationId": "reorder_view_favorites",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Orbit-Contract",
-            "in": "header",
-            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ViewFavoritesOrderBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "400": {
-            "description": "invalid_proxy_headers, invalid_request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "task_resource_not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "contract_mismatch",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "internal_error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "internal_error or another documented stable code",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "cookieAuth": []
-          }
-        ]
-      }
-    },
     "/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}": {
       "get": {
         "tags": [
@@ -36821,254 +38197,6 @@
           }
         ]
       }
-    },
-    "/api/v1/workspaces/{workspace_id}/views/{view_id}/favorite": {
-      "put": {
-        "tags": [
-          "crate::view_routes"
-        ],
-        "operationId": "favorite_view",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "view_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Orbit-Contract",
-            "in": "header",
-            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "400": {
-            "description": "invalid_proxy_headers",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "task_resource_not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "contract_mismatch",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "internal_error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "internal_error or another documented stable code",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "cookieAuth": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "crate::view_routes"
-        ],
-        "operationId": "unfavorite_view",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "view_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "X-Orbit-Contract",
-            "in": "header",
-            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "400": {
-            "description": "invalid_proxy_headers",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "authentication_required",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "origin_forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "task_resource_not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "contract_mismatch",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "internal_error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "internal_error or another documented stable code",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "cookieAuth": []
-          }
-        ]
-      }
     }
   },
   "components": {
@@ -37257,6 +38385,15 @@
         "enum": [
           "read",
           "write"
+        ]
+      },
+      "ArchivedScope": {
+        "type": "string",
+        "description": "Whether a list shows archived tasks. The default hides them.",
+        "enum": [
+          "exclude",
+          "include",
+          "only"
         ]
       },
       "AttachmentComment": {
@@ -37891,6 +39028,13 @@
             "description": "The Monday of the week in the viewer's timezone, `YYYY-MM-DD`."
           }
         }
+      },
+      "CalendarMode": {
+        "type": "string",
+        "enum": [
+          "month",
+          "week"
+        ]
       },
       "CategoryRecord": {
         "type": "object",
@@ -40119,8 +41263,26 @@
           "show_empty_groups"
         ],
         "properties": {
+          "calendar_mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CalendarMode",
+                "description": "The grid of the calendar layout (default `month`)."
+              }
+            ]
+          },
           "group_by": {
             "$ref": "#/components/schemas/GroupBy"
+          },
+          "label_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The label group of `group_by` or `sub_group_by` `label_group`; required with it."
           },
           "layout": {
             "$ref": "#/components/schemas/Layout"
@@ -40137,6 +41299,13 @@
               "$ref": "#/components/schemas/TaskProperty"
             }
           },
+          "show_archived": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the view lists archived tasks with the others (default off). The client sends\n`archived: include` with the task query."
+          },
           "show_completed": {
             "$ref": "#/components/schemas/ShowCompleted"
           },
@@ -40149,6 +41318,13 @@
           "sub_issues": {
             "$ref": "#/components/schemas/SubIssuesDisplay",
             "description": "Optional in stored and received states (default `nested`)."
+          },
+          "timeline_arrows": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the timeline draws an arrow for each \"blocks\" relation (default on)."
           }
         },
         "additionalProperties": false
@@ -40172,6 +41348,108 @@
           "code": {
             "type": "string",
             "description": "A code the authenticator app shows now."
+          }
+        },
+        "additionalProperties": false
+      },
+      "FavoriteKeyBody": {
+        "type": "object",
+        "required": [
+          "kind",
+          "target_id"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`task`, `view`, `project` or `milestone`."
+          },
+          "target_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FavoriteList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FavoriteRecord"
+            }
+          }
+        }
+      },
+      "FavoriteRecord": {
+        "type": "object",
+        "required": [
+          "kind",
+          "target_id",
+          "title",
+          "identifier",
+          "color",
+          "icon",
+          "path",
+          "position"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`: the colour of the project (of the task or milestone), or of the view."
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The icon name of a view; null for a task."
+          },
+          "identifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task identifier (`ENG-12`), or the project key of a project or milestone; null for\na view."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`task`, `view`, `project` or `milestone`."
+          },
+          "path": {
+            "type": "string",
+            "description": "The web app path of the item, such as `/tasks/ENG-12`, `/views/<id>` or\n`/tasks/projects/<id>`."
+          },
+          "position": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "The task title, or the name of the view, project or milestone."
+          }
+        }
+      },
+      "FavoritesOrderBody": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FavoriteKeyBody"
+            },
+            "description": "Every favorite of the caller in this workspace (as `GET /favorites` lists them), in the\nnew order."
           }
         },
         "additionalProperties": false
@@ -40561,6 +41839,7 @@
           "priority",
           "project",
           "label",
+          "label_group",
           "milestone",
           "cycle",
           "none"
@@ -40911,6 +42190,99 @@
           "color": {
             "type": "string"
           },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The label group of the new label."
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LabelGroupBody": {
+        "type": "object",
+        "required": [
+          "name",
+          "color"
+        ],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LabelGroupList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabelGroupRecord"
+            }
+          }
+        }
+      },
+      "LabelGroupRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "color",
+          "position",
+          "version"
+        ],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "LabelGroupUpdateBody": {
+        "type": "object",
+        "required": [
+          "name",
+          "color",
+          "expected_version"
+        ],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "name": {
             "type": "string"
           }
@@ -40929,6 +42301,20 @@
         "properties": {
           "color": {
             "type": "string"
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The label group of this label; a task has not more than one label of a group."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of that group; a label chip shows `Group / Label`."
           },
           "id": {
             "type": "string"
@@ -40962,6 +42348,13 @@
             "format": "int64",
             "minimum": 0
           },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged. A group id: put the label in that group (409 `label_group_conflict`\nwhile a task has this label and a different label of the group). `null`: no group."
+          },
           "name": {
             "type": "string"
           }
@@ -40973,7 +42366,8 @@
         "enum": [
           "list",
           "board",
-          "timeline"
+          "timeline",
+          "calendar"
         ]
       },
       "LinkPreview": {
@@ -43788,6 +45182,20 @@
                 "color": {
                   "type": "string"
                 },
+                "group_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The label group of this label; a task has not more than one label of a group."
+                },
+                "group_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The name of that group; a label chip shows `Group / Label`."
+                },
                 "id": {
                   "type": "string"
                 },
@@ -44279,6 +45687,14 @@
                 "updated_at"
               ],
               "properties": {
+                "auto_archive_months": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64",
+                  "description": "Closed tasks are archived this many months after they close (3, 6 or 12); null = off."
+                },
                 "auto_close_parent": {
                   "type": "boolean",
                   "description": "Close a task automatically when all its sub-issues are done (rule A)."
@@ -44579,6 +45995,14 @@
                   },
                   "description": "`GET /tasks/{id}` only: visible ancestors, root first."
                 },
+                "archived_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "Set while the task is in the archive: it is out of the default lists and the search."
+                },
                 "assignee_ids": {
                   "type": "array",
                   "items": {
@@ -44588,6 +46012,13 @@
                 "blocked": {
                   "type": "boolean",
                   "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
+                },
+                "blocking_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The live tasks that this task blocks (\"blocks\" relations), for the timeline arrows."
                 },
                 "created_at": {
                   "type": "string",
@@ -45111,6 +46542,14 @@
           "updated_at"
         ],
         "properties": {
+          "auto_archive_months": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Closed tasks are archived this many months after they close (3, 6 or 12); null = off."
+          },
           "auto_close_parent": {
             "type": "boolean",
             "description": "Close a task automatically when all its sub-issues are done (rule A)."
@@ -45208,6 +46647,14 @@
           "expected_version"
         ],
         "properties": {
+          "auto_archive_months": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Closed tasks are archived this many months after they close: 3, 6 or 12. Absent:\nunchanged. `null`: off."
+          },
           "auto_close_parent": {
             "type": [
               "boolean",
@@ -46686,7 +48133,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "`triage_not_empty`: the number of tasks in the queue."
+            "description": "The number of tasks that block the change (`label_group_conflict`), or the number of\ntasks in the queue (`triage_not_empty`)."
           },
           "current": {},
           "current_version": {
@@ -46710,6 +48157,36 @@
             ]
           }
         }
+      },
+      "TaskCountResponse": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The number of tasks that changed: the trees of the given tasks.",
+            "minimum": 0
+          }
+        }
+      },
+      "TaskIdsBody": {
+        "type": "object",
+        "required": [
+          "task_ids"
+        ],
+        "properties": {
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1 to 100 task ids."
+          }
+        },
+        "additionalProperties": false
       },
       "TaskPayload": {
         "type": "object",
@@ -46859,6 +48336,10 @@
           "show_completed"
         ],
         "properties": {
+          "archived": {
+            "$ref": "#/components/schemas/ArchivedScope",
+            "description": "Archived tasks: `exclude` (default), `include`, or `only` (the archive page)."
+          },
           "cursor": {
             "type": [
               "string",
@@ -46937,6 +48418,14 @@
             },
             "description": "`GET /tasks/{id}` only: visible ancestors, root first."
           },
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set while the task is in the archive: it is out of the default lists and the search."
+          },
           "assignee_ids": {
             "type": "array",
             "items": {
@@ -46946,6 +48435,13 @@
           "blocked": {
             "type": "boolean",
             "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
+          },
+          "blocking_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The live tasks that this task blocks (\"blocks\" relations), for the timeline arrows."
           },
           "created_at": {
             "type": "string",
@@ -47210,6 +48706,40 @@
           "related",
           "duplicate"
         ]
+      },
+      "TaskSearchHit": {
+        "type": "object",
+        "description": "One result of `GET /tasks/search`.",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "snippet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain text near the match in the description or the comments; absent when only the\ntitle or the identifier matched."
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRecord"
+          }
+        }
+      },
+      "TaskSearchResults": {
+        "type": "object",
+        "description": "Search results, best match first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskSearchHit"
+            }
+          }
+        }
       },
       "TaskSubscribers": {
         "type": "object",
@@ -48004,22 +49534,6 @@
           },
           "visibility": {
             "$ref": "#/components/schemas/Visibility"
-          }
-        },
-        "additionalProperties": false
-      },
-      "ViewFavoritesOrderBody": {
-        "type": "object",
-        "required": [
-          "view_ids"
-        ],
-        "properties": {
-          "view_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Every view the caller has favorited in this workspace, in the new order."
           }
         },
         "additionalProperties": false

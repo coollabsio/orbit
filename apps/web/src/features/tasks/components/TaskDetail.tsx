@@ -4,7 +4,7 @@ import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowLeft, Calendar, Hierarchy2, Link2, Notification, Paperclip2 as Paperclip, Refresh2, Signpost, TaskSquare as SquareCheck, Weight, User as UserIcon, Xmark as X } from 'reicon-react'
+import { ArchiveBox, ArrowLeft, Calendar, Hierarchy2, Link2, Notification, Paperclip2 as Paperclip, Refresh2, Signpost, TaskSquare as SquareCheck, Weight, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -24,6 +24,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader } from '@/components/common/Pane'
+import { FavoriteStar } from '@/features/favorites/FavoriteStar'
+import { useArchiveActions } from '@/features/tasks/useArchiveActions'
 import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
 import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
@@ -164,6 +166,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
     if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: trashConfirmDescription(below), confirmLabel: 'Move to trash', danger: true })) return
     void deleteAndClose({ taskId: task.id, version: task.version })
   }
+  const archiveActions = useArchiveActions(workspace.id)
   useCommand('task.trash', task && !peek ? () => void trash() : null)
   useCommand('task.addSubIssue', task && !peek ? () => setComposingSubIssue(true) : null)
   const [relationMenuOpen, setRelationMenuOpen] = useState(false)
@@ -178,6 +181,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
           <ArrowLeft className="size-4" />
         </Button>
         <TaskBreadcrumb project={project} ancestors={task?.ancestors ?? []} identifier={task?.identifier ?? 'Task'} onOpen={openTask} onOpenProject={onOpenProject} />
+        {task ? <FavoriteStar workspaceId={workspace.id} kind="task" targetId={task.id} /> : null}
         {githubSyncPaused ? <Badge variant="secondary">GitHub sync paused</Badge> : null}
         <div className="flex-1" />
         {task ? <Tip label="Move to trash" side="bottom"><Button variant="destructive" disabled={deleteTask.isPending} onClick={() => void trash()}>Delete</Button></Tip> : null}
@@ -187,6 +191,13 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
           </Button>
         </Tip>
       </PaneHeader>
+      {task?.archivedAt ? (
+        <div role="status" className="flex shrink-0 items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <ArchiveBox aria-hidden className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1">Archived. This task is not in the lists or the search. A move to an open status restores it.</span>
+          <Button variant="outline" size="xs" disabled={archiveActions.pending} onClick={() => void archiveActions.restore([task])}>Restore</Button>
+        </div>
+      ) : null}
       {!task ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <EmptyState

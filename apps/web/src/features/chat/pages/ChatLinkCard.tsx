@@ -16,7 +16,7 @@ import { ProjectPicker } from '@/features/tasks/components/ProjectPicker'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { useSavedView } from '@/features/views/api/views'
 import { viewPath } from '@/features/views/viewActions'
-import { FavoriteStar } from '@/features/views/components/FavoriteStar'
+import { FavoriteStar } from '@/features/favorites/FavoriteStar'
 import { ViewIcon } from '@/features/views/components/ViewIcon'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -121,7 +121,7 @@ function ViewLinkCard({ viewId }: { viewId: string }) {
         {view.name}
       </Link>
       <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{view.description || `View by ${view.owner.display_name}`}</span>
-      <FavoriteStar workspaceId={workspace.id} view={view} className="relative z-10" />
+      <FavoriteStar workspaceId={workspace.id} kind="view" targetId={view.id} on={view.is_favorite} className="relative z-10" />
     </div>
   )
 }

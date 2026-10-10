@@ -184,7 +184,8 @@ const MUTED_ACCENT = 'var(--muted-foreground)'
 export function groupAccent(group: Pick<TaskGroup, 'field' | 'value'>, ctx: GroupContext): string {
   switch (group.field) {
     case 'project': return ctx.projects.find((project) => project.id === group.value)?.color ?? MUTED_ACCENT
-    case 'label': return ctx.labels.find((label) => label.id === group.value)?.color ?? MUTED_ACCENT
+    case 'label':
+    case 'label_group': return ctx.labels.find((label) => label.id === group.value)?.color ?? MUTED_ACCENT
     case 'status': return ctx.statuses.find((status) => statusKeyOf(status) === group.value)?.color ?? MUTED_ACCENT
     default: return MUTED_ACCENT
   }

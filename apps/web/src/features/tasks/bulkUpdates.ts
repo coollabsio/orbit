@@ -1,6 +1,7 @@
-import type { BulkItem } from '@/api/generated/types.gen'
+import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
 import type { Cycle } from '@/features/tasks/api/cycles'
 import type { Milestone } from '@/features/tasks/api/milestones'
+import { addLabel } from '@/features/tasks/labelGroups'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 
@@ -32,12 +33,13 @@ export function assignUpdates(tasks: Task[], userId: string): BulkItem[] {
 }
 
 /** Every task has the label → remove from all; otherwise add to the tasks that miss it. */
-export function labelToggleUpdates(tasks: Task[], labelId: string): BulkItem[] {
+/** `labels`: every label of the workspace, so that a label of a group replaces the task's other label of that group. */
+export function labelToggleUpdates(tasks: Task[], labelId: string, labels: Array<Pick<LabelRecord, 'id' | 'name' | 'group_id' | 'group_name'>>): BulkItem[] {
   const everyone = tasks.every((task) => task.labels.includes(labelId))
   return tasks.map((task) => ({
     id: task.id,
     expected_version: task.version,
-    label_ids: everyone ? task.labels.filter((id) => id !== labelId) : Array.from(new Set([...task.labels, labelId])),
+    label_ids: everyone ? task.labels.filter((id) => id !== labelId) : addLabel(task.labels, labelId, labels),
   }))
 }
 

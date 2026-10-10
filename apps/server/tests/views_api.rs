@@ -297,10 +297,11 @@ async fn owner_creates_reads_updates_and_deletes_a_personal_view() {
     assert_eq!(fetched, updated);
 
     sqlx::query(
-        "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) VALUES (?, ?, 0, 0)",
+        "INSERT INTO favorites (workspace_id, user_id, kind, target_id, position, created_at) VALUES (?, ?, 'view', ?, 0, 0)",
     )
-    .bind(&id)
+    .bind(&fixture.workspace_id)
     .bind(fixture.owner_id.to_string())
+    .bind(&id)
     .execute(fixture.database.pool())
     .await
     .unwrap();
@@ -308,12 +309,11 @@ async fn owner_creates_reads_updates_and_deletes_a_personal_view() {
         .call("DELETE", &format!("/views/{id}"), &cookie, None)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let favorites: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM saved_view_favorites WHERE view_id = ?")
-            .bind(&id)
-            .fetch_one(fixture.database.pool())
-            .await
-            .unwrap();
+    let favorites: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM favorites WHERE target_id = ?")
+        .bind(&id)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
     assert_eq!(favorites, 0);
     let (status, problem) = fixture
         .call("GET", &format!("/views/{id}"), &cookie, None)
@@ -504,10 +504,11 @@ async fn making_a_view_personal_drops_other_users_favorites() {
     let id = id_of(&fixture.create_view(&author, "Shared", "workspace").await);
     for (user_id, position) in [(author_id, 0), (reader_id, 0), (fixture.owner_id, 3)] {
         sqlx::query(
-            "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) VALUES (?, ?, ?, 0)",
+            "INSERT INTO favorites (workspace_id, user_id, kind, target_id, position, created_at) VALUES (?, ?, 'view', ?, ?, 0)",
         )
-        .bind(&id)
+        .bind(&fixture.workspace_id)
         .bind(user_id.to_string())
+        .bind(&id)
         .bind(position)
         .execute(fixture.database.pool())
         .await
@@ -525,7 +526,7 @@ async fn making_a_view_personal_drops_other_users_favorites() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["is_favorite"], true);
     let remaining: Vec<String> =
-        sqlx::query_scalar("SELECT user_id FROM saved_view_favorites WHERE view_id = ?")
+        sqlx::query_scalar("SELECT user_id FROM favorites WHERE target_id = ?")
             .bind(&id)
             .fetch_all(fixture.database.pool())
             .await
@@ -921,7 +922,7 @@ async fn set_favorite(
 ) -> StatusCode {
     let method = if favorite { "PUT" } else { "DELETE" };
     fixture
-        .call(method, &format!("/views/{view_id}/favorite"), cookie, None)
+        .call(method, &format!("/favorites/view/{view_id}"), cookie, None)
         .await
         .0
 }
@@ -930,9 +931,11 @@ async fn reorder(fixture: &Fixture, cookie: &str, view_ids: Value) -> (StatusCod
     fixture
         .call(
             "PUT",
-            "/view-favorites/order",
+            "/favorites/order",
             cookie,
-            Some(json!({"view_ids": view_ids})),
+            Some(json!({"items": view_ids.as_array().unwrap().iter()
+                .map(|id| json!({"kind": "view", "target_id": id}))
+                .collect::<Vec<_>>()})),
         )
         .await
 }
@@ -1144,7 +1147,7 @@ async fn reordering_requires_exactly_the_callers_favorites() {
         let (status, problem) = reorder(&fixture, &cookie, bad).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
         assert_eq!(problem["code"], "validation_failed");
-        assert_eq!(problem["detail"], "view_ids");
+        assert_eq!(problem["detail"], "items");
     }
     assert_eq!(favorite_names(&fixture, &cookie).await, ["C", "A", "B"]);
 
@@ -1246,12 +1249,11 @@ async fn favorite_changes_are_broadcast_only_when_something_changes() {
         StatusCode::NO_CONTENT
     );
     assert_eq!(fixture.sequence().await, start + 2);
-    let changes: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_events WHERE action = 'saved_view.favorites_changed'",
-    )
-    .fetch_one(fixture.database.pool())
-    .await
-    .unwrap();
+    let changes: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE action = 'favorite.changed'")
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
     assert_eq!(changes, 2);
 }
 
@@ -1546,4 +1548,160 @@ async fn views_store_the_sub_issues_display_and_default_it_to_nested() {
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn favorites_hold_tasks_and_views_in_one_order_and_drop_dead_rows() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture.owner_cookie.clone();
+    let pool = fixture.database.pool();
+    let (project_id, key): (String, String) =
+        sqlx::query_as("SELECT id, project_key FROM projects WHERE workspace_id = ?")
+            .bind(&fixture.workspace_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let status_id: String =
+        sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = ? LIMIT 1")
+            .bind(&project_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let mut tasks = Vec::new();
+    for title in ["First task", "Second task"] {
+        let id = Id::new_v7().to_string();
+        sqlx::query(
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, 1, 1)",
+        )
+        .bind(&id)
+        .bind(&fixture.workspace_id)
+        .bind(&project_id)
+        .bind(&status_id)
+        .bind(title)
+        .bind(fixture.owner_id.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+        tasks.push(id);
+    }
+    let view = id_of(&fixture.create_view(&cookie, "Board", "workspace").await);
+
+    let set = async |kind: &str, id: &str, method: &str| {
+        fixture
+            .call(method, &format!("/favorites/{kind}/{id}"), &cookie, None)
+            .await
+            .0
+    };
+    let titles = async |cookie: &str| -> Vec<String> {
+        let (status, list) = fixture.call("GET", "/favorites", cookie, None).await;
+        assert_eq!(status, StatusCode::OK);
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["title"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    for (kind, id) in [("task", &tasks[0]), ("view", &view), ("task", &tasks[1])] {
+        assert_eq!(set(kind, id, "PUT").await, StatusCode::NO_CONTENT);
+        assert_eq!(set(kind, id, "PUT").await, StatusCode::NO_CONTENT);
+    }
+    let (_, list) = fixture.call("GET", "/favorites", &cookie, None).await;
+    assert_eq!(
+        list["items"],
+        json!([
+            {"kind": "task", "target_id": tasks[0], "title": "First task", "identifier": format!("{key}-1"),
+             "color": list["items"][0]["color"], "icon": null, "path": format!("/tasks/{key}-1"), "position": 0},
+            {"kind": "view", "target_id": view, "title": "Board", "identifier": null,
+             "color": null, "icon": null, "path": format!("/views/{view}"), "position": 1},
+            {"kind": "task", "target_id": tasks[1], "title": "Second task", "identifier": format!("{key}-2"),
+             "color": list["items"][2]["color"], "icon": null, "path": format!("/tasks/{key}-2"), "position": 2},
+        ])
+    );
+    assert!(list["items"][0]["color"].is_string());
+
+    // Unknown kinds and items the caller cannot see are refused.
+    assert_eq!(
+        set("page", &project_id, "PUT").await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        set("task", &Id::new_v7().to_string(), "PUT").await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(set("view", &tasks[0], "PUT").await, StatusCode::NOT_FOUND);
+
+    // The order is one list for all kinds, and it must name every favorite.
+    let order = |keys: &[(&str, &String)]| json!({"items": keys.iter().map(|(kind, id)| json!({"kind": kind, "target_id": id})).collect::<Vec<_>>()});
+    let (status, _) = fixture
+        .call(
+            "PUT",
+            "/favorites/order",
+            &cookie,
+            Some(order(&[
+                ("task", &tasks[1]),
+                ("task", &tasks[0]),
+                ("view", &view),
+            ])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        titles(&cookie).await,
+        ["Second task", "First task", "Board"]
+    );
+    let (status, problem) = fixture
+        .call(
+            "PUT",
+            "/favorites/order",
+            &cookie,
+            Some(order(&[("task", &tasks[1]), ("view", &view)])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    // Favorites are per user.
+    let (_, member) = fixture
+        .add_user("member@example.com", "Member", Some("member"))
+        .await;
+    assert!(titles(&member).await.is_empty());
+
+    // A task in the trash is dropped from the list and comes back with a restore.
+    sqlx::query("UPDATE tasks SET deleted_at = 5 WHERE id = ?")
+        .bind(&tasks[1])
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(titles(&cookie).await, ["First task", "Board"]);
+    sqlx::query("UPDATE tasks SET deleted_at = NULL WHERE id = ?")
+        .bind(&tasks[1])
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        titles(&cookie).await,
+        ["Second task", "First task", "Board"]
+    );
+
+    // A hard delete removes the rows; a removed favorite is gone.
+    sqlx::query("DELETE FROM tasks WHERE id = ?")
+        .bind(&tasks[1])
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        set("task", &tasks[0], "DELETE").await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set("task", &tasks[0], "DELETE").await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(titles(&cookie).await, ["Board"]);
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM favorites")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
 }

@@ -17,6 +17,7 @@ import { TriagePage } from '@/features/tasks/pages/TriagePage'
 import { CyclePage, CyclesPage } from '@/features/tasks/pages/CyclesPage'
 import { InsightsPage } from '@/features/tasks/pages/InsightsPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
+import { TaskArchivePage } from '@/features/tasks/pages/TaskArchivePage'
 import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
 import { DocsPage } from '@/features/docs/pages/DocsPage'
@@ -101,6 +102,7 @@ export default function App() {
               <Route path="tasks/projects/:projectId/cycles/:cycleId" element={<CyclePage />} />
               <Route path="tasks/:taskId" element={<TasksPage />} />
               <Route path="tasks-trash" element={<TaskTrashPage />} />
+              <Route path="tasks-archive" element={<TaskArchivePage />} />
               <Route path="views" element={<ViewsPage />} />
               <Route path="views/:viewId" element={<TasksPage />} />
               <Route path="views/:viewId/:taskId" element={<TasksPage />} />

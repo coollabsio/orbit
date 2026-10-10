@@ -183,6 +183,25 @@ test('multi-value, negative, nested, OR-rooted and unknown conditions give no de
   expect(createDefaultsFromFilter(effectiveFilter(emptyFilter(), { preset: 'mine' }), { ...target('p1'), currentUserId: '' }, tuesdayEvening)).toEqual({ project_id: 'p1' })
 })
 
+test('a label group gives one group for each of its labels and "No {group}"; a drop replaces the label', () => {
+  const grouped: GroupContext = {
+    ...ctx,
+    showEmpty: true,
+    labels: [{ ...label('label-bug', 'Bug'), group_id: 'group-type' }, { ...label('label-feat', 'Feature'), group_id: 'group-type' }, label('label-ui', 'UI')],
+    labelGroup: { id: 'group-type', name: 'Type' },
+  }
+  const tasks = [task('a', { labels: ['label-bug', 'label-ui'] }), task('b', { labels: ['label-ui'] }), task('c', { labels: ['label-feat'] })]
+  expect(groupTasks(tasks, 'label_group', grouped).map((group) => [group.label, group.tasks.map((item) => item.id)])).toEqual([
+    ['Bug', ['a']],
+    ['Feature', ['c']],
+    ['No Type', ['b']],
+  ])
+  expect(dropUpdate(tasks[0]!, 'label_group', 'label-bug', 'label-feat', grouped)).toEqual({ taskId: 'a', patch: { expected_version: 2, label_ids: ['label-ui', 'label-feat'] } })
+  // to "No Type": the label of the group goes
+  expect(dropUpdate(tasks[0]!, 'label_group', 'label-bug', null, grouped)).toEqual({ taskId: 'a', patch: { expected_version: 2, label_ids: ['label-ui'] } })
+  expect(dropUpdate(tasks[1]!, 'label_group', null, 'label-bug', grouped)).toEqual({ taskId: 'b', patch: { expected_version: 2, label_ids: ['label-ui', 'label-bug'] } })
+})
+
 const milestoneOf = (id: string, projectId: string, name: string) => ({
   id, workspace_id: 'workspace-1', project_id: projectId, name, status: 'planned', start_at: null, target_at: null,
   description_page_id: null, position: 0, completed_at: null, task_count: 0, task_done_count: 0, health: null,

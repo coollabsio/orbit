@@ -27,6 +27,7 @@ import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
 import { ConnectionBanner } from './ConnectionBanner'
+import { SidebarFavorites } from '@/features/favorites/SidebarFavorites'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
@@ -127,7 +128,7 @@ function Shell() {
         >
           <WorkspaceSwitcher collapsed={sidebarCollapsed} />
         </div>
-        <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} inboxUnread={inboxUnread} triageCount={triageCount} currentCyclePaths={currentCyclePaths} isRoot={isRoot} />
+        <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} inboxUnread={inboxUnread} triageCount={triageCount} currentCyclePaths={currentCyclePaths} isRoot={isRoot} favorites={<SidebarFavorites />} />
         <div
           className={cn(
             'flex shrink-0 items-center gap-2 border-t border-border pt-2',
@@ -168,7 +169,7 @@ function Shell() {
           <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
             <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
           </div>
-          <SidebarNav onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} inboxUnread={inboxUnread} triageCount={triageCount} currentCyclePaths={currentCyclePaths} isRoot={isRoot} />
+          <SidebarNav onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} inboxUnread={inboxUnread} triageCount={triageCount} currentCyclePaths={currentCyclePaths} isRoot={isRoot} favorites={<SidebarFavorites onNavigate={() => setDrawerOpen(false)} />} />
           <div className="flex shrink-0 items-center gap-2 border-t border-border pt-2">
             <UserMenu />
           </div>

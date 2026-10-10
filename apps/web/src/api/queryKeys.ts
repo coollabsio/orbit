@@ -63,9 +63,12 @@ export const queryKeys = {
   taskRelations: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'relations'] as const,
   labels: (workspaceId: string) => [...workspace(workspaceId), 'labels'] as const,
+  /** Under the labels prefix: a label change refreshes the groups and a group change the labels. */
+  labelGroups: (workspaceId: string) => [...workspace(workspaceId), 'labels', 'groups'] as const,
   commentAttachments: (workspaceId: string, taskId: string, commentId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments', commentId, 'attachments'] as const,
   taskTrash: (workspaceId: string) => [...workspace(workspaceId), 'tasks', 'trash'] as const,
+  taskArchive: (workspaceId: string, projectId: string | null) => [...workspace(workspaceId), 'tasks', 'archive', projectId] as const,
   projectTrash: (workspaceId: string) => [...workspace(workspaceId), 'projects', 'trash'] as const,
   workspaceTrash: (workspaceId: string) => [...workspace(workspaceId), 'trash'] as const,
   audit: (workspaceId: string) => [...workspace(workspaceId), 'audit'] as const,
@@ -77,6 +80,8 @@ export const queryKeys = {
   /** Saved views list; also the prefix of every `view` key (use `exact: true` to target only the list). */
   views: (workspaceId: string) => [...workspace(workspaceId), 'views'] as const,
   view: (workspaceId: string, viewId: string) => [...workspace(workspaceId), 'views', 'detail', viewId] as const,
+  /** The caller's favorite tasks and views. Under the views prefix: a view change (name, visibility, star) refreshes it. */
+  favorites: (workspaceId: string) => [...workspace(workspaceId), 'views', 'favorites'] as const,
   viewPreference: (workspaceId: string, pageKey: string) =>
     [...workspace(workspaceId), 'view-preferences', pageKey] as const,
   /** Under `tasks.all`, so every task mutation's existing invalidation and optimistic patch reaches it. */

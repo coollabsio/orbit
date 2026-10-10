@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import { Link, useNavigate, useParams } from 'react-router'
 import { Add as Plus, ArrowLeft, Chart as ChartIcon, Folder, Setting2 as Settings, Signpost, TaskSquare as SquareCheck } from 'reicon-react'
 import { ColorDot } from '@/components/common/ColorDot'
+import { FavoriteStar } from '@/features/favorites/FavoriteStar'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Modal } from '@/components/common/Modal'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
@@ -46,6 +47,7 @@ export function ProjectOverviewPage() {
           </Tip>
           {project ? <ColorDot color={project.color} /> : null}
           <PaneTitle render={<h1 />}>{project?.name ?? 'Project'}</PaneTitle>
+          {project ? <FavoriteStar workspaceId={workspace.id} kind="project" targetId={project.id} /> : null}
           {project ? (
             <div className="ml-auto flex items-center gap-1">
               <Link to={`/tasks/projects/${project.id}/insights`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>

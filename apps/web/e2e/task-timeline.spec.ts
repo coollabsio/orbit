@@ -39,7 +39,7 @@ test('drag a timeline bar, then open the task and come back to the same layout',
       return
     }
     // the shell's favorites sidebar lists saved views on every page
-    if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
+    if (/(?<!pages)\/favorites$/.test(path)) { await route.fulfill({ json: { items: [] } }); return }
     let body: unknown = { items: [], next_cursor: null }
     if (path.endsWith('/views')) body = []
     if (path.endsWith('/setup/status')) body = { complete: true }
@@ -95,7 +95,7 @@ test.describe('narrow screens', () => {
     await page.route('**/api/v1/**', async (route) => {
       const path = new URL(route.request().url()).pathname
       // the shell's favorites sidebar lists saved views on every page
-      if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
+      if (/(?<!pages)\/favorites$/.test(path)) { await route.fulfill({ json: { items: [] } }); return }
       let body: unknown = { items: [], next_cursor: null }
       if (path.endsWith('/views')) body = []
       if (path.endsWith('/setup/status')) body = { complete: true }

@@ -70,6 +70,7 @@ const REGISTRY = [
   { id: 'task.addRelation', title: 'Add relation', group: 'Task', keys: 'Mod+Shift+M', context: 'task-target' },
   { id: 'task.copyId', title: 'Copy task ID', group: 'Task', keys: 'Mod+.', context: 'task-target' },
   { id: 'task.copyLink', title: 'Copy task link', group: 'Task', keys: 'Mod+Shift+,', context: 'task-target' },
+  { id: 'task.favorite', title: 'Add to favorites', group: 'Task', keys: 'Alt+F', context: 'task-target' },
   { id: 'task.copyBranch', title: 'Copy git branch name', group: 'Task', keys: 'Mod+Shift+.', context: 'task-target' },
   { id: 'task.trash', title: 'Move to trash', group: 'Task', keys: 'Mod+Backspace', context: 'task-target' },
 

@@ -98,6 +98,8 @@ export interface Task {
   attachments: Attachment[]
   dueStartAt?: string | null
   dueAt: string | null
+  /** Set while the task is in the archive. */
+  archivedAt?: string | null
   createdAt: string
   updatedAt: string
   comments: TaskComment[]
@@ -106,6 +108,8 @@ export interface Task {
   duplicateOf?: TaskRef | null
   /** At least one open task (not completed, cancelled or duplicate) blocks this one. */
   blocked?: boolean
+  /** The tasks that this task blocks. */
+  blockingIds?: string[]
   /** Parent task id; null at the top level. */
   parentTaskId?: string | null
   /** A milestone of the task's project; null when the task has none. */
@@ -322,6 +326,7 @@ export function taskFromRecord(
     attachments: attachments.filter((attachment) => !attachment.comment_id).map(attachmentView),
     dueStartAt: record.due_start_at ?? null,
     dueAt: record.due_at ?? null,
+    archivedAt: record.archived_at ?? null,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     comments: comments.map((comment) => ({
@@ -363,6 +368,7 @@ export function taskFromRecord(
       ? { id: record.duplicate_of.id, projectId: record.duplicate_of.project_id, number: record.duplicate_of.number, title: record.duplicate_of.title }
       : null,
     blocked: record.blocked ?? false,
+    blockingIds: record.blocking_ids ?? [],
     parentTaskId: wire.parent_task_id ?? null,
     milestoneId: wire.milestone_id ?? null,
     cycleId: wire.cycle_id ?? null,

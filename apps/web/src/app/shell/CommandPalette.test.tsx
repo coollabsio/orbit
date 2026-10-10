@@ -21,6 +21,23 @@ function Location() {
 }
 
 let pageSearches: string[] = []
+let taskSearches: string[] = []
+const TASK = {
+  id: 'task-ship-it',
+  workspace_id: 'workspace-1',
+  project_id: 'project-1',
+  status_id: 'todo',
+  title: 'Ship the invite flow',
+  description: '',
+  position: 0,
+  priority: 'none',
+  assignee_ids: [],
+  creator_id: 'user-1',
+  label_ids: [],
+  created_at: '2026-09-05T10:00:00Z',
+  updated_at: '2026-09-05T10:00:00Z',
+  version: 1,
+}
 let recentPages: unknown[] = []
 
 const ran: string[] = []
@@ -36,6 +53,7 @@ function PageCommands({ target, children }: { target: boolean; children: ReactNo
 
 function setup(onClose = () => {}, target = false) {
   pageSearches = []
+  taskSearches = []
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.workspaces, [
@@ -63,24 +81,13 @@ function setup(onClose = () => {}, target = false) {
     if (url.includes('/teamspaces')) {
       return Response.json({ items: [{ id: 'teamspace-1', workspace_id: 'workspace-1', name: 'General', icon: null, position: 0, version: 1, is_default: true, created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z' }] })
     }
+    if (url.includes('/tasks/search')) {
+      taskSearches.push(new URL(url).searchParams.get('q') ?? '')
+      return Response.json({ items: [{ task: { ...TASK, id: 'task-found', title: 'Rotate the keys' }, snippet: 'the invite rollout plan' }] })
+    }
     if (url.includes('/tasks')) {
       return Response.json({
-        items: [{
-          id: 'task-ship-it',
-          workspace_id: 'workspace-1',
-          project_id: 'project-1',
-          status_id: 'todo',
-          title: 'Ship the invite flow',
-          description: '',
-          position: 0,
-          priority: 'none',
-          assignee_ids: [],
-          creator_id: 'user-1',
-          label_ids: [],
-          created_at: '2026-09-05T10:00:00Z',
-          updated_at: '2026-09-05T10:00:00Z',
-          version: 1,
-        }],
+        items: [TASK],
         next_cursor: null,
       })
     }
@@ -108,16 +115,19 @@ test('command palette never advertises disabled products or mock store titles', 
   }
 })
 
-test('searching a live task opens it in the active workspace', async () => {
+test('searching uses the ranked task search and opens the hit in the active workspace', async () => {
   const closed: string[] = []
   const view = setup(() => closed.push('closed'))
   const input = await view.findByPlaceholderText('Search tasks, pages and navigation…')
   await userEvent.type(input, 'invite')
-  const task = await view.findByRole('option', { name: /Ship the invite flow/ })
-  expect(view.queryByRole('option', { name: /Go to Home/ })).toBeNull()
+  // the title has no "invite": the server matched the description, and its snippet shows
+  const task = await view.findByRole('option', { name: /Rotate the keys/ })
+  expect(task.textContent).toContain('the invite rollout plan')
+  expect(taskSearches).toEqual(['invite'])
+  expect(view.queryAllByRole('option', { name: /Go to Home/ }).length).toBe(0)
   fireEvent.click(task)
   expect(closed).toEqual(['closed'])
-  expect(view.getByTestId('location').textContent).toBe('/tasks/task-ship-it')
+  expect(view.getByTestId('location').textContent).toBe('/tasks/task-found')
 })
 
 test('empty search shows enabled navigation and Escape closes the palette', async () => {

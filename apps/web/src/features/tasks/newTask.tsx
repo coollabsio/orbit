@@ -15,6 +15,8 @@ export interface NewTaskSource {
 
 interface NewTaskRequest {
   values?: GroupValues
+  /** Properties that go over the page's defaults, e.g. the due date of a calendar day. */
+  defaults?: Partial<CreateTaskBody>
   /** Text the dialog starts with, e.g. a task made from a chat message. */
   title?: string
   description?: string
@@ -31,7 +33,7 @@ export function NewTaskProvider({ children }: { children: ReactNode }) {
   const open = useCallback((request: NewTaskRequest = {}) => {
     const page = source.current
     setDialog((current) => current ?? {
-      defaults: page?.defaults(request.values ?? []) ?? {},
+      defaults: { ...page?.defaults(request.values ?? []), ...request.defaults },
       // the task page replaces the id with the identifier once the task loads
       onOpenTask: page?.onOpenTask ?? ((task) => navigate(taskPath({ id: task.id }))),
       title: request.title,

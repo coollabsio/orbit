@@ -98,6 +98,8 @@ test('task deletion retry returns to the task list after success', async () => {
     const path = new URL(request.url).pathname
     if (path.endsWith('/github-links') || path.endsWith('/relations')) return Response.json([])
     if (path.endsWith('/subscribers')) return Response.json({ user_ids: [] })
+    // the star in the header reads the caller's favorites
+    if (path.endsWith('/favorites')) return Response.json({ items: [] })
     // the projects list, the detail's sub-issues list, and the milestones and cycles of its pickers are reads,
     // not the delete under test
     if (request.method === 'GET' && /\/(projects|tasks|milestones|cycles)$/.test(path)) return Response.json({ items: [], next_cursor: null })

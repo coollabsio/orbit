@@ -10,14 +10,22 @@ import { Tip } from '@/components/common/Tip'
 import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS, TIMELINE_PROPERTIES } from '../displayMeta'
 
+/** A grouping choice: a `GroupBy`, or one label group as `label_group:<id>`. */
+type GroupChoice = Exclude<GroupBy, 'label_group'> | `label_group:${string}`
+const choiceOf = (group: GroupBy, labelGroupId: string | undefined): GroupChoice => group === 'label_group' ? `label_group:${labelGroupId ?? ''}` : group
+const groupOf = (choice: GroupChoice): Pick<DisplayOptions, 'label_group_id'> & { group: GroupBy } =>
+  choice.startsWith('label_group:') ? { group: 'label_group', label_group_id: choice.slice('label_group:'.length) } : { group: choice as GroupBy }
+
 export interface DisplayPopoverProps {
+  /** The label groups of the workspace: each one is a grouping choice. */
+  labelGroups?: Array<{ id: string; name: string }>
   display: DisplayOptions
   /** What "Reset to default" restores: DEFAULT_DISPLAY on pages, the saved display on a view. */
   defaultDisplay: DisplayOptions
   onChange: (patch: Partial<DisplayOptions>) => void
 }
 
-const GROUP_ORDER: GroupBy[] = ['status', 'assignee', 'priority', 'project', 'label', 'milestone', 'cycle', 'none']
+const GROUP_ORDER: Array<Exclude<GroupBy, 'label_group'>> = ['status', 'assignee', 'priority', 'project', 'label', 'milestone', 'cycle', 'none']
 
 const ORDER_LABEL: Record<OrderBy, string> = {
   manual: 'Manual',
@@ -91,7 +99,7 @@ function OptionSelect<T extends string>({ label, value, items, onChange, describ
 }
 
 /** Header "Display" button. `Shift+V` opens it (never while typing); keyboard opens skip the entrance animation. */
-export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPopoverProps) {
+export function DisplayPopover({ display, defaultDisplay, onChange, labelGroups = [] }: DisplayPopoverProps) {
   const [open, setOpen] = useState(false)
   const [instant, setInstant] = useState(false)
   useCommand('view.display', () => {
@@ -105,14 +113,27 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
     const layouts = LAYOUTS.map((layout) => layout.value)
     setLayout(layouts[(layouts.indexOf(display.layout) + 1) % layouts.length])
   })
-  const setGroup = (group_by: GroupBy) =>
-    onChange(group_by === 'none' || group_by === display.sub_group_by ? { group_by, sub_group_by: 'none' } : { group_by })
-  const groupItems = GROUP_ORDER.filter((group) => display.layout !== 'board' || group !== 'none').map((group) => ({ value: group, label: GROUP_LABEL[group] }))
-  const subItems = GROUP_ORDER.filter((group) => group !== display.group_by).map((group) => ({
-    value: group,
-    label: group === 'none' ? 'No sub-grouping' : GROUP_LABEL[group],
-  }))
+  // only one of group and sub-group can be a label group: they share `label_group_id`
+  const setGroup = (choice: GroupChoice) => {
+    const { group: group_by, label_group_id } = groupOf(choice)
+    const clearSub = group_by === 'none' || group_by === display.sub_group_by
+    onChange({ group_by, ...(clearSub ? { sub_group_by: 'none' as const } : {}), ...(label_group_id ? { label_group_id } : {}) })
+  }
+  const setSubGroup = (choice: GroupChoice) => {
+    const { group: sub_group_by, label_group_id } = groupOf(choice)
+    onChange({ sub_group_by, ...(label_group_id ? { label_group_id } : {}) })
+  }
+  const labelGroupItems = labelGroups.map((group) => ({ value: `label_group:${group.id}` as GroupChoice, label: group.name }))
+  const fixedItems = GROUP_ORDER.map((group) => ({ value: group as GroupChoice, label: GROUP_LABEL[group] }))
+  // the label groups go after "Label", before "No grouping"
+  const allItems = [...fixedItems.filter((item) => item.value !== 'none'), ...labelGroupItems, ...fixedItems.filter((item) => item.value === 'none')]
+  const groupItems = allItems.filter((item) => display.layout !== 'board' || item.value !== 'none')
+  const subItems = allItems
+    .filter((item) => groupOf(item.value).group !== display.group_by)
+    .map((item) => (item.value === 'none' ? { ...item, label: 'No sub-grouping' } : item))
   const timeline = display.layout === 'timeline'
+  // the calendar puts each task on its dates: no groups and no ordering
+  const calendar = display.layout === 'calendar'
   const flatOnly = display.layout !== 'list' && display.sub_issues === 'nested'
   const manual = display.order_by === 'manual'
   const ascending = display.order_direction === 'asc'
@@ -144,11 +165,11 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
             value={[display.layout]}
             onValueChange={(value: string[]) => {
               const next = value[0]
-              if (next === 'list' || next === 'board' || next === 'timeline') setLayout(next)
+              if (next === 'list' || next === 'board' || next === 'timeline' || next === 'calendar') setLayout(next)
             }}
           >
             {LAYOUTS.map(({ value, label, icon: Icon }) => (
-              <ToggleGroupItem key={value} value={value} className="flex-1 gap-1.5 font-normal text-muted-foreground aria-pressed:text-foreground">
+              <ToggleGroupItem key={value} value={value} className="flex-1 gap-1 px-1.5 font-normal text-muted-foreground aria-pressed:text-foreground">
                 <Icon className="size-3.5" aria-hidden="true" />
                 {label}
               </ToggleGroupItem>
@@ -156,16 +177,18 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
           </ToggleGroup>
         </div>
         <div className="flex flex-col gap-1 border-t p-3">
-          <Row label="Grouping">
-            <OptionSelect label="Grouping" value={display.group_by} items={groupItems} onChange={setGroup} />
-          </Row>
-          {!timeline && display.group_by !== 'none' ? (
+          {calendar ? null : (
+            <Row label="Grouping">
+              <OptionSelect label="Grouping" value={choiceOf(display.group_by, display.label_group_id)} items={groupItems} onChange={setGroup} />
+            </Row>
+          )}
+          {!timeline && !calendar && display.group_by !== 'none' ? (
             <Row label="Sub-grouping">
-              <OptionSelect label="Sub-grouping" value={display.sub_group_by} items={subItems} onChange={(sub_group_by) => onChange({ sub_group_by })} />
+              <OptionSelect label="Sub-grouping" value={choiceOf(display.sub_group_by, display.label_group_id)} items={subItems} onChange={setSubGroup} />
             </Row>
           ) : null}
           {/* Timeline rows always follow their dates, so an ordering would do nothing there. */}
-          {timeline ? null : (
+          {timeline || calendar ? null : (
             <Row label="Ordering">
               <div className="flex items-center gap-1">
                 <OptionSelect
@@ -201,7 +224,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
           {/* Board and timeline render Nested as Flat (spec §7.1): the value stays (it is saved with the view for the list) */}
           {flatOnly ? (
             <p id="display-sub-issues-hint" className="-mt-1 mb-1 w-40 self-end text-xs text-muted-foreground">
-              {timeline ? 'Timeline' : 'Board'} shows sub-issues flat
+              {LAYOUTS.find((layout) => layout.value === display.layout)?.label} shows sub-issues flat
             </p>
           ) : null}
           <Row label="Completed tasks">
@@ -210,6 +233,24 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
               value={display.show_completed}
               items={COMPLETED_OPTIONS.map((option) => ({ value: option, label: COMPLETED_LABEL[option] }))}
               onChange={(show_completed) => onChange({ show_completed })}
+            />
+          </Row>
+          {timeline ? (
+            <Row label="Dependency arrows">
+              <Switch
+                aria-label="Dependency arrows"
+                className="[&_[data-slot=switch-thumb]]:transition-none"
+                checked={display.timeline_arrows ?? true}
+                onCheckedChange={(checked: boolean) => onChange({ timeline_arrows: checked })}
+              />
+            </Row>
+          ) : null}
+          <Row label="Archived tasks">
+            <Switch
+              aria-label="Show archived tasks"
+              className="[&_[data-slot=switch-thumb]]:transition-none"
+              checked={display.show_archived ?? false}
+              onCheckedChange={(checked: boolean) => onChange({ show_archived: checked })}
             />
           </Row>
           <Row label="Show empty groups">

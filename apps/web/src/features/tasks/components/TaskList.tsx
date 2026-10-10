@@ -2,7 +2,8 @@ import { useTaskTarget, useVirtualTaskRows } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
-import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, Refresh2, Signpost, TaskSquare as SquareCheck, Tag, Weight, UserAdd, Xmark as X } from 'reicon-react'
+import { ArchiveBox, Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, Refresh2, Signpost, TaskSquare as SquareCheck, Tag, Weight, UserAdd, Xmark as X } from 'reicon-react'
+import { canArchive, useArchiveActions } from '@/features/tasks/useArchiveActions'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -447,6 +448,7 @@ function BulkBar({
 }) {
   const { workspace } = useWorkspace()
   const bulkTasks = useBulkTasks(workspace.id)
+  const archiveActions = useArchiveActions(workspace.id)
   const bulkSlow = useSlowPending(bulkTasks.isPending)
   const limitError = bulkTasks.error instanceof BulkTaskLimitError ? bulkTasks.error : null
 
@@ -459,7 +461,7 @@ function BulkBar({
   const bulkStatus = (key: string | null) => mutate(statusUpdates(tasks, statuses, key))
   const bulkPriority = (priority: Task['priority']) => mutate(priorityUpdates(tasks, priority))
   const bulkAssign = (userId: string) => mutate(assigneeToggleUpdates(tasks, userId))
-  const bulkLabel = (labelId: string) => mutate(labelToggleUpdates(tasks, labelId))
+  const bulkLabel = (labelId: string) => mutate(labelToggleUpdates(tasks, labelId, labels))
   // a milestone belongs to one project: offered only when the selection is in one project
   const milestones = sharedProjectMilestones(tasks, groupContext.milestones ?? [])
   const cycles = sharedProjectCycles(tasks, groupContext.cycles ?? [])
@@ -608,6 +610,9 @@ function BulkBar({
         <BulkAction icon={<Hierarchy2 aria-hidden />} label="Set parent" aria-label="Set parent…" title="Set parent…" onClick={onSetParent} />
         {tasks.some((task) => task.parentTaskId) ? (
           <BulkAction icon={<LinkBroken aria-hidden />} label="Remove parent" aria-label="Remove parent" title="Remove parent" onClick={onRemoveParent} />
+        ) : null}
+        {canArchive(tasks, statuses) ? (
+          <BulkAction icon={<ArchiveBox aria-hidden />} label="Archive" aria-label="Archive" title="Archive closed tasks" disabled={archiveActions.pending} onClick={() => void archiveActions.archive(tasks).then((done) => { if (done) onClear() })} />
         ) : null}
         {bulkSlow ? (
           <span role="status" className="flex shrink-0 items-center gap-1.5 px-2 text-xs whitespace-nowrap text-muted-foreground">

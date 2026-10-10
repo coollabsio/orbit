@@ -28,7 +28,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useMilestones } from '@/features/tasks/api/milestones'
 import { useAllCycles } from '@/features/tasks/api/cycles'
-import { useLabels } from '@/features/tasks/api/labels'
+import { useLabelGroups, useLabels } from '@/features/tasks/api/labels'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import { taskPath, taskSlug } from '@/lib/taskLinks'
 import {
@@ -66,6 +66,7 @@ import { createDefaultsFromFilter, type GroupContext } from '@/features/views/gr
 import { groupCreateFields, type GroupValues } from '@/features/views/layoutGroups'
 import { AdvancedFilterDialog } from '@/features/views/components/AdvancedFilterDialog'
 import { DisplayPopover } from '@/features/views/components/DisplayPopover'
+import { TaskCalendar } from '@/features/tasks/calendar/TaskCalendar'
 import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
 import { SaveViewDialog, type SaveViewMode } from '@/features/views/components/SaveViewDialog'
 import { ViewChanges } from '@/features/views/components/ViewChanges'
@@ -75,7 +76,7 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { useCreateTaskDefaults, useOpenNewTask } from '@/features/tasks/newTask'
 import { rebaseViewSessionEdit, useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
-import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
+import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset, type FilterGroup } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 const OPEN_WAIT_MS = 300
@@ -119,6 +120,7 @@ function WorkspaceTasksPage() {
   const statusesQuery = useAllStatuses(workspace.id, projects)
   const membersQuery = useMembers(workspace.id)
   const labelsQuery = useLabels(workspace.id)
+  const labelGroups = useLabelGroups(workspace.id).data ?? []
   const allMilestones = useMilestones(workspace.id).data
   const allCycles = useAllCycles(workspace.id, projects)
   const currentUser = useCurrentUser()
@@ -155,6 +157,14 @@ function WorkspaceTasksPage() {
   const openSaveDialog = (mode: SaveViewMode, instant = false) => setSaveDialog({ mode, instant })
   // the Views page's "New view" opens the Save view dialog on a task page, once
   const wantsSaveView = source.kind === 'page' && searchParams.get('save_view') === '1'
+  // a link can hand the page a filter to show (Settings > Labels: the tasks that stop a label from joining a group)
+  const handedFilter = source.kind === 'page' ? (location.state as { applyFilter?: FilterGroup } | null)?.applyFilter : undefined
+  const { setFilter: applyFilter, isLoading: viewStateLoading } = viewState
+  useEffect(() => {
+    if (!handedFilter || viewStateLoading) return
+    applyFilter(handedFilter)
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null })
+  }, [applyFilter, handedFilter, location.pathname, location.search, navigate, viewStateLoading])
   useEffect(() => {
     if (!wantsSaveView) return
     setSaveDialog({ mode: 'create', instant: false })
@@ -235,6 +245,7 @@ function WorkspaceTasksPage() {
     cycles,
     currentUserId: state.currentUserId,
     showEmpty: display.show_empty_groups,
+    labelGroup: labelGroups.find((group) => group.id === display.label_group_id) ?? null,
   }
   // collapsed groups are remembered per page (not part of the view state)
   const collapseScope = source.kind === 'view' ? `view:${source.viewId}` : source.pageKey
@@ -451,6 +462,7 @@ function WorkspaceTasksPage() {
             <TaskSearchBox value={search} onChange={setSearch} />
             <FilterButton filter={viewState.state.filter} options={filterOptions} onChange={viewState.setFilter} onOpenAdvanced={() => setAdvancedOpen(true)} />
             <DisplayPopover
+              labelGroups={labelGroups}
               display={display}
               // a view resets to its saved display (normalized like useViewState's dirty base), a page to the default
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
@@ -510,7 +522,7 @@ function WorkspaceTasksPage() {
             }}
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
-          <div className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
+          <div className={cn('min-h-0 flex-1', layout === 'timeline' || layout === 'calendar' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {tasksQuery.error || tasksQuery.isLoading ? (
               <div className="flex h-full flex-col p-2 *:flex-1">
                 {tasksQuery.error
@@ -520,7 +532,9 @@ function WorkspaceTasksPage() {
             ) : (
                 <TaskContextMenu tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} groupContext={groupContext} currentUserId={currentUser.data?.id ?? ''}>
                   {layout === 'timeline'
-                    ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
+                    ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} arrows={display.timeline_arrows ?? true} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
+                    : layout === 'calendar'
+                    ? <TaskCalendar key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} mode={display.calendar_mode ?? 'month'} onModeChange={(calendar_mode) => viewState.setDisplay({ calendar_mode })} onOpen={openTask} onCreate={(due_at) => openNewTask({ defaults: { due_at } })} />
                     : layout === 'board'
                     ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
                     : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labelsQuery.data ?? []} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => openNewTask({ values })} />}

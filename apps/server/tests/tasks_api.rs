@@ -3345,6 +3345,15 @@ async fn blocked_flag_follows_open_blockers() {
         .unwrap()
         .clone();
     assert_eq!(listed_blocked["blocked"], true);
+    // The list record of the blocker names the tasks it blocks (timeline arrows, no request for each task).
+    let listed_blocker = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == blocker["id"])
+        .unwrap();
+    assert_eq!(listed_blocker["blocking_ids"], json!([blocked["id"]]));
+    assert!(listed_blocked.get("blocking_ids").is_none());
 
     let (status, _) = call(
         &fixture,
@@ -4204,6 +4213,7 @@ async fn filter_data() -> FilterData {
             owner,
             "bug".to_owned(),
             "#ff0000".to_owned(),
+            None,
             "test",
             now,
         )
@@ -4216,6 +4226,7 @@ async fn filter_data() -> FilterData {
             owner,
             "ui".to_owned(),
             "#00ff00".to_owned(),
+            None,
             "test",
             now,
         )
@@ -4328,6 +4339,7 @@ async fn filtered(data: &FilterData, actor: Id, tree: &Value, now: i64) -> Vec<S
         order: SortOrder::Asc,
         parent_task_id: None,
         sub_issues: SubIssuesDisplay::Nested,
+        archived: Default::default(),
     };
     page_titles(&data.repo, data.workspace, actor, &filter, 100, now).await
 }
@@ -4504,7 +4516,9 @@ async fn filter_trees_match_every_field_and_operator() {
         // text: case-insensitive, LIKE wildcards are literal
         (only("text", "contains", json!("ALPHA")), vec!["Alpha"]),
         (only("text", "contains", json!("100%")), vec!["Delta"]),
-        (only("text", "contains", json!("%")), vec!["Delta"]),
+        // Fewer than 3 characters: a substring of the title only (Delta has "%" in its description).
+        (only("text", "contains", json!("%")), vec![]),
+        (only("text", "contains", json!("lt")), vec!["Delta"]),
         (only("text", "contains", json!("_ish")), vec!["Delta"]),
         // groups
         (
@@ -4647,6 +4661,7 @@ async fn show_completed_windows_use_completed_at() {
             order: SortOrder::Asc,
             parent_task_id: None,
             sub_issues: SubIssuesDisplay::Nested,
+            archived: Default::default(),
         };
         assert_eq!(
             page_titles(&repo, workspace, fixture.owner_id, &filter, 100, FILTER_NOW).await,
@@ -4705,6 +4720,7 @@ async fn due_date_order_keeps_empty_dates_last_across_pages() {
             order,
             parent_task_id: None,
             sub_issues: SubIssuesDisplay::Nested,
+            archived: Default::default(),
         };
         assert_eq!(
             page_titles(&repo, workspace, fixture.owner_id, &filter, 2, FILTER_NOW).await,
@@ -4720,6 +4736,7 @@ async fn due_date_order_keeps_empty_dates_last_across_pages() {
         order: SortOrder::Asc,
         parent_task_id: None,
         sub_issues: SubIssuesDisplay::Nested,
+        archived: Default::default(),
     };
     let now = TimestampMillis::from_millis(FILTER_NOW);
     let first = repo
@@ -6835,6 +6852,604 @@ async fn moving_a_task_between_projects_maps_its_status_and_renumbers_it() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn task_search_ranks_by_field_and_follows_default_visibility() {
+    let fixture = Fixture::new().await;
+    let key = project_key_of(&fixture, &fixture.project_id).await;
+    let tasks_uri = format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id);
+    let mut ids = Vec::new();
+    for (title, description) in [
+        ("Fix login", ""),
+        ("Rotate the keys", "The rollout plan is in the wiki"),
+        ("Rollout checklist", ""),
+        ("Trashed rollout", ""),
+    ] {
+        let (status, task) = call(
+            &fixture,
+            "POST",
+            &tasks_uri,
+            Some(json!({
+                "project_id": fixture.project_id,
+                "status_id": fixture.status_id,
+                "title": title,
+                "description": description
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        ids.push(id_of(&task).to_owned());
+    }
+    let (status, comment) = call(
+        &fixture,
+        "POST",
+        &format!("{tasks_uri}/{}/comments", ids[0]),
+        Some(json!({ "body": "Blocked until the rollout is done" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{tasks_uri}/{}?expected_version=0", ids[3]),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let search = async |text: &str| {
+        let (status, body) = call(
+            &fixture,
+            "GET",
+            &format!("{tasks_uri}/search?q={}", text.replace(' ', "%20")),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        body["items"].as_array().unwrap().clone()
+    };
+    let titles = |hits: &[Value]| -> Vec<String> {
+        hits.iter()
+            .map(|hit| hit["task"]["title"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // A prefix of each word; title above description above comments; the trashed task is hidden.
+    let hits = search("rollo").await;
+    assert_eq!(
+        titles(&hits),
+        ["Rollout checklist", "Rotate the keys", "Fix login"]
+    );
+    assert!(hits[0]["snippet"].is_null());
+    assert!(
+        hits[1]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("rollout plan"),
+        "{}",
+        hits[1]
+    );
+    assert!(
+        hits[2]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("until the rollout"),
+        "{}",
+        hits[2]
+    );
+    assert_eq!(titles(&search("ROLLOUT wik").await), ["Rotate the keys"]);
+    assert!(search("ollout").await.is_empty());
+    // The identifier comes first, before text matches.
+    assert_eq!(
+        titles(&search(&format!("{key}-2")).await),
+        ["Rotate the keys"]
+    );
+    // A short term is a title substring.
+    assert_eq!(titles(&search("ix").await), ["Fix login"]);
+
+    // The list filter uses the same index (comments too) and the same visibility.
+    let list = async |text: &str| {
+        let (status, page) =
+            call(&fixture, "GET", &format!("{tasks_uri}?search={text}"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let mut found: Vec<String> = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .collect();
+        found.sort();
+        found
+    };
+    assert_eq!(
+        list("rollout").await,
+        ["Fix login", "Rollout checklist", "Rotate the keys"]
+    );
+    assert_eq!(list("ro").await, ["Rollout checklist", "Rotate the keys"]);
+
+    // The index follows a comment delete and a task edit.
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!(
+            "{tasks_uri}/{}/comments/{}?expected_version=0",
+            ids[0],
+            id_of(&comment)
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(
+        &fixture,
+        "PATCH",
+        &format!("{tasks_uri}/{}", ids[2]),
+        Some(json!({ "expected_version": 0, "title": "Release checklist" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(titles(&search("rollout").await), ["Rotate the keys"]);
+
+    // A restored task is found again.
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("{tasks_uri}/{}/restore", ids[3]),
+        Some(json!({ "expected_version": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        titles(&search("rollout").await),
+        ["Trashed rollout", "Rotate the keys"]
+    );
+    orbit_platform::IntegrityService::new((*fixture.database).clone())
+        .full()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_task_has_one_label_of_a_group_and_a_label_joins_a_group_only_without_conflicts() {
+    let fixture = Fixture::new().await;
+    let base = format!("/api/v1/workspaces/{}", fixture.workspace_id);
+    let (status, group) = call(
+        &fixture,
+        "POST",
+        &format!("{base}/label-groups"),
+        Some(json!({"name": "Type", "color": "#112233"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{group}");
+    let group_id = id_of(&group).to_owned();
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("{base}/label-groups"),
+        Some(json!({"name": "Type", "color": "#112233"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let label = async |name: &str, group: Option<&str>| {
+        let (status, label) = call(
+            &fixture,
+            "POST",
+            &format!("{base}/labels"),
+            Some(json!({"name": name, "color": "#445566", "group_id": group})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{label}");
+        id_of(&label).to_owned()
+    };
+    let bug = label("Bug", Some(&group_id)).await;
+    let feature = label("Feature", Some(&group_id)).await;
+    let chore = label("Chore", None).await;
+    let urgent = label("Urgent", None).await;
+    let labels_of = |task: &Value| -> Vec<String> {
+        let mut ids: Vec<String> = task["label_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|id| id.as_str().unwrap().to_owned())
+            .collect();
+        ids.sort();
+        ids
+    };
+    let sorted = |ids: &[&String]| {
+        let mut ids: Vec<String> = ids.iter().map(|id| (*id).clone()).collect();
+        ids.sort();
+        ids
+    };
+
+    // Create: two labels of one group in the payload, the last one stays.
+    let (status, task) = call(
+        &fixture,
+        "POST",
+        &format!("{base}/tasks"),
+        Some(
+            json!({"project_id": fixture.project_id, "status_id": fixture.status_id, "title": "One",
+            "label_ids": [bug, urgent, feature]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let task_id = id_of(&task).to_owned();
+    let (_, task) = call(&fixture, "GET", &format!("{base}/tasks/{task_id}"), None).await;
+    assert_eq!(labels_of(&task), sorted(&[&urgent, &feature]));
+
+    // Single edit: the added label replaces the other label of the group, also when the
+    // client lists the old label after the new one.
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/tasks/{task_id}"),
+        Some(json!({"expected_version": task["version"], "label_ids": [bug, feature, urgent]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{task}");
+    assert_eq!(labels_of(&task), sorted(&[&urgent, &bug]));
+
+    // Bulk edit: the same rule.
+    let (status, body) = call(
+        &fixture,
+        "POST",
+        &format!("{base}/tasks/bulk"),
+        Some(
+            json!({"updates": [{"id": task_id, "expected_version": task["version"],
+            "label_ids": [bug, urgent, feature, chore]}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, task) = call(&fixture, "GET", &format!("{base}/tasks/{task_id}"), None).await;
+    assert_eq!(labels_of(&task), sorted(&[&urgent, &feature, &chore]));
+
+    // Chore cannot join the group while the task has Chore and Feature: 409 with the count,
+    // and no label is removed.
+    let patch_label = async |id: &str, name: &str, version: u64, group: Value| {
+        call(
+            &fixture,
+            "PATCH",
+            &format!("{base}/labels/{id}"),
+            Some(json!({"name": name, "color": "#445566", "expected_version": version, "group_id": group})),
+        )
+        .await
+    };
+    let (status, problem) = patch_label(&chore, "Chore", 0, json!(group_id)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "label_group_conflict");
+    assert_eq!(problem["conflict"]["count"], 1);
+    let (_, task) = call(&fixture, "GET", &format!("{base}/tasks/{task_id}"), None).await;
+    assert_eq!(labels_of(&task), sorted(&[&urgent, &feature, &chore]));
+    // Urgent is alone in its future group on that task, so it can join; then it replaces.
+    let (status, problem) =
+        patch_label(&urgent, "Urgent", 0, json!(Id::new_v7().to_string())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    // With the conflict gone the label joins, and a rename leaves the group as it is.
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/tasks/{task_id}"),
+        Some(json!({"expected_version": task["version"], "label_ids": [urgent, chore]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, joined) = patch_label(&chore, "Chore", 0, json!(group_id)).await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    assert_eq!(joined["group_id"], group_id);
+    assert_eq!(joined["group_name"], "Type");
+    let (status, renamed) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/labels/{chore}"),
+        Some(json!({"name": "Chores", "color": "#445566", "expected_version": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["group_id"], group_id);
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/tasks/{task_id}"),
+        Some(json!({"expected_version": task["version"], "label_ids": [urgent, chore, bug]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(labels_of(&task), sorted(&[&urgent, &bug]));
+
+    // A label leaves its group with null.
+    let (status, left) = patch_label(&chore, "Chores", 2, Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{left}");
+    assert_eq!(left["group_id"], Value::Null);
+
+    // Group rename, and delete: the labels stay with no group and both can be on a task.
+    let (status, renamed) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/label-groups/{group_id}"),
+        Some(json!({"name": "Kind", "color": "#112233", "expected_version": 0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    let (_, groups) = call(&fixture, "GET", &format!("{base}/label-groups"), None).await;
+    assert_eq!(groups["items"][0]["name"], "Kind");
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{base}/label-groups/{group_id}?expected_version=1"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, labels) = call(&fixture, "GET", &format!("{base}/labels"), None).await;
+    assert!(
+        labels["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|label| label["group_id"].is_null()),
+        "{labels}"
+    );
+    let (status, task) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/tasks/{task_id}"),
+        Some(json!({"expected_version": task["version"], "label_ids": [bug, feature]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(labels_of(&task), sorted(&[&bug, &feature]));
+}
+
+/// Makes a closed task (the "completed" status of the fixture project), closed `closed_at`.
+async fn closed_task(
+    fixture: &Fixture,
+    title: &str,
+    parent: Option<&str>,
+    closed_at: i64,
+) -> String {
+    let done: String = sqlx::query_scalar(
+        "SELECT id FROM task_statuses WHERE project_id = ? AND category = 'completed' LIMIT 1",
+    )
+    .bind(&fixture.project_id)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    let (status, task) = call(
+        fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({"project_id": fixture.project_id, "status_id": done, "title": title, "parent_task_id": parent})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let id = id_of(&task).to_owned();
+    sqlx::query("UPDATE tasks SET completed_at = ? WHERE id = ?")
+        .bind(closed_at)
+        .bind(&id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    id
+}
+
+async fn queried_titles(fixture: &Fixture, body: Value) -> Vec<String> {
+    let mut request = json!({"filter": {"op": "and", "children": []}, "order_by": "title",
+        "order_direction": "asc", "show_completed": "all"});
+    request
+        .as_object_mut()
+        .unwrap()
+        .extend(body.as_object().unwrap().clone());
+    let (status, page) = call(
+        fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks/query", fixture.workspace_id),
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn closed_trees_are_archived_together_hidden_by_default_and_restored() {
+    let fixture = Fixture::new().await;
+    let base = format!("/api/v1/workspaces/{}", fixture.workspace_id);
+    // Without this automation a closed sub-issue can stay below an open parent.
+    sqlx::query("UPDATE projects SET auto_close_parent = 0")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let parent = closed_task(&fixture, "Parent", None, 10).await;
+    let child = closed_task(&fixture, "Child", Some(&parent), 20).await;
+    let open_parent = id_of(&fixture.create_task("Open parent").await).to_owned();
+    let closed_child = closed_task(&fixture, "Closed child", Some(&open_parent), 30).await;
+    let lone = closed_task(&fixture, "Lone", None, 40).await;
+    let archive = async |ids: Value, path: &str| {
+        call(
+            &fixture,
+            "POST",
+            &format!("{base}/tasks/{path}"),
+            Some(json!({"task_ids": ids})),
+        )
+        .await
+    };
+
+    // A closed sub-issue does not go away from below an open parent, and nothing is archived
+    // when one tree of the request is open.
+    let (status, problem) = archive(json!([lone, closed_child]), "archive").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "archive_open_tree");
+    let (status, problem) = archive(json!([open_parent]), "archive").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(
+        queried_titles(&fixture, json!({"archived": "only"})).await,
+        Vec::<String>::new()
+    );
+
+    // The child brings its whole closed tree.
+    let (status, body) = archive(json!([child]), "archive").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["count"], 2);
+    let all = ["Closed child", "Lone", "Open parent"];
+    assert_eq!(queried_titles(&fixture, json!({})).await, all);
+    assert_eq!(
+        queried_titles(&fixture, json!({"archived": "only"})).await,
+        ["Child", "Parent"]
+    );
+    assert_eq!(
+        queried_titles(&fixture, json!({"archived": "include"})).await,
+        ["Child", "Closed child", "Lone", "Open parent", "Parent"]
+    );
+    // The legacy list and the search follow the default rule.
+    let (_, page) = call(&fixture, "GET", &format!("{base}/tasks?sort=title"), None).await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 3);
+    let (_, found) = call(
+        &fixture,
+        "GET",
+        &format!("{base}/tasks/search?q=parent"),
+        None,
+    )
+    .await;
+    let found: Vec<&str> = found["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["task"]["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(found, ["Open parent"]);
+
+    // A direct link opens the archived task; its sub-issues list and its counts stay.
+    let (status, read) = call(&fixture, "GET", &format!("{base}/tasks/{parent}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(read["archived_at"].is_string(), "{read}");
+    assert_eq!(read["sub_issue_count"], 1);
+    assert_eq!(read["sub_issue_closed_count"], 1);
+    assert_eq!(
+        queried_titles(&fixture, json!({"parent_task_id": parent})).await,
+        ["Child"]
+    );
+    // A new comment does not restore the task.
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("{base}/tasks/{parent}/comments"),
+        Some(json!({"body": "late note"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        queried_titles(&fixture, json!({"archived": "only"})).await,
+        ["Child", "Parent"]
+    );
+
+    // Restore brings the tree back; a second restore changes nothing.
+    let (status, body) = archive(json!([parent]), "unarchive").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["count"], 2);
+    assert_eq!(archive(json!([parent]), "unarchive").await.1["count"], 0);
+    assert_eq!(queried_titles(&fixture, json!({})).await.len(), 5);
+
+    // A move to an open status restores the archived tree.
+    assert_eq!(
+        archive(json!([parent, lone]), "archive").await.1["count"],
+        3
+    );
+    let (_, read) = call(&fixture, "GET", &format!("{base}/tasks/{child}"), None).await;
+    let (status, reopened) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/tasks/{child}"),
+        Some(json!({"expected_version": read["version"], "status_id": fixture.status_id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reopened}");
+    assert!(reopened.get("archived_at").is_none(), "{reopened}");
+    assert_eq!(
+        queried_titles(&fixture, json!({"archived": "only"})).await,
+        ["Lone"]
+    );
+    assert_eq!(
+        queried_titles(&fixture, json!({})).await,
+        ["Child", "Closed child", "Open parent", "Parent"]
+    );
+}
+
+#[tokio::test]
+async fn the_daily_job_archives_closed_trees_after_the_project_period() {
+    let fixture = Fixture::new().await;
+    let base = format!("/api/v1/workspaces/{}", fixture.workspace_id);
+    const DAY: i64 = 24 * 60 * 60 * 1000;
+    let now = TimestampMillis::from_millis(1_000 * DAY);
+    let old = now.as_millis() - 91 * DAY;
+    let recent = now.as_millis() - 80 * DAY;
+
+    let old_parent = closed_task(&fixture, "Old parent", None, old).await;
+    closed_task(&fixture, "Old child", Some(&old_parent), old).await;
+    // The most recent close time in the tree decides.
+    let mixed_parent = closed_task(&fixture, "Mixed parent", None, old).await;
+    closed_task(&fixture, "Mixed child", Some(&mixed_parent), recent).await;
+    // A tree with an open task stays.
+    let open_parent = closed_task(&fixture, "Parent of open", None, old).await;
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("{base}/tasks"),
+        Some(
+            json!({"project_id": fixture.project_id, "status_id": fixture.status_id,
+            "title": "Open child", "parent_task_id": open_parent}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run = async || {
+        orbit_server::repositories::archive::run_auto_archive(&fixture.database, now)
+            .await
+            .unwrap()
+    };
+
+    // Off by default.
+    assert_eq!(run().await, 0);
+
+    // The setting accepts 3, 6, 12 and null.
+    let project_uri = format!("{base}/projects/{}", fixture.project_id);
+    let (_, projects) = call(&fixture, "GET", &format!("{base}/projects"), None).await;
+    let project = projects["items"][0].clone();
+    let patch =
+        async |version: &Value, months: Value| {
+            call(
+            &fixture,
+            "PATCH",
+            &project_uri,
+            Some(json!({"name": project["name"], "key": project["key"], "color": project["color"],
+                "expected_version": version, "auto_archive_months": months})),
+        )
+        .await
+        };
+    let (status, _) = patch(&project["version"], json!(4)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, updated) = patch(&project["version"], json!(3)).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["auto_archive_months"], 3);
+
+    assert_eq!(run().await, 2);
+    assert_eq!(
+        queried_titles(&fixture, json!({"archived": "only"})).await,
+        ["Old child", "Old parent"]
+    );
+    assert_eq!(run().await, 0);
+
+    let (status, updated) = patch(&updated["version"], Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["auto_archive_months"], Value::Null);
 }
 
 #[tokio::test]

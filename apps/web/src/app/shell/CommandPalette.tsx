@@ -25,7 +25,7 @@ import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord } from '@/features/tasks/api/models'
-import { useTasks } from '@/features/tasks/api/tasks'
+import { useTasks, useTaskSearch } from '@/features/tasks/api/tasks'
 import { usePageSearch } from '@/features/docs/api/pages'
 import { useRecentPages } from '@/features/docs/api/pageOptions'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
@@ -141,8 +141,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const projects = useProjects(workspace.id)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const taskQuery = useTasks(workspace.id, { search: query || undefined, limit: 25 })
+  // the first tasks while the query is empty; the ranked server search once there is one
+  const taskQuery = useTasks(workspace.id, { limit: 25 })
   const debouncedQuery = useDebouncedValue(query, 250)
+  const taskSearch = useTaskSearch(workspace.id, debouncedQuery)
   const pageQuery = usePageSearch(workspace.id, debouncedQuery)
   const recentQuery = useRecentPages(workspace.id, !docsHidden)
   const recentCount = recentQuery.data?.length ?? 0
@@ -168,14 +170,24 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_views', icon: SquareCheck, title: 'Go to Views', meta: 'Navigation', to: '/views', command: 'nav.views', keywords: 'views saved filters' },
       { id: 'nav_shortcuts', icon: Settings, title: 'Go to Keyboard shortcuts', meta: 'Navigation', to: '/profile/shortcuts', keywords: 'keyboard shortcuts keys hotkeys customize' },
     ]
-    const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
-      id: t.id,
-      icon: SquareCheck,
-      title: t.title,
-      meta: t.identifier,
-      to: taskPath(t),
-      keywords: `${t.identifier} ${t.labels.join(' ')}`,
-    }))
+    // Only show search hits for the query they belong to (the debounced search lags the input).
+    const searching = query.trim().length > 0
+    const taskHits = searching
+      ? (debouncedQuery === query ? taskSearch.data ?? [] : [])
+      : (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((task) => ({ task, snippet: undefined }))
+    const tasks: CommandEntry[] = taskHits.map((hit) => {
+      const t = taskFromRecord(hit.task, projects.data?.find((project) => project.id === hit.task.project_id))
+      return {
+        id: t.id,
+        icon: SquareCheck,
+        title: t.title,
+        meta: t.identifier,
+        to: taskPath(t),
+        keywords: `${t.identifier} ${t.labels.join(' ')}`,
+        serverMatch: searching,
+        snippet: hit.snippet ? { text: hit.snippet, highlights: [] } : undefined,
+      }
+    })
     // Only show page hits for the query they belong to (the debounced search lags the input).
     const pages: CommandEntry[] = query.trim() && debouncedQuery === query
       ? (pageQuery.data ?? []).map((page) => ({
@@ -193,7 +205,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       : []
     if (docsHidden) return [...nav.filter((entry) => !entry.to?.startsWith('/docs')), ...tasks]
     return [...nav, ...pages, ...tasks]
-  }, [projects.data, taskQuery.data, pageQuery.data, teamspaces.data, query, debouncedQuery])
+  }, [projects.data, taskQuery.data, taskSearch.data, pageQuery.data, teamspaces.data, query, debouncedQuery])
 
   /** Recently opened pages, shown while the query is empty. */
   const recent = useMemo<CommandEntry[]>(

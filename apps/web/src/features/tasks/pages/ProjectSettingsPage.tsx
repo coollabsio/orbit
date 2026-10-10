@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { ArrowLeft, Check, Lock, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -256,6 +257,7 @@ export function ProjectSettingsPage() {
               <PrAutomationCard workspaceId={workspace.id} projectId={project.id} statuses={statuses} />
 
               <SubIssueSettingsCard project={project} />
+              <ArchiveSettingsCard project={project} />
 
               <EstimatesCard project={project} />
 
@@ -463,6 +465,49 @@ function SubIssueSettingsCard({ project }: { project: Project }) {
           Couldn’t save the sub-issue settings. <Button variant="ghost" size="xs" onClick={retry}>Retry</Button>
         </p>
       ) : null}
+    </SettingsCard>
+  )
+}
+
+const ARCHIVE_PERIODS = [
+  { value: 'off', label: 'Off' },
+  { value: '3', label: 'After 3 months' },
+  { value: '6', label: 'After 6 months' },
+  { value: '12', label: 'After 12 months' },
+]
+
+/** The automatic archive period of the project. Saves on change; the body repeats name/key/color, which the PATCH requires. */
+function ArchiveSettingsCard({ project }: { project: Project }) {
+  const { workspace } = useWorkspace()
+  const updateProject = useUpdateProject(workspace.id, project.id)
+  const value = project.auto_archive_months ? String(project.auto_archive_months) : 'off'
+  return (
+    <SettingsCard title="Archive" description="Closed tasks leave the lists and the search after this period. They are not deleted: the archive keeps them, and you can restore them.">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm font-medium text-foreground">Archive closed tasks automatically</span>
+          <span className="text-xs text-muted-foreground">A task is archived only when its parent and all its sub-issues are closed too.</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select
+            items={ARCHIVE_PERIODS}
+            value={value}
+            onValueChange={(next) => {
+              if (typeof next !== 'string' || next === value) return
+              updateProject.mutate({ name: project.name, key: project.key, color: project.color, expected_version: project.version, auto_archive_months: next === 'off' ? null : Number(next) })
+            }}
+          >
+            <SelectTrigger size="sm" className="w-44" aria-label="Archive closed tasks automatically" disabled={updateProject.isPending}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ARCHIVE_PERIODS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} to={`/tasks-archive?project=${project.id}`}>Open archive</Link>
+        </div>
+      </div>
+      {updateProject.isError ? <p role="alert" className="mt-2 text-xs text-destructive">Couldn’t save the archive period. Try again.</p> : null}
     </SettingsCard>
   )
 }

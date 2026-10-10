@@ -127,7 +127,7 @@ test('dragging a favorite keeps it mounted and saves the full order', async () =
   expect(beta.getAttribute('data-drop-edge')).toBe('before')
   fireEvent.drop(beta, { dataTransfer })
   expect(names(favoriteRows(view))).toEqual(['Alpha view', 'Beta view'])
-  await waitFor(() => expect(requests.find((request) => request.method === 'PUT')?.body).toEqual({ view_ids: ['view-a', 'view-b'] }))
+  await waitFor(() => expect(requests.find((request) => request.method === 'PUT')?.body).toEqual({ items: [{ kind: 'view', target_id: 'view-a' }, { kind: 'view', target_id: 'view-b' }] }))
 })
 
 test('dragging a favorite downward marks the drop below the target', () => {
@@ -146,7 +146,7 @@ test('Alt+Arrow keys reorder favorites from the keyboard', async () => {
   const requests = stubFetch((request) => (request.method === 'GET' ? Response.json([ALPHA, BETA]) : new Response(null, { status: 204 })))
   const { view } = renderWithProviders(<ViewsPage />, { views: [ALPHA, BETA] })
   fireEvent.keyDown(view.getByRole('link', { name: 'Beta view' }), { key: 'ArrowDown', altKey: true })
-  await waitFor(() => expect(requests.find((request) => request.method === 'PUT')?.body).toEqual({ view_ids: ['view-a', 'view-b'] }))
+  await waitFor(() => expect(requests.find((request) => request.method === 'PUT')?.body).toEqual({ items: [{ kind: 'view', target_id: 'view-a' }, { kind: 'view', target_id: 'view-b' }] }))
 })
 
 test('a search turns off reordering, which would send only part of the order', async () => {

@@ -988,3 +988,75 @@ async fn an_after_completion_routine_waits_for_its_last_task() {
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn a_task_from_a_payload_has_one_label_of_a_label_group() {
+    let fixture = Fixture::new().await;
+    let (status, group) = fixture
+        .call(
+            "POST",
+            &fixture.uri("/label-groups"),
+            Some(json!({"name": "Type", "color": "#112233"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{group}");
+    let mut labels = Vec::new();
+    for (name, grouped) in [("Bug", true), ("Feature", true), ("Urgent", false)] {
+        let (status, label) = fixture
+            .call(
+                "POST",
+                &fixture.uri("/labels"),
+                Some(json!({"name": name, "color": "#445566",
+                    "group_id": grouped.then(|| id_of(&group).to_owned())})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{label}");
+        labels.push(id_of(&label).to_owned());
+    }
+    // The payload names both labels of the group: the last one stays, as in a task edit.
+    let (status, task) = fixture
+        .call(
+            "POST",
+            &fixture.uri("/tasks/from-payload"),
+            Some(json!({"project_id": fixture.project_id,
+                "payload": {"title": "From a template", "label_ids": labels}})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let mut stored: Vec<String> =
+        sqlx::query_scalar("SELECT label_id FROM task_labels WHERE task_id = ?")
+            .bind(id_of(&task))
+            .fetch_all(fixture.database.pool())
+            .await
+            .unwrap();
+    stored.sort();
+    let mut expected = vec![labels[1].clone(), labels[2].clone()];
+    expected.sort();
+    assert_eq!(stored, expected);
+}
+
+#[tokio::test]
+async fn the_search_leaves_out_tasks_in_triage() {
+    let fixture = Fixture::new().await;
+    fixture.set_triage(true).await;
+    let waiting = fixture.github_issue(1, "open").await;
+    assert_eq!(fixture.category_of(&waiting).await, "triage");
+    let search = async || {
+        let (status, found) = fixture
+            .call("GET", &fixture.uri("/tasks/search?q=issue"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{found}");
+        found["items"].as_array().unwrap().len()
+    };
+    // The search follows the default visibility rule: a task in triage is not found.
+    assert_eq!(search().await, 0);
+    let (status, task) = fixture
+        .call(
+            "POST",
+            &fixture.uri(&format!("/tasks/{waiting}/triage")),
+            Some(json!({"expected_version": 0, "action": "accept"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{task}");
+    assert_eq!(search().await, 1);
+}

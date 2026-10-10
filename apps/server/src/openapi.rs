@@ -161,8 +161,15 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::create_label,
         crate::task_routes::update_label,
         crate::task_routes::delete_label,
+        crate::task_routes::list_label_groups,
+        crate::task_routes::create_label_group,
+        crate::task_routes::update_label_group,
+        crate::task_routes::delete_label_group,
         crate::task_routes::list_tasks,
         crate::task_routes::query_tasks,
+        crate::task_routes::search_tasks,
+        crate::task_routes::archive_tasks,
+        crate::task_routes::unarchive_tasks,
         crate::task_routes::get_task,
         crate::task_routes::list_task_relations,
         crate::task_routes::create_task_relation,
@@ -193,9 +200,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::view_routes::get_view,
         crate::view_routes::update_view,
         crate::view_routes::delete_view,
-        crate::view_routes::favorite_view,
-        crate::view_routes::unfavorite_view,
-        crate::view_routes::reorder_view_favorites,
+        crate::view_routes::list_favorites,
+        crate::view_routes::add_favorite,
+        crate::view_routes::remove_favorite,
+        crate::view_routes::reorder_favorites,
         crate::view_routes::get_view_preference,
         crate::view_routes::put_view_preference,
         crate::attachment_routes::list_task_attachments,
@@ -412,8 +420,10 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/milestones")
         || route.contains("/cycles")
         || route.contains("/labels")
+        || route.contains("/label-groups")
         || route.contains("/views")
         || route.contains("/view-")
+        || route.contains("/favorites")
         || route.contains("/pages")
         || route.contains("/teamspaces")
         || route.contains("/imports/")
@@ -725,7 +735,7 @@ fn unsafe_operation(operation_id: &str) -> bool {
         || operation_id.starts_with("download_")
         || matches!(
             operation_id,
-            "me" | "setup_status" | "export_global_audit" | "search_pages"
+            "me" | "setup_status" | "export_global_audit" | "search_pages" | "search_tasks"
         ))
 }
 
@@ -805,12 +815,18 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_label"
             | "update_label"
             | "delete_label"
+            | "create_label_group"
+            | "update_label_group"
+            | "delete_label_group"
             | "list_tasks"
             | "query_tasks"
+            | "search_tasks"
             | "create_task"
             | "update_task"
             | "create_task_relation"
             | "bulk_tasks"
+            | "archive_tasks"
+            | "unarchive_tasks"
             | "reorder_tasks"
             | "delete_task"
             | "restore_task"
@@ -823,7 +839,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "list_comment_attachments"
             | "create_view"
             | "update_view"
-            | "reorder_view_favorites"
+            | "reorder_favorites"
             | "put_view_preference"
             | "create_page"
             | "update_page"
@@ -961,8 +977,13 @@ fn task_operation(operation_id: &str) -> bool {
             | "create_label"
             | "update_label"
             | "delete_label"
+            | "list_label_groups"
+            | "create_label_group"
+            | "update_label_group"
+            | "delete_label_group"
             | "list_tasks"
             | "query_tasks"
+            | "search_tasks"
             | "get_task"
             | "list_task_relations"
             | "create_task_relation"
@@ -970,6 +991,8 @@ fn task_operation(operation_id: &str) -> bool {
             | "create_task"
             | "update_task"
             | "bulk_tasks"
+            | "archive_tasks"
+            | "unarchive_tasks"
             | "reorder_tasks"
             | "delete_task"
             | "restore_task"
@@ -991,6 +1014,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "list_labels"
             | "list_tasks"
             | "query_tasks"
+            | "search_tasks"
             | "list_task_trash"
             | "list_comments"
     ) {
@@ -1006,9 +1030,13 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "reorder_statuses"
             | "create_label"
             | "update_label"
+            | "create_label_group"
+            | "update_label_group"
             | "create_task"
             | "update_task"
             | "bulk_tasks"
+            | "archive_tasks"
+            | "unarchive_tasks"
             | "reorder_tasks"
             | "create_comment"
             | "update_comment"
@@ -1029,7 +1057,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "get_insight_throughput"
             | "get_insight_open"
             | "get_milestone_burnup"
-    ) || operation_id == "list_tasks"
+    ) || matches!(operation_id, "list_tasks" | "search_tasks")
     {
         add_code(responses, "422", "validation_failed");
     }
@@ -1045,6 +1073,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         "create_project"
             | "create_status"
             | "create_label"
+            | "create_label_group"
             | "create_task"
             | "create_comment"
             | "create_task_relation"
@@ -1060,6 +1089,8 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "reorder_statuses"
             | "update_label"
             | "delete_label"
+            | "update_label_group"
+            | "delete_label_group"
             | "update_task"
             | "bulk_tasks"
             | "reorder_tasks"
@@ -1082,6 +1113,12 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     ) {
         add_code(responses, "409", "task_conflict");
         add_code(responses, "409", "conflict");
+    }
+    if operation_id == "update_label" {
+        add_code(responses, "409", "label_group_conflict");
+    }
+    if operation_id == "archive_tasks" {
+        add_code(responses, "409", "archive_open_tree");
     }
     if operation_id == "create_template" {
         add_code(responses, "409", "task_conflict");
@@ -1114,9 +1151,10 @@ fn view_operation(operation_id: &str) -> bool {
             | "get_view"
             | "update_view"
             | "delete_view"
-            | "favorite_view"
-            | "unfavorite_view"
-            | "reorder_view_favorites"
+            | "list_favorites"
+            | "add_favorite"
+            | "remove_favorite"
+            | "reorder_favorites"
             | "get_view_preference"
             | "put_view_preference"
     )
@@ -1128,7 +1166,9 @@ fn view_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         operation_id,
         "create_view"
             | "update_view"
-            | "reorder_view_favorites"
+            | "add_favorite"
+            | "remove_favorite"
+            | "reorder_favorites"
             | "get_view_preference"
             | "put_view_preference"
     ) {

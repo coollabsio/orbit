@@ -6,6 +6,7 @@ import { apiClient } from '@/api/client'
 import type { createApiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
 import {
+  archiveTasks,
   bulkTasks,
   createAttachmentComment,
   createComment,
@@ -28,8 +29,11 @@ import {
   listTasks,
   putCommentReaction,
   putTaskSubscription,
+  queryTasks,
   reorderTasks,
   restoreTask,
+  unarchiveTasks,
+  searchTasks,
   updateComment,
   updateTask,
   uploadCommentAttachments,
@@ -121,6 +125,20 @@ export function useTasks(workspaceId: string, filters: TaskFilters = {}, exhaust
       : taskListPage(apiClient, workspaceId, filters, pageParam),
     getNextPageParam: nextTaskCursor,
     placeholderData: keepPreviousData,
+  })
+}
+
+/** Ranked server search over title, description and comments. Idle while the query is blank; debounce on the caller side. */
+export function useTaskSearch(workspaceId: string, query: string) {
+  const q = query.trim().slice(0, 200)
+  return useQuery({
+    queryKey: [...queryKeys.tasks.all(workspaceId), 'search', q] as const,
+    enabled: q.length > 0,
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const { data } = await searchTasks({ client: apiClient, path: { workspace_id: workspaceId }, query: { q }, throwOnError: true })
+      return required(data, 'Task search response was empty.').items
+    },
   })
 }
 
@@ -335,6 +353,50 @@ export function useTaskTrash(workspaceId: string) {
       })
       return page.items
     },
+  })
+}
+
+/** The archived tasks of the workspace, or of one project; the most recently updated first. */
+export function useTaskArchive(workspaceId: string, projectId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.taskArchive(workspaceId, projectId),
+    queryFn: async () => {
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await queryTasks({
+          client: apiClient,
+          path: { workspace_id: workspaceId },
+          body: {
+            filter: { op: 'and', children: projectId ? [{ field: 'project', operator: 'is', value: [projectId] }] : [] },
+            order_by: 'updated',
+            order_direction: 'desc',
+            show_completed: 'all',
+            archived: 'only',
+            cursor,
+            limit: 100,
+          },
+          throwOnError: true,
+        })
+        return required(data, 'Task archive response was empty.')
+      })
+      return page.items
+    },
+  })
+}
+
+/**
+ * Archive (`archive: true`) or restore tasks with their trees. A tree is archived only when each task of it is
+ * closed; the server refuses the whole request if one is open (409 `archive_open_tree`).
+ */
+export function useArchiveTasks(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ taskIds, archive }: { taskIds: string[]; archive: boolean }) => {
+      const request = { client: apiClient, path: { workspace_id: workspaceId }, body: { task_ids: taskIds }, throwOnError: true as const }
+      const { data } = archive ? await archiveTasks(request) : await unarchiveTasks(request)
+      return required(data, 'Archive response was empty.').count
+    },
+    // lists, the open task, the archive page and the favorites all show or hide the tasks
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) }),
   })
 }
 

@@ -21,7 +21,7 @@ const MANIFEST_FILE: &str = "manifest.json";
 /// Snapshots fetched from S3 for verify, download or restore.
 const DOWNLOADS: &str = "downloads";
 const DOWNLOAD_CACHE_MILLIS: u128 = 60 * 60 * 1000;
-const SUPPORTED_SCHEMA_VERSION: i64 = 52;
+const SUPPORTED_SCHEMA_VERSION: i64 = 53;
 /// Retention keeps up to this many snapshots from the last day, so a manual or hourly backup does not replace an
 /// earlier one from the same day.
 const RECENT_SNAPSHOTS: usize = 24;

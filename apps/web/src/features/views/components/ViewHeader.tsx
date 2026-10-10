@@ -4,7 +4,7 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { PaneTitle } from '@/components/common/Pane'
 import { buttonVariants } from '@/components/ui/button'
 import type { ViewStateController } from '../useViewState'
-import { FavoriteStar } from './FavoriteStar'
+import { FavoriteStar } from '@/features/favorites/FavoriteStar'
 import { ViewActionsMenu } from './ViewActionsMenu'
 import { ViewIcon } from './ViewIcon'
 
@@ -25,7 +25,7 @@ export function ViewHeader({ workspaceId, controller, onEdit, onDuplicate, onDel
       <div className="flex min-w-0 items-center gap-1.5 pl-1">
         <ViewIcon icon={view.icon} color={view.color} />
         <PaneTitle render={<h1 />}>{view.name}</PaneTitle>
-        <FavoriteStar workspaceId={workspaceId} view={view} />
+        <FavoriteStar workspaceId={workspaceId} kind="view" targetId={view.id} on={view.is_favorite} />
         <ViewActionsMenu workspaceId={workspaceId} view={view} onEdit={onEdit} onDuplicate={onDuplicate} onDeleted={onDeleted} />
       </div>
       <div className="flex-1" />

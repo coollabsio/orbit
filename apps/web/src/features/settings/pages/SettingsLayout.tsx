@@ -26,6 +26,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
       { to: '/settings/emoji', label: 'Emoji', icon: SmileCircle, permission: 'chat.manage' },
       { to: '/settings/stickers', label: 'Stickers', icon: Sticker, permission: 'chat.manage' },
       { to: '/settings/github', label: 'GitHub', icon: Link2 },
+      { to: '/tasks-archive', label: 'Archive', icon: ArchiveBox },
       { to: '/tasks-trash', label: 'Trash', icon: Trash2 },
     ],
   },

@@ -3,13 +3,10 @@ import { apiClient, type createApiClient } from '@/api/client'
 import {
   createView,
   deleteView,
-  favoriteView,
   getView,
   getViewPreference,
   listViews,
   putViewPreference,
-  reorderViewFavorites,
-  unfavoriteView,
   updateView,
 } from '@/api/generated/sdk.gen'
 import type { SavedViewRecord, ViewCreateBody, ViewUpdateBody } from '@/api/generated/types.gen'
@@ -158,65 +155,6 @@ export function useDeleteView(workspaceId: string) {
       queryClient.removeQueries({ queryKey: queryKeys.view(workspaceId, viewId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.views(workspaceId), exact: true })
     },
-  })
-}
-
-type ListSnapshot = { previous: SavedView[] | undefined }
-type FavoriteSnapshot = ListSnapshot & { previousView: SavedView | undefined }
-
-export function useSetFavorite(workspaceId: string) {
-  const queryClient = useQueryClient()
-  const listKey = queryKeys.views(workspaceId)
-  return useMutation<void, Error, { viewId: string; favorite: boolean }, FavoriteSnapshot>({
-    mutationFn: async ({ viewId, favorite }) => {
-      const path = { workspace_id: workspaceId, view_id: viewId }
-      if (favorite) await favoriteView({ client: apiClient, path, throwOnError: true })
-      else await unfavoriteView({ client: apiClient, path, throwOnError: true })
-    },
-    onMutate: async ({ viewId, favorite }) => {
-      const viewKey = queryKeys.view(workspaceId, viewId)
-      await Promise.all([queryClient.cancelQueries({ queryKey: listKey, exact: true }), queryClient.cancelQueries({ queryKey: viewKey })])
-      const previous = queryClient.getQueryData<SavedView[]>(listKey)
-      const previousView = queryClient.getQueryData<SavedView>(viewKey)
-      // like the server, a new favorite goes last (max + 1), so it does not jump in the sidebar when the list refetches
-      const positions = (previous ?? []).filter((view) => view.is_favorite && view.id !== viewId).map((view) => view.favorite_position ?? 0)
-      const position = favorite ? (positions.length > 0 ? Math.max(...positions) + 1 : 0) : null
-      const patch = { is_favorite: favorite, favorite_position: position }
-      queryClient.setQueryData<SavedView[]>(listKey, (views) =>
-        views?.map((view) => view.id === viewId ? { ...view, ...patch } : view))
-      // the open view's header star reads the detail query
-      queryClient.setQueryData<SavedView>(viewKey, (view) => view && { ...view, ...patch })
-      return { previous, previousView }
-    },
-    onError: (_error, { viewId }, snapshot) => {
-      if (snapshot?.previous) queryClient.setQueryData(listKey, snapshot.previous)
-      if (snapshot?.previousView) queryClient.setQueryData(queryKeys.view(workspaceId, viewId), snapshot.previousView)
-    },
-    // the list and the open view both carry `is_favorite`
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: listKey }),
-  })
-}
-
-export function useReorderFavorites(workspaceId: string) {
-  const queryClient = useQueryClient()
-  const listKey = queryKeys.views(workspaceId)
-  return useMutation<void, Error, string[], ListSnapshot>({
-    mutationFn: async (viewIds) => {
-      await reorderViewFavorites({ client: apiClient, path: { workspace_id: workspaceId }, body: { view_ids: viewIds }, throwOnError: true })
-    },
-    onMutate: async (viewIds) => {
-      await queryClient.cancelQueries({ queryKey: listKey, exact: true })
-      const previous = queryClient.getQueryData<SavedView[]>(listKey)
-      queryClient.setQueryData<SavedView[]>(listKey, (views) => views?.map((view) => {
-        const position = viewIds.indexOf(view.id)
-        return position === -1 ? view : { ...view, favorite_position: position }
-      }))
-      return { previous }
-    },
-    onError: (_error, _input, snapshot) => {
-      if (snapshot?.previous) queryClient.setQueryData(listKey, snapshot.previous)
-    },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: listKey, exact: true }),
   })
 }
 

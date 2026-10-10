@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        52
+        53
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 52
+            binary_version: 53
         }
     ));
 }
@@ -1634,7 +1634,7 @@ async fn views_migration_backfills_completed_at_and_creates_view_tables() {
             ("Duplicate".to_owned(), Some(40)),
         ]
     );
-    for table in ["saved_views", "saved_view_favorites", "view_preferences"] {
+    for table in ["saved_views", "favorites", "view_preferences"] {
         assert_eq!(
             database
                 .scalar::<i64>(&format!(
@@ -2434,4 +2434,180 @@ async fn task_subscribers_migration_merges_task_rows_moves_prefs_and_backfills()
         db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
         "ok"
     );
+}
+
+#[tokio::test]
+async fn find_and_organise_migration_indexes_tasks_and_moves_view_favorites() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 52)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        workspace,
+        membership,
+        project,
+        status,
+        plain,
+        commented,
+    ]: [Id; 7] = std::array::from_fn(|_| Id::new_v7());
+    let [first, second]: [Id; 2] = std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'Orbit', 0, '{membership}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{membership}', '{workspace}', '{user}', 'owner', 0, 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at)
+         VALUES ('{project}', '{workspace}', 'Engineering', 'ENG', '#000000', 0, NULL, 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at)
+         VALUES ('{status}', '{workspace}', '{project}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, creator_id, created_at, updated_at)
+         VALUES ('{plain}', '{workspace}', '{project}', '{status}', 'Über plan', 'Café notes', '{user}', 1, 1),
+                ('{commented}', '{workspace}', '{project}', '{status}', 'Deploy', '', '{user}', 2, 2);
+         INSERT INTO task_comments (id, workspace_id, task_id, author_id, body, created_at, updated_at)
+         VALUES ('{first}', '{workspace}', '{commented}', '{user}', 'the rollback failed', 3, 3),
+                ('{second}', '{workspace}', '{commented}', '{user}', 'retry tomorrow', 4, 4);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    // A view favourite under the old table moves to `favorites`.
+    let view = Id::new_v7();
+    db.execute(&format!(
+        "INSERT INTO saved_views (id, workspace_id, owner_user_id, name, visibility, state_json, created_at, updated_at)
+         VALUES ('{view}', '{workspace}', '{user}', 'Mine', 'personal', '{{}}', 1, 1);
+         INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) VALUES ('{view}', '{user}', 4, 9);"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, String, String, i64, i64)>(
+            "SELECT workspace_id, user_id, kind, target_id, position, created_at FROM favorites"
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap(),
+        [(
+            workspace.to_string(),
+            user.to_string(),
+            "view".to_owned(),
+            view.to_string(),
+            4,
+            9
+        )]
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM sqlite_master WHERE name = 'saved_view_favorites'")
+            .await
+            .unwrap(),
+        0
+    );
+
+    let matches = |query: &'static str| {
+        let db = &db;
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT task_search_rows.task_id FROM task_search \
+                 JOIN task_search_rows ON task_search_rows.id = task_search.rowid \
+                 WHERE task_search MATCH ?",
+            )
+            .bind(query)
+            .fetch_all(db.pool())
+            .await
+            .unwrap()
+        }
+    };
+    // Backfill: titles, descriptions and the joined comments, diacritics folded.
+    assert_eq!(matches("\"uber\"").await, [plain.to_string()]);
+    assert_eq!(matches("\"cafe\"*").await, [plain.to_string()]);
+    assert_eq!(
+        matches("comments : \"rollback\" \"retry\"").await,
+        [commented.to_string()]
+    );
+
+    // Task triggers: insert, repeated updates, delete.
+    let added = Id::new_v7();
+    db.execute(&format!(
+        "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at) \
+         VALUES ('{added}', '{workspace}', '{project}', '{status}', 'Zebra', '{user}', 5, 5)"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(matches("\"zebra\"").await, [added.to_string()]);
+    for title in ["Giraffe", "Okapi", "Tapir"] {
+        db.execute(&format!(
+            "UPDATE tasks SET title = '{title}', description = 'tall' WHERE id = '{added}'"
+        ))
+        .await
+        .unwrap();
+    }
+    assert!(matches("\"zebra\"").await.is_empty());
+    assert!(matches("\"okapi\"").await.is_empty());
+    assert_eq!(matches("\"tapir\" \"tall\"").await, [added.to_string()]);
+
+    // Comment triggers: insert, edit, delete.
+    let third = Id::new_v7();
+    db.execute(&format!(
+        "INSERT INTO task_comments (id, workspace_id, task_id, author_id, body, created_at, updated_at) \
+         VALUES ('{third}', '{workspace}', '{added}', '{user}', 'needs a ladder', 6, 6)"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(matches("\"ladder\"").await, [added.to_string()]);
+    db.execute(&format!(
+        "UPDATE task_comments SET body = 'needs a crane' WHERE id = '{third}'"
+    ))
+    .await
+    .unwrap();
+    assert!(matches("\"ladder\"").await.is_empty());
+    assert_eq!(matches("\"crane\"").await, [added.to_string()]);
+    db.execute(&format!("DELETE FROM task_comments WHERE id = '{first}'"))
+        .await
+        .unwrap();
+    assert!(matches("\"rollback\"").await.is_empty());
+    assert_eq!(matches("\"retry\"").await, [commented.to_string()]);
+
+    // FTS5's own check passes after repeated updates. `PRAGMA integrity_check` of the bundled
+    // SQLite 3.46.0 can report a false "malformed inverted index" here; `IntegrityService::full`
+    // (the scheduled job) confirms such a finding with FTS5's check and must accept the table.
+    db.execute("INSERT INTO task_search (task_search) VALUES ('integrity-check')")
+        .await
+        .unwrap();
+    orbit_platform::IntegrityService::new(db.clone())
+        .full()
+        .await
+        .unwrap();
+
+    // A task delete cascades to its comments; the index rows go with it.
+    db.execute(&format!(
+        "DELETE FROM tasks WHERE workspace_id = '{workspace}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM task_search")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM task_search_rows")
+            .await
+            .unwrap(),
+        0
+    );
+    db.execute("INSERT INTO task_search (task_search) VALUES ('integrity-check')")
+        .await
+        .unwrap();
 }

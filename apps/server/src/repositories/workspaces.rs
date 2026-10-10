@@ -1609,6 +1609,8 @@ impl WorkspaceRepository {
         let now = self.database.database_now().await?;
         self.purge_retention(now).await?;
         self.purge_attachment_files().await?;
+        // The same daily job archives the closed tasks of projects with an archive period.
+        super::archive::run_auto_archive(&self.database, now).await?;
         Ok(())
     }
 
