@@ -14,6 +14,6 @@ test('mobile task header wraps search without pushing action buttons off screen'
 
 test('task detail shows back arrow on mobile and close X on desktop', async () => {
   const detail = await Bun.file(new URL('./components/TaskDetail.tsx', import.meta.url)).text()
-  expect(detail).toContain('min-[900px]:hidden" onClick={onBack} aria-label="Back to tasks"')
-  expect(detail).toContain('max-[899px]:hidden" onClick={onBack} aria-label="Close task"')
+  expect(detail).toContain('@min-[660px]:hidden" onClick={onBack} aria-label="Back to tasks"')
+  expect(detail).toContain('@max-[659px]:hidden" onClick={onBack} aria-label="Close task"')
 })

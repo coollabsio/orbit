@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from './utils'
 import { InternalLinkContext } from './internalLinkContext'
 import { MarkdownTextContext } from './markdownTextContext'
+import { isAttachmentImagePath } from './attachmentLib'
 import { isMentionBoundary, mentionedUserId, type MentionToken } from './mentions'
 
 /* ---------- inline (the chat reference linkify / mentionify / renderMarkdownText) ---------- */
@@ -193,7 +194,11 @@ export const EMOJI_SHORTCODES: Record<string, string> = {
  * `chat`: the rules of Discord, where `__text__` is underline and `||text||` is a spoiler. Without it `__text__` is
  * bold, as in standard markdown, and `||` is text (`a || b` in a task is code, not a secret).
  */
-export type MarkdownOptions = { chat?: boolean }
+export type MarkdownOptions = {
+  chat?: boolean
+  /** With it a checklist item can be ticked in place: the line of the item in the text (0-based) and its new state. */
+  onToggleChecklist?: (line: number, checked: boolean) => void
+}
 
 /**
  * Inline markdown. A backslash before an ASCII punctuation character is an escape, as in standard markdown: the
@@ -204,7 +209,7 @@ export type MarkdownOptions = { chat?: boolean }
  */
 export function renderMarkdownText(text: string, keyPrefix: string, mentionTokens: MentionToken[] = [], options: MarkdownOptions = {}): React.ReactNode[] {
   const tokenRegex =
-    /(\\[!-/:-@[-`{-~]|<https?:\/\/[^\s<>]+>|<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\|\|.+?\|\||\*\*\*[^*]+?\*\*\*|\*\*(?!\*)(?:[^*]|\*(?!\*))+?\*\*|__(?!_)(?:[^_]|_(?!_))+?__|~~[^~]+?~~|\*[^*\s](?:[^*]|\*\*[^*]+?\*\*)*?\*(?!\*)|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
+    /(\\[!-/:-@[-`{-~]|<https?:\/\/[^\s<>]+>|<img\b[^>]*>|!\[[^\]\n]*\]\((?:https?:\/\/|\/api\/v1\/workspaces\/)[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\|\|.+?\|\||\*\*\*[^*]+?\*\*\*|\*\*(?!\*)(?:[^*]|\*(?!\*))+?\*\*|__(?!_)(?:[^_]|_(?!_))+?__|~~[^~]+?~~|\*[^*\s](?:[^*]|\*\*[^*]+?\*\*)*?\*(?!\*)|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let tokenIndex = 0
@@ -237,10 +242,11 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
     } else if (token.startsWith('<img') || token.startsWith('![')) {
       const htmlSource = token.match(/\ssrc\s*=\s*(["'])(.*?)\1/i)?.[2]
       const htmlAlt = token.match(/\salt\s*=\s*(["'])(.*?)\1/i)?.[2]
-      const markdownImage = token.match(/^!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)$/)
+      const markdownImage = token.match(/^!\[([^\]\n]*)\]\(((?:https?:\/\/|\/api\/v1\/workspaces\/)[^\s)]+)\)$/)
       const src = markdownImage?.[2] || htmlSource
       const alt = markdownImage?.[1] ?? htmlAlt ?? 'Image'
-      parts.push(src && /^https?:\/\//i.test(src)
+      // an absolute URL, or an attachment of this server (a pasted image); every other source stays text
+      parts.push(src && (/^https?:\/\//i.test(src) || (markdownImage !== null && isAttachmentImagePath(src)))
         ? <img key={key} src={src} alt={alt} loading="lazy" className="my-2 block h-auto max-w-full rounded-md" />
         : token)
     } else if (token.startsWith('[')) {
@@ -327,7 +333,16 @@ function renderList(lines: string[], start: number, keyPrefix: string, mentionTo
       <li key={`${keyPrefix}-item-${itemIndex}`} className={checklist ? 'list-none' : undefined}>
         {checklist ? (
           <span className="flex items-start gap-2">
-            <Checkbox checked={checklist[1].toLowerCase() === 'x'} disabled aria-label={checklist[2]} className="pointer-events-none mt-0.5" />
+            {options.onToggleChecklist ? (
+              <Checkbox
+                checked={checklist[1].toLowerCase() === 'x'}
+                aria-label={checklist[2]}
+                className="mt-0.5"
+                onCheckedChange={(checked: boolean) => options.onToggleChecklist?.(itemIndex, checked)}
+              />
+            ) : (
+              <Checkbox checked={checklist[1].toLowerCase() === 'x'} disabled aria-label={checklist[2]} className="pointer-events-none mt-0.5" />
+            )}
             <span>{renderMarkdownText(checklist[2], `${keyPrefix}-item-${itemIndex}`, mentionTokens, options)}</span>
           </span>
         ) : renderMarkdownText(item.content, `${keyPrefix}-item-${itemIndex}`, mentionTokens, options)}

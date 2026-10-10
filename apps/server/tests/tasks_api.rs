@@ -1128,7 +1128,7 @@ async fn github_issue_task_text_is_read_only_but_other_fields_can_change() {
     assert_eq!(changed["priority"], "high");
     assert_eq!(changed["title"], "GitHub title");
 
-    sqlx::query("INSERT INTO github_pull_links (workspace_id, repository, pull_number, task_id, title, url, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO github_pull_links (workspace_id, repository, pull_number, task_id, title, url, branch, state, closes, trusted, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'fix', ?, 1, 1, ?)")
         .bind(&fixture.workspace_id)
         .bind("owner/repo")
         .bind(8)
@@ -6819,4 +6819,90 @@ async fn moving_a_task_between_projects_maps_its_status_and_renumbers_it() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn pr_automation_rules_are_read_and_set_for_a_project_of_the_workspace() {
+    let fixture = Fixture::new().await;
+    let uri = format!(
+        "/api/v1/workspaces/{}/projects/{}/pr-automation",
+        fixture.workspace_id, fixture.project_id
+    );
+    let started = status_id_by_category(&fixture, &fixture.project_id, "started").await;
+    let get = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("GET", &uri, &fixture.owner_cookie))
+        .await
+        .unwrap();
+    assert_eq!(get.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(get).await,
+        json!([
+            {"event": "draft", "mode": "default", "status_id": null},
+            {"event": "open", "mode": "default", "status_id": null},
+            {"event": "review", "mode": "default", "status_id": null},
+            {"event": "merged", "mode": "default", "status_id": null}
+        ])
+    );
+    let put = |cookie: &str, body: Value| {
+        fixture
+            .app
+            .clone()
+            .oneshot(json_request("PUT", &uri, cookie, body))
+    };
+    let saved = put(
+        &fixture.owner_cookie,
+        json!([
+            {"event": "review", "mode": "status", "status_id": started},
+            {"event": "merged", "mode": "none"}
+        ]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved.status(), StatusCode::OK);
+    let saved = response_json(saved).await;
+    assert_eq!(saved[1]["mode"], "default");
+    assert_eq!(
+        saved[2],
+        json!({"event": "review", "mode": "status", "status_id": started})
+    );
+    assert_eq!(saved[3]["mode"], "none");
+
+    // A status of a different project, an unknown event and an unknown field are refused.
+    let other_workspace = create_workspace(&fixture, "Other").await;
+    let foreign: String =
+        sqlx::query_scalar("SELECT id FROM task_statuses WHERE workspace_id = ? LIMIT 1")
+            .bind(&other_workspace)
+            .fetch_optional(fixture.database.pool())
+            .await
+            .unwrap()
+            .unwrap_or_else(|| Id::new_v7().to_string());
+    for body in [
+        json!([{"event": "open", "mode": "status", "status_id": foreign}]),
+        json!([{"event": "approved", "mode": "none"}]),
+        json!([{"event": "open", "mode": "none", "extra": true}]),
+    ] {
+        let refused = put(&fixture.owner_cookie, body.clone()).await.unwrap();
+        assert!(refused.status().is_client_error(), "{body}");
+    }
+    // A member can set them, as the other project settings; a person outside cannot read them.
+    let (_, member_cookie) = add_member(&fixture, "member@example.com").await;
+    let by_member = put(&member_cookie, json!([{"event": "open", "mode": "none"}]))
+        .await
+        .unwrap();
+    assert_eq!(by_member.status(), StatusCode::OK);
+    let (outsider, outsider_cookie) = add_member(&fixture, "outsider@example.com").await;
+    sqlx::query("DELETE FROM memberships WHERE user_id = ?")
+        .bind(outsider.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let denied = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("GET", &uri, &outsider_cookie))
+        .await
+        .unwrap();
+    assert!(denied.status().is_client_error());
 }

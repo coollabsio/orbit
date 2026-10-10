@@ -29,6 +29,9 @@ export const queryKeys = {
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
   projects: (workspaceId: string) => [...workspace(workspaceId), 'projects'] as const,
+  /** Under the statuses key: a deleted status puts its event back to the default. */
+  prAutomation: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'statuses', 'pr-automation'] as const,
   statuses: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,
   comments: (workspaceId: string, taskId: string) =>
@@ -46,8 +49,11 @@ export const queryKeys = {
   projectTrash: (workspaceId: string) => [...workspace(workspaceId), 'projects', 'trash'] as const,
   workspaceTrash: (workspaceId: string) => [...workspace(workspaceId), 'trash'] as const,
   audit: (workspaceId: string) => [...workspace(workspaceId), 'audit'] as const,
-  notifications: (workspaceId: string, unread?: boolean) =>
-    [...workspace(workspaceId), 'notifications', { unread }] as const,
+  notifications: (workspaceId: string, unread?: boolean, state: 'inbox' | 'snoozed' | 'archived' = 'inbox') =>
+    [...workspace(workspaceId), 'notifications', { unread, state }] as const,
+  /** Under the task's detail key, so what refreshes the task refreshes who follows it. */
+  taskSubscribers: (workspaceId: string, taskId: string) =>
+    [...workspace(workspaceId), 'tasks', 'detail', taskId, 'subscribers'] as const,
   /** Saved views list; also the prefix of every `view` key (use `exact: true` to target only the list). */
   views: (workspaceId: string) => [...workspace(workspaceId), 'views'] as const,
   view: (workspaceId: string, viewId: string) => [...workspace(workspaceId), 'views', 'detail', viewId] as const,

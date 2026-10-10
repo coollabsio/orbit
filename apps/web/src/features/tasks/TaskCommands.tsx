@@ -18,7 +18,7 @@ import { GroupIcon } from '@/features/views/components/GroupIcon'
 import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { taskPath } from '@/lib/taskLinks'
+import { taskBranchName, taskPath } from '@/lib/taskLinks'
 import { focusTaskRow, focusedTaskId, useTaskTarget } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 
@@ -71,6 +71,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.assignMe', () => mutate(assignUpdates(targets(), currentUserId)), { available })
   useCommand('task.copyId', () => copy(targets()[0].identifier, 'Copied task ID'), { available: single })
   useCommand('task.copyLink', () => copy(`${window.location.origin}${taskPath(targets()[0])}`, 'Copied task link'), { available: single })
+  useCommand('task.copyBranch', () => copy(taskBranchName(targets()[0].identifier, targets()[0].title), 'Copied git branch name'), { available: single })
   // the open task has its own trash action, which also closes the page
   useCommand('task.trash', openTaskId ? null : async () => {
     if (await trashTasks(targets())) setSelected([])

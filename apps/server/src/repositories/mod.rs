@@ -1,6 +1,7 @@
 pub mod api_tokens;
 pub mod attachments;
 pub mod chat;
+pub mod github_pulls;
 pub mod identity;
 pub mod instance_settings;
 pub(crate) mod membership;
@@ -12,6 +13,9 @@ pub mod page_versions;
 pub mod pages;
 pub mod sub_issues;
 pub mod task_filter;
+pub mod task_mentions;
+pub mod task_notifications;
+pub mod task_reactions;
 pub mod task_relations;
 pub mod tasks;
 pub mod teamspaces;

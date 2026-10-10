@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test'
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Task } from '@/features/tasks/api/models'
 import { TaskTextFields } from './TaskTextFields'
@@ -168,4 +168,90 @@ test('Tab moves focus from a new task title to its description', () => {
   fireEvent.keyDown(title, { key: 'Tab' })
 
   expect(document.activeElement).toBe(view.getByLabelText('Description'))
+})
+
+// The rich editor (with `members`). Counts, not elements, inside waitFor: see src/test/waitForAbsence.ts.
+const richTask = (description: string) => task(1, 'Task', description)
+
+async function openRichEditor(description: string) {
+  const onUpdate = mock(() => {})
+  const view = render(<TaskTextFields task={richTask(description)} members={[]} onUpdate={onUpdate} />)
+  fireEvent.click(view.getByRole('textbox', { name: 'Description' }))
+  const editors = () => view.container.querySelectorAll('[data-slot="markdown-editor"]').length
+  const textareas = () => view.container.querySelectorAll('textarea[aria-label="Description"]').length
+  await waitFor(() => { if (editors() + textareas() === 0) throw new Error('the description editor did not open') })
+  return { view, onUpdate, editors, textareas }
+}
+
+test('a description that is opened and closed with no edit is not saved', async () => {
+  // the editor would write this text with other spelling (`*` bullets, a padded table): that is not an edit
+  const { view, onUpdate, editors } = await openRichEditor('* one\n* two\n\n| a   | b |\n| --- | --- |\n| 1 | 2 |')
+  expect(editors()).toBe(1)
+  fireEvent.blur(view.container.querySelector('[data-slot="markdown-editor"]')!)
+  await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
+  expect(onUpdate).not.toHaveBeenCalled()
+})
+
+test('Escape closes the rich editor and saves nothing', async () => {
+  const { view, onUpdate, editors } = await openRichEditor('Some text')
+  fireEvent.keyDown(view.container.querySelector('[data-slot="markdown-editor"]')!, { key: 'Escape' })
+  await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
+  expect(onUpdate).not.toHaveBeenCalled()
+})
+
+test('a description that the rich editor would change opens as plain markdown', async () => {
+  const { onUpdate, editors, textareas, view } = await openRichEditor('Use Vec<String> and __underline__ here.')
+  expect([editors(), textareas()]).toEqual([0, 1])
+  // the text is whole, and leaving the field without an edit saves nothing
+  const field = view.getByLabelText('Description') as HTMLTextAreaElement
+  expect(field.value).toBe('Use Vec<String> and __underline__ here.')
+  fireEvent.blur(field)
+  expect(onUpdate).not.toHaveBeenCalled()
+})
+
+test('a checklist tick in the read view saves that one item and opens no editor', async () => {
+  const onUpdate = mock(() => {})
+  const description = '- [ ] first\n- [x] second\n\n```\n- [ ] in code\n```'
+  const view = render(<TaskTextFields task={richTask(description)} members={[]} onUpdate={onUpdate} />)
+  fireEvent.click(view.getByRole('checkbox', { name: 'first' }))
+  expect(onUpdate).toHaveBeenCalledTimes(1)
+  expect(onUpdate).toHaveBeenCalledWith({ description: description.replace('- [ ] first', '- [x] first') })
+  expect(view.container.querySelectorAll('[data-slot="markdown-editor"], textarea[aria-label="Description"]')).toHaveLength(0)
+})
+
+test('a GitHub-synced description has no tick boxes to change', () => {
+  const onUpdate = mock(() => {})
+  const view = render(<TaskTextFields task={richTask('- [ ] first')} members={[]} readOnly onUpdate={onUpdate} />)
+  fireEvent.click(view.getByRole('checkbox', { name: 'first' }))
+  expect(onUpdate).not.toHaveBeenCalled()
+})
+
+/** The Tiptap editor behind the rich editor: Tiptap puts it on its DOM node. A command through it is a real edit. */
+function tiptapOf(container: HTMLElement) {
+  const editor = (container.querySelector('.ProseMirror') as (HTMLElement & { editor?: { commands: { focus: (at: string) => boolean; insertContent: (text: string) => boolean } } }) | null)?.editor
+  if (!editor) throw new Error('no editor on the page')
+  return editor
+}
+
+test('an edit in the rich editor is saved as markdown when the editor closes', async () => {
+  const { view, onUpdate, editors } = await openRichEditor('Hello\n\n- [ ] one')
+  const tiptap = tiptapOf(view.container)
+  tiptap.commands.focus('start')
+  tiptap.commands.insertContent('Oh, ')
+  // BlockNote reports the change after the transaction
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(onUpdate).not.toHaveBeenCalled()
+  fireEvent.blur(view.container.querySelector('[data-slot="markdown-editor"]')!)
+  await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
+  expect(onUpdate).toHaveBeenCalledTimes(1)
+  expect(onUpdate).toHaveBeenCalledWith({ description: 'Oh, Hello\n\n- [ ] one' })
+})
+
+test('Escape after an edit in the rich editor saves nothing', async () => {
+  const { view, onUpdate, editors } = await openRichEditor('Hello')
+  tiptapOf(view.container).commands.insertContent('changed ')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  fireEvent.keyDown(view.container.querySelector('[data-slot="markdown-editor"]')!, { key: 'Escape' })
+  await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
+  expect(onUpdate).not.toHaveBeenCalled()
 })

@@ -46,6 +46,7 @@ import {
 import { TaskBoard } from '@/features/tasks/components/TaskBoard'
 import { TaskContextMenu } from '@/features/tasks/components/TaskContextMenu'
 import { TaskDetail } from '@/features/tasks/components/TaskDetail'
+import { TaskPeek } from '@/features/tasks/components/TaskPeek'
 import { TaskList } from '@/features/tasks/components/TaskList'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
@@ -280,7 +281,30 @@ function WorkspaceTasksPage() {
   }, [basePath, canonicalSlug, detailProjectKey, detailRecord?.number, location.search, location.state, navigate, queryClient, taskId, taskParam, workspace.id])
 
   // Esc closes the task, unless it belongs to a field, an open menu or a dialog
-  useCommand('detail.close', detailOpen ? closeTask : null)
+  // The peek: a task beside the list. Its id is in the URL (`peek=`), so a reload and the back button keep it.
+  const peekId = detailOpen ? null : searchParams.get('peek')
+  const peeking = useRef<string | null>(null)
+  const setPeek = (id: string | null, replace: boolean) => {
+    peeking.current = id
+    const write = () => setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (id) next.set('peek', id)
+      else next.delete('peek')
+      return next
+    }, { replace })
+    if (!id) return write()
+    // the panel shows complete: wait for the task (at most OPEN_WAIT_MS), as for the full page
+    const wait = new Promise((resolve) => setTimeout(resolve, OPEN_WAIT_MS))
+    void Promise.race([prefetchTaskDetail(queryClient, workspace.id, id), wait]).then(() => {
+      if (peeking.current === id) write()
+    })
+  }
+  // Space shows the task of the row, and hides it again. Desktop only: a narrow window has no room beside the list.
+  const togglePeek = (id: string) => {
+    if (!window.matchMedia('(min-width: 900px)').matches) return
+    setPeek(id === peekId ? null : id, false)
+  }
+  useCommand('detail.close', detailOpen ? closeTask : peekId ? () => setPeek(null, false) : null)
   const stepTask = (step: 1 | -1) => {
     const ids = order.current.length > 0 ? order.current : visibleTasks.map((task) => task.id)
     const next = taskId ? ids[ids.indexOf(taskId) + step] : undefined
@@ -289,7 +313,12 @@ function WorkspaceTasksPage() {
   useCommand('detail.next', taskId ? () => stepTask(1) : null)
   useCommand('detail.prev', taskId ? () => stepTask(-1) : null)
   // list keys work in every layout; rows can be selected in the list only (it has the bulk toolbar)
-  useListNavigation(detailOpen ? null : openTask, { selectable: layout === 'list' })
+  useListNavigation(detailOpen ? null : openTask, {
+    selectable: layout === 'list',
+    onPeek: togglePeek,
+    // an open peek follows the keyboard focus; the steps do not fill the history
+    onMove: (id) => { if (peekId && id !== peekId) setPeek(id, true) },
+  })
 
   /** Starting properties of a new task; each group value wins over the filter default for its field. */
   const newTaskDefaults = (values: GroupValues) => {
@@ -484,6 +513,9 @@ function WorkspaceTasksPage() {
           </div>
         </Pane>
       )}
+      {peekId ? (
+        <TaskPeek taskId={peekId} projects={projects} state={state} onClose={() => setPeek(null, false)} onOpenTask={openTask} onOpenProject={(projectId) => navigate(`/tasks?project=${projectId}`)} />
+      ) : null}
     </div>
   )
 }

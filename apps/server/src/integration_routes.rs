@@ -21,6 +21,7 @@ use utoipa::ToSchema;
 use crate::audit::{self, AuditOutcome};
 use crate::auth_routes::{CookieMode, request_session};
 use crate::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
+use crate::repositories::github_pulls::GithubPull;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::membership;
 use crate::repositories::tasks::{
@@ -900,6 +901,30 @@ async fn github_webhook_from_database(
         .pointer("/installation/id")
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    // Links from the branch, title and body need no project connection and no label.
+    if event == "pull_request"
+        && matches!(
+            action,
+            "opened"
+                | "edited"
+                | "closed"
+                | "reopened"
+                | "synchronize"
+                | "ready_for_review"
+                | "converted_to_draft"
+                | "review_requested"
+                | "review_request_removed"
+        )
+        && let Some(pull) = github_pull(&payload, repository)
+    {
+        // A failure here must not stop the sync of the pull request's own task below.
+        if link_github_pull(state, &workspace, installation_id, &pull, id)
+            .await
+            .is_err()
+        {
+            tracing::warn!("GitHub pull request links were not updated");
+        }
+    }
     let connections = sqlx::query("SELECT project_id, label FROM github_project_connections WHERE workspace_id = ? AND repository = ? AND installation_id = ?")
         .bind(&workspace).bind(repository).bind(installation_id).fetch_all(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
     if connections.is_empty() {
@@ -1063,6 +1088,96 @@ async fn github_webhook_from_database(
             }
         })?;
     Ok(StatusCode::OK)
+}
+
+/// The pull request of a `pull_request` delivery. Its state comes from the payload fields, not
+/// from the action, so a repeated or out-of-order delivery gives the same result.
+fn github_pull(payload: &Value, repository: &str) -> Option<GithubPull> {
+    let item = payload.get("pull_request")?;
+    let text = |pointer: &str| item.pointer(pointer).and_then(Value::as_str).unwrap_or("");
+    let flag = |name: &str| item.get(name).and_then(Value::as_bool) == Some(true);
+    let any = |name: &str| {
+        item.get(name)
+            .and_then(Value::as_array)
+            .is_some_and(|list| !list.is_empty())
+    };
+    let number = item
+        .get("number")
+        .or_else(|| payload.get("number"))
+        .and_then(Value::as_i64)
+        .filter(|number| *number > 0)?;
+    let state = if flag("merged") {
+        "merged"
+    } else if text("/state") == "closed" {
+        "closed"
+    } else if flag("draft") {
+        "draft"
+    } else if any("requested_reviewers") || any("requested_teams") {
+        "in_review"
+    } else {
+        "open"
+    };
+    Some(GithubPull {
+        repository: repository.to_owned(),
+        number,
+        title: text("/title").trim().chars().take(500).collect(),
+        url: format!("https://github.com/{repository}/pull/{number}"),
+        branch: text("/head/ref").chars().take(255).collect(),
+        body: text("/body").to_owned(),
+        state,
+        trusted: matches!(
+            text("/author_association"),
+            "OWNER" | "MEMBER" | "COLLABORATOR"
+        ),
+    })
+}
+
+/// Links the pull request to the tasks it names, for an installation of the workspace.
+async fn link_github_pull(
+    state: &IntegrationState,
+    workspace: &str,
+    installation_id: i64,
+    pull: &GithubPull,
+    id: Option<&RequestId>,
+) -> Result<(), ApiError> {
+    let pool = state.tasks.database().pool();
+    let installed: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM github_installations WHERE installation_id = ? AND workspace_id = ?)",
+    )
+    .bind(installation_id)
+    .bind(workspace)
+    .fetch_one(pool)
+    .await
+    .map_err(|_| ApiError::internal(id))?;
+    if !installed || !valid_repository(&pull.repository) {
+        return Ok(());
+    }
+    let actor: Option<String> = sqlx::query_scalar(
+        "SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner' LIMIT 1",
+    )
+    .bind(workspace)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| ApiError::internal(id))?;
+    let Some(actor) = actor else {
+        return Ok(());
+    };
+    let workspace_id: Id = workspace.parse().map_err(|_| ApiError::internal(id))?;
+    let actor_id: Id = actor.parse().map_err(|_| ApiError::internal(id))?;
+    state
+        .tasks
+        .sync_github_pull_links(
+            workspace_id,
+            actor_id,
+            pull,
+            id.map_or("github-webhook", RequestId::as_str),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|cause| {
+            tracing::warn!(error = ?cause, "GitHub pull request link sync failed");
+            ApiError::internal(id)
+        })
 }
 
 async fn update_github_installation(

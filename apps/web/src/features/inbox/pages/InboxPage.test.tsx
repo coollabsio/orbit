@@ -27,11 +27,11 @@ test('activity lists assignment notifications and opens the linked task', async 
     const url = String(input instanceof Request ? input.url : input)
     if (url.includes('/notifications') && url.includes('unread=true')) return Response.json({ items: [{
       id: 'n1', workspace_id: 'workspace-1', recipient_user_id: 'me', actor_user_id: 'user-owner',
-      kind: 'task_assigned', task_id: 'task-9', comment_id: null, read_at: null, created_at: '2026-09-06T10:00:00Z',
+      kind: 'task_assigned', task_id: 'task-9', task_identifier: 'ENG-9', task_title: 'Assigned work', comment_id: null, read_at: null, created_at: '2026-09-06T10:00:00Z',
     }], next_cursor: null })
     if (url.includes('/notifications')) return Response.json({ items: [{
       id: 'n1', workspace_id: 'workspace-1', recipient_user_id: 'me', actor_user_id: 'user-owner',
-      kind: 'task_assigned', task_id: 'task-9', comment_id: null, read_at: null, created_at: '2026-09-06T10:00:00Z',
+      kind: 'task_assigned', task_id: 'task-9', task_identifier: 'ENG-9', task_title: 'Assigned work', comment_id: null, read_at: null, created_at: '2026-09-06T10:00:00Z',
     }], next_cursor: null })
     return new Response('missing', { status: 404 })
   }) as unknown as typeof fetch
@@ -47,12 +47,14 @@ test('activity lists assignment notifications and opens the linked task', async 
     </QueryClientProvider>,
   )
 
-  expect(await view.findByText('You were assigned a task')).toBeTruthy()
+  expect(await view.findByText('ENG-9 Assigned work')).toBeTruthy()
+  expect(view.getByText('Owner · assigned you')).toBeTruthy()
+  expect(view.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['All', 'Unread', 'Mentions', 'Snoozed', 'Archived'])
   let openedSidebar = false
   window.addEventListener('open-sidebar', () => { openedSidebar = true }, { once: true })
   fireEvent.click(view.getByRole('button', { name: 'Menu' }))
   expect(openedSidebar).toBe(true)
-  fireEvent.click(view.getByText('You were assigned a task'))
+  fireEvent.click(view.getByText('ENG-9 Assigned work'))
   await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/tasks/task-9?redirect=%2Factivity%3Fworkspace%3Dworkspace-1'))
 })
 

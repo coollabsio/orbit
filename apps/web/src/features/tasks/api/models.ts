@@ -1,6 +1,6 @@
 import type { User } from '@/features/workspaces/models'
 import { formatTaskIdentifier } from '@/lib/taskLinks'
-import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
+import type { AttachmentRecord, AuditEvent, CommentReaction, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
@@ -46,6 +46,8 @@ export interface TaskComment {
   parentId?: string
   attachments?: Attachment[]
   editedAt?: string | null
+  /** Emoji reactions, in the order the emoji were first used. */
+  reactions: { emoji: string; userIds: string[] }[]
   version: number
 }
 
@@ -195,6 +197,13 @@ function subIssueActivity(
   return null
 }
 
+/** A pull request that names the task was linked, or its reference was removed. */
+function pullRequestActivity(action: string, metadata: Record<string, unknown>): Pick<TaskActivity, 'text'> | null {
+  if (action !== 'task.pull_request_linked' && action !== 'task.pull_request_unlinked') return null
+  const pull = typeof metadata.repository === 'string' && typeof metadata.number === 'number' ? `${metadata.repository}#${metadata.number}` : 'a pull request'
+  return { text: action === 'task.pull_request_linked' ? `linked pull request ${pull}` : `unlinked pull request ${pull}` }
+}
+
 /**
  * The fields a `task.updated` event changed, one entry each. `null` for an event without the `changes`
  * metadata (recorded before the server sent it); an empty list when only a field with its own event changed.
@@ -309,6 +318,7 @@ export function taskFromRecord(
       body: comment.body,
       canEdit: comment.can_edit,
       canDelete: comment.can_delete,
+      reactions: (comment.reactions ?? []).map((reaction) => ({ emoji: reaction.emoji, userIds: reaction.user_ids })),
       createdAt: comment.created_at,
       parentId: comment.parent_id ?? undefined,
       editedAt: comment.updated_at === comment.created_at ? null : comment.updated_at,
@@ -320,7 +330,7 @@ export function taskFromRecord(
     activity: activity.flatMap((event): TaskActivity[] => {
       const metadata = (event.metadata ?? {}) as Record<string, unknown>
       const sentence: Pick<TaskActivity, 'text' | 'related' | 'statusId'> | null =
-        relationActivity(event.action, metadata, identifierOf) ?? subIssueActivity(event.action, metadata, identifierOf)
+        relationActivity(event.action, metadata, identifierOf) ?? subIssueActivity(event.action, metadata, identifierOf) ?? pullRequestActivity(event.action, metadata)
       const base: TaskActivity = {
         id: event.id,
         actorId: event.actor_id ?? '',
@@ -348,4 +358,19 @@ export function taskFromRecord(
     ancestors: (wire.ancestors ?? []).map(keyRef),
     version: record.version,
   }
+}
+
+/** The reactions of a comment after `userId` added (`on`) or removed `emoji`; what the server will answer. */
+export function toggleReaction(reactions: CommentReaction[], emoji: string, userId: string, on: boolean): CommentReaction[] {
+  const without = reactions
+    .map((reaction) => (reaction.emoji === emoji ? { ...reaction, user_ids: reaction.user_ids.filter((id) => id !== userId) } : reaction))
+  const known = without.some((reaction) => reaction.emoji === emoji)
+  const next = on
+    ? known
+      ? without.map((reaction) => (reaction.emoji === emoji ? { ...reaction, user_ids: [...reaction.user_ids, userId] } : reaction))
+      : [...without, { emoji, count: 0, reacted: false, user_ids: [userId] }]
+    : without
+  return next
+    .filter((reaction) => reaction.user_ids.length > 0)
+    .map((reaction) => ({ ...reaction, count: reaction.user_ids.length, reacted: reaction.user_ids.includes(userId) }))
 }

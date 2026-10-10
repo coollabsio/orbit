@@ -1,6 +1,7 @@
 import { confirmAction } from '@/components/common/confirmAction'
 import { keepPreviousData, queryOptions, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { taskAttachmentPath } from '@/lib/attachmentLib'
 import { apiClient } from '@/api/client'
 import type { createApiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
@@ -11,18 +12,22 @@ import {
   createTask,
   createTaskRelation,
   deleteComment,
+  deleteCommentReaction,
   deleteTask,
   deleteTaskAttachment,
   deleteTaskRelation,
   getTask,
+  listCommentAttachments,
   listComments,
   listGithubLinks,
   listTaskActivity,
-  listCommentAttachments,
   listTaskAttachments,
   listTaskRelations,
+  listTaskSubscribers,
   listTaskTrash,
   listTasks,
+  putCommentReaction,
+  putTaskSubscription,
   reorderTasks,
   restoreTask,
   updateComment,
@@ -43,6 +48,7 @@ import type {
   TaskUpdateBody,
   CommentRecord,
 } from '@/api/generated/types.gen'
+import { toggleReaction } from './models'
 import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed } from './autoClosed'
 import { isTaskVersionConflict } from './conflicts'
@@ -180,6 +186,14 @@ function taskDetailQueries(workspaceId: string, taskId: string | undefined) {
         return required(data, 'Task relations response was empty.')
       },
     }),
+    subscribers: queryOptions({
+      queryKey: queryKeys.taskSubscribers(workspaceId, id),
+      enabled,
+      queryFn: async () => {
+        const { data } = await listTaskSubscribers({ client: apiClient, path: { workspace_id: workspaceId, task_id: id }, throwOnError: true })
+        return required(data, 'Subscribers response was empty.').user_ids
+      },
+    }),
     subIssues: queryOptions({
       // under tasks.all: every task mutation's invalidation and optimistic patch reaches it
       queryKey: [...queryKeys.tasks.all(workspaceId), 'sub-issues', id],
@@ -212,6 +226,7 @@ export async function prefetchTaskDetail(queryClient: QueryClient, workspaceId: 
     queryClient.prefetchQuery(queries.attachments),
     queryClient.prefetchQuery(queries.relations),
     queryClient.prefetchQuery(queries.subIssues),
+    queryClient.prefetchQuery(queries.subscribers),
     queryClient.fetchQuery(queries.comments)
       .then((comments) => Promise.all(comments.map((comment) => queryClient.prefetchQuery(commentAttachmentsQuery(workspaceId, taskId, comment.id)))))
       .catch(() => undefined),
@@ -480,6 +495,23 @@ export async function bulkTaskDuplicateUpdates(client: ApiClient, workspaceId: s
   return required(data, 'Bulk task response was empty.')
 }
 
+/** The ids of the persons who get the later events of the task in their inbox. */
+export function useTaskSubscribers(workspaceId: string, taskId: string | undefined) {
+  return useQuery(taskDetailQueries(workspaceId, taskId).subscribers)
+}
+
+/** Subscribes the signed-in person to the task, or unsubscribes them. */
+export function useSetTaskSubscription(workspaceId: string, taskId: string) {
+  const queryClient = useQueryClient()
+  return useMutation<string[], Error, boolean>({
+    mutationFn: async (subscribed) => {
+      const { data } = await putTaskSubscription({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { subscribed }, throwOnError: true })
+      return required(data, 'Subscription response was empty.').user_ids
+    },
+    onSuccess: (userIds) => queryClient.setQueryData(queryKeys.taskSubscribers(workspaceId, taskId), userIds),
+  })
+}
+
 export function useTaskRelations(workspaceId: string, taskId: string | undefined) {
   return useQuery(taskDetailQueries(workspaceId, taskId).relations)
 }
@@ -542,9 +574,9 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
   const [remainingCount, setRemainingCount] = useState(0)
   const resume = useRef<{ signature: string; commentId: string; version: number; remaining: File[]; total: number } | null>(null)
   const mutation = useMutation({
-    mutationFn: async (input: { body: string; parentId?: string; files: File[]; mentionedUserIds?: string[] }) => {
-      const { body, parentId, files, mentionedUserIds = [] } = input
-      const signature = JSON.stringify([body, parentId ?? null, mentionedUserIds, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
+    mutationFn: async (input: { body: string; parentId?: string; files: File[] }) => {
+      const { body, parentId, files } = input
+      const signature = JSON.stringify([body, parentId ?? null, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
       if (resume.current && resume.current.signature !== signature) {
         await deleteComment({
           client: apiClient,
@@ -563,7 +595,7 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
         setRemainingCount(files.length)
         const mode = commentUploadMode(body, files.length)
         if (mode === 'text') {
-          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId, mentioned_user_ids: mentionedUserIds }, throwOnError: true })
+          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId }, throwOnError: true })
           comment = required(response.data, 'Create comment response was empty.')
         } else if (mode === 'attachment-only') {
           const [first, ...rest] = files
@@ -618,6 +650,31 @@ export function useUpdateTaskComment(workspaceId: string, taskId: string) {
   })
 }
 
+/** Adds the user's reaction to a comment, or removes it. The chip moves at once and goes back if the server refuses. */
+export function useToggleCommentReaction(workspaceId: string, taskId: string) {
+  const queryClient = useQueryClient()
+  const key = queryKeys.comments(workspaceId, taskId)
+  return useMutation({
+    mutationFn: async ({ commentId, emoji, on }: { commentId: string; emoji: string; on: boolean; userId: string }) => {
+      const request = { client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId, emoji }, throwOnError: true } as const
+      const { data } = on ? await putCommentReaction(request) : await deleteCommentReaction(request)
+      return required(data, 'Reaction response was empty.')
+    },
+    onMutate: async ({ commentId, emoji, on, userId }) => {
+      await queryClient.cancelQueries({ queryKey: key })
+      const previous = queryClient.getQueryData<CommentRecord[]>(key)
+      queryClient.setQueryData<CommentRecord[]>(key, (comments) =>
+        comments?.map((comment) => (comment.id === commentId ? { ...comment, reactions: toggleReaction(comment.reactions ?? [], emoji, userId, on) } : comment)))
+      return { previous }
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous)
+    },
+    onSuccess: (record) =>
+      queryClient.setQueryData<CommentRecord[]>(key, (comments) => comments?.map((comment) => (comment.id === record.id ? record : comment))),
+  })
+}
+
 export function useDeleteTaskComment(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -656,6 +713,19 @@ export function useUploadTaskAttachments(workspaceId: string, taskId: string) {
     onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) }),
   })
   return { ...mutation, progress, remainingCount, retry: () => mutation.mutate(remaining.current) }
+}
+
+/**
+ * Uploads an image that was pasted or dropped into a description or a comment, as an attachment of the task, and
+ * gives the path that the markdown image points to. The image is in the task's attachment list too.
+ */
+export function useUploadTaskImage(workspaceId: string, taskId: string) {
+  const queryClient = useQueryClient()
+  return useCallback(async (file: File): Promise<string> => {
+    const { data } = await uploadTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file }, throwOnError: true })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) })
+    return taskAttachmentPath(required(data, 'Upload response was empty.'))
+  }, [queryClient, taskId, workspaceId])
 }
 
 export function useDeleteTaskAttachment(workspaceId: string, taskId: string) {

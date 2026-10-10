@@ -5,7 +5,7 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::de::DeserializeOwned;
@@ -15,16 +15,19 @@ use sqlx::Row;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::{CookieMode, request_session};
+use crate::repositories::github_pulls::PrAutomationRule;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
     self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, OrderBy,
     OrderDirection, ShowCompleted, SubIssuesDisplay,
 };
+use crate::repositories::task_notifications::NotificationPatch;
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
-    CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
-    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, normalize_project_key,
+    CommentRecord, CreateTask, NotificationRecord, NotificationState, Page, ProjectAutomationPatch,
+    SortOrder, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
+    TaskUpdate, normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
 
@@ -76,6 +79,10 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}",
             patch(update_project).delete(delete_project),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/pr-automation",
+            get(get_pr_automation).put(put_pr_automation),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}/restore",
@@ -154,6 +161,10 @@ pub fn task_router(state: TaskState) -> Router {
             patch(update_comment).delete(delete_comment),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/reactions/{emoji}",
+            put(put_comment_reaction).delete(delete_comment_reaction),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/notifications",
             get(list_notifications),
         )
@@ -164,6 +175,18 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/notifications/{notification_id}/read",
             post(read_notification),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/notifications/{notification_id}",
+            patch(patch_notification),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscribers",
+            get(list_task_subscribers),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscription",
+            put(put_task_subscription),
         )
         .with_state(state)
 }
@@ -357,6 +380,53 @@ async fn update_project(
                 auto_close_sub_issues: body.auto_close_sub_issues,
             },
             body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/pr-automation", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Vec<PrAutomationRule>)))]
+async fn get_pr_automation(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<PrAutomationRule>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/pr-automation");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .pr_automation(workspace_id, project_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Sets the rule of each event in the body; an event that is not in the body stays as it is.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/pr-automation", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = Vec<PrAutomationRule>, responses((status = 200, body = Vec<PrAutomationRule>)))]
+async fn put_pr_automation(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<Vec<PrAutomationRule>>,
+) -> Result<Json<Vec<PrAutomationRule>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/pr-automation");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .set_pr_automation(
+            workspace_id,
+            project_id,
+            actor_id,
+            &body,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -1176,7 +1246,17 @@ pub struct GithubLink {
     kind: String,
     title: String,
     url: String,
+    /// A source link (the task is the issue or pull request): `active`, `paused`, or for a pull
+    /// request `open`, `closed`, `merged`. A linked pull request: `draft`, `open`,
+    /// `in_review`, `merged`, `closed`.
     state: String,
+    repository: String,
+    number: i64,
+    /// The rest is set for a linked pull request (`source` is false): its branch, whether it
+    /// closes the task, and whether its author can change the task status.
+    branch: Option<String>,
+    closes: Option<bool>,
+    trusted: Option<bool>,
     source: bool,
 }
 
@@ -1196,7 +1276,17 @@ pub(crate) async fn list_github_links(
         .get_task(workspace_id, task_id, actor_id)
         .await
         .map_err(|error| task_problem(error, instance.clone(), request_id.as_ref()))?;
-    let rows = sqlx::query("SELECT kind, repository || '#' || issue_number AS title, 'https://github.com/' || repository || CASE kind WHEN 'pull_request' THEN '/pull/' ELSE '/issues/' END || issue_number AS url, CASE WHEN sync_paused = 1 THEN 'paused' WHEN kind = 'pull_request' THEN pull_state ELSE 'active' END AS state, 1 AS source FROM github_issue_links WHERE workspace_id = ? AND task_id = ? UNION ALL SELECT 'pull_request' AS kind, title, url, state, 0 AS source FROM github_pull_links WHERE workspace_id = ? AND task_id = ? ORDER BY kind, title")
+    let rows = sqlx::query(
+        "SELECT kind, repository || '#' || issue_number AS title, 'https://github.com/' || repository \
+         || CASE kind WHEN 'pull_request' THEN '/pull/' ELSE '/issues/' END || issue_number AS url, \
+         CASE WHEN sync_paused = 1 THEN 'paused' WHEN kind = 'pull_request' THEN pull_state ELSE 'active' END AS state, \
+         1 AS source, repository, issue_number AS number, NULL AS branch, NULL AS closes, NULL AS trusted \
+         FROM github_issue_links WHERE workspace_id = ? AND task_id = ? \
+         UNION ALL SELECT 'pull_request' AS kind, title, url, state, 0 AS source, repository, \
+         pull_number AS number, branch, closes, trusted \
+         FROM github_pull_links WHERE workspace_id = ? AND task_id = ? \
+         ORDER BY source DESC, repository, number",
+    )
         .bind(workspace_id.to_string()).bind(task_id.to_string())
         .bind(workspace_id.to_string()).bind(task_id.to_string())
         .fetch_all(state.tasks.database().pool()).await
@@ -1208,6 +1298,11 @@ pub(crate) async fn list_github_links(
                 title: row.get("title"),
                 url: row.get("url"),
                 state: row.get("state"),
+                repository: row.get("repository"),
+                number: row.get("number"),
+                branch: row.get("branch"),
+                closes: row.get("closes"),
+                trusted: row.get("trusted"),
                 source: row.get::<i64, _>("source") != 0,
             })
             .collect(),
@@ -1595,8 +1690,6 @@ async fn list_task_trash(
 struct CommentBody {
     body: String,
     parent_id: Option<String>,
-    #[serde(default)]
-    mentioned_user_ids: Vec<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1645,7 +1738,6 @@ async fn create_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let parent_id = optional_id(body.parent_id, &instance, request_id.as_ref())?;
-    let mentioned_user_ids = parse_ids(body.mentioned_user_ids, &instance, request_id.as_ref())?;
     let body = message(
         body.body,
         100_000,
@@ -1662,12 +1754,63 @@ async fn create_comment(
             actor_id,
             parent_id,
             body,
-            mentioned_user_ids,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
         .await
         .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Adds the caller's reaction to a comment. `emoji` is a Unicode emoji, or `:name:` for a
+/// custom emoji of the workspace. A repeat changes nothing.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/reactions/{emoji}", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path), ("emoji" = String, Path)), responses((status = 200, body = crate::repositories::tasks::CommentRecord)))]
+async fn put_comment_reaction(
+    state: State<TaskState>,
+    path: Path<(String, String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<CommentRecord>, ApiError> {
+    set_comment_reaction(state, path, headers, request_id, true).await
+}
+
+/// Removes the caller's reaction from a comment. A repeat changes nothing.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/reactions/{emoji}", params(("workspace_id" = String, Path), ("task_id" = String, Path), ("comment_id" = String, Path), ("emoji" = String, Path)), responses((status = 200, body = crate::repositories::tasks::CommentRecord)))]
+async fn delete_comment_reaction(
+    state: State<TaskState>,
+    path: Path<(String, String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<CommentRecord>, ApiError> {
+    set_comment_reaction(state, path, headers, request_id, false).await
+}
+
+async fn set_comment_reaction(
+    State(state): State<TaskState>,
+    Path((workspace, task, comment, emoji)): Path<(String, String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    on: bool,
+) -> Result<Json<CommentRecord>, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace}/tasks/{task}/comments/{comment}/reactions/{emoji}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .set_comment_reaction(
+            workspace_id,
+            task_id,
+            comment_id,
+            actor_id,
+            &emoji,
+            on,
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
@@ -1742,6 +1885,10 @@ async fn delete_comment(
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct NotificationQuery {
+    /// `inbox` (the default), `snoozed` or `archived`.
+    #[serde(default)]
+    #[param(required = false, inline)]
+    state: NotificationState,
     #[serde(default)]
     unread: bool,
     cursor: Option<String>,
@@ -1771,9 +1918,11 @@ async fn list_notifications(
         .notifications(
             workspace_id,
             actor_id,
+            query.state,
             query.unread,
             query.cursor.as_deref(),
             query.limit,
+            TimestampMillis::now(),
         )
         .await
         .map(Json)
@@ -1801,6 +1950,108 @@ async fn read_notification(
         )
         .await
         .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct NotificationPatchBody {
+    read: Option<bool>,
+    /// A time in the future hides the notification from the inbox until then; `null` ends
+    /// the snooze.
+    #[serde(default, deserialize_with = "deserialize_due_patch")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    snoozed_until: Option<Option<TimestampMillis>>,
+    archived: Option<bool>,
+}
+
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/notifications/{notification_id}", request_body = NotificationPatchBody, params(("workspace_id" = String, Path), ("notification_id" = String, Path)), responses((status = 200, body = NotificationRecord)))]
+async fn patch_notification(
+    State(state): State<TaskState>,
+    Path((workspace, notification)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<NotificationPatchBody>,
+) -> Result<Json<NotificationRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/notifications/{notification}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let notification_id = parse_id(&notification, &instance, request_id.as_ref())?;
+    let patch = NotificationPatch {
+        read: body.read,
+        snoozed_until: body.snoozed_until,
+        archived: body.archived,
+    };
+    state
+        .tasks
+        .patch_notification(
+            workspace_id,
+            actor_id,
+            notification_id,
+            patch,
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Serialize, ToSchema)]
+struct TaskSubscribers {
+    /// The persons who get the later events of the task.
+    #[schema(value_type = Vec<String>)]
+    user_ids: Vec<Id>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscribers", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = TaskSubscribers)))]
+async fn list_task_subscribers(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<TaskSubscribers>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/subscribers");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .task_subscribers(workspace_id, task_id, actor_id)
+        .await
+        .map(|user_ids| Json(TaskSubscribers { user_ids }))
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct TaskSubscriptionBody {
+    subscribed: bool,
+}
+
+/// Subscribes the caller to the task, or unsubscribes them.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscription", request_body = TaskSubscriptionBody, params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = TaskSubscribers)))]
+async fn put_task_subscription(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TaskSubscriptionBody>,
+) -> Result<Json<TaskSubscribers>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/subscription");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .set_task_subscription(
+            workspace_id,
+            task_id,
+            actor_id,
+            body.subscribed,
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|user_ids| Json(TaskSubscribers { user_ids }))
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 

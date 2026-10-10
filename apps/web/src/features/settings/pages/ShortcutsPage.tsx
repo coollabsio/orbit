@@ -11,7 +11,7 @@ import { KeyRecorder } from '@/shortcuts/KeyRecorder'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useShortcutBindings } from '@/shortcuts/useShortcutBindings'
 
-const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Docs', 'Chat']
+const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Inbox', 'Docs', 'Chat']
 const ALL: readonly Command[] = COMMANDS
 
 /** What the page says under a row after a recording that could not be saved as it is. */

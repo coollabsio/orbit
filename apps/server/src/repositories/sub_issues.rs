@@ -9,6 +9,7 @@ use serde_json::json;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use utoipa::ToSchema;
 
+use super::task_notifications::{self, TaskEvent};
 use super::tasks::{TaskError, TaskRef, parse_id};
 use crate::audit::{self, AuditOutcome};
 
@@ -534,6 +535,19 @@ async fn close_in_tx(
         actor.request_id,
         metadata,
         actor.now,
+    )
+    .await?;
+    task_notifications::status_changed_in_tx(
+        tx,
+        TaskEvent {
+            workspace_id: actor.workspace_id,
+            actor: actor_id,
+            task_id,
+            now: actor.now,
+        },
+        from,
+        to,
+        &[],
     )
     .await?;
     auto_closed.push(AutoClosed {

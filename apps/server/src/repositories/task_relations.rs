@@ -7,6 +7,7 @@ use serde_json::json;
 use sqlx::{Row, Sqlite, Transaction};
 use utoipa::ToSchema;
 
+use super::task_notifications::{self, TaskEvent};
 use super::tasks::{
     TaskChanges, TaskError, TaskRepository, TaskUpdate, parse_id, record_mutation,
     require_access_tx, task_in_tx, update_task_in_tx,
@@ -651,6 +652,21 @@ impl TaskRepository {
                 .bind(existing_id.to_string())
                 .execute(&mut *tx)
                 .await?;
+            if existing_type == "blocks" {
+                let blocker = TaskEvent {
+                    workspace_id,
+                    actor: Some(actor_id),
+                    task_id: existing_source,
+                    now,
+                };
+                task_notifications::blocks_relation_changed_in_tx(
+                    &mut tx,
+                    blocker,
+                    existing_target,
+                    false,
+                )
+                .await?;
+            }
             record_relation_audit(
                 &mut tx,
                 workspace_id,
@@ -690,6 +706,16 @@ impl TaskRepository {
             now,
         )
         .await?;
+        if relation_type == "blocks" {
+            let blocker = TaskEvent {
+                workspace_id,
+                actor: Some(actor_id),
+                task_id: source,
+                now,
+            };
+            task_notifications::blocks_relation_changed_in_tx(&mut tx, blocker, target, true)
+                .await?;
+        }
         let record = relation_in_tx(&mut tx, workspace_id, task_id, id).await?;
         tx.commit().await?;
         Ok(record)
@@ -746,6 +772,16 @@ impl TaskRepository {
                 .bind(relation_id.to_string())
                 .execute(&mut *tx)
                 .await?;
+            if relation.relation_type == TaskRelationType::Blocks {
+                let blocker = TaskEvent {
+                    workspace_id,
+                    actor: Some(actor_id),
+                    task_id: source,
+                    now,
+                };
+                task_notifications::blocks_relation_changed_in_tx(&mut tx, blocker, target, false)
+                    .await?;
+            }
             let relation_type = match relation.relation_type {
                 TaskRelationType::Blocks => "blocks",
                 _ => "related",

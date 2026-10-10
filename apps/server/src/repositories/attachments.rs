@@ -11,7 +11,9 @@ use crate::audit::{self, AuditOutcome};
 
 use super::identity::AuthenticatedSession;
 use super::membership;
+use super::task_notifications::{self, TaskEvent};
 use super::tasks::CommentRecord;
+use crate::push::NotificationKind;
 
 const DAY_MILLIS: i64 = 24 * 60 * 60 * 1_000;
 
@@ -492,6 +494,28 @@ impl AttachmentRepository {
                 now,
             )
             .await?;
+            // A comment that is only a file: the author follows the task, the others hear of it.
+            task_notifications::subscribe_in_tx(
+                &mut transaction,
+                task_id,
+                &[session.user.id],
+                false,
+                now,
+            )
+            .await?;
+            task_notifications::notify_subscribers_in_tx(
+                &mut transaction,
+                TaskEvent {
+                    workspace_id,
+                    actor: Some(session.user.id),
+                    task_id,
+                    now,
+                },
+                NotificationKind::TaskCommented,
+                Some(id),
+                &[],
+            )
+            .await?;
             Some(CommentRecord {
                 id,
                 workspace_id,
@@ -502,6 +526,7 @@ impl AttachmentRepository {
                 can_edit: true,
                 can_delete: true,
                 version: 0,
+                reactions: Vec::new(),
                 created_at: now,
                 updated_at: now,
             })

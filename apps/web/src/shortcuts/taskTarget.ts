@@ -143,7 +143,16 @@ export function focusAdjacentColumn(card: HTMLElement, step: 1 | -1) {
 }
 
 /** Mounts the list commands: move the focus, open, and (in the list layout) select rows. */
-export function useListNavigation(onOpen: ((id: string) => void) | null, options: { selectable: boolean }) {
+export function useListNavigation(
+  onOpen: ((id: string) => void) | null,
+  options: {
+    selectable: boolean
+    /** Space on a row: show or hide the task beside the list. */
+    onPeek?: (id: string) => void
+    /** The focus moved to a row with the keyboard: an open peek follows it. */
+    onMove?: (id: string) => void
+  },
+) {
   const { setSelected } = useContext(TaskTargetContext)
   const pointer = useContext(TaskPointerContext)
   const enabled = onOpen !== null
@@ -159,6 +168,7 @@ export function useListNavigation(onOpen: ((id: string) => void) | null, options
     if (visible.length === 0) return null
     const next = index === -1 ? visible[0] : visible[Math.min(visible.length - 1, Math.max(0, index + step))]
     focusTaskRow(next, pointer)
+    options.onMove?.(next)
     return { from: index === -1 ? null : focused, to: next }
   }
   const extend = (step: 1 | -1) => {
@@ -180,6 +190,10 @@ export function useListNavigation(onOpen: ((id: string) => void) | null, options
   useCommand('list.open', enabled ? () => {
     const id = pointed()
     if (id) onOpen(id)
+  } : null)
+  useCommand('list.peek', enabled && options.onPeek ? () => {
+    const id = pointed()
+    if (id) options.onPeek?.(id)
   } : null)
   useCommand('list.select', selectable ? () => {
     const id = pointed()

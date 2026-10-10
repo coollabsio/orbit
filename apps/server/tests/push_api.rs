@@ -325,16 +325,20 @@ async fn a_notice_goes_to_the_active_tab_or_else_to_every_browser_and_respects_t
     hub.disconnect(fixture.workspace_id, tab.id, owner);
 
     // A kind the user turned off, and "do not disturb".
-    let prefs = json!({ "direct_messages": false, "chat_mentions": true, "thread_replies": true,
-        "channel_messages": true, "task_assigned": true, "mentions": true });
-    let (status, _) = fixture
-        .send(
+    let put = |prefs: Value| {
+        fixture.send(
             "PUT",
             "/api/v1/notification-preferences",
             &fixture.owner_cookie,
-            Some(prefs.clone()),
+            Some(prefs),
         )
-        .await;
+    };
+    let (status, _) = put(json!({ "no_such_category": false })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = put(json!({ "direct_messages": false, "mentions": false })).await;
+    assert_eq!(status, StatusCode::OK);
+    // A category that the body does not name stays as it is; on again removes the override.
+    let (status, _) = put(json!({ "mentions": true })).await;
     assert_eq!(status, StatusCode::OK);
     let (_, stored) = fixture
         .send(
@@ -344,7 +348,20 @@ async fn a_notice_goes_to_the_active_tab_or_else_to_every_browser_and_respects_t
             None,
         )
         .await;
-    assert_eq!(stored, prefs);
+    let stored = stored.as_array().unwrap();
+    assert_eq!(stored.len(), PushKind::ALL.len());
+    assert_eq!(
+        stored[0],
+        json!({ "category": "direct_messages", "label": "Direct messages", "enabled": false })
+    );
+    assert!(stored[1..].iter().all(|pref| pref["enabled"] == true));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM notification_pref_overrides")
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap(),
+        1
+    );
     push.notify(owner, PushKind::DirectMessages, &notice())
         .await
         .unwrap();
@@ -537,6 +554,138 @@ async fn inbox_notifications_are_pushed_once() {
     assert!(sent[0].1["icon"].is_null());
     assert_eq!(fixture.push.push_inbox().await.unwrap(), 0);
     assert!(fixture.sent().is_empty());
+}
+
+#[tokio::test]
+async fn each_subscriber_kind_is_pushed_once_and_its_toggle_stops_it() {
+    let fixture = Fixture::new().await;
+    let (_, ada_cookie) = fixture.member("ada").await;
+    fixture
+        .subscribe(&ada_cookie, "https://web.push.apple.com/ada")
+        .await;
+    let project: String = sqlx::query_scalar("SELECT id FROM projects LIMIT 1")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    let status = |category: &'static str| {
+        sqlx::query_scalar::<_, String>(
+            "SELECT id FROM task_statuses WHERE project_id = ? AND category = ? ORDER BY position LIMIT 1",
+        )
+        .bind(&project)
+        .bind(category)
+        .fetch_one(fixture.database.pool())
+    };
+    let (todo, done) = (
+        status("unstarted").await.unwrap(),
+        status("completed").await.unwrap(),
+    );
+    let tasks = format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id);
+    let create = |title: &'static str| {
+        fixture.send(
+            "POST",
+            &tasks,
+            &fixture.owner_cookie,
+            Some(json!({ "project_id": project, "status_id": todo, "title": title })),
+        )
+    };
+    let (_, task) = create("Ship the parser").await;
+    let (_, blocker) = create("Blocker").await;
+    let task_id = task["id"].as_str().unwrap();
+    let blocker_id = blocker["id"].as_str().unwrap();
+    let (subscribed, _) = fixture
+        .send(
+            "PUT",
+            &format!("{tasks}/{task_id}/subscription"),
+            &ada_cookie,
+            Some(json!({ "subscribed": true })),
+        )
+        .await;
+    assert_eq!(subscribed, StatusCode::OK);
+    // The title of the one push that the inbox service sends for what happened.
+    let pushed = || async {
+        fixture.push.push_inbox().await.unwrap();
+        let titles: Vec<String> = fixture
+            .sent()
+            .iter()
+            .map(|sent| sent.1["title"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(fixture.push.push_inbox().await.unwrap(), 0);
+        titles.join(", ")
+    };
+    let set_status = |id: &'static str, version: i64, status: String| {
+        let path = format!("{tasks}/{id}");
+        let fixture = &fixture;
+        async move {
+            let (code, body) = fixture
+                .send(
+                    "PATCH",
+                    &path,
+                    &fixture.owner_cookie,
+                    Some(json!({ "expected_version": version, "status_id": status })),
+                )
+                .await;
+            assert_eq!(code, StatusCode::OK, "{body}");
+        }
+    };
+    let task_id: &'static str = Box::leak(task_id.to_owned().into_boxed_str());
+    let blocker_id: &'static str = Box::leak(blocker_id.to_owned().into_boxed_str());
+
+    // Two events of one task before the service runs: one push, for the later event.
+    let comments = format!("{tasks}/{task_id}/comments");
+    let comment = || {
+        fixture.send(
+            "POST",
+            &comments,
+            &fixture.owner_cookie,
+            Some(json!({ "body": "hello" })),
+        )
+    };
+    assert_eq!(comment().await.0, StatusCode::CREATED);
+    set_status(task_id, 0, done.clone()).await;
+    assert_eq!(pushed().await, "Owner changed the status of a task");
+    assert_eq!(comment().await.0, StatusCode::CREATED);
+    assert_eq!(pushed().await, "Owner commented on a task");
+
+    let (code, _) = fixture
+        .send(
+            "POST",
+            &format!("{tasks}/{blocker_id}/relations"),
+            &fixture.owner_cookie,
+            Some(json!({ "type": "blocks", "task_id": task_id })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+    assert_eq!(pushed().await, "A task is now blocked");
+    set_status(blocker_id, 0, done.clone()).await;
+    assert_eq!(pushed().await, "A task is no longer blocked");
+
+    // Each toggle stops its kind; the inbox row is written all the same.
+    let (code, _) = fixture
+        .send(
+            "PUT",
+            "/api/v1/notification-preferences",
+            &ada_cookie,
+            Some(json!({ "task_comments": false, "task_status": false,
+                "task_blocked": false, "task_unblocked": false })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(comment().await.0, StatusCode::CREATED);
+    assert_eq!(pushed().await, "");
+    set_status(task_id, 1, todo.clone()).await;
+    assert_eq!(pushed().await, "");
+    set_status(blocker_id, 1, todo.clone()).await;
+    assert_eq!(pushed().await, "");
+    set_status(blocker_id, 2, done).await;
+    assert_eq!(pushed().await, "");
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT kind FROM notifications WHERE task_id = ?")
+            .bind(task_id)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap(),
+        "task_unblocked"
+    );
 }
 
 #[tokio::test]

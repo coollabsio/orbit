@@ -3,10 +3,10 @@ import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import {
   listNotifications,
+  patchNotification,
   readAllNotifications,
-  readNotification,
 } from '@/api/generated/sdk.gen'
-import type { NotificationRecord } from '@/api/generated/types.gen'
+import type { NotificationPatchBody, NotificationRecord } from '@/api/generated/types.gen'
 import { fetchAllPages } from '@/api/pagination'
 import { taskPath } from '@/lib/taskLinks'
 
@@ -15,15 +15,18 @@ function required<T>(data: T | undefined, message: string): T {
   return data
 }
 
-export function useNotifications(workspaceId: string, unread = false) {
+export type NotificationState = 'inbox' | 'snoozed' | 'archived'
+
+export function useNotifications(workspaceId: string, unread = false, state: NotificationState = 'inbox', enabled = true) {
   return useQuery({
-    queryKey: queryKeys.notifications(workspaceId, unread),
+    queryKey: queryKeys.notifications(workspaceId, unread, state),
+    enabled,
     queryFn: async () => {
       const page = await fetchAllPages(async (cursor) => {
         const { data } = await listNotifications({
           client: apiClient,
           path: { workspace_id: workspaceId },
-          query: { unread, cursor, limit: 100 },
+          query: { state, unread, cursor, limit: 100 },
           throwOnError: true,
         })
         return required(data, 'Notifications response was empty.')
@@ -50,20 +53,20 @@ export function useHasUnreadNotifications(workspaceId: string) {
   })
 }
 
-export function useMarkNotificationRead(workspaceId: string) {
+/** Read or unread, snooze (`snoozed_until: null` ends it) and archive, for one notification. */
+export function usePatchNotification(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (notificationId: string) => {
-      const { data } = await readNotification({
+    mutationFn: async ({ id, body }: { id: string; body: NotificationPatchBody }) => {
+      const { data } = await patchNotification({
         client: apiClient,
-        path: { workspace_id: workspaceId, notification_id: notificationId },
+        path: { workspace_id: workspaceId, notification_id: id },
+        body,
         throwOnError: true,
       })
-      return required(data, 'Read notification response was empty.')
+      return required(data, 'Notification response was empty.')
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) })
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...queryKeys.workspace(workspaceId), 'notifications'] }),
   })
 }
 
@@ -103,23 +106,48 @@ export function notificationTarget(notification: NotificationRecord): string | n
 
 /** Mentions in task comments, page comments, page bodies and chat. */
 export function isMention(notification: NotificationRecord): boolean {
-  return ['comment_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(notification.kind)
+  return ['comment_mentioned', 'task_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(notification.kind)
 }
 
+/** What happened, as the second line of a task row shows it after the actor. */
+const TASK_EVENTS: Record<string, string> = {
+  task_assigned: 'assigned you',
+  comment_mentioned: 'mentioned you in a comment',
+  task_mentioned: 'mentioned you in the description',
+  task_commented: 'commented',
+  task_status_changed: 'changed the status',
+  task_blocked: 'the task is now blocked',
+  task_unblocked: 'the task is no longer blocked',
+}
+
+/** The two lines of an inbox row. A task row is the task (identifier and title) and its latest event. */
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
+  if (notification.task_id) {
+    const title = notification.task_title?.trim() || 'Untitled'
+    return {
+      title: notification.task_identifier ? `${notification.task_identifier} ${title}` : title,
+      // a kind of a newer server
+      body: `${actorName ?? (notification.actor_user_id ? 'Someone' : 'GitHub')} · ${TASK_EVENTS[notification.kind] ?? 'updated the task'}`,
+    }
+  }
+  const body = (text: string) => (actorName ? `${actorName} · ${text}` : text)
   if (notification.kind === 'chat_mentioned') {
-    return { title: `${actorName ?? 'Someone'} mentioned you in chat`, body: 'Open the conversation to see the message.' }
+    return { title: `${actorName ?? 'Someone'} mentioned you in chat`, body: body('Open the conversation to see the message.') }
   }
+  const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`
   if (notification.kind === 'page_mentioned') {
-    const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`
-    return { title: `${actorName ?? 'Someone'} mentioned you in ${page}`, body: 'Open the page to see where.' }
+    return { title: `${actorName ?? 'Someone'} mentioned you in ${page}`, body: body('Open the page to see where.') }
   }
-  if (notification.kind === 'page_comment_mentioned') {
-    const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`
-    return { title: 'You were mentioned in a comment', body: `Someone mentioned you in a comment on ${page}.` }
-  }
-  if (notification.kind === 'comment_mentioned') {
-    return { title: 'You were mentioned', body: 'Someone mentioned you in a task comment.' }
-  }
-  return { title: 'You were assigned a task', body: 'A task was assigned to you.' }
+  return { title: 'You were mentioned in a comment', body: body(`Someone mentioned you in a comment on ${page}.`) }
+}
+
+/** The snooze choices at `now`: in an hour, tomorrow at 9:00 and next Monday at 9:00 (local time). */
+export function snoozePresets(now: Date): { label: string; until: Date }[] {
+  const morning = (daysAhead: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysAhead, 9)
+  return [
+    { label: 'In 1 hour', until: new Date(now.getTime() + 60 * 60 * 1000) },
+    { label: 'Tomorrow', until: morning(1) },
+    // Monday of the next week; on a Monday that is seven days ahead
+    { label: 'Next week', until: morning(((8 - now.getDay()) % 7) || 7) },
+  ]
 }

@@ -62,3 +62,20 @@ export function clipboardFiles(event: ClipboardEvent<HTMLElement>): File[] {
     return true
   })
 }
+
+const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+const ATTACHMENT_DOWNLOAD_PATH = new RegExp(`^/api/v1/workspaces/${ID}/tasks/${ID}/(?:comments/${ID}/)?attachments/${ID}/download$`, 'i')
+
+/**
+ * Whether `src` is the download path of a task attachment on this server. It is the only relative image source that
+ * markdown shows: an image pasted into a description or a comment is a task attachment. Nothing else that is not
+ * `http(s)` is an image source (no other path, no `data:` or `javascript:` URL).
+ */
+export function isAttachmentImagePath(src: string): boolean {
+  return ATTACHMENT_DOWNLOAD_PATH.test(src)
+}
+
+/** The download path of a task attachment, as `isAttachmentImagePath` accepts it. */
+export function taskAttachmentPath(attachment: { id: string; workspace_id: string; task_id: string }): string {
+  return `/api/v1/workspaces/${attachment.workspace_id}/tasks/${attachment.task_id}/attachments/${attachment.id}/download`
+}

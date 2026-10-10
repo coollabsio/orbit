@@ -2,8 +2,9 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { ArrowLeft, Calendar, Hierarchy2, Link2, Notification, Paperclip2 as Paperclip, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -31,7 +32,8 @@ import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/o
 import { useProjects } from '@/features/tasks/api/projects'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
-  subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask, useUploadTaskAttachments,
+  subIssuesQuery, useSetTaskSubscription, useSubIssues, useTaskGithubLinks, useTaskRelations, useTaskSubscribers, useUpdateTask, useUploadTaskImage,
+  useUploadTaskAttachments,
 } from '@/features/tasks/api/tasks'
 import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
@@ -59,10 +61,12 @@ interface TaskDetailProps {
   onOpenTask?: (taskId: string) => void
   /** Opens a project's task list (the breadcrumb's project crumb). */
   onOpenProject?: (projectId: string) => void
+  /** Shown beside a list (the peek panel): the list keeps the task shortcuts, so they act on its selection. */
+  peek?: boolean
 }
 
 /** Full-page task view: main column (title, description, activity, comment composer) + properties column. */
-export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenProject }: TaskDetailProps) {
+export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenProject, peek = false }: TaskDetailProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const uploadAttachments = useUploadTaskAttachments(workspace.id, task?.id ?? '')
@@ -77,6 +81,11 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
   const githubIssueLinked = githubLinks.data?.some((link) => link.source) ?? false
   const moveToProject = useMoveToProject(workspace.id)
   const users = state.users
+  const uploadImage = useUploadTaskImage(workspace.id, task?.id ?? '')
+  const subscribers = useTaskSubscribers(workspace.id, task?.id)
+  const setSubscription = useSetTaskSubscription(workspace.id, task?.id ?? '')
+  const subscribedUsers = users.filter((u) => subscribers.data?.includes(u.id))
+  const subscribed = subscribers.data?.includes(state.currentUserId) ?? false
   const fileInputRef = useRef<HTMLInputElement>(null)
   // the date panel needs to close itself from Clear, so the popover stays controlled
   const [dueDateOpen, setDueDateOpen] = useState(false)
@@ -144,15 +153,17 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
     if (!await confirmAction({ title: `Move ${task.identifier} to trash?`, description: trashConfirmDescription(below), confirmLabel: 'Move to trash', danger: true })) return
     void deleteAndClose({ taskId: task.id, version: task.version })
   }
-  useCommand('task.trash', task ? () => void trash() : null)
-  useCommand('task.addSubIssue', task ? () => setComposingSubIssue(true) : null)
+  useCommand('task.trash', task && !peek ? () => void trash() : null)
+  useCommand('task.addSubIssue', task && !peek ? () => setComposingSubIssue(true) : null)
   const [relationMenuOpen, setRelationMenuOpen] = useState(false)
-  useCommand('task.addRelation', task ? () => setRelationMenuOpen(true) : null)
+  useCommand('task.addRelation', task && !peek ? () => setRelationMenuOpen(true) : null)
 
   return (
-    <Pane>
+    // A container: the layout follows the width of this view, not of the window, so the peek panel beside a list
+    // gets the one-column form. 660px is the width of the task page in a 900px window (the old viewport breakpoint).
+    <Pane className="@container">
       <PaneHeader>
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 min-[900px]:hidden" onClick={onBack} aria-label="Back to tasks">
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 @min-[660px]:hidden" onClick={onBack} aria-label="Back to tasks">
           <ArrowLeft className="size-4" />
         </Button>
         <TaskBreadcrumb project={project} ancestors={task?.ancestors ?? []} identifier={task?.identifier ?? 'Task'} onOpen={openTask} onOpenProject={onOpenProject} />
@@ -160,7 +171,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
         <div className="flex-1" />
         {task ? <Tip label="Move to trash" side="bottom"><Button variant="destructive" disabled={deleteTask.isPending} onClick={() => void trash()}>Delete</Button></Tip> : null}
         <Tip label="Close task" side="bottom">
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 max-[899px]:hidden" onClick={onBack} aria-label="Close task">
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 @max-[659px]:hidden" onClick={onBack} aria-label="Close task">
             <X className="size-4" />
           </Button>
         </Tip>
@@ -176,8 +187,8 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
       ) : (
         // the content sits centered in the space left of the properties column, which runs down the right edge;
         // the first row is as tall as its content, so a short task leaves no gap above the activity
-        <div className="grid min-h-0 flex-1 overflow-y-auto min-[900px]:grid-cols-[minmax(0,1fr)_280px] min-[900px]:grid-rows-[auto_1fr] max-[899px]:grid-cols-1 max-[899px]:content-start max-[899px]:gap-[14px] max-[899px]:px-3.5 max-[899px]:pt-4 max-[899px]:pb-7">
-          <div className="min-w-0 min-[900px]:mx-auto min-[900px]:w-full min-[900px]:max-w-[840px] min-[900px]:px-10 min-[900px]:pt-8">
+        <div className="grid min-h-0 flex-1 overflow-y-auto @min-[660px]:grid-cols-[minmax(0,1fr)_280px] @min-[660px]:grid-rows-[auto_1fr] @max-[659px]:grid-cols-1 @max-[659px]:content-start @max-[659px]:gap-[14px] @max-[659px]:px-3.5 @max-[659px]:pt-4 @max-[659px]:pb-7">
+          <div className="min-w-0 @min-[660px]:mx-auto @min-[660px]:w-full @min-[660px]:max-w-[840px] @min-[660px]:px-10 @min-[660px]:pt-8">
             {task.duplicateOf ? (
               <DuplicateBanner
                 duplicateOf={task.duplicateOf}
@@ -192,6 +203,8 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
             <TaskTextFields
               task={task}
               readOnly={githubContentReadOnly}
+              members={users}
+              onUploadImage={uploadImage}
               onUpdate={(body) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...body } })}
               onAttachFiles={attach}
             >
@@ -230,8 +243,11 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
               <div className="grid gap-1">
                 {githubPullRequests.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground transition-colors duration-150 ease-out hover:bg-muted">
                   <Link2 className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 text-muted-foreground tabular-nums">{link.repository}#{link.number}</span>
                   <span className="truncate">{link.title}</span>
-                  <span className="ml-auto shrink-0 text-muted-foreground">{link.state === 'paused' ? 'Paused PR' : link.state === 'merged' ? 'Merged PR' : link.state === 'closed' ? 'Closed PR' : 'Open PR'}</span>
+                  {/* its author is not an owner, member or collaborator of the repository: it moves no status */}
+                  {link.trusted === false ? <Badge variant="outline" className="shrink-0">External</Badge> : null}
+                  <span className="ml-auto shrink-0 text-muted-foreground">{PULL_STATE_LABEL[link.state] ?? 'Open'}</span>
                 </a>)}
               </div>
             </section> : null}
@@ -262,8 +278,8 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
 
           </div>
 
-          <aside className="min-[900px]:col-start-2 min-[900px]:[grid-row:1/span_2] min-[900px]:border-l min-[900px]:px-5 min-[900px]:pt-8 min-[900px]:pb-6 max-[899px]:grid max-[899px]:w-full max-[899px]:grid-cols-2 max-[899px]:gap-x-3 max-[899px]:gap-y-3.5 max-[899px]:border-y max-[899px]:py-3.5">
-            <PropertyGroup title="Properties" className="max-[899px]:col-span-full max-[899px]:flex-row max-[899px]:flex-wrap max-[899px]:items-center max-[899px]:gap-1 max-[899px]:*:data-[slot=property-heading]:w-full">
+          <aside className="@min-[660px]:col-start-2 @min-[660px]:[grid-row:1/span_2] @min-[660px]:border-l @min-[660px]:px-5 @min-[660px]:pt-8 @min-[660px]:pb-6 @max-[659px]:grid @max-[659px]:w-full @max-[659px]:grid-cols-2 @max-[659px]:gap-x-3 @max-[659px]:gap-y-3.5 @max-[659px]:border-y @max-[659px]:py-3.5">
+            <PropertyGroup title="Properties" className="@max-[659px]:col-span-full @max-[659px]:flex-row @max-[659px]:flex-wrap @max-[659px]:items-center @max-[659px]:gap-1 @max-[659px]:*:data-[slot=property-heading]:w-full">
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -378,6 +394,17 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
               <TaskLabels workspaceId={workspace.id} labelIds={task.labels} labels={state.labels} onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })} />
             </PropertyGroup>
 
+            <PropertyGroup title="Subscribers">
+              <PropertyButton
+                aria-pressed={subscribed}
+                disabled={!subscribers.isSuccess || setSubscription.isPending}
+                onClick={() => setSubscription.mutate(!subscribed, { onError: () => toast.error('Could not change your subscription. Try again.') })}
+              >
+                {subscribedUsers.length > 0 ? <UserAvatarStack users={subscribedUsers} size={16} max={5} /> : <Notification aria-hidden="true" className="text-muted-foreground" />}
+                {subscribed ? 'Unsubscribe' : 'Subscribe'}
+              </PropertyButton>
+            </PropertyGroup>
+
             <PropertyGroup title="Project">
               {githubIssueLinked ? (
                 // GitHub sync finds the task through its project's repository, so it cannot move
@@ -423,7 +450,7 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
                   href={task.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={cn(buttonVariants({ variant: 'ghost' }), '-ml-2 max-w-full text-[13px] max-[899px]:h-7 max-[899px]:px-1.5 max-[899px]:text-xs')}
+                  className={cn(buttonVariants({ variant: 'ghost' }), '-ml-2 max-w-full text-[13px] @max-[659px]:h-7 @max-[659px]:px-1.5 @max-[659px]:text-xs')}
                 >
                   <Link2 className="size-3.5" aria-hidden="true" />
                   <span className="truncate">{task.sourceUrl.replace(/^https?:\/\//, '').split('/')[0]}</span>
@@ -471,12 +498,12 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
             </PropertyGroup>
           </aside>
 
-          <div className="col-start-1 min-w-0 min-[900px]:mx-auto min-[900px]:w-full min-[900px]:max-w-[840px] min-[900px]:px-10 min-[900px]:pb-12">
+          <div className="col-start-1 min-w-0 @min-[660px]:mx-auto @min-[660px]:w-full @min-[660px]:max-w-[840px] @min-[660px]:px-10 @min-[660px]:pb-12">
             <ActivityFeed task={task} state={state} onOpenTask={onOpenTask} />
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
-            <div className="mt-4 max-[899px]:mt-3">
-              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentionedUserIds) => createComment.mutateAsync({ body, files, mentionedUserIds })} />
+            <div className="mt-4 @max-[659px]:mt-3">
+              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} rich onUploadImage={uploadImage} onSend={(body, files) => createComment.mutateAsync({ body, files })} />
             </div>
           </div>
           {picker ? (
@@ -512,10 +539,12 @@ export function TaskDetail({ task, project, state, onBack, onOpenTask, onOpenPro
   )
 }
 
+const PULL_STATE_LABEL: Record<string, string> = { draft: 'Draft', open: 'Open', in_review: 'In review', merged: 'Merged', closed: 'Closed' }
+
 /** A titled block of the properties sidebar; on phones the sidebar becomes a two-column grid of these. */
 function PropertyGroup({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
   return (
-    <div data-slot="property-group" className={cn('mb-6 flex flex-col items-start gap-0.5 max-[899px]:mb-0 max-[899px]:min-w-0', className)}>
+    <div data-slot="property-group" className={cn('mb-6 flex flex-col items-start gap-0.5 @max-[659px]:mb-0 @max-[659px]:min-w-0', className)}>
       <h4 data-slot="property-heading" className="mb-1.5 text-xs font-medium text-muted-foreground/70">{title}</h4>
       {children}
     </div>
@@ -527,7 +556,7 @@ function PropertyButton({ className, ...props }: ComponentProps<typeof Button>) 
   return (
     <Button
       variant="ghost"
-      className={cn('-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs', className)}
+      className={cn('-ml-2 text-[13px] @max-[659px]:h-7 @max-[659px]:max-w-full @max-[659px]:px-1.5 @max-[659px]:text-xs', className)}
       {...props}
     />
   )

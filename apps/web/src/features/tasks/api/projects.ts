@@ -7,15 +7,18 @@ import {
   createStatus,
   deleteProject,
   deleteStatus,
+  getPrAutomation,
   listProjects,
   listProjectTrash,
   listStatuses,
+  putPrAutomation,
   reorderStatuses,
   restoreProject,
   updateProject,
   updateStatus,
 } from '@/api/generated/sdk.gen'
 import type {
+  PrAutomationRule,
   ProjectBody,
   ProjectRecord,
   ProjectUpdateBody,
@@ -214,5 +217,38 @@ export function useReorderStatuses(workspaceId: string, projectId: string) {
       return required(data, 'Reorder statuses response was empty.')
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.statuses(workspaceId, projectId) }),
+  })
+}
+
+/** The status that a task of the project takes on each pull request event. */
+export function usePrAutomation(workspaceId: string, projectId: string) {
+  return useQuery({
+    queryKey: queryKeys.prAutomation(workspaceId, projectId),
+    queryFn: async () => {
+      const { data } = await getPrAutomation({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })
+      return required(data, 'Pull request automation response was empty.')
+    },
+  })
+}
+
+/** Sets the rule of one event. The selector moves at once and goes back if the server refuses. */
+export function useSetPrAutomation(workspaceId: string, projectId: string) {
+  const queryClient = useQueryClient()
+  const key = queryKeys.prAutomation(workspaceId, projectId)
+  return useMutation({
+    mutationFn: async (rule: PrAutomationRule) => {
+      const { data } = await putPrAutomation({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, body: [rule], throwOnError: true })
+      return required(data, 'Pull request automation response was empty.')
+    },
+    onMutate: async (rule) => {
+      await queryClient.cancelQueries({ queryKey: key })
+      const previous = queryClient.getQueryData<PrAutomationRule[]>(key)
+      queryClient.setQueryData<PrAutomationRule[]>(key, (current) => current?.map((item) => (item.event === rule.event ? rule : item)))
+      return { previous }
+    },
+    onError: (_error, _rule, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous)
+    },
+    onSuccess: (rules) => queryClient.setQueryData(key, rules),
   })
 }
