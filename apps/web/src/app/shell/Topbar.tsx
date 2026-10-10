@@ -165,7 +165,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
       <Button
         variant="ghost"
         size="icon-sm"
-        className="text-muted-foreground/70 group-data-[root=home]/topbar:hidden"
+        className="text-muted-foreground/70"
         onClick={onOpenDrawer}
         aria-label="Menu"
       >
