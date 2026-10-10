@@ -2,7 +2,7 @@ import { Shortcut } from '@/shortcuts/Shortcut'
 import type { ReactNode } from 'react'
 import { useRender } from '@base-ui/react/use-render'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Lock, Add as Plus, Menu, Moon, SearchNormal as Search, Setting2 as Settings, Sun } from 'reicon-react'
+import { Lock, Add as Plus, Menu, Moon, SearchNormal as Search, Sun } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -188,19 +188,14 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
       </nav>
       <div className="flex shrink-0 items-center gap-1.5 group-data-[root=home]/topbar:gap-0.5 group-data-[root=settings]/topbar:gap-2">
         <Tip label="Search" side="bottom">
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={onOpenPalette} aria-label="Search">
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 group-data-[root=home]/topbar:text-foreground" onClick={onOpenPalette} aria-label="Search">
             <Search className={routeRoot === 'settings' ? 'size-[15px]' : 'size-4'} />
           </Button>
         </Tip>
-        <Tip label="Toggle theme" side="bottom">
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={toggleTheme} aria-label="Toggle theme">
-            {theme === 'dark' ? <Sun className="size-[15px]" /> : <Moon className="size-[15px]" />}
-          </Button>
-        </Tip>
-        {routeRoot === 'home' ? (
-          <Tip label="Settings" side="bottom">
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/settings')} aria-label="Settings">
-              <Settings className="size-[15px]" />
+        {routeRoot !== 'home' ? (
+          <Tip label="Toggle theme" side="bottom">
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={toggleTheme} aria-label="Toggle theme">
+              {theme === 'dark' ? <Sun className="size-[15px]" /> : <Moon className="size-[15px]" />}
             </Button>
           </Tip>
         ) : null}
